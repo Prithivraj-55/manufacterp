@@ -157,6 +157,9 @@ doc_events = {
 	"Batch": {
 		"before_insert": "manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.before_insert_batch",
 	},
+	"BOM": {
+		"validate": "manufyxinvenzaerp.drawing_management.drawing_utils.validate_bom_from_drawing",
+	},
 }
 
 override_doctype_dashboards = {

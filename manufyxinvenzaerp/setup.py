@@ -236,6 +236,7 @@ def after_install():
     create_batch_custom_fields()
     create_purchase_receipt_client_script()
     create_so_client_script()
+    create_bom_custom_fields()
 
 
 def after_migrate():
@@ -248,6 +249,7 @@ def after_migrate():
     create_batch_custom_fields()
     create_purchase_receipt_client_script()
     create_so_client_script()
+    create_bom_custom_fields()
 
 
 def create_item_client_script():
@@ -561,6 +563,85 @@ def create_purchase_receipt_client_script():
             "script": PR_CLIENT_SCRIPT,
         }).insert(ignore_permissions=True)
     frappe.db.commit()
+
+
+def create_bom_custom_fields():
+    create_custom_fields(
+        {
+            "BOM": [
+                {
+                    "fieldname": "custom_drawing",
+                    "fieldtype": "Link",
+                    "label": "Drawing Reference",
+                    "options": "Drawing",
+                    "insert_after": "project",
+                    "read_only": 1,
+                    "no_copy": 1,
+                    "print_hide": 1,
+                }
+            ],
+            "BOM Item": [
+                {
+                    "fieldname": "custom_item_number",
+                    "fieldtype": "Int",
+                    "label": "Item Number",
+                    "insert_after": "item_code",
+                    "read_only": 1,
+                },
+                {
+                    "fieldname": "custom_material_spec",
+                    "fieldtype": "Data",
+                    "label": "Material Spec",
+                    "insert_after": "description",
+                    "read_only": 1,
+                },
+                {
+                    "fieldname": "custom_unit_weight",
+                    "fieldtype": "Float",
+                    "label": "Unit Weight",
+                    "insert_after": "custom_material_spec",
+                    "read_only": 1,
+                },
+                {
+                    "fieldname": "custom_thickness",
+                    "fieldtype": "Float",
+                    "label": "Thickness",
+                    "insert_after": "custom_unit_weight",
+                    "read_only": 1,
+                },
+                {
+                    "fieldname": "custom_length",
+                    "fieldtype": "Float",
+                    "label": "Length",
+                    "insert_after": "custom_thickness",
+                    "read_only": 1,
+                },
+                {
+                    "fieldname": "custom_width",
+                    "fieldtype": "Float",
+                    "label": "Width",
+                    "insert_after": "custom_length",
+                    "read_only": 1,
+                },
+                {
+                    "fieldname": "custom_sec_qty",
+                    "fieldtype": "Float",
+                    "label": "Sec Qty",
+                    "insert_after": "uom",
+                    "read_only": 1,
+                },
+                {
+                    "fieldname": "custom_sec_uom",
+                    "fieldtype": "Link",
+                    "label": "Sec UOM",
+                    "options": "UOM",
+                    "insert_after": "custom_sec_qty",
+                    "read_only": 1,
+                },
+            ],
+        },
+        update=True,
+    )
 
 
 def create_so_client_script():
