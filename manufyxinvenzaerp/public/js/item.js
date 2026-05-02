@@ -9,6 +9,31 @@ function set_calculation_type(frm) {
 	}
 }
 
+function set_default_uoms(frm) {
+	const group = frm.doc.custom_parent_item_group;
+	if (FORMULA_GROUPS.includes(group)) {
+		frm.set_value("stock_uom", "Kg");
+		frm.set_value("custom_secondary_uom", "Nos");
+	} else if (group === "Nuts and Bolts") {
+		frm.set_value("stock_uom", "Nos");
+		frm.set_value("custom_secondary_uom", "Kg");
+	}
+}
+
+function apply_batch_ui(frm) {
+	const has_batch = !!frm.doc.has_batch_no;
+	const is_formula_group = FORMULA_GROUPS.includes(frm.doc.custom_parent_item_group);
+
+	frm.toggle_display("custom_batch_prefix", has_batch);
+
+	if (has_batch && is_formula_group) {
+		frm.set_value("create_new_batch", 1);
+		frm.toggle_display("batch_number_series", false);
+	} else {
+		frm.toggle_display("batch_number_series", true);
+	}
+}
+
 function lock_item_group_filter(frm) {
 	const field = frm.fields_dict["item_group"];
 
@@ -44,10 +69,17 @@ frappe.ui.form.on("Item", {
 		frm.set_df_property("custom_item_calculation_type", "read_only", 1);
 		frm.set_query("custom_parent_item_group", () => ({ filters: { is_group: 1 } }));
 		lock_item_group_filter(frm);
+		apply_batch_ui(frm);
 	},
 
 	custom_parent_item_group(frm) {
 		set_calculation_type(frm);
+		set_default_uoms(frm);
 		frm.set_value("item_group", "");
+		apply_batch_ui(frm);
+	},
+
+	has_batch_no(frm) {
+		apply_batch_ui(frm);
 	},
 });

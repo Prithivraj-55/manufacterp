@@ -4,6 +4,7 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 CLIENT_SCRIPT_NAME = "Item-parent-item-group-filter"
 PO_CLIENT_SCRIPT_NAME = "Purchase Order-custom-po-item-logic"
 PR_CLIENT_SCRIPT_NAME = "Purchase Receipt-custom-pr-item-logic"
+SO_CLIENT_SCRIPT_NAME = "Sales Order-create-drawing-button"
 
 CLIENT_SCRIPT = """
 frappe.ui.form.on("Item", {
@@ -194,6 +195,36 @@ function pr_warn_missing_fields(row, group) {
 }
 """.strip()
 
+SO_CLIENT_SCRIPT = """
+frappe.ui.form.on("Sales Order", {
+\trefresh(frm) {
+\t\tif (frm.doc.docstatus === 1) {
+\t\t\tfrm.add_custom_button(__("Drawing"), function() {
+\t\t\t\tfrappe.call({
+\t\t\t\t\tmethod: "manufyxinvenzaerp.drawing_management.drawing_utils.create_drawings_from_so",
+\t\t\t\t\targs: { so_name: frm.doc.name },
+\t\t\t\t\tfreeze: true,
+\t\t\t\t\tfreeze_message: __("Creating Drawings..."),
+\t\t\t\t\tcallback: function(r) {
+\t\t\t\t\t\tif (r.message && r.message.length) {
+\t\t\t\t\t\t\tvar links = r.message.map(function(name) {
+\t\t\t\t\t\t\t\treturn '<a href="/app/drawing/' + encodeURIComponent(name) + '" target="_blank">' + name + '</a>';
+\t\t\t\t\t\t\t}).join(', ');
+\t\t\t\t\t\t\tfrappe.msgprint({
+\t\t\t\t\t\t\t\ttitle: __("Drawings Created"),
+\t\t\t\t\t\t\t\tmessage: r.message.length + ' ' + __('Drawing(s) created') + ': ' + links,
+\t\t\t\t\t\t\t\tindicator: 'green'
+\t\t\t\t\t\t\t});
+\t\t\t\t\t\t\tfrm.reload_doc();
+\t\t\t\t\t\t}
+\t\t\t\t\t}
+\t\t\t\t});
+\t\t\t}, __("Create"));
+\t\t}
+\t}
+});
+""".strip()
+
 
 def after_install():
     create_item_custom_fields()
@@ -204,6 +235,7 @@ def after_install():
     create_purchase_receipt_custom_fields()
     create_batch_custom_fields()
     create_purchase_receipt_client_script()
+    create_so_client_script()
 
 
 def after_migrate():
@@ -215,6 +247,7 @@ def after_migrate():
     create_purchase_receipt_custom_fields()
     create_batch_custom_fields()
     create_purchase_receipt_client_script()
+    create_so_client_script()
 
 
 def create_item_client_script():
@@ -281,6 +314,7 @@ def create_item_custom_fields():
                 "label": "Custom Batch Abbreviation",
                 "fieldtype": "Data",
                 "insert_after": "has_batch_no",
+                "depends_on": "eval:doc.has_batch_no",
                 "description": "Batch prefix for custom naming (e.g., ISMB150)",
             },
         ],
@@ -525,5 +559,21 @@ def create_purchase_receipt_client_script():
             "view": "Form",
             "enabled": 1,
             "script": PR_CLIENT_SCRIPT,
+        }).insert(ignore_permissions=True)
+    frappe.db.commit()
+
+
+def create_so_client_script():
+    if frappe.db.exists("Client Script", SO_CLIENT_SCRIPT_NAME):
+        frappe.db.set_value("Client Script", SO_CLIENT_SCRIPT_NAME, "script", SO_CLIENT_SCRIPT)
+        frappe.db.set_value("Client Script", SO_CLIENT_SCRIPT_NAME, "enabled", 1)
+    else:
+        frappe.get_doc({
+            "doctype": "Client Script",
+            "name": SO_CLIENT_SCRIPT_NAME,
+            "dt": "Sales Order",
+            "view": "Form",
+            "enabled": 1,
+            "script": SO_CLIENT_SCRIPT,
         }).insert(ignore_permissions=True)
     frappe.db.commit()

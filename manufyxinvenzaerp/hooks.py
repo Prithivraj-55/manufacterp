@@ -159,6 +159,10 @@ doc_events = {
 	},
 }
 
+override_doctype_dashboards = {
+	"Sales Order": "manufyxinvenzaerp.drawing_management.drawing_utils.get_so_dashboard_data",
+}
+
 # Scheduled Tasks
 # ---------------
 

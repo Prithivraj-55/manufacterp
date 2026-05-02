@@ -69,5 +69,14 @@ def validate_uom_configuration(doc):
 
 
 def validate_batch_configuration(doc):
-    if doc.has_batch_no and not doc.custom_batch_prefix:
-        frappe.throw(_("Custom Batch Abbreviation is required when Has Batch No is enabled"))
+    if not doc.has_batch_no:
+        return
+
+    if doc.custom_parent_item_group in FORMULA_GROUPS:
+        doc.create_new_batch = 1
+        if not doc.custom_batch_prefix:
+            frappe.throw(
+                _("Custom Batch Abbreviation is required for {0} when Has Batch No is enabled").format(
+                    doc.custom_parent_item_group
+                )
+            )

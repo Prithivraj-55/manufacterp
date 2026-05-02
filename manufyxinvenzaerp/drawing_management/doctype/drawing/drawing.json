@@ -1,0 +1,315 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2025-01-01 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "tab_details",
+  "naming_series",
+  "status",
+  "column_break_top",
+  "sales_order",
+  "so_item_reference",
+  "section_customer",
+  "customer",
+  "customer_name",
+  "column_break_cust",
+  "customer_no",
+  "project",
+  "section_order",
+  "cust_po_no",
+  "customer_drawing_number",
+  "column_break_order",
+  "rev_no",
+  "duno_mark_no",
+  "section_fg",
+  "fg_item_code",
+  "fg_item_name",
+  "fg_description",
+  "column_break_fg",
+  "no_of_qty_to_manufacture",
+  "nature_of_work",
+  "tab_materials",
+  "items",
+  "section_items_view",
+  "items_summary_html",
+  "section_totals",
+  "total_weight",
+  "column_break_totals",
+  "total_raw_material_cost",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "tab_details",
+   "fieldtype": "Tab Break",
+   "label": "Details"
+  },
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "no_copy": 1,
+   "options": "DRW-.YYYY.-",
+   "print_hide": 1,
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "default": "Working",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Working\nOld Revision\nFinal Revision",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_top",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "sales_order",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Sales Order",
+   "options": "Sales Order",
+   "read_only": 1
+  },
+  {
+   "fieldname": "so_item_reference",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "SO Item Reference",
+   "no_copy": 1,
+   "options": "Sales Order Item",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_customer",
+   "fieldtype": "Section Break",
+   "label": "Customer"
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "fetch_from": "sales_order.customer",
+   "in_list_view": 1,
+   "label": "Customer",
+   "options": "Customer",
+   "read_only": 1
+  },
+  {
+   "fieldname": "customer_name",
+   "fieldtype": "Data",
+   "fetch_from": "sales_order.customer_name",
+   "label": "Customer Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_cust",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "customer_no",
+   "fieldtype": "Data",
+   "label": "Customer No",
+   "read_only": 1
+  },
+  {
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "fetch_from": "sales_order.project",
+   "label": "Project",
+   "options": "Project",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_order",
+   "fieldtype": "Section Break",
+   "label": "Order & Drawing Details"
+  },
+  {
+   "fieldname": "cust_po_no",
+   "fieldtype": "Data",
+   "fetch_from": "sales_order.po_no",
+   "label": "Customer PO No",
+   "read_only": 1
+  },
+  {
+   "fieldname": "customer_drawing_number",
+   "fieldtype": "Data",
+   "label": "Customer Drawing Number"
+  },
+  {
+   "fieldname": "column_break_order",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "rev_no",
+   "fieldtype": "Int",
+   "label": "Rev No",
+   "read_only": 1
+  },
+  {
+   "fieldname": "duno_mark_no",
+   "fieldtype": "Int",
+   "label": "DUNO/Mark No",
+   "description": "Dispatch Number"
+  },
+  {
+   "fieldname": "section_fg",
+   "fieldtype": "Section Break",
+   "label": "Finished Good"
+  },
+  {
+   "fieldname": "fg_item_code",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "FG Item Code",
+   "options": "Item",
+   "read_only": 1
+  },
+  {
+   "fieldname": "fg_item_name",
+   "fieldtype": "Data",
+   "label": "FG Item Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "fg_description",
+   "fieldtype": "Small Text",
+   "label": "FG Description",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_fg",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "no_of_qty_to_manufacture",
+   "fieldtype": "Float",
+   "label": "No of Qty to Manufacture",
+   "read_only": 1
+  },
+  {
+   "fieldname": "nature_of_work",
+   "fieldtype": "Link",
+   "label": "Nature of Work",
+   "options": "Nature of Work"
+  },
+  {
+   "fieldname": "tab_materials",
+   "fieldtype": "Tab Break",
+   "label": "Raw Materials"
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Items",
+   "options": "Drawing Item"
+  },
+  {
+   "fieldname": "section_items_view",
+   "fieldtype": "Section Break",
+   "label": "Items Summary"
+  },
+  {
+   "fieldname": "items_summary_html",
+   "fieldtype": "HTML",
+   "label": "Items Summary"
+  },
+  {
+   "fieldname": "section_totals",
+   "fieldtype": "Section Break",
+   "label": "Totals"
+  },
+  {
+   "description": "Sum of qty for Structurals/Plates; sum of Sec Qty for items if Sec UOM is KG (Bolt and nuts)",
+   "fieldname": "total_weight",
+   "fieldtype": "Float",
+   "label": "Total Weight (KG)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_totals",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "total_raw_material_cost",
+   "fieldtype": "Currency",
+   "label": "Total Raw Material Cost",
+   "read_only": 1
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "ignore_user_permissions": 1,
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Drawing",
+   "print_hide": 1,
+   "read_only": 1
+  }
+ ],
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2025-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Drawing Management",
+ "name": "Drawing",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "All",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "customer_name,sales_order,status",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [
+  {
+   "color": "Blue",
+   "title": "Working"
+  },
+  {
+   "color": "Red",
+   "title": "Old Revision"
+  },
+  {
+   "color": "Green",
+   "title": "Final Revision"
+  }
+ ],
+ "title_field": "fg_item_name",
+ "track_changes": 1
+}
