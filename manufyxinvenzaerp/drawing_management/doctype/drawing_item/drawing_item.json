@@ -1,0 +1,200 @@
+{
+ "actions": [],
+ "creation": "2025-01-01 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "item_number",
+  "material_code",
+  "material_name",
+  "item_group",
+  "parent_item_group",
+  "column_break_1",
+  "raw_material_description",
+  "material_spec",
+  "section_break_dims",
+  "batch",
+  "unit_weight",
+  "column_break_2",
+  "thickness",
+  "length",
+  "width",
+  "section_break_qty",
+  "sec_qty",
+  "sec_uom",
+  "qty",
+  "uom",
+  "column_break_3",
+  "rate",
+  "amount"
+ ],
+ "fields": [
+  {
+   "fieldname": "item_number",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Item Number"
+  },
+  {
+   "fieldname": "material_code",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Material Code",
+   "options": "Item"
+  },
+  {
+   "fieldname": "material_name",
+   "fieldtype": "Data",
+   "fetch_from": "material_code.item_name",
+   "in_list_view": 1,
+   "label": "Material Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "item_group",
+   "fieldtype": "Link",
+   "fetch_from": "material_code.item_group",
+   "label": "Item Group",
+   "options": "Item Group",
+   "read_only": 1
+  },
+  {
+   "fieldname": "parent_item_group",
+   "fieldtype": "Data",
+   "fetch_from": "material_code.custom_parent_item_group",
+   "hidden": 1,
+   "label": "Parent Item Group",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "raw_material_description",
+   "fieldtype": "Small Text",
+   "fetch_from": "material_code.description",
+   "label": "Raw Material Description",
+   "read_only": 1
+  },
+  {
+   "fieldname": "material_spec",
+   "fieldtype": "Data",
+   "fetch_from": "material_code.custom_material_spec",
+   "label": "Material Spec",
+   "read_only": 1
+  },
+  {
+   "description": "Based on parent item group, dimensions will be used for calculation. Only dimensions marked as mandatory apply to the formula; other values are not considered.",
+   "fieldname": "section_break_dims",
+   "fieldtype": "Section Break",
+   "label": "Dimensions"
+  },
+  {
+   "fieldname": "batch",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Batch",
+   "options": "Batch",
+   "description": "Select batch if stock is available, otherwise enter the dimensions manually. You can purchase it later. Note: while making a Drawing, stock may be available, but at the time of starting work stock may not be available. Ensure stock availability while making the Production Plan."
+  },
+  {
+   "fieldname": "unit_weight",
+   "fieldtype": "Float",
+   "fetch_from": "material_code.custom_unit_weight",
+   "in_list_view": 1,
+   "label": "Unit Weight",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "thickness",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Thickness",
+   "mandatory_depends_on": "eval:doc.parent_item_group==='Plates'"
+  },
+  {
+   "fieldname": "length",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Length",
+   "mandatory_depends_on": "eval:['Structurals','Plates'].includes(doc.parent_item_group)"
+  },
+  {
+   "fieldname": "width",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Width",
+   "mandatory_depends_on": "eval:doc.parent_item_group==='Plates'"
+  },
+  {
+   "fieldname": "section_break_qty",
+   "fieldtype": "Section Break",
+   "label": "Quantity"
+  },
+  {
+   "fieldname": "sec_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Sec Qty"
+  },
+  {
+   "fieldname": "sec_uom",
+   "fieldtype": "Link",
+   "fetch_from": "material_code.custom_secondary_uom",
+   "label": "Sec UOM",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Quantity",
+   "read_only": 1,
+   "description": "Primary Quantity"
+  },
+  {
+   "fieldname": "uom",
+   "fieldtype": "Link",
+   "fetch_from": "material_code.stock_uom",
+   "label": "UOM",
+   "options": "UOM",
+   "read_only": 1,
+   "description": "Stock UOM"
+  },
+  {
+   "fieldname": "column_break_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "rate",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Rate"
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount",
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2025-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Drawing Management",
+ "name": "Drawing Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
