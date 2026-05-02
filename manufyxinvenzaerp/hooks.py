@@ -5,6 +5,11 @@ app_description = "Custom ERP application"
 app_email = "prithivrajthangadurai@gmail.com"
 app_license = "mit"
 
+after_install = "manufyxinvenzaerp.setup.after_install"
+after_migrate = "manufyxinvenzaerp.setup.after_migrate"
+
+fixtures = ["Custom Field"]
+
 # Apps
 # ------------------
 
@@ -43,7 +48,7 @@ app_license = "mit"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
+app_include_js = "/assets/manufyxinvenzaerp/js/item.js"
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -137,13 +142,22 @@ app_license = "mit"
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+	"Item": {
+		"validate": "manufyxinvenzaerp.item_management.item.validate_item",
+	},
+	"Purchase Order": {
+		"validate": "manufyxinvenzaerp.purchase_order_management.purchase_order.validate_purchase_order",
+		"before_submit": "manufyxinvenzaerp.purchase_order_management.purchase_order.before_submit_purchase_order",
+	},
+	"Purchase Receipt": {
+		"validate": "manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.validate_purchase_receipt",
+		"before_submit": "manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.before_submit_purchase_receipt",
+	},
+	"Batch": {
+		"before_insert": "manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.before_insert_batch",
+	},
+}
 
 # Scheduled Tasks
 # ---------------
