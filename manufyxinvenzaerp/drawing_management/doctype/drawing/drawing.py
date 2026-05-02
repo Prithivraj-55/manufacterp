@@ -13,14 +13,6 @@ FIELD_LABELS = {
     "sec_qty": "Sec Qty",
 }
 
-BATCH_STOCK_NOTE = _(
-    "Note: Select batch if stock is available, otherwise enter the dimensions manually. "
-    "You can purchase it later. While making a Drawing, stock may be available, "
-    "but at the time of starting work stock may not be available. "
-    "Ensure stock availability while making the Production Plan."
-)
-
-
 class Drawing(Document):
     def before_insert(self):
         if self.amended_from:
@@ -38,11 +30,6 @@ class Drawing(Document):
 
     def before_submit(self):
         self._check_missing_fields(throw=True)
-        frappe.msgprint(
-            BATCH_STOCK_NOTE,
-            title=_("Stock Availability Note"),
-            indicator="orange",
-        )
 
     def on_cancel(self):
         self.db_set("status", "Old Revision")
