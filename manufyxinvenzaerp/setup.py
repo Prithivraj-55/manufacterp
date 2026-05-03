@@ -4,7 +4,43 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 CLIENT_SCRIPT_NAME = "Item-parent-item-group-filter"
 PO_CLIENT_SCRIPT_NAME = "Purchase Order-custom-po-item-logic"
 PR_CLIENT_SCRIPT_NAME = "Purchase Receipt-custom-pr-item-logic"
+MR_CLIENT_SCRIPT_NAME = "Material Request-custom-mr-item-logic"
+RFQ_CLIENT_SCRIPT_NAME = "Request for Quotation-custom-rfq-item-logic"
+SQ_CLIENT_SCRIPT_NAME = "Supplier Quotation-custom-sq-item-logic"
 SO_CLIENT_SCRIPT_NAME = "Sales Order-create-drawing-button"
+
+BOM_CLIENT_SCRIPT_NAME = "BOM-create-production-plan-button"
+
+BOM_CLIENT_SCRIPT = """
+frappe.ui.form.on("BOM", {
+\trefresh(frm) {
+\t\tif (frm.doc.docstatus === 1 && frm.doc.custom_drawing) {
+\t\t\tfrm.remove_custom_button(__("Work Order"), __("Create"));
+\t\t\tfrm.add_custom_button(__("Production Plan"), function () {
+\t\t\t\tfrappe.confirm(
+\t\t\t\t\t__("Create a Production Plan for <b>" + (frm.doc.item_name || frm.doc.item) + "</b>?"),
+\t\t\t\t\tfunction () {
+\t\t\t\t\t\tfrappe.call({
+\t\t\t\t\t\t\tmethod: "manufyxinvenzaerp.drawing_management.drawing_utils.create_production_plan_from_bom",
+\t\t\t\t\t\t\targs: { bom_name: frm.doc.name },
+\t\t\t\t\t\t\tfreeze: true,
+\t\t\t\t\t\t\tcallback: function (r) {
+\t\t\t\t\t\t\t\tif (r.message) {
+\t\t\t\t\t\t\t\t\tfrappe.msgprint({
+\t\t\t\t\t\t\t\t\t\ttitle: __("Production Plan Created"),
+\t\t\t\t\t\t\t\t\t\tmessage: __("Production Plan created") + ': <a href="/app/production-plan/' + encodeURIComponent(r.message) + '" target="_blank">' + r.message + '</a>',
+\t\t\t\t\t\t\t\t\t\tindicator: "green",
+\t\t\t\t\t\t\t\t\t});
+\t\t\t\t\t\t\t\t}
+\t\t\t\t\t\t\t},
+\t\t\t\t\t\t});
+\t\t\t\t\t}
+\t\t\t\t);
+\t\t\t}, __("Create"));
+\t\t}
+\t},
+});
+""".strip()
 
 CLIENT_SCRIPT = """
 frappe.ui.form.on("Item", {
@@ -195,6 +231,180 @@ function pr_warn_missing_fields(row, group) {
 }
 """.strip()
 
+MR_CLIENT_SCRIPT = """
+frappe.ui.form.on("Material Request", {
+\trefresh(frm) {
+\t\tfrm.set_query("uom", "items", function(doc, cdt, cdn) {
+\t\t\tvar row = locals[cdt][cdn];
+\t\t\treturn {
+\t\t\t\tquery: "manufyxinvenzaerp.material_request_management.material_request.get_mr_item_uom",
+\t\t\t\tfilters: { item_code: row.item_code }
+\t\t\t};
+\t\t});
+\t}
+});
+
+frappe.ui.form.on("Material Request Item", {
+\titem_code(frm, cdt, cdn) {
+\t\tsetTimeout(function() { mr_calculate_qty(frm, cdt, cdn); }, 600);
+\t},
+\tcustom_length(frm, cdt, cdn) { mr_calculate_qty(frm, cdt, cdn); },
+\tcustom_width(frm, cdt, cdn) { mr_calculate_qty(frm, cdt, cdn); },
+\tcustom_thickness(frm, cdt, cdn) { mr_calculate_qty(frm, cdt, cdn); },
+\tcustom_sec_qty(frm, cdt, cdn) { mr_calculate_qty(frm, cdt, cdn); },
+\tcustom_unit_weight(frm, cdt, cdn) { mr_calculate_qty(frm, cdt, cdn); },
+\tuom(frm, cdt, cdn) {
+\t\tvar row = locals[cdt][cdn];
+\t\tif (row.uom && row.stock_uom && row.uom !== row.stock_uom) {
+\t\t\tfrappe.msgprint({
+\t\t\t\tmessage: "Weight is entered for Stock UOM, Kindly update UOM Weight in item master for correct calculation",
+\t\t\t\tindicator: "orange",
+\t\t\t\ttitle: "UOM Warning"
+\t\t\t});
+\t\t}
+\t}
+});
+
+function mr_calculate_qty(frm, cdt, cdn) {
+\tvar row = locals[cdt][cdn];
+\tvar group = row.custom_parent_item_group;
+\tvar qty = null;
+
+\tif (group === "Structurals") {
+\t\tif (row.custom_length && row.custom_unit_weight && row.custom_sec_qty) {
+\t\t\tqty = (row.custom_length / 1000) * row.custom_unit_weight * row.custom_sec_qty;
+\t\t} else {
+\t\t\tmr_warn_missing_fields(row, group);
+\t\t}
+\t} else if (group === "Plates") {
+\t\tif (row.custom_length && row.custom_width && row.custom_thickness && row.custom_unit_weight && row.custom_sec_qty) {
+\t\t\tqty = (row.custom_length / 1000) * (row.custom_width / 1000) * row.custom_thickness * row.custom_unit_weight * row.custom_sec_qty;
+\t\t} else {
+\t\t\tmr_warn_missing_fields(row, group);
+\t\t}
+\t}
+
+\tif (qty !== null) {
+\t\tfrappe.model.set_value(cdt, cdn, "qty", flt(qty, 3));
+\t}
+}
+
+function mr_warn_missing_fields(row, group) {
+\tvar missing = [];
+\tif (group === "Structurals") {
+\t\tif (!row.custom_length) missing.push("Length");
+\t\tif (!row.custom_unit_weight) missing.push("Unit Weight");
+\t\tif (!row.custom_sec_qty) missing.push("Sec Qty");
+\t} else if (group === "Plates") {
+\t\tif (!row.custom_length) missing.push("Length");
+\t\tif (!row.custom_width) missing.push("Width");
+\t\tif (!row.custom_thickness) missing.push("Thickness");
+\t\tif (!row.custom_unit_weight) missing.push("Unit Weight");
+\t\tif (!row.custom_sec_qty) missing.push("Sec Qty");
+\t}
+\tif (missing.length) {
+\t\tfrappe.show_alert({
+\t\t\tmessage: "Row " + row.idx + ": Missing for " + group + " formula: " + missing.join(", "),
+\t\t\tindicator: "orange"
+\t\t});
+\t}
+}
+""".strip()
+
+RFQ_CLIENT_SCRIPT = """
+frappe.ui.form.on("Request for Quotation", {
+\trefresh(frm) {
+\t\tfrm.set_query("uom", "items", function(doc, cdt, cdn) {
+\t\t\tvar row = locals[cdt][cdn];
+\t\t\treturn {
+\t\t\t\tquery: "manufyxinvenzaerp.sq_management.supplier_quotation.get_sq_item_uom",
+\t\t\t\tfilters: { item_code: row.item_code }
+\t\t\t};
+\t\t});
+\t}
+});
+""".strip()
+
+SQ_CLIENT_SCRIPT = """
+frappe.ui.form.on("Supplier Quotation", {
+\trefresh(frm) {
+\t\tfrm.set_query("uom", "items", function(doc, cdt, cdn) {
+\t\t\tvar row = locals[cdt][cdn];
+\t\t\treturn {
+\t\t\t\tquery: "manufyxinvenzaerp.sq_management.supplier_quotation.get_sq_item_uom",
+\t\t\t\tfilters: { item_code: row.item_code }
+\t\t\t};
+\t\t});
+\t}
+});
+
+frappe.ui.form.on("Supplier Quotation Item", {
+\titem_code(frm, cdt, cdn) {
+\t\tsetTimeout(function() { sq_calculate_qty(frm, cdt, cdn); }, 600);
+\t},
+\tcustom_length(frm, cdt, cdn) { sq_calculate_qty(frm, cdt, cdn); },
+\tcustom_width(frm, cdt, cdn) { sq_calculate_qty(frm, cdt, cdn); },
+\tcustom_thickness(frm, cdt, cdn) { sq_calculate_qty(frm, cdt, cdn); },
+\tcustom_sec_qty(frm, cdt, cdn) { sq_calculate_qty(frm, cdt, cdn); },
+\tcustom_unit_weight(frm, cdt, cdn) { sq_calculate_qty(frm, cdt, cdn); },
+\tuom(frm, cdt, cdn) {
+\t\tvar row = locals[cdt][cdn];
+\t\tif (row.uom && row.stock_uom && row.uom !== row.stock_uom) {
+\t\t\tfrappe.msgprint({
+\t\t\t\tmessage: "Weight is entered for Stock UOM, Kindly update UOM Weight in item master for correct calculation",
+\t\t\t\tindicator: "orange",
+\t\t\t\ttitle: "UOM Warning"
+\t\t\t});
+\t\t}
+\t}
+});
+
+function sq_calculate_qty(frm, cdt, cdn) {
+\tvar row = locals[cdt][cdn];
+\tvar group = row.custom_parent_item_group;
+\tvar qty = null;
+
+\tif (group === "Structurals") {
+\t\tif (row.custom_length && row.custom_unit_weight && row.custom_sec_qty) {
+\t\t\tqty = (row.custom_length / 1000) * row.custom_unit_weight * row.custom_sec_qty;
+\t\t} else {
+\t\t\tsq_warn_missing_fields(row, group);
+\t\t}
+\t} else if (group === "Plates") {
+\t\tif (row.custom_length && row.custom_width && row.custom_thickness && row.custom_unit_weight && row.custom_sec_qty) {
+\t\t\tqty = (row.custom_length / 1000) * (row.custom_width / 1000) * row.custom_thickness * row.custom_unit_weight * row.custom_sec_qty;
+\t\t} else {
+\t\t\tsq_warn_missing_fields(row, group);
+\t\t}
+\t}
+
+\tif (qty !== null) {
+\t\tfrappe.model.set_value(cdt, cdn, "qty", flt(qty, 3));
+\t}
+}
+
+function sq_warn_missing_fields(row, group) {
+\tvar missing = [];
+\tif (group === "Structurals") {
+\t\tif (!row.custom_length) missing.push("Length");
+\t\tif (!row.custom_unit_weight) missing.push("Unit Weight");
+\t\tif (!row.custom_sec_qty) missing.push("Sec Qty");
+\t} else if (group === "Plates") {
+\t\tif (!row.custom_length) missing.push("Length");
+\t\tif (!row.custom_width) missing.push("Width");
+\t\tif (!row.custom_thickness) missing.push("Thickness");
+\t\tif (!row.custom_unit_weight) missing.push("Unit Weight");
+\t\tif (!row.custom_sec_qty) missing.push("Sec Qty");
+\t}
+\tif (missing.length) {
+\t\tfrappe.show_alert({
+\t\t\tmessage: "Row " + row.idx + ": Missing for " + group + " formula: " + missing.join(", "),
+\t\t\tindicator: "orange"
+\t\t});
+\t}
+}
+""".strip()
+
 SO_CLIENT_SCRIPT = """
 frappe.ui.form.on("Sales Order", {
 \trefresh(frm) {
@@ -235,8 +445,15 @@ def after_install():
     create_purchase_receipt_custom_fields()
     create_batch_custom_fields()
     create_purchase_receipt_client_script()
+    create_material_request_custom_fields()
+    create_material_request_client_script()
+    create_rfq_custom_fields()
+    create_rfq_client_script()
+    create_sq_custom_fields()
+    create_sq_client_script()
     create_so_client_script()
     create_bom_custom_fields()
+    create_bom_client_script()
 
 
 def after_migrate():
@@ -248,8 +465,15 @@ def after_migrate():
     create_purchase_receipt_custom_fields()
     create_batch_custom_fields()
     create_purchase_receipt_client_script()
+    create_material_request_custom_fields()
+    create_material_request_client_script()
+    create_rfq_custom_fields()
+    create_rfq_client_script()
+    create_sq_custom_fields()
+    create_sq_client_script()
     create_so_client_script()
     create_bom_custom_fields()
+    create_bom_client_script()
 
 
 def create_item_client_script():
@@ -530,19 +754,37 @@ def create_batch_custom_fields():
                 "fieldname": "custom_thickness",
                 "label": "Thickness",
                 "fieldtype": "Float",
+                "read_only": 1,
                 "insert_after": "description",
             },
             {
                 "fieldname": "custom_length",
                 "label": "Length",
                 "fieldtype": "Float",
+                "read_only": 1,
                 "insert_after": "custom_thickness",
             },
             {
                 "fieldname": "custom_width",
                 "label": "Width",
                 "fieldtype": "Float",
+                "read_only": 1,
                 "insert_after": "custom_length",
+            },
+            {
+                "fieldname": "custom_sec_qty",
+                "label": "Sec Qty",
+                "fieldtype": "Float",
+                "read_only": 1,
+                "insert_after": "custom_width",
+            },
+            {
+                "fieldname": "custom_sec_uom",
+                "label": "Sec UOM",
+                "fieldtype": "Link",
+                "options": "UOM",
+                "read_only": 1,
+                "insert_after": "custom_sec_qty",
             },
         ],
     }
@@ -561,6 +803,279 @@ def create_purchase_receipt_client_script():
             "view": "Form",
             "enabled": 1,
             "script": PR_CLIENT_SCRIPT,
+        }).insert(ignore_permissions=True)
+    frappe.db.commit()
+
+
+def create_material_request_custom_fields():
+    custom_fields = {
+        "Material Request Item": [
+            {
+                "fieldname": "custom_parent_item_group",
+                "label": "Parent Item Group",
+                "fieldtype": "Data",
+                "fetch_from": "item_code.custom_parent_item_group",
+                "read_only": 1,
+                "insert_after": "item_name",
+                "in_list_view": 0,
+            },
+            {
+                "fieldname": "custom_item_calculation_type",
+                "label": "Item Calculation Type",
+                "fieldtype": "Data",
+                "fetch_from": "item_code.custom_item_calculation_type",
+                "read_only": 1,
+                "insert_after": "custom_parent_item_group",
+                "in_list_view": 0,
+            },
+            {
+                "fieldname": "custom_sec_qty",
+                "label": "Sec Qty",
+                "fieldtype": "Float",
+                "insert_after": "uom",
+                "in_list_view": 1,
+            },
+            {
+                "fieldname": "custom_sec_uom",
+                "label": "Sec UOM",
+                "fieldtype": "Link",
+                "options": "UOM",
+                "fetch_from": "item_code.custom_secondary_uom",
+                "read_only": 1,
+                "insert_after": "custom_sec_qty",
+                "in_list_view": 1,
+            },
+            {
+                "fieldname": "custom_unit_weight",
+                "label": "Unit Weight",
+                "fieldtype": "Float",
+                "fetch_from": "item_code.custom_unit_weight",
+                "read_only": 1,
+                "insert_after": "custom_sec_uom",
+                "in_list_view": 1,
+            },
+            {
+                "fieldname": "custom_thickness",
+                "label": "Thickness",
+                "fieldtype": "Float",
+                "mandatory_depends_on": "eval:doc.custom_parent_item_group==='Plates'",
+                "insert_after": "custom_unit_weight",
+                "in_list_view": 1,
+            },
+            {
+                "fieldname": "custom_length",
+                "label": "Length",
+                "fieldtype": "Float",
+                "mandatory_depends_on": "eval:['Structurals','Plates'].includes(doc.custom_parent_item_group)",
+                "insert_after": "custom_thickness",
+                "in_list_view": 1,
+            },
+            {
+                "fieldname": "custom_width",
+                "label": "Width",
+                "fieldtype": "Float",
+                "mandatory_depends_on": "eval:doc.custom_parent_item_group==='Plates'",
+                "insert_after": "custom_length",
+                "in_list_view": 1,
+            },
+        ],
+    }
+    create_custom_fields(custom_fields, update=True)
+
+
+def create_material_request_client_script():
+    if frappe.db.exists("Client Script", MR_CLIENT_SCRIPT_NAME):
+        frappe.db.set_value("Client Script", MR_CLIENT_SCRIPT_NAME, "script", MR_CLIENT_SCRIPT)
+        frappe.db.set_value("Client Script", MR_CLIENT_SCRIPT_NAME, "enabled", 1)
+    else:
+        frappe.get_doc({
+            "doctype": "Client Script",
+            "name": MR_CLIENT_SCRIPT_NAME,
+            "dt": "Material Request",
+            "view": "Form",
+            "enabled": 1,
+            "script": MR_CLIENT_SCRIPT,
+        }).insert(ignore_permissions=True)
+    frappe.db.commit()
+
+
+def create_rfq_custom_fields():
+    custom_fields = {
+        "Request for Quotation Item": [
+            {
+                "fieldname": "custom_parent_item_group",
+                "label": "Parent Item Group",
+                "fieldtype": "Data",
+                "read_only": 1,
+                "insert_after": "item_name",
+                "in_list_view": 0,
+            },
+            {
+                "fieldname": "custom_item_calculation_type",
+                "label": "Item Calculation Type",
+                "fieldtype": "Data",
+                "read_only": 1,
+                "insert_after": "custom_parent_item_group",
+                "in_list_view": 0,
+            },
+            {
+                "fieldname": "custom_sec_qty",
+                "label": "Sec Qty",
+                "fieldtype": "Float",
+                "read_only": 1,
+                "insert_after": "qty",
+                "in_list_view": 1,
+            },
+            {
+                "fieldname": "custom_sec_uom",
+                "label": "Sec UOM",
+                "fieldtype": "Link",
+                "options": "UOM",
+                "read_only": 1,
+                "insert_after": "custom_sec_qty",
+                "in_list_view": 1,
+            },
+            {
+                "fieldname": "custom_unit_weight",
+                "label": "Unit Weight",
+                "fieldtype": "Float",
+                "read_only": 1,
+                "insert_after": "custom_sec_uom",
+                "in_list_view": 1,
+            },
+            {
+                "fieldname": "custom_thickness",
+                "label": "Thickness",
+                "fieldtype": "Float",
+                "read_only": 1,
+                "insert_after": "custom_unit_weight",
+                "in_list_view": 1,
+            },
+            {
+                "fieldname": "custom_length",
+                "label": "Length",
+                "fieldtype": "Float",
+                "read_only": 1,
+                "insert_after": "custom_thickness",
+                "in_list_view": 1,
+            },
+            {
+                "fieldname": "custom_width",
+                "label": "Width",
+                "fieldtype": "Float",
+                "read_only": 1,
+                "insert_after": "custom_length",
+                "in_list_view": 1,
+            },
+        ],
+    }
+    create_custom_fields(custom_fields, update=True)
+
+
+def create_rfq_client_script():
+    if frappe.db.exists("Client Script", RFQ_CLIENT_SCRIPT_NAME):
+        frappe.db.set_value("Client Script", RFQ_CLIENT_SCRIPT_NAME, "script", RFQ_CLIENT_SCRIPT)
+        frappe.db.set_value("Client Script", RFQ_CLIENT_SCRIPT_NAME, "enabled", 1)
+    else:
+        frappe.get_doc({
+            "doctype": "Client Script",
+            "name": RFQ_CLIENT_SCRIPT_NAME,
+            "dt": "Request for Quotation",
+            "view": "Form",
+            "enabled": 1,
+            "script": RFQ_CLIENT_SCRIPT,
+        }).insert(ignore_permissions=True)
+    frappe.db.commit()
+
+
+def create_sq_custom_fields():
+    custom_fields = {
+        "Supplier Quotation Item": [
+            {
+                "fieldname": "custom_parent_item_group",
+                "label": "Parent Item Group",
+                "fieldtype": "Data",
+                "fetch_from": "item_code.custom_parent_item_group",
+                "read_only": 1,
+                "insert_after": "item_name",
+                "in_list_view": 0,
+            },
+            {
+                "fieldname": "custom_item_calculation_type",
+                "label": "Item Calculation Type",
+                "fieldtype": "Data",
+                "fetch_from": "item_code.custom_item_calculation_type",
+                "read_only": 1,
+                "insert_after": "custom_parent_item_group",
+                "in_list_view": 0,
+            },
+            {
+                "fieldname": "custom_sec_qty",
+                "label": "Sec Qty",
+                "fieldtype": "Float",
+                "insert_after": "uom",
+                "in_list_view": 1,
+            },
+            {
+                "fieldname": "custom_sec_uom",
+                "label": "Sec UOM",
+                "fieldtype": "Link",
+                "options": "UOM",
+                "fetch_from": "item_code.custom_secondary_uom",
+                "read_only": 1,
+                "insert_after": "custom_sec_qty",
+                "in_list_view": 1,
+            },
+            {
+                "fieldname": "custom_unit_weight",
+                "label": "Unit Weight",
+                "fieldtype": "Float",
+                "fetch_from": "item_code.custom_unit_weight",
+                "read_only": 1,
+                "insert_after": "custom_sec_uom",
+                "in_list_view": 1,
+            },
+            {
+                "fieldname": "custom_thickness",
+                "label": "Thickness",
+                "fieldtype": "Float",
+                "mandatory_depends_on": "eval:doc.custom_parent_item_group==='Plates'",
+                "insert_after": "custom_unit_weight",
+                "in_list_view": 1,
+            },
+            {
+                "fieldname": "custom_length",
+                "label": "Length",
+                "fieldtype": "Float",
+                "mandatory_depends_on": "eval:['Structurals','Plates'].includes(doc.custom_parent_item_group)",
+                "insert_after": "custom_thickness",
+                "in_list_view": 1,
+            },
+            {
+                "fieldname": "custom_width",
+                "label": "Width",
+                "fieldtype": "Float",
+                "mandatory_depends_on": "eval:doc.custom_parent_item_group==='Plates'",
+                "insert_after": "custom_length",
+                "in_list_view": 1,
+            },
+        ],
+    }
+    create_custom_fields(custom_fields, update=True)
+
+
+def create_sq_client_script():
+    if frappe.db.exists("Client Script", SQ_CLIENT_SCRIPT_NAME):
+        frappe.db.set_value("Client Script", SQ_CLIENT_SCRIPT_NAME, "script", SQ_CLIENT_SCRIPT)
+        frappe.db.set_value("Client Script", SQ_CLIENT_SCRIPT_NAME, "enabled", 1)
+    else:
+        frappe.get_doc({
+            "doctype": "Client Script",
+            "name": SQ_CLIENT_SCRIPT_NAME,
+            "dt": "Supplier Quotation",
+            "view": "Form",
+            "enabled": 1,
+            "script": SQ_CLIENT_SCRIPT,
         }).insert(ignore_permissions=True)
     frappe.db.commit()
 
@@ -656,5 +1171,21 @@ def create_so_client_script():
             "view": "Form",
             "enabled": 1,
             "script": SO_CLIENT_SCRIPT,
+        }).insert(ignore_permissions=True)
+    frappe.db.commit()
+
+
+def create_bom_client_script():
+    if frappe.db.exists("Client Script", BOM_CLIENT_SCRIPT_NAME):
+        frappe.db.set_value("Client Script", BOM_CLIENT_SCRIPT_NAME, "script", BOM_CLIENT_SCRIPT)
+        frappe.db.set_value("Client Script", BOM_CLIENT_SCRIPT_NAME, "enabled", 1)
+    else:
+        frappe.get_doc({
+            "doctype": "Client Script",
+            "name": BOM_CLIENT_SCRIPT_NAME,
+            "dt": "BOM",
+            "view": "Form",
+            "enabled": 1,
+            "script": BOM_CLIENT_SCRIPT,
         }).insert(ignore_permissions=True)
     frappe.db.commit()
