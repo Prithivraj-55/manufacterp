@@ -160,6 +160,17 @@ doc_events = {
 	"BOM": {
 		"validate": "manufyxinvenzaerp.drawing_management.drawing_utils.validate_bom_from_drawing",
 	},
+	"Material Request": {
+		"validate": "manufyxinvenzaerp.material_request_management.material_request.validate_material_request",
+		"before_submit": "manufyxinvenzaerp.material_request_management.material_request.before_submit_material_request",
+	},
+	"Request for Quotation": {
+		"validate": "manufyxinvenzaerp.rfq_management.request_for_quotation.validate_rfq",
+	},
+	"Supplier Quotation": {
+		"validate": "manufyxinvenzaerp.sq_management.supplier_quotation.validate_supplier_quotation",
+		"before_submit": "manufyxinvenzaerp.sq_management.supplier_quotation.before_submit_supplier_quotation",
+	},
 }
 
 override_doctype_dashboards = {

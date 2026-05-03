@@ -210,6 +210,36 @@ def validate_bom_from_drawing(doc, method):
         )
 
 
+@frappe.whitelist()
+def create_production_plan_from_bom(bom_name):
+    bom = frappe.get_doc("BOM", bom_name)
+    if bom.docstatus != 1:
+        frappe.throw(_("BOM must be submitted to create a Production Plan."))
+    if not bom.get("custom_drawing"):
+        frappe.throw(_("Production Plan creation is only available for BOMs linked to a Drawing."))
+
+    stock_uom = frappe.db.get_value("Item", bom.item, "stock_uom") or ""
+
+    pp = frappe.new_doc("Production Plan")
+    pp.company = bom.company
+    pp.posting_date = frappe.utils.today()
+    pp.get_items_from = ""
+
+    pp.append(
+        "po_items",
+        {
+            "item_code": bom.item,
+            "bom_no": bom_name,
+            "planned_qty": flt(bom.quantity) or 1,
+            "planned_start_date": frappe.utils.now_datetime(),
+            "stock_uom": stock_uom,
+        },
+    )
+
+    pp.insert(ignore_permissions=True)
+    return pp.name
+
+
 def get_so_dashboard_data(data):
     """Extend Sales Order dashboard to include Drawing connections."""
     from frappe import _

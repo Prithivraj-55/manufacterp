@@ -50,7 +50,7 @@ def before_insert_batch(doc, method):
     pr_item = frappe.db.get_value(
         "Purchase Receipt Item",
         {"parent": doc.reference_name, "item_code": doc.item},
-        ["custom_thickness", "custom_length", "custom_width", "custom_sec_qty"],
+        ["custom_thickness", "custom_length", "custom_width", "custom_sec_qty", "custom_sec_uom"],
         as_dict=True,
     )
     if not pr_item:
@@ -82,6 +82,8 @@ def before_insert_batch(doc, method):
     doc.custom_thickness = pr_item.custom_thickness
     doc.custom_length = pr_item.custom_length
     doc.custom_width = pr_item.custom_width
+    doc.custom_sec_qty = pr_item.custom_sec_qty
+    doc.custom_sec_uom = pr_item.custom_sec_uom
 
 
 def _get_receipt_suffix(pr_name):
