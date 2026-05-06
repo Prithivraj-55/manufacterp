@@ -170,13 +170,14 @@ def validate_bom_from_drawing(doc, method):
         bom_item.rate = flt(d_item.rate) or 0
         bom_item.base_rate = flt(bom_item.rate) * conversion_rate
         bom_item.uom = d_item.uom
-        if flt(bom_item.qty) != flt(d_item.qty):
+        drawing_qty = flt(d_item.qty)
+        if drawing_qty and flt(bom_item.qty) != drawing_qty:
             qty_warnings.append(
                 _("Row {0}: Quantity changed from {1} to {2} — restored from Drawing.").format(
-                    bom_item.idx, d_item.qty, bom_item.qty
+                    bom_item.idx, flt(bom_item.qty), drawing_qty
                 )
             )
-            bom_item.qty = flt(d_item.qty) or 0
+            bom_item.qty = drawing_qty
 
         bom_item.amount = flt(bom_item.qty) * flt(bom_item.rate)
         bom_item.base_amount = flt(bom_item.amount) * conversion_rate
@@ -243,8 +244,147 @@ def create_production_plan_from_bom(bom_name):
         },
     )
 
+    # Auto-populate Process Planning from BOM routing or BOM operations
+    operations = []
+    if bom.routing:
+        operations = frappe.get_all(
+            "BOM Operation",
+            filters={"parent": bom.routing, "parenttype": "Routing"},
+            fields=["operation", "sequence_id"],
+            order_by="sequence_id asc",
+        )
+    elif bom.with_operations and bom.operations:
+        operations = [
+            {"operation": op.operation, "sequence_id": op.sequence_id}
+            for op in sorted(bom.operations, key=lambda o: o.sequence_id or 0)
+        ]
+
+    for op in operations:
+        pp.append("custom_process_planning", {
+            "operation_name": op.get("operation"),
+            "work_type": "Internal Jobcard",
+        })
+
     pp.insert(ignore_permissions=True)
     return pp.name
+
+
+@frappe.whitelist()
+def parse_drawing_items_csv(csv_content):
+	"""Parse CSV text and return processed Drawing Item rows.
+
+	Expected columns (order-independent, case-insensitive):
+	  item_number, material_code, sec_qty, thickness, length, width, rate
+
+	Fetches item master data and calculates qty server-side so the client
+	only needs to set_value on each child row.
+	"""
+	import csv as csv_module
+	import io
+
+	if not csv_content or not csv_content.strip():
+		frappe.throw(_("The uploaded CSV file is empty."))
+
+	# Strip BOM character that Excel sometimes adds
+	csv_content = csv_content.lstrip("﻿")
+
+	reader = csv_module.DictReader(io.StringIO(csv_content))
+
+	# Normalise headers: lowercase + strip whitespace so both "material_code"
+	# and "Material Code" (or "item_code" from PO-style CSVs) are accepted.
+	if not reader.fieldnames:
+		frappe.throw(_("CSV file has no header row."))
+
+	normalised_headers = {h.strip().lower(): h for h in reader.fieldnames}
+
+	def _col(row, *candidates):
+		"""Return value of first matching column (case-insensitive)."""
+		for c in candidates:
+			orig = normalised_headers.get(c.lower())
+			if orig and orig in row:
+				val = (row[orig] or "").strip()
+				if val:
+					return val
+		return ""
+
+	rows = []
+	errors = []
+	auto_number = 1
+
+	for line_no, row in enumerate(reader, start=2):
+		material_code = _col(row, "material_code", "item_code")
+		if not material_code:
+			continue  # blank rows are silently skipped
+
+		if not frappe.db.exists("Item", material_code):
+			errors.append(_("Row {0}: Item <b>{1}</b> not found.").format(line_no, material_code))
+			continue
+
+		item_data = frappe.db.get_value(
+			"Item",
+			material_code,
+			[
+				"item_name", "item_group", "description",
+				"custom_material_spec", "custom_unit_weight",
+				"custom_secondary_uom", "custom_parent_item_group", "stock_uom",
+			],
+			as_dict=True,
+		) or {}
+
+		def _flt(val):
+			try:
+				return flt(str(val).strip().replace(",", ""))
+			except Exception:
+				return 0.0
+
+		raw_item_number = _col(row, "item_number", "item no", "item no.")
+		item_number = int(_flt(raw_item_number)) if raw_item_number else auto_number
+		sec_qty   = _flt(_col(row, "sec_qty",   "sec qty",   "custom_sec_qty"))
+		thickness = _flt(_col(row, "thickness",  "thickness (mm)", "custom_thickness"))
+		length    = _flt(_col(row, "length",     "length (mm)",    "custom_length"))
+		width     = _flt(_col(row, "width",      "width (mm)",     "custom_width"))
+		rate      = _flt(_col(row, "rate",       "rate (inr)",     "rate (₹)"))
+
+		unit_weight        = flt(item_data.get("custom_unit_weight"))
+		parent_item_group  = (item_data.get("custom_parent_item_group") or "").strip()
+
+		# Calculate primary qty using the same formula as drawing.py
+		qty = 0.0
+		if parent_item_group == "Structurals":
+			if length and unit_weight and sec_qty:
+				qty = (length / 1000) * unit_weight * sec_qty
+		elif parent_item_group == "Plates":
+			if length and width and thickness and unit_weight and sec_qty:
+				qty = (length / 1000) * (width / 1000) * thickness * unit_weight * sec_qty
+
+		rows.append({
+			"item_number":           item_number,
+			"material_code":         material_code,
+			"material_name":         item_data.get("item_name") or "",
+			"item_group":            item_data.get("item_group") or "",
+			"parent_item_group":     parent_item_group,
+			"raw_material_description": item_data.get("description") or "",
+			"material_spec":         item_data.get("custom_material_spec") or "",
+			"unit_weight":           unit_weight,
+			"thickness":             thickness,
+			"length":                length,
+			"width":                 width,
+			"sec_qty":               sec_qty,
+			"sec_uom":               item_data.get("custom_secondary_uom") or "",
+			"qty":                   flt(qty, 3),
+			"uom":                   item_data.get("stock_uom") or "",
+			"rate":                  rate,
+			"amount":                flt(rate * qty, 2),
+		})
+		auto_number += 1
+
+	if errors:
+		frappe.throw("<br>".join(errors), title=_("CSV Upload Errors"))
+
+	if not rows:
+		frappe.throw(_("No valid item rows found in the CSV file."))
+
+	return rows
 
 
 def get_so_dashboard_data(data):

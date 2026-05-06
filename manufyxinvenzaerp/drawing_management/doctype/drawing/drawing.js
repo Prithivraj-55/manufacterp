@@ -1,5 +1,23 @@
 frappe.ui.form.on("Drawing", {
 	refresh(frm) {
+		// ── Upload / Download CSV — standalone buttons, always visible ─────────
+		frm.add_custom_button(__("Download Template"), function () {
+			drawing_download_csv_template();
+		});
+
+		if ((frm.doc.items || []).length) {
+			frm.add_custom_button(__("Download Items CSV"), function () {
+				drawing_download_items_csv(frm);
+			});
+		}
+
+		// Upload only in draft — items table is read-only once submitted
+		if (frm.doc.docstatus === 0) {
+			frm.add_custom_button(__("Upload Items"), function () {
+				drawing_upload_items_dialog(frm);
+			});
+		}
+
 		if (frm.doc.docstatus === 1 && frm.doc.status === "Working") {
 			frm.add_custom_button(__("Mark as Final Revision"), function () {
 				frappe.confirm(
@@ -231,4 +249,168 @@ function drawing_warn_missing_fields(row, group) {
 			indicator: "orange",
 		});
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CSV Upload / Download helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Download a blank Drawing Items CSV template with three sample rows.
+ * Columns: item_number, material_code, sec_qty, thickness, length, width, rate
+ */
+function drawing_download_csv_template() {
+	var HEADERS = ["item_number", "material_code", "sec_qty", "thickness", "length", "width", "rate"];
+	var LABELS  = ["Item Number", "Item Code",     "Sec Qty", "Thickness (mm)", "Length (mm)", "Width (mm)", "Rate"];
+	var SAMPLES = [
+		["1", "ISMBX250X125", "2", "",   "1500", "",     "200"],
+		["2", "PLATE12",      "1", "12", "1500", "2000", "200"],
+		["3", "BOLTM24",      "2", "",   "",     "",     "200"],
+	];
+
+	var lines = [
+		HEADERS.join(","),
+		"# " + LABELS.join(",") + "  ← (labels for reference — do not include this row in your upload)"
+	];
+	SAMPLES.forEach(function(r) { lines.push(r.join(",")); });
+
+	_drawing_trigger_csv_download(lines.join("\n"), "drawing_items_template.csv");
+}
+
+/**
+ * Download the current items table as a CSV file.
+ */
+function drawing_download_items_csv(frm) {
+	var items = frm.doc.items || [];
+	if (!items.length) {
+		frappe.msgprint(__("No items to download."));
+		return;
+	}
+
+	var COLS = [
+		["item_number",    "item_number"],
+		["material_code",  "material_code"],
+		["material_name",  "material_name"],
+		["parent_item_group", "parent_item_group"],
+		["sec_qty",        "sec_qty"],
+		["sec_uom",        "sec_uom"],
+		["thickness",      "thickness"],
+		["length",         "length"],
+		["width",          "width"],
+		["unit_weight",    "unit_weight"],
+		["qty",            "qty"],
+		["uom",            "uom"],
+		["rate",           "rate"],
+		["amount",         "amount"],
+	];
+
+	var lines = [COLS.map(function(c) { return c[0]; }).join(",")];
+	items.forEach(function(row) {
+		var cells = COLS.map(function(c) {
+			var v = row[c[1]];
+			if (v == null) v = "";
+			// Wrap in quotes if the value contains a comma or quote
+			var s = String(v);
+			if (s.indexOf(",") !== -1 || s.indexOf('"') !== -1) {
+				s = '"' + s.replace(/"/g, '""') + '"';
+			}
+			return s;
+		});
+		lines.push(cells.join(","));
+	});
+
+	var doc_id = frm.doc.name || "drawing";
+	_drawing_trigger_csv_download(lines.join("\n"), doc_id + "_items.csv");
+}
+
+/**
+ * Open a dialog with a file-input, read the CSV client-side,
+ * send its text to the server for parsing, and populate the items table.
+ */
+function drawing_upload_items_dialog(frm) {
+	var dialog = new frappe.ui.Dialog({
+		title: __("Upload Drawing Items"),
+		fields: [
+			{
+				fieldtype: "HTML",
+				fieldname: "upload_area",
+				options: `
+					<div style="margin-bottom:12px;">
+						<label class="control-label" style="margin-bottom:6px;">${__("Select CSV File")}</label>
+						<input type="file" id="drawing_csv_file_input" accept=".csv"
+						       style="display:block;width:100%;padding:4px 0;">
+					</div>
+					<p class="text-muted" style="font-size:12px;margin:0;">
+						${__("Required columns")}: <code>item_number, material_code, sec_qty, thickness, length, width, rate</code><br>
+						${__("Leave dimension columns blank for Nuts &amp; Bolts items.")}
+					</p>`
+			}
+		],
+		primary_action_label: __("Upload"),
+		primary_action: function () {
+			var input = document.getElementById("drawing_csv_file_input");
+			if (!input || !input.files || !input.files.length) {
+				frappe.msgprint(__("Please select a CSV file first."));
+				return;
+			}
+
+			var file = input.files[0];
+			if (!file.name.toLowerCase().endsWith(".csv")) {
+				frappe.msgprint(__("Only .csv files are supported."));
+				return;
+			}
+
+			var reader = new FileReader();
+			reader.onload = function (e) {
+				dialog.disable_primary_action();
+				frappe.call({
+					method: "manufyxinvenzaerp.drawing_management.drawing_utils.parse_drawing_items_csv",
+					args: { csv_content: e.target.result },
+					freeze: true,
+					freeze_message: __("Processing CSV…"),
+					callback: function (r) {
+						dialog.enable_primary_action();
+						if (!r.message || !r.message.length) return;
+
+						frm.clear_table("items");
+						r.message.forEach(function (row_data) {
+							var child = frm.add_child("items");
+							$.extend(locals[child.doctype][child.name], row_data);
+						});
+						frm.refresh_field("items");
+						update_totals(frm);
+						dialog.hide();
+
+						frappe.show_alert({
+							message: __("{0} item(s) loaded from CSV.", [r.message.length]),
+							indicator: "green",
+						}, 5);
+					},
+					error: function () {
+						dialog.enable_primary_action();
+					}
+				});
+			};
+			reader.onerror = function () {
+				frappe.msgprint(__("Could not read the file. Please try again."));
+			};
+			reader.readAsText(file);
+		}
+	});
+	dialog.show();
+}
+
+/** Trigger a browser CSV download from a plain-text string. */
+function _drawing_trigger_csv_download(csv_text, filename) {
+	var blob = new Blob([csv_text], { type: "text/csv;charset=utf-8;" });
+	var url  = URL.createObjectURL(blob);
+	var a    = document.createElement("a");
+	a.href     = url;
+	a.download = filename;
+	document.body.appendChild(a);
+	a.click();
+	setTimeout(function () {
+		document.body.removeChild(a);
+		URL.revokeObjectURL(url);
+	}, 100);
 }

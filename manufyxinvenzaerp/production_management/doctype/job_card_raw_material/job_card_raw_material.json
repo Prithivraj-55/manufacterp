@@ -1,0 +1,183 @@
+{
+ "actions": [],
+ "creation": "2026-05-04 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "item_code",
+  "item_name",
+  "parent_item_group",
+  "column_break_item",
+  "unit_weight",
+  "thickness",
+  "length",
+  "width",
+  "section_break_prev",
+  "prev_operation_consumed_stock_qty",
+  "prev_operation_stock_uom",
+  "column_break_prev",
+  "prev_operation_sec_qty",
+  "prev_operation_sec_uom",
+  "section_break_curr",
+  "current_sec_qty",
+  "sec_uom",
+  "manual_qty",
+  "column_break_curr",
+  "current_stock_qty",
+  "stock_uom",
+  "transferred_qty"
+ ],
+ "fields": [
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Item Code",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "item_code.item_name",
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Item Name",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "item_code.custom_parent_item_group",
+   "fieldname": "parent_item_group",
+   "fieldtype": "Data",
+   "label": "Parent Item Group",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_item",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fetch_from": "item_code.custom_unit_weight",
+   "fieldname": "unit_weight",
+   "fieldtype": "Float",
+   "label": "Unit Weight",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.parent_item_group=='Plates'",
+   "fieldname": "thickness",
+   "fieldtype": "Float",
+   "label": "Thickness"
+  },
+  {
+   "depends_on": "eval:['Structurals','Plates'].includes(doc.parent_item_group)",
+   "fieldname": "length",
+   "fieldtype": "Float",
+   "label": "Length"
+  },
+  {
+   "depends_on": "eval:doc.parent_item_group=='Plates'",
+   "fieldname": "width",
+   "fieldtype": "Float",
+   "label": "Width"
+  },
+  {
+   "fieldname": "section_break_prev",
+   "fieldtype": "Section Break",
+   "label": "Previous Operation"
+  },
+  {
+   "fieldname": "prev_operation_consumed_stock_qty",
+   "fieldtype": "Float",
+   "label": "Prev Op Consumed (KG)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "prev_operation_stock_uom",
+   "fieldtype": "Link",
+   "label": "Prev Op Stock UOM",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_prev",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "prev_operation_sec_qty",
+   "fieldtype": "Float",
+   "label": "Prev Op Sec Qty",
+   "read_only": 1
+  },
+  {
+   "fieldname": "prev_operation_sec_uom",
+   "fieldtype": "Link",
+   "label": "Prev Op Sec UOM",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_curr",
+   "fieldtype": "Section Break",
+   "label": "Current Operation"
+  },
+  {
+   "depends_on": "eval:['Structurals','Plates'].includes(doc.parent_item_group)",
+   "fieldname": "current_sec_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Current Sec Qty (Nos)"
+  },
+  {
+   "fetch_from": "item_code.custom_secondary_uom",
+   "fieldname": "sec_uom",
+   "fieldtype": "Link",
+   "label": "Sec UOM",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.parent_item_group=='Nuts and Bolts'",
+   "fieldname": "manual_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Manual Qty (KG)"
+  },
+  {
+   "fieldname": "column_break_curr",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "current_stock_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Current Stock Qty (KG)",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "item_code.stock_uom",
+   "fieldname": "stock_uom",
+   "fieldtype": "Link",
+   "label": "Stock UOM",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "transferred_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Transferred to WIP (KG)",
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-05-04 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Production Management",
+ "name": "Job Card Raw Material",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}
