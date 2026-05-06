@@ -94,6 +94,9 @@ class BOMTree:
 			rep += child.__repr__(level=level + 1)
 		return rep
 
+class BOMRecursionError(frappe.ValidationError):
+	pass
+
 
 class BOM(ERPNextBOM):
 	# begin: auto-generated types
