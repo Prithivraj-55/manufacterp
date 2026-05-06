@@ -8,7 +8,7 @@ app_license = "mit"
 after_install = "manufyxinvenzaerp.setup.after_install"
 after_migrate = "manufyxinvenzaerp.setup.after_migrate"
 
-fixtures = ["Custom Field"]
+fixtures = ["Custom Field", "Property Setter"]
 
 # Apps
 # ------------------
@@ -53,6 +53,9 @@ app_include_js = "/assets/manufyxinvenzaerp/js/item.js"
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 
+doctype_js = {
+    "Production Plan": "public/js/production_plan.js",
+}
 # Svg Icons
 # ------------------
 # include app icons in desk
@@ -133,10 +136,10 @@ app_include_js = "/assets/manufyxinvenzaerp/js/item.js"
 # DocType Class
 # ---------------
 # Override standard doctype classes
-
-# override_doctype_class = {
-# 	"ToDo": "custom_app.overrides.CustomToDo"
-# }
+override_doctype_class = {
+    "BOM": "manufyxinvenzaerp.drawing_management.bom_class_override.BOM",
+    "Subcontracting Order": "manufyxinvenzaerp.subcontracting_management.overrides.CustomSubcontractingOrder",
+}
 
 # Document Events
 # ---------------
@@ -183,10 +186,9 @@ doc_events = {
 		"validate": "manufyxinvenzaerp.subcontracting_management.subcontracting.validate_supplier_operation_entry",
 		"on_submit": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_submit_supplier_operation_entry",
 	},
-}
-
-override_doctype_class = {
-	"Subcontracting Order": "manufyxinvenzaerp.subcontracting_management.overrides.CustomSubcontractingOrder",
+	"Production Plan": {
+		"validate": "manufyxinvenzaerp.production_plan_management.production_plan.after_save_production_plan",
+	},
 }
 
 override_doctype_dashboards = {

@@ -68,7 +68,7 @@ def _setup_batch_from_purchase_receipt(doc):
     receipt_suffix = _get_receipt_suffix(doc.reference_name)
     parts = [batch_prefix]
     if pr_item.custom_thickness:
-        parts.append(f"P{int(pr_item.custom_thickness)}")
+        parts.append(f"T{int(pr_item.custom_thickness)}")
     if pr_item.custom_length:
         parts.append(f"L{int(pr_item.custom_length)}")
     if pr_item.custom_width:

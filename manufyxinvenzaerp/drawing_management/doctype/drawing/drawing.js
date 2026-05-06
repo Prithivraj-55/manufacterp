@@ -36,32 +36,46 @@ frappe.ui.form.on("Drawing", {
 			});
 		}
 
-		if (frm.doc.docstatus === 1 && frm.doc.status === "Final Revision") {
-			frm.add_custom_button(__("Create BOM"), function () {
-				frappe.confirm(
-					__("Create a BOM for <b>" + (frm.doc.fg_item_name || frm.doc.fg_item_code) + "</b>?"),
-					function () {
-						frappe.call({
-							method: "manufyxinvenzaerp.drawing_management.drawing_utils.create_bom_from_drawing",
-							args: { drawing_name: frm.doc.name },
-							freeze: true,
-							callback: function (r) {
-								if (r.message) {
-									frappe.msgprint({
-										title: __("BOM Created"),
-										message: __("BOM created") + ': <a href="/app/bom/' +
-											encodeURIComponent(r.message) + '" target="_blank">' +
-											r.message + "</a>",
-										indicator: "green",
-									});
-									frm.reload_doc();
-								}
-							},
-						});
-					}
-				);
-			}, __("Create"));
-		}
+        if (frm.doc.docstatus === 1 && frm.doc.status === "Final Revision") {
+            frappe.call({
+                method: "manufyxinvenzaerp.drawing_management.doctype.drawing.drawing.check_existing_bom",
+                args: {
+                    drawing_name: frm.doc.name
+                },
+                callback: function (r) {
+                    if (r.message) {
+                        return;
+                    }
+
+                    // ✅ Only show button if no BOM exists
+                    frm.add_custom_button(__("Create BOM"), function () {
+                        frappe.confirm(
+                            __("Create a BOM for <b>" + (frm.doc.fg_item_name || frm.doc.fg_item_code) + "</b>?"),
+                            function () {
+                                frappe.call({
+                                    method: "manufyxinvenzaerp.drawing_management.drawing_utils.create_bom_from_drawing",
+                                    args: { drawing_name: frm.doc.name },
+                                    freeze: true,
+                                    callback: function (r) {
+                                        if (r.message) {
+                                            frappe.msgprint({
+                                                title: __("BOM Created"),
+                                                message: __("BOM created") + ': <a href="/app/bom/' +
+                                                    encodeURIComponent(r.message) + '" target="_blank">' +
+                                                    r.message + "</a>",
+                                                indicator: "green",
+                                            });
+                                            frm.reload_doc();
+                                        }
+                                    },
+                                });
+                            }
+                        );
+                    }, __("Create"));
+
+                }
+            });
+        }
 
 		frm.set_query("batch", "items", function (doc, cdt, cdn) {
 			var row = locals[cdt][cdn];
