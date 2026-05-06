@@ -148,7 +148,14 @@ def validate_bom_from_drawing(doc, method):
     drawing_map = {(d.item_number or 0): d for d in drawing.items}
     drawing_list = list(drawing.items)
     conversion_rate = flt(doc.conversion_rate) or 1
+    drawing_item_numbers = {d.item_number for d in drawing.items if d.item_number}
+    bom_item_numbers = {b.custom_item_number for b in doc.items if b.custom_item_number}
 
+    missing_items = drawing_item_numbers - bom_item_numbers
+    if missing_items:
+        frappe.throw(
+            _("Not allowed to remove items from BOM. Please maintain all items as per Drawing.")
+        )
     qty_warnings = []
     for i, bom_item in enumerate(doc.items):
         d_item = drawing_map.get(bom_item.get("custom_item_number")) or (
@@ -162,7 +169,7 @@ def validate_bom_from_drawing(doc, method):
         # rm_cost_as_per. We never call calculate_cost() here to avoid re-triggering that.
         bom_item.rate = flt(d_item.rate) or 0
         bom_item.base_rate = flt(bom_item.rate) * conversion_rate
-
+        bom_item.uom = d_item.uom
         if flt(bom_item.qty) != flt(d_item.qty):
             qty_warnings.append(
                 _("Row {0}: Quantity changed from {1} to {2} — restored from Drawing.").format(
@@ -246,3 +253,6 @@ def get_so_dashboard_data(data):
 
     data["transactions"].append({"label": _("Drawing"), "items": ["Drawing"]})
     return data
+
+
+#####################

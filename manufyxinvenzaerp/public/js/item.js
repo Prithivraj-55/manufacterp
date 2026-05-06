@@ -84,6 +84,7 @@ frappe.ui.form.on("Item", {
 		frm.set_query("custom_parent_item_group", () => ({ filters: { is_group: 1 } }));
 		lock_item_group_filter(frm);
 		apply_batch_ui(frm);
+		make_unit_weight_mand_based_on_item_group(frm)
 	},
 
 	custom_parent_item_group(frm) {
@@ -96,4 +97,7 @@ frappe.ui.form.on("Item", {
 	has_batch_no(frm) {
 		apply_batch_ui(frm);
 	},
+	custom_parent_item_group(frm){
+		make_unit_weight_mand_based_on_item_group(frm)
+	}
 });
