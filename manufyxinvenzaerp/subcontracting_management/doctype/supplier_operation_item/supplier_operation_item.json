@@ -1,0 +1,187 @@
+{
+ "actions": [],
+ "creation": "2026-05-06 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "item_code",
+  "item_name",
+  "parent_item_group",
+  "column_break_item",
+  "unit_weight",
+  "batch_no",
+  "section_break_dims",
+  "thickness",
+  "length",
+  "width",
+  "section_break_transferred",
+  "transferred_sec_qty",
+  "transferred_stock_qty",
+  "column_break_prev",
+  "prev_operation_sec_qty",
+  "prev_operation_stock_qty",
+  "section_break_current",
+  "current_sec_qty",
+  "current_stock_qty",
+  "manual_qty",
+  "column_break_curr",
+  "sec_uom",
+  "stock_uom"
+ ],
+ "fields": [
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Item Code",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "item_code.item_name",
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Item Name",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "item_code.custom_parent_item_group",
+   "fieldname": "parent_item_group",
+   "fieldtype": "Data",
+   "label": "Parent Item Group",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_item",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fetch_from": "item_code.custom_unit_weight",
+   "fieldname": "unit_weight",
+   "fieldtype": "Float",
+   "label": "Unit Weight",
+   "read_only": 1
+  },
+  {
+   "fieldname": "batch_no",
+   "fieldtype": "Link",
+   "label": "Batch No",
+   "options": "Batch",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_dims",
+   "fieldtype": "Section Break",
+   "label": "Dimensions"
+  },
+  {
+   "depends_on": "eval:doc.parent_item_group=='Plates'",
+   "fieldname": "thickness",
+   "fieldtype": "Float",
+   "label": "Thickness (mm)"
+  },
+  {
+   "depends_on": "eval:['Structurals','Plates'].includes(doc.parent_item_group)",
+   "fieldname": "length",
+   "fieldtype": "Float",
+   "label": "Length (mm)"
+  },
+  {
+   "depends_on": "eval:doc.parent_item_group=='Plates'",
+   "fieldname": "width",
+   "fieldtype": "Float",
+   "label": "Width (mm)"
+  },
+  {
+   "fieldname": "section_break_transferred",
+   "fieldtype": "Section Break",
+   "label": "Transferred (from Supplier WH)"
+  },
+  {
+   "fieldname": "transferred_sec_qty",
+   "fieldtype": "Float",
+   "label": "Transferred Sec Qty (Nos)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "transferred_stock_qty",
+   "fieldtype": "Float",
+   "label": "Transferred Stock Qty (KG)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_prev",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "prev_operation_sec_qty",
+   "fieldtype": "Float",
+   "label": "Prev Op Sec Qty (Nos)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "prev_operation_stock_qty",
+   "fieldtype": "Float",
+   "label": "Prev Op Stock Qty (KG)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_current",
+   "fieldtype": "Section Break",
+   "label": "Current Operation Consumption"
+  },
+  {
+   "depends_on": "eval:['Structurals','Plates'].includes(doc.parent_item_group)",
+   "fieldname": "current_sec_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Current Sec Qty (Nos)"
+  },
+  {
+   "fieldname": "current_stock_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Current Stock Qty (KG)",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.parent_item_group=='Nuts and Bolts'",
+   "fieldname": "manual_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Manual Qty (KG)"
+  },
+  {
+   "fieldname": "column_break_curr",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fetch_from": "item_code.custom_secondary_uom",
+   "fieldname": "sec_uom",
+   "fieldtype": "Link",
+   "label": "Sec UOM",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "item_code.stock_uom",
+   "fieldname": "stock_uom",
+   "fieldtype": "Link",
+   "label": "Stock UOM",
+   "options": "UOM",
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-05-06 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Subcontracting Management",
+ "name": "Supplier Operation Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}

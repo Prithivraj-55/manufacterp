@@ -171,10 +171,27 @@ doc_events = {
 		"validate": "manufyxinvenzaerp.sq_management.supplier_quotation.validate_supplier_quotation",
 		"before_submit": "manufyxinvenzaerp.sq_management.supplier_quotation.before_submit_supplier_quotation",
 	},
+	"Job Card": {
+		"validate": "manufyxinvenzaerp.production_management.job_card.validate_job_card",
+	},
+	"Stock Entry": {
+		"validate": "manufyxinvenzaerp.production_management.stock_entry.validate_stock_entry",
+		"before_submit": "manufyxinvenzaerp.production_management.job_card.before_submit_manufacture_stock_entry",
+		"on_submit": "manufyxinvenzaerp.production_management.stock_entry.on_submit_stock_entry",
+	},
+	"Supplier Operation Entry": {
+		"validate": "manufyxinvenzaerp.subcontracting_management.subcontracting.validate_supplier_operation_entry",
+		"on_submit": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_submit_supplier_operation_entry",
+	},
+}
+
+override_doctype_class = {
+	"Subcontracting Order": "manufyxinvenzaerp.subcontracting_management.overrides.CustomSubcontractingOrder",
 }
 
 override_doctype_dashboards = {
 	"Sales Order": "manufyxinvenzaerp.drawing_management.drawing_utils.get_so_dashboard_data",
+	"Subcontracting Order": "manufyxinvenzaerp.subcontracting_management.subcontracting.get_sco_dashboard_data",
 }
 
 # Scheduled Tasks

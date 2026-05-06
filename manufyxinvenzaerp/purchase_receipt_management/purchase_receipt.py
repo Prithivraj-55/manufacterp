@@ -1,6 +1,7 @@
 import re
 import frappe
 from frappe import _
+from frappe.utils import flt
 
 STRUCTURALS_REQUIRED = ["custom_length", "custom_unit_weight", "custom_sec_qty"]
 PLATES_REQUIRED = ["custom_length", "custom_width", "custom_thickness", "custom_unit_weight", "custom_sec_qty"]
@@ -43,10 +44,14 @@ def before_submit_purchase_receipt(doc, method):
 
 
 def before_insert_batch(doc, method):
-    """Set custom batch name and store dimensions when batch is auto-created from Purchase Receipt."""
-    if doc.reference_doctype != "Purchase Receipt" or not doc.reference_name:
-        return
+    """Set custom batch name and store dimensions when batch is auto-created."""
+    if doc.reference_doctype == "Purchase Receipt" and doc.reference_name:
+        _setup_batch_from_purchase_receipt(doc)
+    elif doc.reference_doctype == "Stock Entry" and doc.reference_name:
+        _setup_batch_from_stock_entry(doc)
 
+
+def _setup_batch_from_purchase_receipt(doc):
     pr_item = frappe.db.get_value(
         "Purchase Receipt Item",
         {"parent": doc.reference_name, "item_code": doc.item},
@@ -71,7 +76,6 @@ def before_insert_batch(doc, method):
     parts.append(f"R{receipt_suffix}")
 
     batch_id = "-".join(parts)
-
     counter = 1
     base_id = batch_id
     while frappe.db.exists("Batch", batch_id):
@@ -86,12 +90,70 @@ def before_insert_batch(doc, method):
     doc.custom_sec_uom = pr_item.custom_sec_uom
 
 
+def _setup_batch_from_stock_entry(doc):
+    """Set batch name and dimensions for batches created from Repack or Material Receipt SE."""
+    se = frappe.get_doc("Stock Entry", doc.reference_name)
+    if se.stock_entry_type not in ("Repack", "Material Receipt"):
+        return
+
+    target_row = next(
+        (
+            r for r in se.items
+            if r.item_code == doc.item
+            and (se.stock_entry_type == "Material Receipt" or r.is_finished_item)
+        ),
+        None,
+    )
+    if not target_row:
+        return
+
+    batch_prefix = frappe.db.get_value("Item", doc.item, "custom_batch_prefix")
+    if not batch_prefix:
+        return
+
+    t = int(flt(target_row.custom_thickness)) if target_row.custom_thickness else None
+    l = int(flt(target_row.custom_length)) if target_row.custom_length else None
+    w = int(flt(target_row.custom_width)) if target_row.custom_width else None
+    suffix = _get_se_suffix(se.name)
+
+    parts = [batch_prefix]
+    if t:
+        parts.append(f"P{t}")
+    if l:
+        parts.append(f"L{l}")
+    if w:
+        parts.append(f"W{w}")
+    parts.append(f"SR{suffix}")
+
+    batch_id = "-".join(parts)
+    counter = 1
+    base_id = batch_id
+    while frappe.db.exists("Batch", batch_id):
+        counter += 1
+        batch_id = f"{base_id}-{counter}"
+
+    doc.batch_id = batch_id
+    doc.custom_thickness = flt(target_row.custom_thickness)
+    doc.custom_length = flt(target_row.custom_length)
+    doc.custom_width = flt(target_row.custom_width)
+    doc.custom_sec_qty = flt(target_row.custom_sec_qty)
+    doc.custom_sec_uom = target_row.custom_sec_uom
+
+
 def _get_receipt_suffix(pr_name):
     """Extract last 3 digits from the numeric part of a receipt name (e.g. MAT-PRE-2024-00010 → '010')."""
     match = re.search(r"(\d+)$", pr_name)
     if match:
         return match.group(1)[-3:].zfill(3)
     return pr_name[-3:] if pr_name else "000"
+
+
+def _get_se_suffix(se_name):
+    """Extract last 3 digits from the numeric part of a Stock Entry name."""
+    match = re.search(r"(\d+)$", se_name)
+    if match:
+        return match.group(1)[-3:].zfill(3)
+    return se_name[-3:] if se_name else "001"
 
 
 def _copy_from_po_item(row):
