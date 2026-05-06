@@ -89,3 +89,15 @@ def _check_row_missing_fields(row, throw):
         frappe.throw(msg)
     else:
         frappe.msgprint(msg, indicator="orange", title=_("Missing Fields"))
+
+
+@frappe.whitelist()
+def check_existing_bom(drawing_name):
+    return bool(frappe.get_all(
+        "BOM",
+        filters={
+            "custom_drawing": drawing_name,
+            "docstatus": ["in", [0, 1]]
+        },
+        limit=1
+    ))

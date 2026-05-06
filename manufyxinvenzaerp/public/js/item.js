@@ -64,12 +64,27 @@ function lock_item_group_filter(frm) {
 	});
 }
 
+// Make custom_unit_weight mandatory for specific item groups
+function make_unit_weight_mand_based_on_item_group(frm) {
+    if (frm.doc.custom_parent_item_group) {
+        if (["Nuts and Bolts", "Plates", "Structurals"].includes(frm.doc.custom_parent_item_group)) {
+            frm.set_df_property("custom_unit_weight", "reqd", 1);
+        } else {
+            frm.set_df_property("custom_unit_weight", "reqd", 0);
+        }
+    }
+	else {
+		frm.set_df_property("custom_unit_weight", "reqd", 0);
+	}
+}
+
 frappe.ui.form.on("Item", {
 	refresh(frm) {
 		frm.set_df_property("custom_item_calculation_type", "read_only", 1);
 		frm.set_query("custom_parent_item_group", () => ({ filters: { is_group: 1 } }));
 		lock_item_group_filter(frm);
 		apply_batch_ui(frm);
+		make_unit_weight_mand_based_on_item_group(frm)
 	},
 
 	custom_parent_item_group(frm) {
@@ -82,4 +97,7 @@ frappe.ui.form.on("Item", {
 	has_batch_no(frm) {
 		apply_batch_ui(frm);
 	},
+	custom_parent_item_group(frm){
+		make_unit_weight_mand_based_on_item_group(frm)
+	}
 });
