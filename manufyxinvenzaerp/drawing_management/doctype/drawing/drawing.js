@@ -141,7 +141,13 @@ frappe.ui.form.on("Drawing Item", {
 	unit_weight(frm, cdt, cdn) { drawing_calculate_qty(frm, cdt, cdn); },
 
 	rate(frm, cdt, cdn) { drawing_calculate_amount(frm, cdt, cdn); },
-	qty(frm, cdt, cdn) { drawing_calculate_amount(frm, cdt, cdn); },
+	qty(frm, cdt, cdn) {
+		var row = locals[cdt][cdn];
+		if ((row.parent_item_group || "") === "Nuts and Bolts" && row.unit_weight) {
+			frappe.model.set_value(cdt, cdn, "sec_qty", flt(row.qty * row.unit_weight, 3));
+		}
+		drawing_calculate_amount(frm, cdt, cdn);
+	},
 });
 
 function drawing_calculate_qty(frm, cdt, cdn) {
@@ -161,6 +167,13 @@ function drawing_calculate_qty(frm, cdt, cdn) {
 		} else {
 			drawing_warn_missing_fields(row, group);
 		}
+	} else if (group === "Nuts and Bolts") {
+		// qty (NOS) is manual; recalculate sec_qty (KG) when unit_weight changes
+		if (row.qty && row.unit_weight) {
+			frappe.model.set_value(cdt, cdn, "sec_qty", flt(row.qty * row.unit_weight, 3));
+			drawing_calculate_amount(frm, cdt, cdn);
+		}
+		return;
 	}
 
 	if (qty !== null) {

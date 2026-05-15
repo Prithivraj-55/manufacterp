@@ -133,6 +133,7 @@ def create_bom_from_drawing(drawing_name):
                 "custom_width": d_item.width,
                 "custom_sec_qty": d_item.sec_qty,
                 "custom_sec_uom": d_item.sec_uom,
+                "custom_parent_item_group": d_item.parent_item_group or "",
             },
         )
 
@@ -145,7 +146,7 @@ def validate_bom_from_drawing(doc, method):
         return
 
     drawing = frappe.get_doc("Drawing", doc.custom_drawing)
-    drawing_map = {(d.item_number or 0): d for d in drawing.items}
+    drawing_map = {d.item_number: d for d in drawing.items if d.item_number}
     drawing_list = list(drawing.items)
     conversion_rate = flt(doc.conversion_rate) or 1
     drawing_item_numbers = {d.item_number for d in drawing.items if d.item_number}
@@ -170,6 +171,13 @@ def validate_bom_from_drawing(doc, method):
         bom_item.rate = flt(d_item.rate) or 0
         bom_item.base_rate = flt(bom_item.rate) * conversion_rate
         bom_item.uom = d_item.uom
+        bom_item.custom_parent_item_group = d_item.parent_item_group or ""
+        bom_item.custom_thickness = flt(d_item.thickness)
+        bom_item.custom_length = flt(d_item.length)
+        bom_item.custom_width = flt(d_item.width)
+        bom_item.custom_unit_weight = flt(d_item.unit_weight)
+        bom_item.custom_sec_qty = flt(d_item.sec_qty)
+        bom_item.custom_sec_uom = d_item.sec_uom or ""
         drawing_qty = flt(d_item.qty)
         if drawing_qty and flt(bom_item.qty) != drawing_qty:
             qty_warnings.append(
@@ -243,6 +251,29 @@ def create_production_plan_from_bom(bom_name):
             "stock_uom": stock_uom,
         },
     )
+
+    # Populate BOM Raw Material List from BOM items (with dimensions + formula values)
+    for bom_item in bom.items:
+        pp.append(
+            "custom_bom_raw_materials",
+            {
+                "item_number": bom_item.get("custom_item_number") or 0,
+                "item_code": bom_item.item_code,
+                "item_name": bom_item.item_name,
+                "parent_item_group": bom_item.get("custom_parent_item_group") or "",
+                "material_spec": bom_item.get("custom_material_spec") or "",
+                "unit_weight": flt(bom_item.get("custom_unit_weight")),
+                "thickness": flt(bom_item.get("custom_thickness")),
+                "length": flt(bom_item.get("custom_length")),
+                "width": flt(bom_item.get("custom_width")),
+                "sec_qty": flt(bom_item.get("custom_sec_qty")),
+                "sec_uom": bom_item.get("custom_sec_uom") or "",
+                "qty": flt(bom_item.qty),
+                "uom": bom_item.uom or "",
+                "rate": flt(bom_item.rate),
+                "amount": flt(bom_item.amount),
+            },
+        )
 
     # Auto-populate Process Planning from BOM routing or BOM operations
     operations = []

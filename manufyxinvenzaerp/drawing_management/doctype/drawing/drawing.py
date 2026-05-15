@@ -72,6 +72,9 @@ def _recalculate_row_qty(row):
                 * row.unit_weight
                 * row.sec_qty
             )
+    elif group == "Nuts and Bolts":
+        if row.qty and row.unit_weight:
+            row.sec_qty = flt(row.qty * row.unit_weight, 3)
 
 
 def _check_row_missing_fields(row, throw):
