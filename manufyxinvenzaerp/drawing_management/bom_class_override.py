@@ -396,6 +396,8 @@ class BOM(ERPNextBOM):
 			)
 
 			for r in ret:
+				if r == "bom_no":
+					continue  # never auto-link sub-BOMs; flat BOM structure only
 				if not item.get(r):
 					item.set(r, ret[r])
 

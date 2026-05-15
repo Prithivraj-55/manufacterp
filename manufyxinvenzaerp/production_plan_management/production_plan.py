@@ -19,286 +19,357 @@ from frappe.utils import (
 )
 
 def get_sbb_available_qty(item_code, warehouse, dimensions):
-    """
-    Fetch total available qty from Serial and Batch Bundle
-    based on dimension match from Batch
-    """
+	"""
+	Fetch available qty from Serial and Batch Bundle per batch,
+	matching dimensions from Batch master.
+	Returns (total_qty, matched_batches) where each matched_batch includes
+	batch_no, qty (Kg), custom_sec_qty (NOS), custom_sec_uom.
+	"""
+	total_qty = 0
+	matched_batches = []
 
-    total_qty = 0
-    matched_batches = []
+	sbb_list = frappe.get_all(
+		"Serial and Batch Bundle",
+		filters={
+			"item_code": item_code,
+			"warehouse": warehouse
+		},
+		fields=["name"]
+	)
 
-    # ✅ Get all SBBs for item + warehouse
-    sbb_list = frappe.get_all(
-        "Serial and Batch Bundle",
-        filters={
-            "item_code": item_code,
-            "warehouse": warehouse
-        },
-        fields=["name"]
-    )
+	if not sbb_list:
+		return 0, []
 
-    if not sbb_list:
-        return 0, []
+	sbb_names = [d.name for d in sbb_list]
 
-    # ✅ Get all entries in one go (optimization)
-    sbb_names = [d.name for d in sbb_list]
+	entries = frappe.get_all(
+		"Serial and Batch Entry",
+		filters={
+			"parent": ["in", sbb_names]
+		},
+		fields=["parent", "batch_no", "qty"]
+	)
 
+	if not entries:
+		return 0, []
 
-    entries = frappe.get_all(
-        "Serial and Batch Entry",
-        filters={
-            "parent": ["in", sbb_names]
-        },
-        fields=["parent", "batch_no", "qty"]
-    )
+	batch_nos = list(set([e.batch_no for e in entries if e.batch_no]))
 
+	batch_map = {}
+	if batch_nos:
+		batch_data = frappe.get_all(
+			"Batch",
+			filters={"name": ["in", batch_nos]},
+			fields=["name", "custom_length", "custom_thickness", "custom_width",
+			        "custom_sec_qty", "custom_sec_uom"]
+		)
+		batch_map = {b.name: b for b in batch_data}
 
-    if not entries:
-        return 0, []
+	# Aggregate qty per batch_no across all SBB entries
+	batch_qty_map = defaultdict(float)
+	for row in entries:
+		if row.batch_no:
+			batch_qty_map[row.batch_no] += flt(row.qty)
 
-    # ✅ Get all batch dimension data in one go
-    batch_nos = list(set([e.batch_no for e in entries if e.batch_no]))
+	for batch_no, qty in batch_qty_map.items():
+		batch = batch_map.get(batch_no)
+		if not batch:
+			continue
 
-    batch_map = {}
-    if batch_nos:
-        batch_data = frappe.get_all(
-            "Batch",
-            filters={"name": ["in", batch_nos]},
-            fields=["name", "custom_length", "custom_thickness", "custom_width"]
-        )
+		if (
+			flt(batch.custom_length) == flt(dimensions.get("custom_length"))
+			and flt(batch.custom_thickness) == flt(dimensions.get("custom_thickness"))
+			and flt(batch.custom_width) == flt(dimensions.get("custom_width"))
+		):
+			total_qty += qty
+			matched_batches.append({
+				"batch_no": batch_no,
+				"qty": qty,
+				"custom_sec_qty": flt(batch.custom_sec_qty),
+				"custom_sec_uom": batch.custom_sec_uom,
+			})
 
-        batch_map = {b.name: b for b in batch_data}
-
-    # ✅ Match dimensions
-    for row in entries:
-        batch = batch_map.get(row.batch_no)
-        if not batch:
-            continue
-
-        if (
-            flt(batch.custom_length) == flt(dimensions.get("custom_length"))
-            and flt(batch.custom_thickness) == flt(dimensions.get("custom_thickness"))
-            and flt(batch.custom_width) == flt(dimensions.get("custom_width"))
-        ):
-            qty = flt(row.qty)
-            total_qty += qty
-
-            matched_batches.append({
-                "batch_no": row.batch_no,
-                "qty": qty
-            })
-    return total_qty, matched_batches
+	return total_qty, matched_batches
 
 
 @frappe.whitelist()
 def get_items_for_material_requests(doc, warehouses=None, get_parent_warehouse_data=None):
-    if isinstance(doc, str):
-        doc = frappe._dict(json.loads(doc))
+	if isinstance(doc, str):
+		doc = frappe._dict(json.loads(doc))
 
-    if warehouses:
-        warehouses = list(set(get_warehouse_list(warehouses)))
+	if warehouses:
+		warehouses = list(set(get_warehouse_list(warehouses)))
 
-        if (
-            doc.get("for_warehouse")
-            and not get_parent_warehouse_data
-            and doc.get("for_warehouse") in warehouses
-        ):
-            warehouses.remove(doc.get("for_warehouse"))
+		if (
+			doc.get("for_warehouse")
+			and not get_parent_warehouse_data
+			and doc.get("for_warehouse") in warehouses
+		):
+			warehouses.remove(doc.get("for_warehouse"))
 
-    doc["mr_items"] = []
+	doc["mr_items"] = []
 
-    po_items = doc.get("po_items") if doc.get("po_items") else doc.get("items")
+	po_items = doc.get("po_items") if doc.get("po_items") else doc.get("items")
 
-    # ✅ Validation
-    if not po_items or not [row.get("item_code") for row in po_items if row.get("item_code")]:
-        frappe.throw(_("Items to Manufacture are required"))
+	if not po_items or not [row.get("item_code") for row in po_items if row.get("item_code")]:
+		frappe.throw(_("Items to Manufacture are required"))
 
-    company = doc.get("company")
-    ignore_existing_ordered_qty = doc.get("ignore_existing_ordered_qty")
-    include_safety_stock = doc.get("include_safety_stock")
+	company = doc.get("company")
+	ignore_existing_ordered_qty = doc.get("ignore_existing_ordered_qty")
+	include_safety_stock = doc.get("include_safety_stock")
 
-    so_item_details = frappe._dict()
+	# so_item_details keyed by (item_code, length, thickness, width) to handle same item at different dims
+	so_item_details = frappe._dict()
 
-    # =========================
-    # ✅ STEP 1: BUILD ITEMS
-    # =========================
-    for data in po_items:
-        planned_qty = data.get("required_qty") or data.get("planned_qty")
-        warehouse = doc.get("for_warehouse")
+	# =========================
+	# STEP 1: BUILD ITEMS
+	# =========================
+	for data in po_items:
+		planned_qty = data.get("required_qty") or data.get("planned_qty")
 
-        item_details = {}
+		item_details = {}
 
-        # ✅ BOM Explosion
-        if data.get("bom") or data.get("bom_no"):
-            bom_no = data.get("bom") or data.get("bom_no")
+		if data.get("bom") or data.get("bom_no"):
+			bom_no = data.get("bom") or data.get("bom_no")
 
-            item_details = get_exploded_items(
-                {},
-                company,
-                bom_no,
-                1,
-                planned_qty=planned_qty,
-                doc=doc,
-            )
-            # inject dimensions
-            for item_code, item in item_details.items():
-                item["custom_thickness"] = (
-                    data.get("custom_thickness")
-                    if data.get("custom_thickness") is not None
-                    else item.get("custom_thickness")
-                )
+			item_details = get_exploded_items(
+				{},
+				company,
+				bom_no,
+				1,
+				planned_qty=planned_qty,
+				doc=doc,
+			)
+			# Raw material dimensions come from the BOM explosion items themselves.
+			# The po_item dimension is for the finished good and must NOT override
+			# individual raw material dimensions — doing so collapses all structural
+			# entries with different lengths into a single merged row.
 
-                item["custom_length"] = (
-                    data.get("custom_length")
-                    if data.get("custom_length") is not None
-                    else item.get("custom_length")
-                )
+		elif data.get("item_code"):
+			item_master = frappe.get_doc("Item", data["item_code"]).as_dict()
 
-                item["custom_width"] = (
-                    data.get("custom_width")
-                    if data.get("custom_width") is not None
-                    else item.get("custom_width")
-                )
-        # ✅ Non-BOM
-        elif data.get("item_code"):
-            item_master = frappe.get_doc("Item", data["item_code"]).as_dict()
+			dim_key = (
+				item_master.name,
+				flt(data.get("custom_length")),
+				flt(data.get("custom_thickness")),
+				flt(data.get("custom_width")),
+			)
+			item_details[dim_key] = frappe._dict({
+				"item_name": item_master.item_name,
+				"qty": planned_qty or 1,
+				"item_code": item_master.name,
+				"description": item_master.description,
+				"stock_uom": item_master.stock_uom,
+				"safety_stock": item_master.safety_stock,
+				"custom_thickness": data.get("custom_thickness"),
+				"custom_length": data.get("custom_length"),
+				"custom_width": data.get("custom_width"),
+				"custom_parent_item_group": frappe.db.get_value(
+					"Item", item_master.name, "custom_parent_item_group"
+				),
+				"custom_unit_weight": frappe.db.get_value(
+					"Item", item_master.name, "custom_unit_weight"
+				),
+			})
 
-            item_details[item_master.name] = frappe._dict({
-                "item_name": item_master.item_name,
-                "qty": planned_qty or 1,
-                "item_code": item_master.name,
-                "description": item_master.description,
-                "stock_uom": item_master.stock_uom,
-                "safety_stock": item_master.safety_stock,
-                "custom_thickness": data.get("custom_thickness"),
-                "custom_length": data.get("custom_length"),
-                "custom_width": data.get("custom_width"),
-            })
+		# Merge by the item's actual dimensions — two BOM items with the same
+		# item_code and identical dimensions from different po_items are combined;
+		# same item at different dimensions keeps a separate entry.
+		for _sql_key, details in item_details.items():
+			final_key = (
+				details.item_code,
+				flt(details.custom_length),
+				flt(details.custom_thickness),
+				flt(details.custom_width),
+			)
+			so_item_details.setdefault(None, frappe._dict())
 
-        # ✅ Merge
-        for item_code, details in item_details.items():
-            so_item_details.setdefault(None, frappe._dict())
+			if final_key in so_item_details[None]:
+				so_item_details[None][final_key]["qty"] += flt(details.qty)
+			else:
+				so_item_details[None][final_key] = details
 
-            if item_code in so_item_details[None]:
-                so_item_details[None][item_code]["qty"] += flt(details.qty)
-            else:
-                so_item_details[None][item_code] = details
-    mr_items = []
+	mr_items = []
+	available_rows = []
 
-    # =========================
-    # ✅ STEP 2: SBB CHECK
-    # =========================
-    for item_dict in so_item_details.values():
-        for details in item_dict.values():
+	# =========================
+	# STEP 2: SBB CHECK
+	# =========================
+	for item_dict in so_item_details.values():
+		for details in item_dict.values():
 
-            warehouse = doc.get("for_warehouse") or details.get("default_warehouse")
+			warehouse = doc.get("for_warehouse") or details.get("default_warehouse")
+			required_qty = flt(details.qty)
 
-            required_qty = flt(details.qty)
+			dimensions = {
+				"custom_length": details.get("custom_length"),
+				"custom_thickness": details.get("custom_thickness"),
+				"custom_width": details.get("custom_width"),
+			}
 
-            dimensions = {
-                "custom_length": details.get("custom_length"),
-                "custom_thickness": details.get("custom_thickness"),
-                "custom_width": details.get("custom_width"),
-            }
+			available_qty, matched_batches = get_sbb_available_qty(
+				details.item_code,
+				warehouse,
+				dimensions
+			)
 
+			# Build available-rows list (one row per matching batch)
+			for batch in matched_batches:
+				available_rows.append({
+					"item_code": details.item_code,
+					"item_name": details.item_name,
+					"batch_no": batch["batch_no"],
+					"required_qty": required_qty,
+					"available_qty": batch["qty"],
+					"custom_sec_qty": batch["custom_sec_qty"],
+					"custom_sec_uom": batch["custom_sec_uom"],
+					"uom": details.get("stock_uom"),
+					"custom_length": dimensions["custom_length"],
+					"custom_thickness": dimensions["custom_thickness"],
+					"custom_width": dimensions["custom_width"],
+					"warehouse": warehouse,
+					"custom_parent_item_group": details.get("custom_parent_item_group"),
+				})
 
-            # 🔥 SBB FIRST
-            available_qty, matched_batches = get_sbb_available_qty(
-                details.item_code,
-                warehouse,
-                dimensions
-            )
+			shortage_qty = required_qty - available_qty
 
+			# =========================
+			# STEP 3: CREATE MR ONLY IF SHORTAGE
+			# =========================
+			if shortage_qty > 0:
+				item_row = get_material_request_items(
+					doc,
+					details,
+					None,
+					company,
+					ignore_existing_ordered_qty,
+					include_safety_stock,
+					warehouse,
+					{},
+					defaultdict(float),
+				)
 
-            shortage_qty = required_qty - available_qty
+				if item_row:
+					item_row["quantity"] = shortage_qty
+					item_row["custom_thickness"] = dimensions["custom_thickness"]
+					item_row["custom_length"] = dimensions["custom_length"]
+					item_row["custom_width"] = dimensions["custom_width"]
+					item_row["required_bom_qty"] = shortage_qty
+					item_row["custom_parent_item_group"] = details.get("custom_parent_item_group")
+					item_row["custom_unit_weight"] = details.get("custom_unit_weight")
 
-            # =========================
-            # ✅ STEP 3: CREATE MR ONLY IF SHORTAGE
-            # =========================
-            if shortage_qty > 0:
-                item_row = get_material_request_items(
-                    doc,
-                    details,
-                    None,
-                    company,
-                    ignore_existing_ordered_qty,
-                    include_safety_stock,
-                    warehouse,
-                    {},  # ❌ no bin usage
-                    defaultdict(float),
-                )
+					# Calculate NOS (sec_qty) for the shortage
+					group = details.get("custom_parent_item_group")
+					length = flt(dimensions.get("custom_length"))
+					thickness = flt(dimensions.get("custom_thickness"))
+					width = flt(dimensions.get("custom_width"))
+					unit_weight = flt(details.get("custom_unit_weight"))
 
-                if item_row:
-                    item_row["quantity"] = shortage_qty
+					if group == "Structurals" and length and unit_weight:
+						denominator = (length / 1000) * unit_weight
+						if denominator:
+							item_row["custom_sec_qty"] = ceil(shortage_qty / denominator)
+					elif group == "Plates" and length and width and thickness and unit_weight:
+						denominator = (length / 1000) * (width / 1000) * thickness * unit_weight
+						if denominator:
+							item_row["custom_sec_qty"] = ceil(shortage_qty / denominator)
+					elif group in ("Nuts and Bolts", "Fasteners") and unit_weight:
+						# shortage is in Nos; sec_qty = Kg reference
+						item_row["custom_sec_qty"] = shortage_qty * unit_weight
 
-                    # attach dimensions
-                    item_row["custom_thickness"] = dimensions["custom_thickness"]
-                    item_row["custom_length"] = dimensions["custom_length"]
-                    item_row["custom_width"] = dimensions["custom_width"]
-                    item_row["required_bom_qty"] = shortage_qty
+					item_row["custom_sec_uom"] = frappe.db.get_value(
+						"Item", details.item_code, "custom_secondary_uom"
+					)
 
-                    # optional debug info
-                    item_row["sbb_batches"] = matched_batches
+					mr_items.append(item_row)
 
-                    mr_items.append(item_row)
-    return mr_items
+	return {"mr_items": mr_items, "available_raw_materials": available_rows}
 
 
 def get_exploded_items(item_details, company, bom_no, include_non_stock_items, planned_qty=1, doc=None):
-	bei = frappe.qb.DocType("BOM Explosion Item")
+	# Delegate to the dimension-aware direct query so all rows with different
+	# custom dimensions are kept separate (ERPNext's BOM Explosion merges rows
+	# by item_code+UOM without considering custom_length/thickness/width).
+	return get_bom_items_direct(item_details, company, bom_no, include_non_stock_items, planned_qty)
+
+
+def get_bom_items_direct(item_details, company, bom_no, include_non_stock_items, planned_qty=1):
+	"""
+	Query BOM Item rows directly instead of BOM Explosion Item.
+
+	ERPNext's explosion pre-aggregates rows by (item_code, stock_uom), ignoring
+	custom dimension fields. Two rows of the same item at different lengths would
+	be collapsed to one. This function preserves each row independently and merges
+	only when (item_code, length, thickness, width) are truly identical.
+	"""
+	bi = frappe.qb.DocType("BOM Item")
 	bom = frappe.qb.DocType("BOM")
 	item = frappe.qb.DocType("Item")
 	item_default = frappe.qb.DocType("Item Default")
 	item_uom = frappe.qb.DocType("UOM Conversion Detail")
 
 	data = (
-		frappe.qb.from_(bei)
+		frappe.qb.from_(bi)
 		.join(bom)
-		.on(bom.name == bei.parent)
+		.on(bom.name == bi.parent)
 		.join(item)
-		.on(item.name == bei.item_code)
+		.on(item.name == bi.item_code)
 		.left_join(item_default)
 		.on((item_default.parent == item.name) & (item_default.company == company))
 		.left_join(item_uom)
 		.on((item.name == item_uom.parent) & (item_uom.uom == item.purchase_uom))
 		.select(
-			(IfNull(Sum(bei.stock_qty / IfNull(bom.quantity, 1)), 0) * planned_qty).as_("qty"),
+			(bi.stock_qty / IfNull(bom.quantity, 1) * planned_qty).as_("qty"),
 			item.item_name,
 			item.name.as_("item_code"),
-			bei.description,
-			bei.stock_uom,
+			bi.description,
+			bi.stock_uom,
 			item.min_order_qty,
-			bei.source_warehouse,
+			bi.source_warehouse,
 			item.default_material_request_type,
-			item.min_order_qty,
 			item_default.default_warehouse,
 			item.purchase_uom,
 			item_uom.conversion_factor,
 			item.safety_stock,
 			bom.item.as_("main_bom_item"),
-            bei.custom_length,
-            bei.custom_thickness,
-            bei.custom_width
+			bi.custom_length,
+			bi.custom_thickness,
+			bi.custom_width,
+			item.custom_parent_item_group,
+			bi.custom_unit_weight,
 		)
 		.where(
-			(bei.docstatus < 2)
+			(bi.docstatus < 2)
 			& (bom.name == bom_no)
 			& (item.is_stock_item.isin([0, 1]) if include_non_stock_items else item.is_stock_item == 1)
 		)
-		.groupby(bei.item_code, bei.stock_uom)
+		# No GROUP BY — each BOM Item row is kept as-is to preserve dimension uniqueness
 	).run(as_dict=True)
 
 	for d in data:
 		if not d.conversion_factor and d.purchase_uom:
 			d.conversion_factor = get_uom_conversion_factor(d.item_code, d.purchase_uom)
-		item_details.setdefault(d.get("item_code"), d)
-    
+
+		dim_key = (
+			d.get("item_code"),
+			flt(d.get("custom_length")),
+			flt(d.get("custom_thickness")),
+			flt(d.get("custom_width")),
+		)
+		if dim_key in item_details:
+			# Same item at identical dimensions from a different po_item: sum qty
+			item_details[dim_key]["qty"] = flt(item_details[dim_key]["qty"]) + flt(d.get("qty"))
+		else:
+			item_details[dim_key] = d
+
 	return item_details
+
 
 def get_uom_conversion_factor(item_code, uom):
 	return frappe.db.get_value(
 		"UOM Conversion Detail", {"parent": item_code, "uom": uom}, "conversion_factor"
 	)
+
 
 def get_warehouse_list(warehouses):
 	warehouse_list = []
@@ -314,6 +385,7 @@ def get_warehouse_list(warehouses):
 			warehouse_list.append(row.get("warehouse"))
 
 	return warehouse_list
+
 
 def get_material_request_items(
 	doc,
@@ -400,112 +472,168 @@ def get_material_request_items(
 			"uom": row.get("purchase_uom") or row.get("stock_uom"),
 			"main_bom_item": row.get("main_bom_item"),
 		}
-      
+
+
+@frappe.whitelist()
+def get_bom_raw_materials_for_pp(doc):
+	"""
+	Explode BOMs from Production Plan po_items and return rows for
+	the custom_bom_raw_materials (Production Plan BOM Raw Material) table.
+	Called by the "Get Raw Materials" button on the Production Plan form.
+	"""
+	if isinstance(doc, str):
+		doc = frappe._dict(json.loads(doc))
+
+	company = doc.get("company")
+	if not company:
+		frappe.throw(_("Company is required."))
+
+	rows = []
+	for item_row in doc.get("po_items") or []:
+		bom_no = item_row.get("bom_no")
+		planned_qty = flt(item_row.get("planned_qty")) or 1
+
+		if not bom_no:
+			continue
+
+		item_details = get_exploded_items({}, company, bom_no, False, planned_qty=planned_qty)
+
+		for _dim_key, detail in item_details.items():
+			group = detail.get("custom_parent_item_group") or ""
+			length = flt(detail.get("custom_length"))
+			width = flt(detail.get("custom_width"))
+			thickness = flt(detail.get("custom_thickness"))
+			unit_weight = flt(detail.get("custom_unit_weight"))
+			qty = flt(detail.get("qty"))
+
+			sec_qty = 0.0
+			if group == "Structurals" and length and unit_weight:
+				denom = (length / 1000) * unit_weight
+				if denom:
+					sec_qty = ceil(qty / denom)
+			elif group == "Plates" and length and width and thickness and unit_weight:
+				denom = (length / 1000) * (width / 1000) * thickness * unit_weight
+				if denom:
+					sec_qty = ceil(qty / denom)
+
+			sec_uom = frappe.db.get_value("Item", detail.get("item_code"), "custom_secondary_uom") or ""
+
+			rows.append({
+				"item_code": detail.get("item_code"),
+				"item_name": detail.get("item_name"),
+				"parent_item_group": group,
+				"material_spec": "",
+				"unit_weight": unit_weight,
+				"thickness": thickness,
+				"length": length,
+				"width": width,
+				"sec_qty": sec_qty,
+				"sec_uom": sec_uom,
+				"qty": qty,
+				"uom": detail.get("stock_uom") or "",
+				"rate": 0,
+				"amount": 0,
+			})
+
+	return rows
+
 
 @frappe.whitelist()
 def make_material_request(doc, submit):
-    self = frappe.get_doc("Production Plan",doc)
-    """Create Material Requests grouped by Sales Order and Material Request Type"""
-    material_request_list = []
-    material_request_map = {}
+	self = frappe.get_doc("Production Plan", doc)
+	material_request_list = []
+	material_request_map = {}
 
-    for item in self.mr_items:
-        item_doc = frappe.get_cached_doc("Item", item.item_code)
+	for item in self.mr_items:
+		item_doc = frappe.get_cached_doc("Item", item.item_code)
 
-        material_request_type = item.material_request_type or item_doc.default_material_request_type
+		material_request_type = item.material_request_type or item_doc.default_material_request_type
 
-        # key for Sales Order:Material Request Type:Customer
-        key = "{}:{}:{}".format(item.sales_order, material_request_type, item_doc.customer or "")
-        schedule_date = item.schedule_date or add_days(nowdate(), cint(item_doc.lead_time_days))
+		key = "{}:{}:{}".format(item.sales_order, material_request_type, item_doc.customer or "")
+		schedule_date = item.schedule_date or add_days(nowdate(), cint(item_doc.lead_time_days))
 
-        if key not in material_request_map:
-            # make a new MR for the combination
-            material_request_map[key] = frappe.new_doc("Material Request")
-            material_request = material_request_map[key]
-            material_request.update(
-                {
-                    "transaction_date": nowdate(),
-                    "status": "Draft",
-                    "company": self.company,
-                    "material_request_type": material_request_type,
-                    "customer": item_doc.customer or "",
-                }
-            )
-            material_request_list.append(material_request)
-        else:
-            material_request = material_request_map[key]
+		if key not in material_request_map:
+			material_request_map[key] = frappe.new_doc("Material Request")
+			material_request = material_request_map[key]
+			material_request.update(
+				{
+					"transaction_date": nowdate(),
+					"status": "Draft",
+					"company": self.company,
+					"material_request_type": material_request_type,
+					"customer": item_doc.customer or "",
+				}
+			)
+			material_request_list.append(material_request)
+		else:
+			material_request = material_request_map[key]
 
-        # add item
-        material_request.append(
-            "items",
-            {
-                "item_code": item.item_code,
-                "from_warehouse": item.from_warehouse
-                if material_request_type == "Material Transfer"
-                else None,
-                "qty": item.quantity,
-                'custom_length': item.custom_length,
-                'custom_thickness': item.custom_thickness,
-                'custom_width': item.custom_width,
-                "custom_sec_qty": item.custom_sec_qty,
-                "schedule_date": schedule_date,
-                "warehouse": item.warehouse,
-                "sales_order": item.sales_order,
-                "production_plan": self.name,
-                "material_request_plan_item": item.name,
-                "project": frappe.db.get_value("Sales Order", item.sales_order, "project")
-                if item.sales_order
-                else None,
-            },
-        )
+		material_request.append(
+			"items",
+			{
+				"item_code": item.item_code,
+				"from_warehouse": item.from_warehouse
+				if material_request_type == "Material Transfer"
+				else None,
+				"qty": item.quantity,
+				"custom_length": item.custom_length,
+				"custom_thickness": item.custom_thickness,
+				"custom_width": item.custom_width,
+				"custom_sec_qty": item.custom_sec_qty,
+				"custom_sec_uom": item.custom_sec_uom,
+				"schedule_date": schedule_date,
+				"warehouse": item.warehouse,
+				"sales_order": item.sales_order,
+				"production_plan": self.name,
+				"material_request_plan_item": item.name,
+				"project": frappe.db.get_value("Sales Order", item.sales_order, "project")
+				if item.sales_order
+				else None,
+			},
+		)
 
-    for material_request in material_request_list:
-        # submit
-        material_request.flags.ignore_permissions = 1
-        material_request.run_method("set_missing_values")
+	for material_request in material_request_list:
+		material_request.flags.ignore_permissions = 1
+		material_request.run_method("set_missing_values")
+		material_request.save()
+		if self.get("submit_material_request"):
+			material_request.submit()
 
-        material_request.save()
-        if self.get("submit_material_request"):
-            material_request.submit()
+	frappe.flags.mute_messages = False
 
-    frappe.flags.mute_messages = False
-
-    if material_request_list:
-        material_request_list = [
-            get_link_to_form("Material Request", m.name) for m in material_request_list
-        ]
-        frappe.msgprint(_("{0} created").format(comma_and(material_request_list)))
-    else:
-        frappe.msgprint(_("No material request created"))
-
-
-
+	if material_request_list:
+		material_request_list = [
+			get_link_to_form("Material Request", m.name) for m in material_request_list
+		]
+		frappe.msgprint(_("{0} created").format(comma_and(material_request_list)))
+	else:
+		frappe.msgprint(_("No material request created"))
 
 
 def after_save_production_plan(doc, method):
-    for row in doc.mr_items:
-        _recalculate_sec_qty(row)
+	for row in doc.mr_items:
+		_recalculate_sec_qty(row)
+
 
 PLATES_REQUIRED = ["custom_length", "custom_width", "custom_thickness", "custom_unit_weight", "quantity"]
 
+
 def _recalculate_sec_qty(row):
-    group = row.custom_parent_item_group
+	group = row.custom_parent_item_group
 
-    # 🏗 Structurals
-    if group == "Structurals":
-        if row.custom_length and row.custom_unit_weight:
-            denominator = (row.custom_length / 1000) * row.custom_unit_weight
-            if denominator:
-                row.custom_sec_qty = row.quantity / denominator
+	if group == "Structurals":
+		if row.custom_length and row.custom_unit_weight:
+			denominator = (row.custom_length / 1000) * row.custom_unit_weight
+			if denominator:
+				row.custom_sec_qty = row.quantity / denominator
 
-    # 🪵 Plates
-    elif group == "Plates":
-        if all(getattr(row, f, None) for f in PLATES_REQUIRED):
-            denominator = (
-                (row.custom_length / 1000)
-                * (row.custom_width / 1000)
-                * row.custom_thickness
-                * row.custom_unit_weight
-            )
-            if denominator:
-                row.custom_sec_qty = row.quantity / denominator
+	elif group == "Plates":
+		if all(getattr(row, f, None) for f in PLATES_REQUIRED):
+			denominator = (
+				(row.custom_length / 1000)
+				* (row.custom_width / 1000)
+				* row.custom_thickness
+				* row.custom_unit_weight
+			)
+			if denominator:
+				row.custom_sec_qty = row.quantity / denominator

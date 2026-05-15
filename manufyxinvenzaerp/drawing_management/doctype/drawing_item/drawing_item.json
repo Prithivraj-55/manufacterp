@@ -116,6 +116,7 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Thickness",
+   "hidden_depends_on": "eval:doc.parent_item_group === 'Nuts and Bolts'",
    "mandatory_depends_on": "eval:doc.parent_item_group==='Plates'"
   },
   {
@@ -123,6 +124,7 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Length",
+   "hidden_depends_on": "eval:doc.parent_item_group === 'Nuts and Bolts'",
    "mandatory_depends_on": "eval:['Structurals','Plates'].includes(doc.parent_item_group)"
   },
   {
@@ -130,6 +132,7 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Width",
+   "hidden_depends_on": "eval:doc.parent_item_group === 'Nuts and Bolts'",
    "mandatory_depends_on": "eval:doc.parent_item_group==='Plates'"
   },
   {
@@ -141,7 +144,8 @@
    "fieldname": "sec_qty",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Sec Qty"
+   "label": "Sec Qty",
+   "read_only_depends_on": "eval:doc.parent_item_group === 'Nuts and Bolts'"
   },
   {
    "fieldname": "sec_uom",
@@ -156,7 +160,7 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Quantity",
-   "read_only": 1,
+   "read_only_depends_on": "eval:['Structurals','Plates'].includes(doc.parent_item_group)",
    "description": "Primary Quantity"
   },
   {

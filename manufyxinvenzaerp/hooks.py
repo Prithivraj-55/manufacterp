@@ -55,6 +55,7 @@ app_include_js = "/assets/manufyxinvenzaerp/js/item.js"
 
 doctype_js = {
     "Production Plan": "public/js/production_plan.js",
+    "BOM": "public/js/bom.js",
 }
 # Svg Icons
 # ------------------
