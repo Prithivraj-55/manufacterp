@@ -12,13 +12,24 @@
   "column_break_top",
   "company",
   "section_production_settings",
-  "for_warehouse",
   "column_break_settings",
   "ignore_existing_ordered_qty",
   "tab_bom_items",
   "bom_items",
-  "tab_raw_materials",
+  "tab_stock_analysis",
+  "section_raw_materials",
+  "get_raw_materials_btn",
   "raw_materials",
+  "section_available_raw_materials",
+  "for_warehouse",
+  "check_stock_btn",
+  "available_raw_materials",
+  "section_material_mapping",
+  "finalize_mapping_btn",
+  "material_mapping",
+  "section_unavailable_items",
+  "update_exact_match_btn",
+  "unavailable_items",
   "amended_from"
  ],
  "fields": [
@@ -87,6 +98,11 @@
    "label": "Ignore Available Stock"
   },
   {
+   "fieldname": "get_raw_materials_btn",
+   "fieldtype": "Button",
+   "label": "Get Raw Materials"
+  },
+  {
    "fieldname": "tab_bom_items",
    "fieldtype": "Tab Break",
    "label": "Selected BOMs"
@@ -98,8 +114,14 @@
    "options": "Material Planning BOM Item"
   },
   {
-   "fieldname": "tab_raw_materials",
+   "fieldname": "tab_stock_analysis",
    "fieldtype": "Tab Break",
+   "label": "Stock Details"
+  },
+  {
+   "description": "All raw materials exploded from the selected BOMs. Shows required qty, available qty in the selected warehouse, and shortage qty for each item. Use 'Get Raw Materials' to populate this list, then 'Check Stock Availability' to classify items into the sections below.",
+   "fieldname": "section_raw_materials",
+   "fieldtype": "Section Break",
    "label": "Raw Materials"
   },
   {
@@ -107,6 +129,57 @@
    "fieldtype": "Table",
    "label": "Raw Materials",
    "options": "Material Planning Raw Material"
+  },
+  {
+   "description": "Select the warehouse and click 'Check Stock Availability'. Items with an exact dimension match appear here.",
+   "fieldname": "section_available_raw_materials",
+   "fieldtype": "Section Break",
+   "label": "Available Raw Materials (Exact Match)"
+  },
+  {
+   "fieldname": "check_stock_btn",
+   "fieldtype": "Button",
+   "label": "Check Stock Availability"
+  },
+  {
+   "fieldname": "update_exact_match_btn",
+   "fieldtype": "Button",
+   "label": "Update Exact Match"
+  },
+  {
+   "fieldname": "available_raw_materials",
+   "fieldtype": "Table",
+   "label": "Available Raw Materials",
+   "options": "Material Planning Available Raw Material"
+  },
+  {
+   "description": "Items that have some stock in the warehouse but no batch with an exact dimension match. Assign a batch manually, then click 'Finalize Mapping' — items with no batch assigned move to Unavailable Items.",
+   "fieldname": "section_material_mapping",
+   "fieldtype": "Section Break",
+   "label": "Material Mapping (Partial Stock)"
+  },
+  {
+   "fieldname": "finalize_mapping_btn",
+   "fieldtype": "Button",
+   "label": "Move to Unavailable Items"
+  },
+  {
+   "fieldname": "material_mapping",
+   "fieldtype": "Table",
+   "label": "Material Mapping",
+   "options": "Material Planning Material Mapping"
+  },
+  {
+   "description": "Items with no stock at all in the warehouse. These must be purchased before production can proceed. Once a purchase receipt is created and stock is available, re-run 'Check Stock Availability' to move them to Material Mapping.",
+   "fieldname": "section_unavailable_items",
+   "fieldtype": "Section Break",
+   "label": "Unavailable Items (No Stock — Needs Purchase)"
+  },
+  {
+   "fieldname": "unavailable_items",
+   "fieldtype": "Table",
+   "label": "Unavailable Items",
+   "options": "Material Planning Unavailable Item"
   },
   {
    "fieldname": "amended_from",
