@@ -842,6 +842,17 @@ def create_purchase_receipt_client_script():
 
 def create_material_request_custom_fields():
     custom_fields = {
+        "Material Request": [
+            {
+                "fieldname": "custom_material_planning",
+                "label": "Material Planning",
+                "fieldtype": "Link",
+                "options": "Material Planning",
+                "read_only": 1,
+                "insert_after": "amended_from",
+                "in_list_view": 0,
+            },
+        ],
         "Material Request Item": [
             {
                 "fieldname": "custom_parent_item_group",
