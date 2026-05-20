@@ -252,29 +252,6 @@ def create_production_plan_from_bom(bom_name):
         },
     )
 
-    # Populate BOM Raw Material List from BOM items (with dimensions + formula values)
-    for bom_item in bom.items:
-        pp.append(
-            "custom_bom_raw_materials",
-            {
-                "item_number": bom_item.get("custom_item_number") or 0,
-                "item_code": bom_item.item_code,
-                "item_name": bom_item.item_name,
-                "parent_item_group": bom_item.get("custom_parent_item_group") or "",
-                "material_spec": bom_item.get("custom_material_spec") or "",
-                "unit_weight": flt(bom_item.get("custom_unit_weight")),
-                "thickness": flt(bom_item.get("custom_thickness")),
-                "length": flt(bom_item.get("custom_length")),
-                "width": flt(bom_item.get("custom_width")),
-                "sec_qty": flt(bom_item.get("custom_sec_qty")),
-                "sec_uom": bom_item.get("custom_sec_uom") or "",
-                "qty": flt(bom_item.qty),
-                "uom": bom_item.uom or "",
-                "rate": flt(bom_item.rate),
-                "amount": flt(bom_item.amount),
-            },
-        )
-
     # Auto-populate Process Planning from BOM routing or BOM operations
     operations = []
     if bom.routing:

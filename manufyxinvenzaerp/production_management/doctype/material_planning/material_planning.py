@@ -165,10 +165,10 @@ def check_stock_availability(doc):
 
 @frappe.whitelist()
 def make_production_plan(material_planning_name):
-    """Create a draft Production Plan from a submitted Material Planning document."""
+    """Create a draft Production Plan from a Material Planning document."""
     mp = frappe.get_doc("Material Planning", material_planning_name)
-    if mp.docstatus != 1:
-        frappe.throw(_("Submit the Material Planning before creating a Production Plan."))
+    if mp.docstatus == 2:
+        frappe.throw(_("Cannot create a Production Plan from a cancelled Material Planning."))
     if not mp.bom_items:
         frappe.throw(_("No BOM items found on this Material Planning."))
 
@@ -180,14 +180,29 @@ def make_production_plan(material_planning_name):
     pp.get_items_from = "Sales Order"
 
     for row in mp.bom_items:
+<<<<<<< Updated upstream
         stock_uom = frappe.db.get_value("Item", row.item_code, "stock_uom") or ""
         pp.append("po_items", {
             "item_code": row.item_code,
             "item_name": row.item_name,
             "bom_no": row.bom_no,
             "planned_qty": flt(row.qty_to_manufacture),
+=======
+        item_code = row.item_code or frappe.db.get_value("BOM", row.bom_no, "item")
+        item_name = row.item_name or frappe.db.get_value("Item", item_code, "item_name") or item_code
+        stock_uom = frappe.db.get_value("Item", item_code, "stock_uom") or "Nos"
+        planned_qty = flt(row.qty_to_manufacture) or 1
+        pp.append("po_items", {
+            "item_code": item_code,
+            "custom_item_name": item_name,
+            "bom_no": row.bom_no,
+            "custom_duno_mark_no": row.duno_mark_no or 0,
+            "custom_drawing": row.drawing or "",
+            "planned_qty": planned_qty,
+>>>>>>> Stashed changes
             "stock_uom": stock_uom,
             "sales_order": row.sales_order or "",
+            "custom_customer": row.customer or "",
             "warehouse": mp.for_warehouse or "",
         })
 

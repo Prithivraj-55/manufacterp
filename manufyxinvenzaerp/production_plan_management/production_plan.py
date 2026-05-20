@@ -474,69 +474,6 @@ def get_material_request_items(
 		}
 
 
-@frappe.whitelist()
-def get_bom_raw_materials_for_pp(doc):
-	"""
-	Explode BOMs from Production Plan po_items and return rows for
-	the custom_bom_raw_materials (Production Plan BOM Raw Material) table.
-	Called by the "Get Raw Materials" button on the Production Plan form.
-	"""
-	if isinstance(doc, str):
-		doc = frappe._dict(json.loads(doc))
-
-	company = doc.get("company")
-	if not company:
-		frappe.throw(_("Company is required."))
-
-	rows = []
-	for item_row in doc.get("po_items") or []:
-		bom_no = item_row.get("bom_no")
-		planned_qty = flt(item_row.get("planned_qty")) or 1
-
-		if not bom_no:
-			continue
-
-		item_details = get_exploded_items({}, company, bom_no, False, planned_qty=planned_qty)
-
-		for _dim_key, detail in item_details.items():
-			group = detail.get("custom_parent_item_group") or ""
-			length = flt(detail.get("custom_length"))
-			width = flt(detail.get("custom_width"))
-			thickness = flt(detail.get("custom_thickness"))
-			unit_weight = flt(detail.get("custom_unit_weight"))
-			qty = flt(detail.get("qty"))
-
-			sec_qty = 0.0
-			if group == "Structurals" and length and unit_weight:
-				denom = (length / 1000) * unit_weight
-				if denom:
-					sec_qty = ceil(qty / denom)
-			elif group == "Plates" and length and width and thickness and unit_weight:
-				denom = (length / 1000) * (width / 1000) * thickness * unit_weight
-				if denom:
-					sec_qty = ceil(qty / denom)
-
-			sec_uom = frappe.db.get_value("Item", detail.get("item_code"), "custom_secondary_uom") or ""
-
-			rows.append({
-				"item_code": detail.get("item_code"),
-				"item_name": detail.get("item_name"),
-				"parent_item_group": group,
-				"material_spec": "",
-				"unit_weight": unit_weight,
-				"thickness": thickness,
-				"length": length,
-				"width": width,
-				"sec_qty": sec_qty,
-				"sec_uom": sec_uom,
-				"qty": qty,
-				"uom": detail.get("stock_uom") or "",
-				"rate": 0,
-				"amount": 0,
-			})
-
-	return rows
-
 
 @frappe.whitelist()
 def make_material_request(doc, submit):
