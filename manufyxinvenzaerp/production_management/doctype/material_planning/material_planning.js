@@ -97,16 +97,15 @@ frappe.ui.form.on("Material Planning", {
 			return { description_field: "item" };
 		});
 
-		let is_draft = frm.doc.docstatus === 0;
 		let has_raw = !!(frm.doc.raw_materials || []).length;
 		let has_mapping = !!(frm.doc.material_mapping || []).length;
 		let has_unavail = !!(frm.doc.unavailable_items || []).length;
 
 		// Button visibility
-		frm.set_df_property("get_raw_materials_btn",     "hidden", is_draft ? 0 : 1);
-		frm.set_df_property("check_stock_btn",           "hidden", (is_draft && has_raw) ? 0 : 1);
-		frm.set_df_property("update_exact_match_btn",    "hidden", (is_draft && has_unavail) ? 0 : 1);
-		frm.set_df_property("finalize_mapping_btn",      "hidden", (is_draft && has_mapping) ? 0 : 1);
+		frm.set_df_property("get_raw_materials_btn",  "hidden", 0);
+		frm.set_df_property("check_stock_btn",         "hidden", has_raw     ? 0 : 1);
+		frm.set_df_property("update_exact_match_btn",  "hidden", has_unavail ? 0 : 1);
+		frm.set_df_property("finalize_mapping_btn",    "hidden", has_mapping ? 0 : 1);
 
 		// Add icons to inline form buttons (no color override)
 		function _style_btn(fieldname, icon, label) {
@@ -157,31 +156,29 @@ frappe.ui.form.on("Material Planning", {
 			);
 		}
 
-		// "Create → Production Plan" — only after submit
-		if (frm.doc.docstatus === 1) {
-			frm.add_custom_button(__("Production Plan"), function () {
-				frappe.confirm(
-					__("Create a Production Plan from this Material Planning?"),
-					function () {
-						frappe.call({
-							method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.make_production_plan",
-							args: { material_planning_name: frm.doc.name },
-							freeze: true,
-							freeze_message: __("Creating Production Plan…"),
-							callback(r) {
-								if (r.message) {
-									frappe.show_alert({
-										message: __("Production Plan {0} created.", [r.message]),
-										indicator: "green",
-									}, 5);
-									frappe.set_route("Form", "Production Plan", r.message);
-								}
-							},
-						});
-					}
-				);
-			}, __("Create"));
-		}
+		// "Create → Production Plan"
+		frm.add_custom_button(__("Production Plan"), function () {
+			frappe.confirm(
+				__("Create a Production Plan from this Material Planning?"),
+				function () {
+					frappe.call({
+						method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.make_production_plan",
+						args: { material_planning_name: frm.doc.name },
+						freeze: true,
+						freeze_message: __("Creating Production Plan…"),
+						callback(r) {
+							if (r.message) {
+								frappe.show_alert({
+									message: __("Production Plan {0} created.", [r.message]),
+									indicator: "green",
+								}, 5);
+								frappe.set_route("Form", "Production Plan", r.message);
+							}
+						},
+					});
+				}
+			);
+		}, __("Create"));
 	},
 });
 

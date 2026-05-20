@@ -7,35 +7,12 @@ from frappe.utils import ceil, flt, today
 
 
 class MaterialPlanning(Document):
-    def before_validate(self):
-        self.set_status_from_docstatus()
-
     def validate(self):
-        self.set_status_from_docstatus()
         self.raw_materials = [r for r in (self.raw_materials or []) if r.item_code]
         self.available_raw_materials = [r for r in (self.available_raw_materials or []) if r.item_code]
         self.material_mapping = [r for r in (self.material_mapping or []) if r.item_code]
         self.unavailable_items = [r for r in (self.unavailable_items or []) if r.item_code]
 
-    def set_status_from_docstatus(self):
-        self.status = {
-            0: "Draft",
-            1: "Submitted",
-            2: "Cancelled",
-        }.get(self.docstatus, "Draft")
-
-    def before_submit(self):
-        if not self.bom_items:
-            frappe.throw(_("Add at least one BOM before submitting."))
-        for row in self.bom_items:
-            if not row.bom_no:
-                frappe.throw(_("Row {0}: BOM No is required.").format(row.idx))
-
-    def on_submit(self):
-        self.db_set("status", "Submitted")
-
-    def on_cancel(self):
-        self.db_set("status", "Cancelled")
 
 
 @frappe.whitelist()
@@ -367,10 +344,8 @@ def get_batch_item(batch_no):
 
 @frappe.whitelist()
 def make_production_plan(material_planning_name):
-    """Create a draft Production Plan from a submitted Material Planning document."""
+    """Create a draft Production Plan from a saved Material Planning document."""
     mp = frappe.get_doc("Material Planning", material_planning_name)
-    if mp.docstatus != 1:
-        frappe.throw(_("Submit the Material Planning before creating a Production Plan."))
     if not mp.bom_items:
         frappe.throw(_("No BOM items found on this Material Planning."))
 
@@ -505,8 +480,9 @@ def make_material_request(material_planning_name, selected_items):
     mr.custom_material_planning = material_planning_name
     mr.insert(ignore_permissions=True)
 
+    frappe.db.commit()
     return mr.name
 
 
 def unlink_material_request_on_cancel(doc, method=None):
-    return
+    pass
