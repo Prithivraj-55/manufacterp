@@ -1,6 +1,6 @@
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import flt, now
 
 FORMULA_GROUPS = {"Structurals", "Plates"}
 
@@ -50,6 +50,39 @@ def _reduce_batch_sec_qty(batch_no, consumed_qty):
 	frappe.db.set_value("Batch", batch_no, "custom_sec_qty", flt(current - flt(consumed_qty), 3))
 
 
+def _collect_consumed_batches(doc):
+	"""
+	Collect batch_nos consumed by this SE.
+	v15 SBB system: batch_no on SE Detail may be NULL (or cleared on cancel).
+	Always also look up SBBs linked via voucher_no (any docstatus — on cancel they're docstatus=2).
+	"""
+	batches = set()
+	for row in doc.items:
+		if row.batch_no and not row.get("is_finished_item"):
+			batches.add(row.batch_no)
+
+	# Always supplement from SBBs linked to this SE — handles v15 SBB-tracked batches
+	# and the case where batch_no is cleared on SE Detail after cancel.
+	voucher_no = getattr(doc, "name", None)
+	sbb_list = frappe.get_all(
+		"Serial and Batch Bundle",
+		filters={"voucher_no": voucher_no} if voucher_no else {"name": "__nonexistent__"},
+		fields=["name"],
+	) if voucher_no else []
+	if sbb_list:
+		sbb_names = [d.name for d in sbb_list]
+		sbe_rows = frappe.get_all(
+			"Serial and Batch Entry",
+			filters={"parent": ["in", sbb_names]},
+			fields=["batch_no"],
+		)
+		for r in sbe_rows:
+			if r.batch_no:
+				batches.add(r.batch_no)
+
+	return batches
+
+
 def _release_material_planning_reservations(doc):
 	"""
 	After a Stock Entry is submitted, clear is_reserved on Material Planning Material Mapping
@@ -59,11 +92,7 @@ def _release_material_planning_reservations(doc):
 	if doc.stock_entry_type not in consumed_types:
 		return
 
-	# Collect batch_nos from source (outgoing) rows
-	consumed_batches = set()
-	for row in doc.items:
-		if row.batch_no and (not row.get("is_finished_item")):
-			consumed_batches.add(row.batch_no)
+	consumed_batches = _collect_consumed_batches(doc)
 
 	if not consumed_batches:
 		return
@@ -86,6 +115,48 @@ def _release_material_planning_reservations(doc):
 			"Material Planning Material Mapping",
 			r.name,
 			{"is_reserved": 0, "reserved_qty": 0, "shortfall_qty": 0, "reserved_on": None},
+			update_modified=False,
+		)
+
+
+def on_cancel_stock_entry(doc, method):
+	"""When a Stock Entry is cancelled, batch stock returns — restore Material Planning reservations."""
+	_restore_material_planning_reservations(doc)
+
+
+def _restore_material_planning_reservations(doc):
+	"""
+	Re-apply is_reserved=1 on Material Mapping rows whose batch was consumed by this SE
+	(they were cleared on submit). Only restores rows that are currently unreserved and
+	still have the batch assigned.
+	"""
+	consumed_types = {"Manufacture", "Material Transfer", "Material Issue", "Repack"}
+	if doc.stock_entry_type not in consumed_types:
+		return
+
+	consumed_batches = _collect_consumed_batches(doc)
+
+	if not consumed_batches:
+		return
+
+	mapping_rows = frappe.get_all(
+		"Material Planning Material Mapping",
+		filters={"batch": ["in", list(consumed_batches)], "is_reserved": 0},
+		fields=["name", "qty"],
+	)
+	if not mapping_rows:
+		return
+
+	for r in mapping_rows:
+		frappe.db.set_value(
+			"Material Planning Material Mapping",
+			r.name,
+			{
+				"is_reserved": 1,
+				"reserved_qty": flt(r.qty),
+				"shortfall_qty": 0,
+				"reserved_on": now(),
+			},
 			update_modified=False,
 		)
 

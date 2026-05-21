@@ -125,27 +125,6 @@ def get_raw_materials(doc):
     return rows
 
 
-def _get_any_batch_qty(item_code, warehouse):
-    """Return total qty across all batches for item in warehouse (no dimension filter)."""
-    from collections import defaultdict
-
-    sbb_list = frappe.get_all(
-        "Serial and Batch Bundle",
-        filters={"item_code": item_code, "warehouse": warehouse},
-        fields=["name"],
-    )
-    if not sbb_list:
-        return 0.0
-
-    sbb_names = [d.name for d in sbb_list]
-    entries = frappe.get_all(
-        "Serial and Batch Entry",
-        filters={"parent": ["in", sbb_names]},
-        fields=["batch_no", "qty"],
-    )
-    total = sum(flt(e.qty) for e in entries if e.batch_no)
-    return total
-
 
 @frappe.whitelist()
 def check_stock_availability(doc):
@@ -167,6 +146,15 @@ def check_stock_availability(doc):
         frappe.throw(_("Set 'Raw Materials Warehouse' before checking stock availability."))
 
     location = doc.get("store_location") or None
+
+    # Capture existing reserved rows so they survive a re-check.
+    # Key = (item_code, bom_no) — unique enough since BOM explosion won't
+    # produce two rows for the same item from the same BOM.
+    reserved_by_key = {}
+    for r in doc.get("material_mapping") or []:
+        if r.get("is_reserved"):
+            key = (r.get("item_code"), r.get("bom_no") or "")
+            reserved_by_key[key] = r
 
     updated_raw_materials = []
     available_raw_materials = []
@@ -228,8 +216,18 @@ def check_stock_availability(doc):
                     "store_location": location or "",
                 })
         else:
-            # No exact dimension match — goes to Material Mapping regardless of stock level.
-            # User assigns a batch manually; Finalize Mapping moves unassigned rows to Unavailable.
+            # No exact dimension match — goes to Material Mapping.
+            # Restore reservation data if this row was previously reserved.
+            existing = reserved_by_key.get((item_code, row.get("bom_no") or ""))
+            if existing:
+                base_mapping.update({
+                    "batch": existing.get("batch"),
+                    "planned_item": existing.get("planned_item"),
+                    "is_reserved": existing.get("is_reserved"),
+                    "reserved_qty": existing.get("reserved_qty"),
+                    "shortfall_qty": existing.get("shortfall_qty"),
+                    "reserved_on": existing.get("reserved_on"),
+                })
             material_mapping.append(base_mapping)
 
     return {
@@ -351,16 +349,16 @@ def get_batch_item(batch_no):
     return frappe.db.get_value("Batch", batch_no, "item")
 
 
-def _get_batch_total_stock(batch_no):
-    """Return total physical stock qty for a batch across all warehouses (from submitted SBBs)."""
+def _get_batch_total_stock(batch_no, warehouse):
+    """Return net stock qty for a batch in the given warehouse (submitted SBBs only)."""
     result = frappe.db.sql(
         """
         SELECT COALESCE(SUM(sbe.qty), 0) AS qty
         FROM `tabSerial and Batch Entry` sbe
         INNER JOIN `tabSerial and Batch Bundle` sbb ON sbb.name = sbe.parent
-        WHERE sbe.batch_no = %s AND sbb.docstatus = 1 AND sbe.qty > 0
+        WHERE sbe.batch_no = %s AND sbb.warehouse = %s AND sbb.docstatus = 1
         """,
-        batch_no,
+        (batch_no, warehouse),
         as_dict=True,
     )
     return flt(result[0].qty) if result else 0.0
@@ -393,6 +391,8 @@ def reserve_batches(material_planning_name):
     mp = frappe.get_doc("Material Planning", material_planning_name)
     if not mp.material_mapping:
         frappe.throw(_("No items in Material Mapping to reserve."))
+    if not mp.for_warehouse:
+        frappe.throw(_("Set 'Raw Materials Warehouse' on the Material Planning before reserving."))
 
     reserved_count = 0
     partial_rows = []
@@ -404,7 +404,7 @@ def reserve_batches(material_planning_name):
             continue
 
         required_qty = flt(row.qty)
-        batch_stock = _get_batch_total_stock(row.batch)
+        batch_stock = _get_batch_total_stock(row.batch, mp.for_warehouse)
         reserved_by_others = _get_batch_reserved_by_others(row.batch, material_planning_name)
         available = max(0.0, flt(batch_stock) - flt(reserved_by_others))
 
@@ -522,6 +522,12 @@ def make_production_plan(material_planning_name):
     if not mp.bom_items:
         frappe.throw(_("No BOM items found on this Material Planning."))
 
+    if mp.production_plan and frappe.db.exists("Production Plan", mp.production_plan):
+        frappe.throw(
+            _("Production Plan {0} already exists for this Material Planning. "
+              "Open it or clear the link before creating a new one.").format(mp.production_plan)
+        )
+
     pp = frappe.new_doc("Production Plan")
     pp.company = mp.company
     pp.posting_date = today()
@@ -546,6 +552,7 @@ def make_production_plan(material_planning_name):
         })
 
     pp.insert(ignore_permissions=True)
+    frappe.db.set_value("Material Planning", material_planning_name, "production_plan", pp.name)
     return pp.name
 
 
@@ -604,12 +611,15 @@ def make_material_request(material_planning_name, selected_items):
         use_width     = flt(row.alternate_width)     if row.alternate_item and flt(row.alternate_width)     else flt(row.width)
         use_thickness = flt(row.alternate_thickness) if row.alternate_item and flt(row.alternate_thickness) else flt(row.thickness)
 
-        # Validate mandatory dimensions based on the ordered item's flags
-        flags = frappe.db.get_value(
-            "Item", order_item,
-            ["custom_mandatory_length", "custom_mandatory_width", "custom_mandatory_thickness"],
-            as_dict=True,
-        ) or {}
+        # Validate mandatory dimensions based on the ordered item's flags (if custom fields exist)
+        try:
+            flags = frappe.db.get_value(
+                "Item", order_item,
+                ["custom_mandatory_length", "custom_mandatory_width", "custom_mandatory_thickness"],
+                as_dict=True,
+            ) or {}
+        except Exception:
+            flags = {}
         missing = []
         if flags.get("custom_mandatory_length") and not use_length:
             missing.append("Length")
@@ -658,4 +668,6 @@ def make_material_request(material_planning_name, selected_items):
 
 
 def unlink_material_request_on_cancel(doc, method=None):
-    pass
+    """Clear the Material Planning link when an MR is cancelled or deleted."""
+    if doc.get("custom_material_planning"):
+        frappe.db.set_value("Material Request", doc.name, "custom_material_planning", "")

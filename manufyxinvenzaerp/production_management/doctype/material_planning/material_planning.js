@@ -561,7 +561,9 @@ function _show_material_request_dialog(frm) {
 		return;
 	}
 	// Save first so the server reads current unavailable_items state
-	frm.save().then(function() { _build_material_request_dialog(frm, items); });
+	frm.save()
+		.then(function() { _build_material_request_dialog(frm, items); })
+		.catch(function() { frappe.msgprint(__("Please save the document successfully before creating a Material Request.")); });
 }
 
 function _build_material_request_dialog(frm, items) {
@@ -756,7 +758,9 @@ function _add_reservation_buttons(frm) {
 					});
 				};
 				if (frm.is_dirty()) {
-					frm.save().then(do_reserve).catch(do_reserve);
+					frm.save().then(do_reserve).catch(function() {
+						frappe.msgprint(__("Save failed. Fix any errors before reserving."));
+					});
 				} else {
 					do_reserve();
 				}
