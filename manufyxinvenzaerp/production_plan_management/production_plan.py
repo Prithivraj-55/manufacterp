@@ -18,42 +18,59 @@ from frappe.utils import (
 	nowdate,
 )
 
-def get_sbb_available_qty(item_code, warehouse, dimensions):
+def get_sbb_available_qty(item_code, warehouse, dimensions, location=None):
 	"""
-	Fetch available qty from Serial and Batch Bundle per batch,
-	matching dimensions from Batch master.
+	Fetch available qty per batch for an item in a warehouse, optionally filtered
+	by Store Location (Inventory Dimension: store_location on Stock Ledger Entry).
+
+	Flow when location is given:
+	  SLE (item + warehouse + store_location) → SBB → SBE → aggregate by batch_no
+	Flow without location:
+	  SBB (item + warehouse) → SBE → aggregate by batch_no
+
 	Returns (total_qty, matched_batches) where each matched_batch includes
 	batch_no, qty (Kg), custom_sec_qty (NOS), custom_sec_uom.
+	Only batches whose dimensions exactly match the required dimensions are returned.
 	"""
 	total_qty = 0
 	matched_batches = []
 
-	sbb_list = frappe.get_all(
-		"Serial and Batch Bundle",
-		filters={
+	if location:
+		# Filter SLEs by location → collect their SBB names
+		sle_filters = {
 			"item_code": item_code,
-			"warehouse": warehouse
-		},
-		fields=["name"]
-	)
-
-	if not sbb_list:
-		return 0, []
-
-	sbb_names = [d.name for d in sbb_list]
+			"warehouse": warehouse,
+			"is_cancelled": 0,
+			"store_location": location,
+			"serial_and_batch_bundle": ("is", "set"),
+		}
+		sle_list = frappe.get_all(
+			"Stock Ledger Entry",
+			filters=sle_filters,
+			fields=["serial_and_batch_bundle"],
+		)
+		if not sle_list:
+			return 0, []
+		sbb_names = list({s.serial_and_batch_bundle for s in sle_list if s.serial_and_batch_bundle})
+	else:
+		sbb_list = frappe.get_all(
+			"Serial and Batch Bundle",
+			filters={"item_code": item_code, "warehouse": warehouse},
+			fields=["name"],
+		)
+		if not sbb_list:
+			return 0, []
+		sbb_names = [d.name for d in sbb_list]
 
 	entries = frappe.get_all(
 		"Serial and Batch Entry",
-		filters={
-			"parent": ["in", sbb_names]
-		},
-		fields=["parent", "batch_no", "qty"]
+		filters={"parent": ["in", sbb_names]},
+		fields=["parent", "batch_no", "qty"],
 	)
-
 	if not entries:
 		return 0, []
 
-	batch_nos = list(set([e.batch_no for e in entries if e.batch_no]))
+	batch_nos = list({e.batch_no for e in entries if e.batch_no})
 
 	batch_map = {}
 	if batch_nos:
@@ -61,17 +78,19 @@ def get_sbb_available_qty(item_code, warehouse, dimensions):
 			"Batch",
 			filters={"name": ["in", batch_nos]},
 			fields=["name", "custom_length", "custom_thickness", "custom_width",
-			        "custom_sec_qty", "custom_sec_uom"]
+			        "custom_sec_qty", "custom_sec_uom"],
 		)
 		batch_map = {b.name: b for b in batch_data}
 
-	# Aggregate qty per batch_no across all SBB entries
+	# Net qty per batch across all SBB entries (outgoing SBEs have negative qty)
 	batch_qty_map = defaultdict(float)
 	for row in entries:
 		if row.batch_no:
 			batch_qty_map[row.batch_no] += flt(row.qty)
 
 	for batch_no, qty in batch_qty_map.items():
+		if qty <= 0:
+			continue
 		batch = batch_map.get(batch_no)
 		if not batch:
 			continue

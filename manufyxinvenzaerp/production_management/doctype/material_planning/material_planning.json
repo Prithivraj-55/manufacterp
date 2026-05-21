@@ -12,6 +12,8 @@
   "column_break_top",
   "company",
   "section_production_settings",
+  "for_warehouse",
+  "store_location",
   "column_break_settings",
   "ignore_existing_ordered_qty",
   "tab_bom_items",
@@ -56,15 +58,6 @@
    "reqd": 1
   },
   {
-   "default": "Draft",
-   "fieldname": "status",
-   "fieldtype": "Select",
-   "in_list_view": 1,
-   "label": "Status",
-   "options": "Draft\nSubmitted\nCancelled",
-   "read_only": 1
-  },
-  {
    "fieldname": "column_break_top",
    "fieldtype": "Column Break"
   },
@@ -86,6 +79,13 @@
    "fieldtype": "Link",
    "label": "Raw Materials Warehouse",
    "options": "Warehouse"
+  },
+  {
+   "fieldname": "store_location",
+   "fieldtype": "Link",
+   "label": "Store Location",
+   "options": "Store Location",
+   "description": "Filter stock check to this sub-location within the warehouse."
   },
   {
    "fieldname": "column_break_settings",
@@ -153,7 +153,7 @@
    "options": "Material Planning Available Raw Material"
   },
   {
-   "description": "Items that have some stock in the warehouse but no batch with an exact dimension match. Assign a batch manually, then click 'Finalize Mapping' — items with no batch assigned move to Unavailable Items.",
+   "description": "Items that have some stock in the warehouse but no batch with an exact dimension match. Assign a batch manually, then click 'Finalize Mapping' \u2014 items with no batch assigned move to Unavailable Items.",
    "fieldname": "section_material_mapping",
    "fieldtype": "Section Break",
    "label": "Material Mapping (Partial Stock)"
@@ -173,7 +173,7 @@
    "description": "Items with no stock at all in the warehouse. These must be purchased before production can proceed. Once a purchase receipt is created and stock is available, re-run 'Check Stock Availability' to move them to Material Mapping.",
    "fieldname": "section_unavailable_items",
    "fieldtype": "Section Break",
-   "label": "Unavailable Items (No Stock — Needs Purchase)"
+   "label": "Unavailable Items (No Stock \u2014 Needs Purchase)"
   },
   {
    "fieldname": "unavailable_items",
@@ -192,7 +192,7 @@
    "read_only": 1
   }
  ],
- "is_submittable": 1,
+ "is_submittable": 0,
  "links": [],
  "modified": "2026-05-09 00:00:00.000000",
  "modified_by": "Administrator",

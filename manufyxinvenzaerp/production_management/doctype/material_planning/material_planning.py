@@ -3,39 +3,16 @@ import json
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import ceil, flt, today
+from frappe.utils import ceil, flt, now, today
 
 
 class MaterialPlanning(Document):
-    def before_validate(self):
-        self.set_status_from_docstatus()
-
     def validate(self):
-        self.set_status_from_docstatus()
         self.raw_materials = [r for r in (self.raw_materials or []) if r.item_code]
         self.available_raw_materials = [r for r in (self.available_raw_materials or []) if r.item_code]
         self.material_mapping = [r for r in (self.material_mapping or []) if r.item_code]
         self.unavailable_items = [r for r in (self.unavailable_items or []) if r.item_code]
 
-    def set_status_from_docstatus(self):
-        self.status = {
-            0: "Draft",
-            1: "Submitted",
-            2: "Cancelled",
-        }.get(self.docstatus, "Draft")
-
-    def before_submit(self):
-        if not self.bom_items:
-            frappe.throw(_("Add at least one BOM before submitting."))
-        for row in self.bom_items:
-            if not row.bom_no:
-                frappe.throw(_("Row {0}: BOM No is required.").format(row.idx))
-
-    def on_submit(self):
-        self.db_set("status", "Submitted")
-
-    def on_cancel(self):
-        self.db_set("status", "Cancelled")
 
 
 @frappe.whitelist()
@@ -87,6 +64,7 @@ def get_raw_materials(doc):
 
     company = doc.get("company")
     warehouse = doc.get("for_warehouse") or ""
+    location = doc.get("store_location") or ""
     if not company:
         frappe.throw(_("Company is required before fetching raw materials."))
 
@@ -141,6 +119,7 @@ def get_raw_materials(doc):
                 "available_qty": 0.0,
                 "shortage_qty": qty,
                 "warehouse": warehouse,
+                "store_location": location,
             })
 
     return rows
@@ -187,6 +166,8 @@ def check_stock_availability(doc):
     if not warehouse:
         frappe.throw(_("Set 'Raw Materials Warehouse' before checking stock availability."))
 
+    location = doc.get("store_location") or None
+
     updated_raw_materials = []
     available_raw_materials = []
     material_mapping = []
@@ -201,12 +182,13 @@ def check_stock_availability(doc):
             "custom_width": flt(row.get("width")),
         }
 
-        available_qty, matched_batches = get_sbb_available_qty(item_code, warehouse, dimensions)
+        available_qty, matched_batches = get_sbb_available_qty(item_code, warehouse, dimensions, location=location)
         shortage = max(0.0, required_qty - available_qty)
 
         updated_row = dict(row)
         updated_row["available_qty"] = available_qty
         updated_row["shortage_qty"] = shortage
+        updated_row["store_location"] = location or ""
         updated_raw_materials.append(updated_row)
 
         base_mapping = {
@@ -224,6 +206,7 @@ def check_stock_availability(doc):
             "thickness": flt(row.get("thickness")),
             "unit_weight": flt(row.get("unit_weight")),
             "alternate_item": row.get("alternate_item") or "",
+            "store_location": location or "",
         }
 
         if matched_batches:
@@ -242,6 +225,7 @@ def check_stock_availability(doc):
                     "width": flt(row.get("width")),
                     "warehouse": warehouse,
                     "parent_item_group": row.get("parent_item_group"),
+                    "store_location": location or "",
                 })
         else:
             # No exact dimension match — goes to Material Mapping regardless of stock level.
@@ -275,6 +259,7 @@ def move_to_exact_match(doc, item_codes):
     if not warehouse:
         frappe.throw(_("Set 'Raw Materials Warehouse' before checking stock."))
 
+    location = doc.get("store_location") or None
     item_set = set(item_codes)
     matched = []
     failed = []
@@ -289,7 +274,7 @@ def move_to_exact_match(doc, item_codes):
             "custom_width": flt(row.get("width")),
         }
         _available_qty, matched_batches = get_sbb_available_qty(
-            row.get("item_code"), warehouse, dimensions
+            row.get("item_code"), warehouse, dimensions, location=location
         )
 
         if matched_batches:
@@ -308,6 +293,7 @@ def move_to_exact_match(doc, item_codes):
                     "width": flt(row.get("width")),
                     "warehouse": warehouse,
                     "parent_item_group": row.get("parent_item_group"),
+                    "store_location": location or "",
                 })
         else:
             failed.append(row.get("item_code"))
@@ -365,12 +351,172 @@ def get_batch_item(batch_no):
     return frappe.db.get_value("Batch", batch_no, "item")
 
 
+def _get_batch_total_stock(batch_no):
+    """Return total physical stock qty for a batch across all warehouses (from submitted SBBs)."""
+    result = frappe.db.sql(
+        """
+        SELECT COALESCE(SUM(sbe.qty), 0) AS qty
+        FROM `tabSerial and Batch Entry` sbe
+        INNER JOIN `tabSerial and Batch Bundle` sbb ON sbb.name = sbe.parent
+        WHERE sbe.batch_no = %s AND sbb.docstatus = 1 AND sbe.qty > 0
+        """,
+        batch_no,
+        as_dict=True,
+    )
+    return flt(result[0].qty) if result else 0.0
+
+
+def _get_batch_reserved_by_others(batch_no, exclude_mp):
+    """Return total reserved_qty already committed to other Material Planning docs for this batch."""
+    result = frappe.db.sql(
+        """
+        SELECT COALESCE(SUM(reserved_qty), 0) AS total
+        FROM `tabMaterial Planning Material Mapping`
+        WHERE batch = %s AND is_reserved = 1 AND parent != %s
+        """,
+        (batch_no, exclude_mp),
+        as_dict=True,
+    )
+    return flt(result[0].total) if result else 0.0
+
+
+@frappe.whitelist()
+def reserve_batches(material_planning_name):
+    """
+    Reserve batches in material_mapping with partial-stock awareness.
+    For each row:
+      - Computes available qty = batch_stock - already_reserved_by_other_MPs
+      - reserved_qty = min(required_qty, available)
+      - shortfall_qty = required_qty - reserved_qty
+    Returns updated rows + list of partially reserved items for JS warning.
+    """
+    mp = frappe.get_doc("Material Planning", material_planning_name)
+    if not mp.material_mapping:
+        frappe.throw(_("No items in Material Mapping to reserve."))
+
+    reserved_count = 0
+    partial_rows = []
+
+    for row in mp.material_mapping:
+        if not row.batch:
+            continue
+        if row.is_reserved:
+            continue
+
+        required_qty = flt(row.qty)
+        batch_stock = _get_batch_total_stock(row.batch)
+        reserved_by_others = _get_batch_reserved_by_others(row.batch, material_planning_name)
+        available = max(0.0, flt(batch_stock) - flt(reserved_by_others))
+
+        reserved_qty = min(required_qty, available)
+        shortfall_qty = max(0.0, required_qty - reserved_qty)
+
+        row.is_reserved = 1
+        row.reserved_qty = flt(reserved_qty, 3)
+        row.shortfall_qty = flt(shortfall_qty, 3)
+        row.reserved_on = now()
+        reserved_count += 1
+
+        if shortfall_qty > 0:
+            partial_rows.append({
+                "item_code": row.item_code,
+                "item_name": row.item_name or "",
+                "batch": row.batch,
+                "required_qty": required_qty,
+                "reserved_qty": flt(reserved_qty, 3),
+                "shortfall_qty": flt(shortfall_qty, 3),
+                "uom": row.uom or "",
+                "batch_stock": flt(batch_stock, 3),
+                "reserved_by_others": flt(reserved_by_others, 3),
+            })
+
+    if not reserved_count:
+        frappe.throw(_("All rows with a batch are already reserved."))
+
+    mp.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "rows": [
+            {
+                "name": row.name,
+                "item_code": row.item_code,
+                "batch": row.batch,
+                "is_reserved": row.is_reserved,
+                "reserved_qty": flt(row.reserved_qty, 3),
+                "shortfall_qty": flt(row.shortfall_qty, 3),
+                "reserved_on": str(row.reserved_on) if row.reserved_on else "",
+            }
+            for row in mp.material_mapping
+        ],
+        "partial": partial_rows,
+    }
+
+
+@frappe.whitelist()
+def unreserve_batches(material_planning_name, row_names):
+    """
+    Clear reservation on specified material_mapping rows (by child row name).
+    row_names: JSON list of child row names to unreserve.
+    """
+    if isinstance(row_names, str):
+        row_names = json.loads(row_names)
+
+    mp = frappe.get_doc("Material Planning", material_planning_name)
+    target = set(row_names)
+    unreserved_count = 0
+
+    for row in mp.material_mapping:
+        if row.name in target:
+            row.is_reserved = 0
+            row.reserved_qty = 0
+            row.shortfall_qty = 0
+            row.reserved_on = None
+            unreserved_count += 1
+
+    if not unreserved_count:
+        frappe.throw(_("No matching reserved rows found."))
+
+    mp.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    return [
+        {
+            "name": row.name,
+            "item_code": row.item_code,
+            "batch": row.batch,
+            "is_reserved": row.is_reserved,
+            "reserved_qty": flt(row.reserved_qty, 3),
+            "shortfall_qty": flt(row.shortfall_qty, 3),
+            "reserved_on": str(row.reserved_on) if row.reserved_on else "",
+        }
+        for row in mp.material_mapping
+    ]
+
+
+@frappe.whitelist()
+def _test_simulate_se_release(batch_nos, se_type="Material Issue"):
+    """Test helper: simulate a Stock Entry submit that consumes the given batch(es)."""
+    from manufyxinvenzaerp.production_management.stock_entry import _release_material_planning_reservations
+    if isinstance(batch_nos, str):
+        batch_nos = json.loads(batch_nos)
+
+    class _FakeRow:
+        def __init__(self, b): self.batch_no = b; self.is_finished_item = False
+        def get(self, k, d=None): return getattr(self, k, d)
+
+    class _FakeSE:
+        def __init__(self, t, bs): self.stock_entry_type = t; self.items = [_FakeRow(b) for b in bs]
+
+    _release_material_planning_reservations(_FakeSE(se_type, batch_nos))
+    frappe.db.commit()
+    return "OK"
+
+
 @frappe.whitelist()
 def make_production_plan(material_planning_name):
-    """Create a draft Production Plan from a submitted Material Planning document."""
+    """Create a draft Production Plan from a saved Material Planning document."""
     mp = frappe.get_doc("Material Planning", material_planning_name)
-    if mp.docstatus != 1:
-        frappe.throw(_("Submit the Material Planning before creating a Production Plan."))
     if not mp.bom_items:
         frappe.throw(_("No BOM items found on this Material Planning."))
 
@@ -505,8 +651,9 @@ def make_material_request(material_planning_name, selected_items):
     mr.custom_material_planning = material_planning_name
     mr.insert(ignore_permissions=True)
 
+    frappe.db.commit()
     return mr.name
 
 
 def unlink_material_request_on_cancel(doc, method=None):
-    return
+    pass
