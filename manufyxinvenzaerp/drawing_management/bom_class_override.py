@@ -251,6 +251,12 @@ class BOM(ERPNextBOM):
 
 		return index
 
+	def before_insert(self):
+		if not self.with_operations:
+			self.with_operations = 1
+		if not self.routing:
+			self.routing = "Standard Manufacturing Routing"
+
 	def validate(self):
 		self.route = frappe.scrub(self.name).replace("_", "-")
 

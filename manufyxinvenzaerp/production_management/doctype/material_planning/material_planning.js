@@ -98,6 +98,59 @@ frappe.ui.form.on("Material Planning", {
 			return { filters: { item: row.item_code }, description_field: "item" };
 		});
 
+<<<<<<< HEAD
+		// "Create → Production Plan" — available in draft and submitted states
+		if (frm.doc.docstatus !== 2) {
+			frm.add_custom_button(__("Production Plan"), function () {
+				if (!frm.doc.bom_items || !frm.doc.bom_items.length) {
+					frappe.msgprint(__("Add at least one BOM in the 'Selected BOMs' tab first."));
+					return;
+				}
+				if (frm.doc.__islocal) {
+					frappe.msgprint(__("Save the document before creating a Production Plan."));
+					return;
+				}
+
+				function _do_create() {
+					frappe.call({
+						method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.make_production_plan",
+						args: { material_planning_name: frm.doc.name },
+						freeze: true,
+						freeze_message: __("Creating Production Plan…"),
+						callback(r) {
+							if (r.message) {
+								frappe.show_alert({
+									message: __("Production Plan {0} created.", [r.message]),
+									indicator: "green",
+								}, 5);
+								frappe.set_route("Form", "Production Plan", r.message);
+							}
+						},
+					});
+				}
+
+				frappe.confirm(
+					__("Create a Production Plan from this Material Planning?"),
+					function () {
+						// Draft docs: save unsaved changes before reading from DB on server
+						if (frm.doc.docstatus === 0 && frm.is_dirty()) {
+							frappe.call({
+								method: "frappe.client.save",
+								args: { doc: frm.doc },
+								freeze: true,
+								freeze_message: __("Saving…"),
+								callback(r) {
+									if (r.message) {
+										frappe.model.sync(r.message);
+										frm.refresh();
+									}
+									_do_create();
+								},
+							});
+						} else {
+							_do_create();
+						}
+=======
 		let has_raw = !!(frm.doc.raw_materials || []).length;
 		let has_mapping = !!(frm.doc.material_mapping || []).length;
 		let has_unavail = !!(frm.doc.unavailable_items || []).length;
@@ -150,6 +203,7 @@ frappe.ui.form.on("Material Planning", {
 					if (!all_items.length) {
 						frappe.msgprint(__("No unavailable items to map."));
 						return;
+>>>>>>> 41c82862054f6399688747d5b867da076eb731fe
 					}
 					_show_add_to_mapping_dialog(frm, all_items);
 				}
