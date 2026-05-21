@@ -17,7 +17,8 @@
   "sec_qty",
   "sec_uom",
   "uom",
-  "warehouse"
+  "warehouse",
+  "store_location"
  ],
  "fields": [
   {
@@ -116,6 +117,14 @@
    "in_list_view": 1,
    "label": "Warehouse",
    "options": "Warehouse",
+   "read_only": 1
+  },
+  {
+   "fieldname": "store_location",
+   "fieldtype": "Link",
+   "in_list_view": 0,
+   "label": "Store Location",
+   "options": "Store Location",
    "read_only": 1
   }
  ],

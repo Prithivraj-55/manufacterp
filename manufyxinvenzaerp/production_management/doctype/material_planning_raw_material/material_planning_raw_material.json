@@ -21,7 +21,8 @@
   "shortage_qty",
   "unit_weight",
   "material_spec",
-  "warehouse"
+  "warehouse",
+  "store_location"
  ],
  "fields": [
   {
@@ -144,6 +145,14 @@
    "fieldtype": "Link",
    "label": "Warehouse",
    "options": "Warehouse",
+   "read_only": 1
+  },
+  {
+   "fieldname": "store_location",
+   "fieldtype": "Link",
+   "in_list_view": 0,
+   "label": "Store Location",
+   "options": "Store Location",
    "read_only": 1
   }
  ],

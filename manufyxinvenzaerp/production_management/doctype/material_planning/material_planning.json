@@ -12,6 +12,8 @@
   "column_break_top",
   "company",
   "section_production_settings",
+  "for_warehouse",
+  "store_location",
   "column_break_settings",
   "ignore_existing_ordered_qty",
   "tab_bom_items",
@@ -77,6 +79,13 @@
    "fieldtype": "Link",
    "label": "Raw Materials Warehouse",
    "options": "Warehouse"
+  },
+  {
+   "fieldname": "store_location",
+   "fieldtype": "Link",
+   "label": "Store Location",
+   "options": "Store Location",
+   "description": "Filter stock check to this sub-location within the warehouse."
   },
   {
    "fieldname": "column_break_settings",

@@ -92,9 +92,10 @@ frappe.ui.form.on("Material Planning", {
 		frm.set_df_property("section_material_mapping", "hidden", 0);
 		frm.set_df_property("section_unavailable_items", "hidden", 0);
 
-		// Show item name in the batch dropdown for Material Mapping
+		// Filter batch dropdown to the item in that row
 		frm.set_query("batch", "material_mapping", function(doc, cdt, cdn) {
-			return { description_field: "item" };
+			let row = locals[cdt][cdn];
+			return { filters: { item: row.item_code }, description_field: "item" };
 		});
 
 		let has_raw = !!(frm.doc.raw_materials || []).length;
@@ -137,6 +138,9 @@ frappe.ui.form.on("Material Planning", {
 			["raw_materials", "available_raw_materials", "material_mapping", "unavailable_items"].forEach(function (tbl) {
 				_add_io_buttons(frm, tbl);
 			});
+
+			// Reserve / Unreserve on Material Mapping
+			_add_reservation_buttons(frm);
 
 			// Action buttons on Unavailable Items
 			let $map_btn = frm.fields_dict["unavailable_items"].grid.add_custom_button(
@@ -188,72 +192,81 @@ frappe.ui.form.on("Material Planning", {
 			frappe.msgprint(__("Set 'Raw Materials Warehouse' before checking stock."));
 			return;
 		}
-		frappe.call({
-			method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.check_stock_availability",
-			args: { doc: frm.doc },
-			freeze: true,
-			freeze_message: __("Checking stock…"),
-			callback(r) {
-				if (!r.message) return;
-				let result = r.message;
+		if (!(frm.doc.raw_materials || []).length) {
+			frappe.msgprint(__("Get Raw Materials first before checking stock."));
+			return;
+		}
 
-				frm.clear_table("raw_materials");
-				(result.raw_materials || []).forEach(function (row) {
-					let child = frm.add_child("raw_materials");
-					Object.keys(row).forEach(function (k) { if (k !== "name" && k !== "idx") child[k] = row[k]; });
-				});
-				frm.refresh_field("raw_materials");
+		let _run = function() {
+			frappe.call({
+				method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.check_stock_availability",
+				args: { doc: frm.doc },
+				freeze: true,
+				freeze_message: __("Checking stock…"),
+				callback(r) {
+					if (!r.message) return;
+					let result = r.message;
 
-				frm.clear_table("available_raw_materials");
-				(result.available_raw_materials || []).forEach(function (row) {
-					let child = frm.add_child("available_raw_materials");
-					Object.keys(row).forEach(function (k) { if (k !== "name" && k !== "idx") child[k] = row[k]; });
-				});
-				frm.refresh_field("available_raw_materials");
+					frm.clear_table("raw_materials");
+					(result.raw_materials || []).forEach(function(row) {
+						let child = frm.add_child("raw_materials");
+						Object.keys(row).forEach(function(k) { if (k !== "name" && k !== "idx") child[k] = row[k]; });
+					});
+					frm.refresh_field("raw_materials");
 
-				frm.clear_table("material_mapping");
-				(result.material_mapping || []).forEach(function (row) {
-					let child = frm.add_child("material_mapping");
-					Object.keys(row).forEach(function (k) { if (k !== "name" && k !== "idx") child[k] = row[k]; });
-				});
-				frm.refresh_field("material_mapping");
+					frm.clear_table("available_raw_materials");
+					(result.available_raw_materials || []).forEach(function(row) {
+						let child = frm.add_child("available_raw_materials");
+						Object.keys(row).forEach(function(k) { if (k !== "name" && k !== "idx") child[k] = row[k]; });
+					});
+					frm.refresh_field("available_raw_materials");
 
-				frm.clear_table("unavailable_items");
-				(result.unavailable_items || []).forEach(function (row) {
-					let child = frm.add_child("unavailable_items");
-					Object.keys(row).forEach(function (k) { if (k !== "name" && k !== "idx") child[k] = row[k]; });
-				});
-				frm.refresh_field("unavailable_items");
+					frm.clear_table("material_mapping");
+					(result.material_mapping || []).forEach(function(row) {
+						let child = frm.add_child("material_mapping");
+						Object.keys(row).forEach(function(k) { if (k !== "name" && k !== "idx") child[k] = row[k]; });
+					});
+					frm.refresh_field("material_mapping");
 
-				// Show/hide finalize button now that mapping table may have rows
-				let show_fin = !!(frm.doc.material_mapping || []).length;
-				frm.set_df_property("finalize_mapping_btn", "hidden", show_fin ? 0 : 1);
-				if (show_fin) {
-					setTimeout(function () {
-						let $fin = frm.fields_dict["finalize_mapping_btn"] && frm.fields_dict["finalize_mapping_btn"].$input;
-						if ($fin && $fin.length) {
-							$fin.html(frappe.utils.icon("move", "sm") + "&nbsp;" + __("Move to Unavailable Items"));
-						}
-					}, 50);
-				}
+					frm.clear_table("unavailable_items");
+					(result.unavailable_items || []).forEach(function(row) {
+						let child = frm.add_child("unavailable_items");
+						Object.keys(row).forEach(function(k) { if (k !== "name" && k !== "idx") child[k] = row[k]; });
+					});
+					frm.refresh_field("unavailable_items");
 
-				let avail = (result.available_raw_materials || []).length;
-				let mapping = (result.material_mapping || []).length;
-				let unavail = (result.unavailable_items || []).length;
+					let mapping = (result.material_mapping || []).length;
+					let unavail = (result.unavailable_items || []).length;
+					let avail   = (result.available_raw_materials || []).length;
 
-				// Refresh button visibility to match new table state
-				frm.set_df_property("finalize_mapping_btn",   "hidden", mapping  ? 0 : 1);
-				frm.set_df_property("update_exact_match_btn", "hidden", unavail  ? 0 : 1);
+					frm.set_df_property("finalize_mapping_btn",   "hidden", mapping  ? 0 : 1);
+					frm.set_df_property("update_exact_match_btn", "hidden", unavail  ? 0 : 1);
 
-				frappe.show_alert({
-					message: __("Stock checked: {0} matched, {1} to map, {2} unavailable.", [avail, mapping, unavail]),
-					indicator: "green",
-				}, 6);
-			},
-		});
+					frappe.show_alert({
+						message: __("Stock checked: {0} matched, {1} to map, {2} unavailable.", [avail, mapping, unavail]),
+						indicator: "green",
+					}, 6);
+				},
+			});
+		};
+
+		let has_work = (frm.doc.material_mapping || []).length || (frm.doc.unavailable_items || []).length;
+		let has_reserved = (frm.doc.material_mapping || []).some(r => r.is_reserved);
+		if (has_work) {
+			let warn = has_reserved
+				? __("Re-checking stock will clear all mapping work including RESERVED rows. Unreserve first if you want to keep them. Continue?")
+				: __("Re-checking stock will clear all current mapping work. Continue?");
+			frappe.confirm(warn, _run);
+		} else {
+			_run();
+		}
 	},
 
 	finalize_mapping_btn(frm) {
+		if (!(frm.doc.material_mapping || []).length) {
+			frappe.msgprint(__("No items in Material Mapping to finalize."));
+			return;
+		}
 		frappe.call({
 			method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.finalize_mapping",
 			args: { doc: frm.doc },
@@ -264,23 +277,24 @@ frappe.ui.form.on("Material Planning", {
 				let result = r.message;
 
 				frm.clear_table("material_mapping");
-				(result.material_mapping || []).forEach(function (row) {
+				(result.material_mapping || []).forEach(function(row) {
 					let child = frm.add_child("material_mapping");
-					Object.keys(row).forEach(function (k) { if (k !== "name" && k !== "idx") child[k] = row[k]; });
+					Object.keys(row).forEach(function(k) { if (k !== "name" && k !== "idx") child[k] = row[k]; });
 				});
 				frm.refresh_field("material_mapping");
 
+				// Merge newly-unmapped rows with any existing unavailable items
+				let existing = (frm.doc.unavailable_items || []).filter(r => r.item_code);
 				frm.clear_table("unavailable_items");
-				(result.unavailable_items || []).forEach(function (row) {
+				existing.concat(result.unavailable_items || []).forEach(function(row) {
 					let child = frm.add_child("unavailable_items");
-					Object.keys(row).forEach(function (k) { if (k !== "name" && k !== "idx") child[k] = row[k]; });
+					Object.keys(row).forEach(function(k) { if (k !== "name" && k !== "idx") child[k] = row[k]; });
 				});
 				frm.refresh_field("unavailable_items");
 
-				let mapped = (result.material_mapping || []).length;
-				let unavail = (result.unavailable_items || []).length;
+				let mapped  = (result.material_mapping || []).length;
+				let unavail = (frm.doc.unavailable_items || []).length;
 
-				// Hide finalize if nothing left in mapping; show/hide update-exact-match for unavailable
 				frm.set_df_property("finalize_mapping_btn",   "hidden", mapped  ? 0 : 1);
 				frm.set_df_property("update_exact_match_btn", "hidden", unavail ? 0 : 1);
 
@@ -306,7 +320,7 @@ frappe.ui.form.on("Material Planning", {
 			method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.move_to_exact_match",
 			args: {
 				doc: frm.doc,
-				item_codes: JSON.stringify(all_items.map(r => r.item_code)),
+				item_codes: JSON.stringify(all_items.map(r => r.item_code).filter(Boolean)),
 			},
 			freeze: true,
 			freeze_message: __("Checking exact match…"),
@@ -321,7 +335,7 @@ frappe.ui.form.on("Material Planning", {
 
 				let matched_codes = new Set(matched.map(m => m.item_code));
 
-				matched.forEach(function (row) {
+				matched.forEach(function(row) {
 					let child = frm.add_child("available_raw_materials");
 					Object.keys(row).forEach(k => { if (k !== "name" && k !== "idx") child[k] = row[k]; });
 				});
@@ -329,13 +343,12 @@ frappe.ui.form.on("Material Planning", {
 
 				let remaining = (frm.doc.unavailable_items || []).filter(r => !matched_codes.has(r.item_code));
 				frm.clear_table("unavailable_items");
-				remaining.forEach(function (row) {
+				remaining.forEach(function(row) {
 					let child = frm.add_child("unavailable_items");
 					Object.keys(row).forEach(k => { if (k !== "name" && k !== "idx") child[k] = row[k]; });
 				});
 				frm.refresh_field("unavailable_items");
 
-				// Refresh button visibility
 				frm.set_df_property("update_exact_match_btn", "hidden",
 					!(frm.doc.unavailable_items || []).length ? 1 : 0
 				);
@@ -356,27 +369,44 @@ frappe.ui.form.on("Material Planning", {
 			frappe.msgprint(__("Set Company before fetching raw materials."));
 			return;
 		}
-		frappe.call({
-			method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.get_raw_materials",
-			args: { doc: frm.doc },
-			freeze: true,
-			freeze_message: __("Exploding BOMs…"),
-			callback(r) {
-				if (!r.message) return;
-				frm.clear_table("raw_materials");
-				(r.message || []).forEach(function (row) {
-					let child = frm.add_child("raw_materials");
-					Object.keys(row).forEach(function (k) {
-						if (k !== "name" && k !== "idx") child[k] = row[k];
+
+		let _fetch = function() {
+			frappe.call({
+				method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.get_raw_materials",
+				args: { doc: frm.doc },
+				freeze: true,
+				freeze_message: __("Exploding BOMs…"),
+				callback(r) {
+					if (!r.message) return;
+					if (!r.message.length) {
+						frappe.msgprint(__("No raw materials found. Check that the BOMs have sub-items."));
+						return;
+					}
+					frm.clear_table("raw_materials");
+					r.message.forEach(function(row) {
+						let child = frm.add_child("raw_materials");
+						Object.keys(row).forEach(function(k) {
+							if (k !== "name" && k !== "idx") child[k] = row[k];
+						});
 					});
-				});
-				frm.refresh_field("raw_materials");
-				frappe.show_alert({
-					message: __("{0} raw material row(s) loaded.", [r.message.length]),
-					indicator: "green",
-				}, 5);
-			},
-		});
+					frm.refresh_field("raw_materials");
+					frm.set_df_property("check_stock_btn", "hidden", 0);
+					frappe.show_alert({
+						message: __("{0} raw material row(s) loaded.", [r.message.length]),
+						indicator: "green",
+					}, 5);
+				},
+			});
+		};
+
+		if ((frm.doc.raw_materials || []).length) {
+			frappe.confirm(
+				__("This will replace the existing raw materials list. Continue?"),
+				_fetch
+			);
+		} else {
+			_fetch();
+		}
 	},
 });
 
@@ -418,7 +448,9 @@ function _show_add_to_mapping_dialog(frm, selected_rows) {
 			fieldtype: "Link",
 			label: __("Assign Batch"),
 			options: "Batch",
-
+			get_query: (function(item_code) {
+				return function() { return { filters: { item: item_code } }; };
+			})(row.item_code),
 		});
 	});
 
@@ -596,10 +628,32 @@ frappe.ui.form.on("Material Planning Unavailable Item", {
 	},
 });
 
-// Table 3: when batch is selected, auto-fetch the item linked to that batch
+// Table 3: batch field events on Material Mapping rows
 frappe.ui.form.on("Material Planning Material Mapping", {
 	batch(frm, cdt, cdn) {
 		let row = locals[cdt][cdn];
+
+		// Block batch change on reserved rows — revert to DB value and show error
+		if (row.is_reserved) {
+			frappe.msgprint(__("This row is reserved. Unreserve it before changing the batch."));
+			// Fetch the committed batch value from DB and revert
+			if (row.name && !String(row.name).startsWith("new-")) {
+				frappe.db.get_value(
+					"Material Planning Material Mapping",
+					row.name,
+					"batch",
+					function (d) {
+						frappe.model.set_value(cdt, cdn, "batch", (d && d.batch) || "");
+						frappe.model.set_value(cdt, cdn, "planned_item", "");
+					}
+				);
+			} else {
+				frappe.model.set_value(cdt, cdn, "batch", "");
+				frappe.model.set_value(cdt, cdn, "planned_item", "");
+			}
+			return;
+		}
+
 		if (!row.batch) {
 			frappe.model.set_value(cdt, cdn, "planned_item", "");
 			return;
@@ -615,3 +669,124 @@ frappe.ui.form.on("Material Planning Material Mapping", {
 		});
 	},
 });
+
+// Reserve / Unreserve toolbar buttons on the Material Mapping grid
+function _add_reservation_buttons(frm) {
+	let grid = frm.fields_dict["material_mapping"] && frm.fields_dict["material_mapping"].grid;
+	if (!grid) return;
+
+	grid.add_custom_button(
+		frappe.utils.icon("lock", "xs") + " " + __("Reserve"),
+		function () {
+			let has_batch = (frm.doc.material_mapping || []).some(r => r.batch && !r.is_reserved);
+			if (!has_batch) {
+				frappe.msgprint(__("No un-reserved rows with a batch to reserve."));
+				return;
+			}
+			frappe.confirm(__("Reserve all batches assigned in Material Mapping?"), function () {
+				// Save any unsaved batch assignments first, then call reserve
+				let do_reserve = function() {
+					frappe.call({
+						method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.reserve_batches",
+						args: { material_planning_name: frm.doc.name },
+						freeze: true,
+						freeze_message: __("Reserving batches…"),
+						callback(r) {
+							if (!r.message) return;
+							frm.reload_doc();
+							let partial = r.message.partial || [];
+							if (partial.length) {
+								let lines = partial.map(function(p) {
+									return `<tr>
+										<td>${p.item_code}</td>
+										<td>${p.batch}</td>
+										<td>${p.required_qty} ${p.uom}</td>
+										<td>${p.reserved_qty} ${p.uom}</td>
+										<td style="color:red">${p.shortfall_qty} ${p.uom}</td>
+									</tr>`;
+								}).join("");
+								frappe.msgprint({
+									title: __("Partial Reservation — Stock Shortfall"),
+									indicator: "orange",
+									message: `<p>${__("Some batches had insufficient stock. Partial quantities were reserved:")}</p>
+										<table class="table table-bordered table-condensed" style="font-size:12px">
+											<thead><tr>
+												<th>${__("Item")}</th><th>${__("Batch")}</th>
+												<th>${__("Required")}</th><th>${__("Reserved")}</th>
+												<th>${__("Shortfall")}</th>
+											</tr></thead>
+											<tbody>${lines}</tbody>
+										</table>`,
+								});
+							} else {
+								frappe.show_alert({ message: __("Batches reserved."), indicator: "green" }, 4);
+							}
+						},
+					});
+				};
+				if (frm.is_dirty()) {
+					frm.save().then(do_reserve).catch(do_reserve);
+				} else {
+					do_reserve();
+				}
+			});
+		}
+	);
+
+	grid.add_custom_button(
+		frappe.utils.icon("unlock", "xs") + " " + __("Unreserve"),
+		function () {
+			let reserved = (frm.doc.material_mapping || []).filter(r => r.is_reserved);
+			if (!reserved.length) {
+				frappe.msgprint(__("No reserved rows to unreserve."));
+				return;
+			}
+			// Show checklist of reserved rows
+			let fields = [
+				{
+					fieldtype: "Section Break",
+					label: __("Select rows to unreserve"),
+				},
+			];
+			reserved.forEach(function (row, idx) {
+				fields.push({
+					fieldname: "row_" + idx,
+					fieldtype: "Check",
+					label: `${row.item_code} — Batch: ${row.batch || ""}`,
+					default: 1,
+				});
+			});
+
+			let d = new frappe.ui.Dialog({
+				title: __("Unreserve Batches"),
+				fields: fields,
+				primary_action_label: __("Unreserve"),
+				primary_action(values) {
+					let targets = [];
+					reserved.forEach(function (row, idx) {
+						if (values["row_" + idx]) targets.push(row.name);
+					});
+					if (!targets.length) {
+						frappe.msgprint(__("Select at least one row."));
+						return;
+					}
+					frappe.call({
+						method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.unreserve_batches",
+						args: {
+							material_planning_name: frm.doc.name,
+							row_names: JSON.stringify(targets),
+						},
+						freeze: true,
+						freeze_message: __("Unreserving…"),
+						callback(r) {
+							d.hide();
+							frm.reload_doc();
+							frappe.show_alert({ message: __("Batches unreserved."), indicator: "orange" }, 4);
+						},
+					});
+				},
+			});
+			d.show();
+		}
+	);
+}
