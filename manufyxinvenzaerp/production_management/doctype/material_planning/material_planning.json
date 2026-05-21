@@ -11,6 +11,7 @@
   "status",
   "column_break_top",
   "company",
+  "production_plan",
   "section_production_settings",
   "for_warehouse",
   "store_location",
@@ -23,7 +24,6 @@
   "get_raw_materials_btn",
   "raw_materials",
   "section_available_raw_materials",
-  "for_warehouse",
   "check_stock_btn",
   "available_raw_materials",
   "section_material_mapping",
@@ -68,6 +68,14 @@
    "label": "Company",
    "options": "Company",
    "reqd": 1
+  },
+  {
+   "fieldname": "production_plan",
+   "fieldtype": "Link",
+   "label": "Production Plan",
+   "options": "Production Plan",
+   "read_only": 1,
+   "no_copy": 1
   },
   {
    "fieldname": "section_production_settings",
