@@ -92,6 +92,13 @@ frappe.ui.form.on("Material Planning", {
 		frm.set_df_property("section_material_mapping", "hidden", 0);
 		frm.set_df_property("section_unavailable_items", "hidden", 0);
 
+		// BOM search: supports name, item, item_name, and DUNO/Mark No
+		frm.set_query("bom_no", "bom_items", function() {
+			return {
+				query: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.search_bom",
+			};
+		});
+
 		// Filter batch dropdown to the item in that row
 		frm.set_query("batch", "material_mapping", function(doc, cdt, cdn) {
 			let row = locals[cdt][cdn];

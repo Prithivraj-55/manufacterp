@@ -1,14 +1,12 @@
 frappe.ui.form.on("BOM", {
 	refresh(frm) {
-		// Remove the standard "Create > Production Plan" button — Production Plans
-		// are created from the Material Planning doctype instead.
-		frm.page.remove_inner_button(__("Production Plan"), __("Create"));
-
 		if (frm.doc.custom_drawing) {
+			// Drawing-linked BOMs: remove all Create sub-options (including Production Plan)
 			frm.page.remove_inner_button(__("Update Cost"));
 			frm.page.remove_inner_button(__("Browse BOM"));
 			frm.page.remove_inner_button(__("New Version"));
-			frm.page.get_inner_group_button(__("Create")).remove();
+			frm.page.get_inner_group_button(__("Create")) &&
+				frm.page.get_inner_group_button(__("Create")).remove();
 		}
 	},
 	onload_post_render(frm) {

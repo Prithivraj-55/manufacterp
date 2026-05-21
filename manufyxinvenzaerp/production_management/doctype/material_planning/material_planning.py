@@ -16,11 +16,61 @@ class MaterialPlanning(Document):
 
 
 @frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
+def search_bom(doctype, txt, searchfield, start, page_len, filters):
+    """Custom BOM search: matches name, item, item_name, or DUNO/Mark No (int exact match)."""
+    like_txt = f"%{txt}%"
+    duno_clause = ""
+    values = {"txt": like_txt, "page_len": int(page_len), "start": int(start)}
+
+    try:
+        duno_val = int(txt.strip())
+        duno_clause = "OR b.custom_duno_mark_no = %(duno)s"
+        values["duno"] = duno_val
+    except (ValueError, TypeError):
+        pass
+
+    return frappe.db.sql(
+        f"""
+        SELECT b.name, b.item, b.item_name, b.custom_duno_mark_no
+        FROM `tabBOM` b
+        WHERE b.docstatus < 2
+          AND (
+              b.name LIKE %(txt)s
+              OR b.item LIKE %(txt)s
+              OR b.item_name LIKE %(txt)s
+              {duno_clause}
+          )
+        ORDER BY b.name
+        LIMIT %(page_len)s OFFSET %(start)s
+        """,
+        values,
+    )
+
+
+@frappe.whitelist()
 def get_bom_info(bom_no):
     """Return Drawing-derived details for a BOM row (called on bom_no change in JS)."""
-    drawing_name = frappe.db.get_value("BOM", bom_no, "custom_drawing")
-    if not drawing_name:
+    bom = frappe.db.get_value(
+        "BOM", bom_no,
+        ["item", "item_name", "quantity", "custom_drawing", "custom_duno_mark_no"],
+        as_dict=True,
+    )
+    if not bom:
         return {}
+
+    drawing_name = bom.custom_drawing
+    duno_mark_no = bom.custom_duno_mark_no or 0
+
+    if not drawing_name:
+        stock_uom = frappe.db.get_value("Item", bom.item, "stock_uom") or "" if bom.item else ""
+        return {
+            "item_code": bom.item,
+            "item_name": bom.item_name,
+            "duno_mark_no": duno_mark_no,
+            "qty_to_manufacture": bom.quantity or 1,
+            "uom": stock_uom,
+        }
 
     d = frappe.db.get_value(
         "Drawing",
@@ -32,19 +82,16 @@ def get_bom_info(bom_no):
     if not d:
         return {}
 
-    bom_qty = frappe.db.get_value("BOM", bom_no, "quantity") or 1
-    stock_uom = ""
-    if d.fg_item_code:
-        stock_uom = frappe.db.get_value("Item", d.fg_item_code, "stock_uom") or ""
+    stock_uom = frappe.db.get_value("Item", d.fg_item_code, "stock_uom") or "" if d.fg_item_code else ""
 
     return {
         "drawing": drawing_name,
         "item_code": d.fg_item_code,
         "item_name": d.fg_item_name,
-        "duno_mark_no": d.duno_mark_no,
+        "duno_mark_no": duno_mark_no or d.duno_mark_no or 0,
         "sales_order": d.sales_order,
         "customer": d.customer,
-        "qty_to_manufacture": d.no_of_qty_to_manufacture or bom_qty,
+        "qty_to_manufacture": d.no_of_qty_to_manufacture or bom.quantity or 1,
         "uom": stock_uom,
     }
 
