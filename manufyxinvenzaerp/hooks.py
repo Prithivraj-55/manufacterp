@@ -154,6 +154,10 @@ doc_events = {
 		"validate": "manufyxinvenzaerp.purchase_order_management.purchase_order.validate_purchase_order",
 		"before_submit": "manufyxinvenzaerp.purchase_order_management.purchase_order.before_submit_purchase_order",
 	},
+	"Material Request": {
+		"on_cancel": "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.unlink_material_request_on_cancel",
+		"on_trash": "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.unlink_material_request_on_cancel",
+	},
 	"Purchase Receipt": {
 		"validate": "manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.validate_purchase_receipt",
 		"before_submit": "manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.before_submit_purchase_receipt",

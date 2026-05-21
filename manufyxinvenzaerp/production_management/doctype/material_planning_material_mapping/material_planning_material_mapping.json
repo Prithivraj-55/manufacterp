@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2026-05-09 00:00:00.000000",
+ "creation": "2026-05-15 00:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -9,19 +9,24 @@
   "item_name",
   "bom_no",
   "duno_mark_no",
+  "col_break_1",
+  "qty",
+  "uom",
+  "sec_qty",
+  "sec_uom",
+  "col_break_2",
   "parent_item_group",
   "length",
   "width",
   "thickness",
-  "sec_qty",
-  "sec_uom",
-  "qty",
-  "uom",
-  "available_qty",
-  "shortage_qty",
   "unit_weight",
-  "material_spec",
-  "warehouse",
+  "section_batch",
+  "batch",
+  "planned_item",
+  "is_reserved",
+  "reserved_qty",
+  "shortfall_qty",
+  "reserved_on",
   "store_location"
  ],
  "fields": [
@@ -35,6 +40,7 @@
    "reqd": 1
   },
   {
+   "fetch_from": "item_code.item_name",
    "fieldname": "item_name",
    "fieldtype": "Data",
    "in_list_view": 1,
@@ -55,6 +61,44 @@
    "in_list_view": 1,
    "label": "DUNO/Mark No",
    "read_only": 1
+  },
+  {
+   "fieldname": "col_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Required Qty",
+   "read_only": 1
+  },
+  {
+   "fieldname": "uom",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "UOM",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sec_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Sec Qty (NOS)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sec_uom",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Sec UOM",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_2",
+   "fieldtype": "Column Break"
   },
   {
    "fieldname": "parent_item_group",
@@ -85,66 +129,59 @@
    "read_only": 1
   },
   {
-   "fieldname": "sec_qty",
-   "fieldtype": "Float",
-   "in_list_view": 1,
-   "label": "Sec Qty",
-   "read_only": 1
-  },
-  {
-   "fieldname": "sec_uom",
-   "fieldtype": "Link",
-   "in_list_view": 1,
-   "label": "Sec UOM",
-   "options": "UOM",
-   "read_only": 1
-  },
-  {
-   "fieldname": "qty",
-   "fieldtype": "Float",
-   "in_list_view": 1,
-   "label": "Required Qty",
-   "read_only": 1
-  },
-  {
-   "fieldname": "uom",
-   "fieldtype": "Link",
-   "in_list_view": 1,
-   "label": "UOM",
-   "options": "UOM",
-   "read_only": 1
-  },
-  {
-   "fieldname": "available_qty",
-   "fieldtype": "Float",
-   "in_list_view": 1,
-   "label": "Available Qty",
-   "read_only": 1
-  },
-  {
-   "fieldname": "shortage_qty",
-   "fieldtype": "Float",
-   "in_list_view": 1,
-   "label": "Shortage Qty",
-   "read_only": 1
-  },
-  {
    "fieldname": "unit_weight",
    "fieldtype": "Float",
+   "in_list_view": 1,
    "label": "Unit Weight",
    "read_only": 1
   },
   {
-   "fieldname": "material_spec",
-   "fieldtype": "Data",
-   "label": "Material Spec",
+   "fieldname": "section_batch",
+   "fieldtype": "Section Break",
+   "label": "Batch Assignment"
+  },
+  {
+   "fieldname": "batch",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Assign Batch",
+   "options": "Batch",
+   "search_fields": "item"
+  },
+  {
+   "fieldname": "planned_item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Planned Item (from Batch)",
+   "options": "Item",
    "read_only": 1
   },
   {
-   "fieldname": "warehouse",
-   "fieldtype": "Link",
-   "label": "Warehouse",
-   "options": "Warehouse",
+   "fieldname": "is_reserved",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Reserved",
+   "read_only": 1,
+   "default": "0"
+  },
+  {
+   "fieldname": "reserved_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Reserved Qty",
+   "read_only": 1
+  },
+  {
+   "fieldname": "shortfall_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Shortfall Qty",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reserved_on",
+   "fieldtype": "Datetime",
+   "label": "Reserved On",
    "read_only": 1
   },
   {
@@ -158,10 +195,10 @@
  ],
  "istable": 1,
  "links": [],
- "modified": "2026-05-16 00:00:00.000000",
+ "modified": "2026-05-18 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Production Management",
- "name": "Material Planning Raw Material",
+ "name": "Material Planning Material Mapping",
  "owner": "Administrator",
  "permissions": [],
  "sort_field": "modified",

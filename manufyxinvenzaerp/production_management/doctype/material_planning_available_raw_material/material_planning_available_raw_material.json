@@ -1,26 +1,22 @@
 {
  "actions": [],
- "creation": "2026-05-09 00:00:00.000000",
+ "creation": "2026-05-15 00:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
   "item_code",
   "item_name",
-  "bom_no",
-  "duno_mark_no",
+  "batch_no",
   "parent_item_group",
   "length",
   "width",
   "thickness",
+  "required_qty",
+  "available_qty",
   "sec_qty",
   "sec_uom",
-  "qty",
   "uom",
-  "available_qty",
-  "shortage_qty",
-  "unit_weight",
-  "material_spec",
   "warehouse",
   "store_location"
  ],
@@ -35,6 +31,7 @@
    "reqd": 1
   },
   {
+   "fetch_from": "item_code.item_name",
    "fieldname": "item_name",
    "fieldtype": "Data",
    "in_list_view": 1,
@@ -42,18 +39,11 @@
    "read_only": 1
   },
   {
-   "fieldname": "bom_no",
+   "fieldname": "batch_no",
    "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "Source BOM",
-   "options": "BOM",
-   "read_only": 1
-  },
-  {
-   "fieldname": "duno_mark_no",
-   "fieldtype": "Int",
-   "in_list_view": 1,
-   "label": "DUNO/Mark No",
+   "label": "Batch No",
+   "options": "Batch",
    "read_only": 1
   },
   {
@@ -85,10 +75,24 @@
    "read_only": 1
   },
   {
+   "fieldname": "required_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Required Qty",
+   "read_only": 1
+  },
+  {
+   "fieldname": "available_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Available Qty",
+   "read_only": 1
+  },
+  {
    "fieldname": "sec_qty",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Sec Qty",
+   "label": "Sec Qty (NOS)",
    "read_only": 1
   },
   {
@@ -100,13 +104,6 @@
    "read_only": 1
   },
   {
-   "fieldname": "qty",
-   "fieldtype": "Float",
-   "in_list_view": 1,
-   "label": "Required Qty",
-   "read_only": 1
-  },
-  {
    "fieldname": "uom",
    "fieldtype": "Link",
    "in_list_view": 1,
@@ -115,34 +112,9 @@
    "read_only": 1
   },
   {
-   "fieldname": "available_qty",
-   "fieldtype": "Float",
-   "in_list_view": 1,
-   "label": "Available Qty",
-   "read_only": 1
-  },
-  {
-   "fieldname": "shortage_qty",
-   "fieldtype": "Float",
-   "in_list_view": 1,
-   "label": "Shortage Qty",
-   "read_only": 1
-  },
-  {
-   "fieldname": "unit_weight",
-   "fieldtype": "Float",
-   "label": "Unit Weight",
-   "read_only": 1
-  },
-  {
-   "fieldname": "material_spec",
-   "fieldtype": "Data",
-   "label": "Material Spec",
-   "read_only": 1
-  },
-  {
    "fieldname": "warehouse",
    "fieldtype": "Link",
+   "in_list_view": 1,
    "label": "Warehouse",
    "options": "Warehouse",
    "read_only": 1
@@ -161,7 +133,7 @@
  "modified": "2026-05-16 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Production Management",
- "name": "Material Planning Raw Material",
+ "name": "Material Planning Available Raw Material",
  "owner": "Administrator",
  "permissions": [],
  "sort_field": "modified",
