@@ -160,11 +160,19 @@ frappe.ui.form.on("Material Planning", {
 			);
 		}
 
-		// "Create → Production Plan"
-		frm.add_custom_button(__("Production Plan"), function () {
-			frappe.confirm(
-				__("Create a Production Plan from this Material Planning?"),
-				function () {
+		// "Create → Production Plan" — available in draft and submitted states
+		if (frm.doc.docstatus !== 2) {
+			frm.add_custom_button(__("Production Plan"), function () {
+				if (!frm.doc.bom_items || !frm.doc.bom_items.length) {
+					frappe.msgprint(__("Add at least one BOM in the 'Selected BOMs' tab first."));
+					return;
+				}
+				if (frm.doc.__islocal) {
+					frappe.msgprint(__("Save the document before creating a Production Plan."));
+					return;
+				}
+
+				function _do_create() {
 					frappe.call({
 						method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.make_production_plan",
 						args: { material_planning_name: frm.doc.name },
@@ -181,8 +189,31 @@ frappe.ui.form.on("Material Planning", {
 						},
 					});
 				}
-			);
-		}, __("Create"));
+
+				frappe.confirm(
+					__("Create a Production Plan from this Material Planning?"),
+					function () {
+						if (frm.doc.docstatus === 0 && frm.is_dirty()) {
+							frappe.call({
+								method: "frappe.client.save",
+								args: { doc: frm.doc },
+								freeze: true,
+								freeze_message: __("Saving…"),
+								callback(r) {
+									if (r.message) {
+										frappe.model.sync(r.message);
+										frm.refresh();
+									}
+									_do_create();
+								},
+							});
+						} else {
+							_do_create();
+						}
+					}
+				);
+			}, __("Create"));
+		}
 	},
 });
 

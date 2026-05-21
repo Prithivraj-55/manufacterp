@@ -515,8 +515,10 @@ def _test_simulate_se_release(batch_nos, se_type="Material Issue"):
 
 @frappe.whitelist()
 def make_production_plan(material_planning_name):
-    """Create a draft Production Plan from a saved Material Planning document."""
+    """Create a draft Production Plan from a Material Planning document."""
     mp = frappe.get_doc("Material Planning", material_planning_name)
+    if mp.docstatus == 2:
+        frappe.throw(_("Cannot create a Production Plan from a cancelled Material Planning."))
     if not mp.bom_items:
         frappe.throw(_("No BOM items found on this Material Planning."))
 
@@ -534,7 +536,6 @@ def make_production_plan(material_planning_name):
     pp.get_items_from = "Sales Order"
 
     for row in mp.bom_items:
-        # Fall back to BOM's item if the row's item_code was not auto-filled
         item_code = row.item_code or frappe.db.get_value("BOM", row.bom_no, "item")
         item_name = row.item_name or frappe.db.get_value("Item", item_code, "item_name") or item_code
         stock_uom = frappe.db.get_value("Item", item_code, "stock_uom") or "Nos"
@@ -546,6 +547,7 @@ def make_production_plan(material_planning_name):
             "planned_qty": planned_qty,
             "stock_uom": stock_uom,
             "sales_order": row.sales_order or "",
+            "custom_customer": row.customer or "",
             "warehouse": mp.for_warehouse or "",
         })
 
