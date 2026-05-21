@@ -111,6 +111,8 @@ def create_bom_from_drawing(drawing_name):
     bom.item_name = drawing.fg_item_name
     bom.quantity = drawing.no_of_qty_to_manufacture or 1
     bom.custom_drawing = drawing_name
+    bom.custom_duno_mark_no = drawing.duno_mark_no or 0
+    bom.project = drawing.project or ""
     bom.company = company
     bom.currency = (
         frappe.db.get_value("Company", company, "default_currency") if company else "INR"

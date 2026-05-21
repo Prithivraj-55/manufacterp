@@ -316,10 +316,10 @@ def get_bom_items_direct(item_details, company, bom_no, include_non_stock_items,
 	"""
 	Query BOM Item rows directly instead of BOM Explosion Item.
 
-	ERPNext's explosion pre-aggregates rows by (item_code, stock_uom), ignoring
-	custom dimension fields. Two rows of the same item at different lengths would
-	be collapsed to one. This function preserves each row independently and merges
-	only when (item_code, length, thickness, width) are truly identical.
+	Each BOM Item row is preserved as a separate entry keyed by its unique row
+	name — even when two rows share the same item_code and dimensions (e.g., the
+	same structural profile used in multiple positions). qty is scaled by
+	planned_qty / bom.quantity.
 	"""
 	bi = frappe.qb.DocType("BOM Item")
 	bom = frappe.qb.DocType("BOM")
@@ -338,6 +338,8 @@ def get_bom_items_direct(item_details, company, bom_no, include_non_stock_items,
 		.left_join(item_uom)
 		.on((item.name == item_uom.parent) & (item_uom.uom == item.purchase_uom))
 		.select(
+			bi.name.as_("bom_item_name"),
+			bi.idx,
 			(bi.stock_qty / IfNull(bom.quantity, 1) * planned_qty).as_("qty"),
 			item.item_name,
 			item.name.as_("item_code"),
@@ -356,30 +358,21 @@ def get_bom_items_direct(item_details, company, bom_no, include_non_stock_items,
 			bi.custom_width,
 			item.custom_parent_item_group,
 			bi.custom_unit_weight,
+			bi.custom_item_number,
 		)
 		.where(
 			(bi.docstatus < 2)
 			& (bom.name == bom_no)
 			& (item.is_stock_item.isin([0, 1]) if include_non_stock_items else item.is_stock_item == 1)
 		)
-		# No GROUP BY — each BOM Item row is kept as-is to preserve dimension uniqueness
+		.orderby(bi.idx)
 	).run(as_dict=True)
 
 	for d in data:
 		if not d.conversion_factor and d.purchase_uom:
 			d.conversion_factor = get_uom_conversion_factor(d.item_code, d.purchase_uom)
-
-		dim_key = (
-			d.get("item_code"),
-			flt(d.get("custom_length")),
-			flt(d.get("custom_thickness")),
-			flt(d.get("custom_width")),
-		)
-		if dim_key in item_details:
-			# Same item at identical dimensions from a different po_item: sum qty
-			item_details[dim_key]["qty"] = flt(item_details[dim_key]["qty"]) + flt(d.get("qty"))
-		else:
-			item_details[dim_key] = d
+		# Key by the BOM Item row's unique name so every row is preserved individually
+		item_details[d["bom_item_name"]] = d
 
 	return item_details
 

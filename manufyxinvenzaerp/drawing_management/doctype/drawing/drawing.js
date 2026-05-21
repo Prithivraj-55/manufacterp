@@ -1,23 +1,5 @@
 frappe.ui.form.on("Drawing", {
 	refresh(frm) {
-		// ── Upload / Download CSV — standalone buttons, always visible ─────────
-		frm.add_custom_button(__("Download Template"), function () {
-			drawing_download_csv_template();
-		});
-
-		if ((frm.doc.items || []).length) {
-			frm.add_custom_button(__("Download Items CSV"), function () {
-				drawing_download_items_csv(frm);
-			});
-		}
-
-		// Upload only in draft — items table is read-only once submitted
-		if (frm.doc.docstatus === 0) {
-			frm.add_custom_button(__("Upload Items"), function () {
-				drawing_upload_items_dialog(frm);
-			});
-		}
-
 		if (frm.doc.docstatus === 1 && frm.doc.status === "Working") {
 			frm.add_custom_button(__("Mark as Final Revision"), function () {
 				frappe.confirm(
@@ -86,10 +68,40 @@ frappe.ui.form.on("Drawing", {
 		});
 
 		update_totals(frm);
+
+		// Items grid: Download (always) and Upload (draft only) — bottom-right of table
+		setTimeout(function () {
+			var grid = frm.fields_dict["items"] && frm.fields_dict["items"].grid;
+			if (!grid || !grid.wrapper) return;
+
+			var $dl = grid.wrapper.find(".grid-download");
+			var $ul = grid.wrapper.find(".grid-upload");
+
+			$dl.off("click.drawing").removeClass("hidden")
+				.on("click.drawing", function () { drawing_download_items_csv(frm); return false; });
+
+			$ul.off("click.drawing");
+			if (frm.doc.docstatus === 0) {
+				$ul.removeClass("hidden")
+					.on("click.drawing", function () { drawing_upload_items_dialog(frm); return false; });
+			} else {
+				$ul.addClass("hidden");
+			}
+		}, 0);
 	},
 
 	customer(frm) {
 		frm.set_value("customer_no", frm.doc.customer || "");
+	},
+
+	sales_order(frm) {
+		if (!frm.doc.sales_order) {
+			frm.set_value("project", "");
+			return;
+		}
+		frappe.db.get_value("Sales Order", frm.doc.sales_order, "project", function (r) {
+			if (r && r.project) frm.set_value("project", r.project);
+		});
 	},
 });
 
@@ -336,81 +348,35 @@ function drawing_download_items_csv(frm) {
 	_drawing_trigger_csv_download(lines.join("\n"), doc_id + "_items.csv");
 }
 
-/**
- * Open a dialog with a file-input, read the CSV client-side,
- * send its text to the server for parsing, and populate the items table.
- */
 function drawing_upload_items_dialog(frm) {
-	var dialog = new frappe.ui.Dialog({
-		title: __("Upload Drawing Items"),
-		fields: [
-			{
-				fieldtype: "HTML",
-				fieldname: "upload_area",
-				options: `
-					<div style="margin-bottom:12px;">
-						<label class="control-label" style="margin-bottom:6px;">${__("Select CSV File")}</label>
-						<input type="file" id="drawing_csv_file_input" accept=".csv"
-						       style="display:block;width:100%;padding:4px 0;">
-					</div>
-					<p class="text-muted" style="font-size:12px;margin:0;">
-						${__("Required columns")}: <code>item_number, material_code, sec_qty, thickness, length, width, rate</code><br>
-						${__("Leave dimension columns blank for Nuts &amp; Bolts items.")}
-					</p>`
-			}
-		],
-		primary_action_label: __("Upload"),
-		primary_action: function () {
-			var input = document.getElementById("drawing_csv_file_input");
-			if (!input || !input.files || !input.files.length) {
-				frappe.msgprint(__("Please select a CSV file first."));
-				return;
-			}
-
-			var file = input.files[0];
-			if (!file.name.toLowerCase().endsWith(".csv")) {
-				frappe.msgprint(__("Only .csv files are supported."));
-				return;
-			}
-
-			var reader = new FileReader();
-			reader.onload = function (e) {
-				dialog.disable_primary_action();
-				frappe.call({
-					method: "manufyxinvenzaerp.drawing_management.drawing_utils.parse_drawing_items_csv",
-					args: { csv_content: e.target.result },
-					freeze: true,
-					freeze_message: __("Processing CSV…"),
-					callback: function (r) {
-						dialog.enable_primary_action();
-						if (!r.message || !r.message.length) return;
-
-						frm.clear_table("items");
-						r.message.forEach(function (row_data) {
-							var child = frm.add_child("items");
-							$.extend(locals[child.doctype][child.name], row_data);
-						});
-						frm.refresh_field("items");
-						update_totals(frm);
-						dialog.hide();
-
-						frappe.show_alert({
-							message: __("{0} item(s) loaded from CSV.", [r.message.length]),
-							indicator: "green",
-						}, 5);
-					},
-					error: function () {
-						dialog.enable_primary_action();
-					}
-				});
-			};
-			reader.onerror = function () {
-				frappe.msgprint(__("Could not read the file. Please try again."));
-			};
-			reader.readAsText(file);
-		}
+	new frappe.ui.FileUploader({
+		as_dataurl: true,
+		allow_multiple: false,
+		restrictions: { allowed_file_types: [".csv"] },
+		on_success: function (file) {
+			var csv_content = frappe.utils.get_decoded_string(file.dataurl);
+			frappe.call({
+				method: "manufyxinvenzaerp.drawing_management.drawing_utils.parse_drawing_items_csv",
+				args: { csv_content: csv_content },
+				freeze: true,
+				freeze_message: __("Processing CSV…"),
+				callback: function (r) {
+					if (!r.message || !r.message.length) return;
+					frm.clear_table("items");
+					r.message.forEach(function (row_data) {
+						var child = frm.add_child("items");
+						$.extend(locals[child.doctype][child.name], row_data);
+					});
+					frm.refresh_field("items");
+					update_totals(frm);
+					frappe.show_alert({
+						message: __("{0} item(s) loaded from CSV.", [r.message.length]),
+						indicator: "green",
+					}, 5);
+				},
+			});
+		},
 	});
-	dialog.show();
 }
 
 /** Trigger a browser CSV download from a plain-text string. */
