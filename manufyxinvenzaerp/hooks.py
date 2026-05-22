@@ -154,10 +154,6 @@ doc_events = {
 		"validate": "manufyxinvenzaerp.purchase_order_management.purchase_order.validate_purchase_order",
 		"before_submit": "manufyxinvenzaerp.purchase_order_management.purchase_order.before_submit_purchase_order",
 	},
-	"Material Request": {
-		"on_cancel": "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.unlink_material_request_on_cancel",
-		"on_trash": "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.unlink_material_request_on_cancel",
-	},
 	"Purchase Receipt": {
 		"validate": "manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.validate_purchase_receipt",
 		"before_submit": "manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.before_submit_purchase_receipt",
@@ -171,6 +167,8 @@ doc_events = {
 	"Material Request": {
 		"validate": "manufyxinvenzaerp.material_request_management.material_request.validate_material_request",
 		"before_submit": "manufyxinvenzaerp.material_request_management.material_request.before_submit_material_request",
+		"on_cancel": "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.unlink_material_request_on_cancel",
+		"on_trash": "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.unlink_material_request_on_cancel",
 	},
 	"Request for Quotation": {
 		"validate": "manufyxinvenzaerp.rfq_management.request_for_quotation.validate_rfq",
@@ -186,6 +184,7 @@ doc_events = {
 		"validate": "manufyxinvenzaerp.production_management.stock_entry.validate_stock_entry",
 		"before_submit": "manufyxinvenzaerp.production_management.job_card.before_submit_manufacture_stock_entry",
 		"on_submit": "manufyxinvenzaerp.production_management.stock_entry.on_submit_stock_entry",
+		"on_cancel": "manufyxinvenzaerp.production_management.stock_entry.on_cancel_stock_entry",
 	},
 	"Supplier Operation Entry": {
 		"validate": "manufyxinvenzaerp.subcontracting_management.subcontracting.validate_supplier_operation_entry",

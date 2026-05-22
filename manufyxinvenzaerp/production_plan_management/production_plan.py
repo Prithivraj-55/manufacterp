@@ -55,7 +55,7 @@ def get_sbb_available_qty(item_code, warehouse, dimensions, location=None):
 	else:
 		sbb_list = frappe.get_all(
 			"Serial and Batch Bundle",
-			filters={"item_code": item_code, "warehouse": warehouse},
+			filters={"item_code": item_code, "warehouse": warehouse, "docstatus": 1},
 			fields=["name"],
 		)
 		if not sbb_list:
