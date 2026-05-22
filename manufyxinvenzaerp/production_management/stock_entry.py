@@ -41,6 +41,24 @@ def on_submit_stock_entry(doc, method):
 			if not row.is_finished_item and row.batch_no and flt(row.get("custom_sec_qty")):
 				_reduce_batch_sec_qty(row.batch_no, row.custom_sec_qty)
 
+	elif doc.stock_entry_type == "Material Receipt" and doc.get("custom_supplier"):
+		for row in doc.items:
+			batch_nos = set()
+			if row.batch_no:
+				batch_nos.add(row.batch_no)
+			# serial_and_batch_bundle is written via db_set during on_submit,
+			# so the in-memory row won't have it — read fresh from DB
+			bundle = frappe.db.get_value("Stock Entry Detail", row.name, "serial_and_batch_bundle")
+			if bundle:
+				entries = frappe.get_all(
+					"Serial and Batch Entry",
+					filters={"parent": bundle},
+					fields=["batch_no"],
+				)
+				batch_nos.update(e.batch_no for e in entries if e.batch_no)
+			for batch_no in batch_nos:
+				frappe.db.set_value("Batch", batch_no, "supplier", doc.custom_supplier)
+
 	# Release reservations for all consumed batches
 	_release_material_planning_reservations(doc)
 

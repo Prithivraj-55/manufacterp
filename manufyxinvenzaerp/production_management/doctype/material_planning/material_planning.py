@@ -120,6 +120,7 @@ def get_raw_materials(doc):
         bom_no = bom_row.get("bom_no")
         planned_qty = flt(bom_row.get("qty_to_manufacture")) or 1
         duno_mark_no = bom_row.get("duno_mark_no")
+        sales_order = bom_row.get("sales_order") or ""
 
         if not bom_no:
             continue
@@ -149,6 +150,8 @@ def get_raw_materials(doc):
             )
 
             rows.append({
+                "item_number": detail.get("custom_item_number") or 0,
+                "sales_order": sales_order,
                 "item_code": detail.get("item_code"),
                 "item_name": detail.get("item_name"),
                 "bom_no": bom_no,
@@ -208,6 +211,10 @@ def check_stock_availability(doc):
     material_mapping = []
     unavailable_items = []
 
+    # Track remaining qty per batch across all rows so the same batch is not
+    # double-counted when multiple raw material rows share the same item/dimensions.
+    batch_remaining = {}
+
     for row in doc.get("raw_materials") or []:
         item_code = row.get("item_code")
         required_qty = flt(row.get("qty"))
@@ -217,7 +224,21 @@ def check_stock_availability(doc):
             "custom_width": flt(row.get("width")),
         }
 
-        available_qty, matched_batches = get_sbb_available_qty(item_code, warehouse, dimensions, location=location)
+        _, raw_matched_batches = get_sbb_available_qty(item_code, warehouse, dimensions, location=location)
+
+        # Seed batch_remaining for batches seen for the first time
+        for b in raw_matched_batches:
+            if b["batch_no"] not in batch_remaining:
+                batch_remaining[b["batch_no"]] = flt(b["qty"])
+
+        # Use remaining quantities — skip batches already fully consumed
+        matched_batches = [
+            {**b, "qty": batch_remaining[b["batch_no"]]}
+            for b in raw_matched_batches
+            if batch_remaining.get(b["batch_no"], 0) > 0
+        ]
+
+        available_qty = sum(flt(b["qty"]) for b in matched_batches)
         shortage = max(0.0, required_qty - available_qty)
 
         updated_row = dict(row)
@@ -227,6 +248,8 @@ def check_stock_availability(doc):
         updated_raw_materials.append(updated_row)
 
         base_mapping = {
+            "item_number": row.get("item_number") or 0,
+            "sales_order": row.get("sales_order") or "",
             "item_code": item_code,
             "item_name": row.get("item_name"),
             "bom_no": row.get("bom_no"),
@@ -245,8 +268,19 @@ def check_stock_availability(doc):
         }
 
         if matched_batches:
+            # Deduct this row's required_qty from batch_remaining in order
+            to_consume = required_qty
+            for b in matched_batches:
+                if to_consume <= 0:
+                    break
+                consumed = min(batch_remaining[b["batch_no"]], to_consume)
+                batch_remaining[b["batch_no"]] -= consumed
+                to_consume -= consumed
+
             for b in matched_batches:
                 available_raw_materials.append({
+                    "item_number": row.get("item_number") or 0,
+                    "sales_order": row.get("sales_order") or "",
                     "item_code": item_code,
                     "item_name": row.get("item_name"),
                     "batch_no": b["batch_no"],
@@ -263,7 +297,7 @@ def check_stock_availability(doc):
                     "store_location": location or "",
                 })
         else:
-            # No exact dimension match — goes to Material Mapping.
+            # No remaining stock in any matching batch — send to Material Mapping.
             # Restore reservation data if this row was previously reserved.
             existing = reserved_by_key.get((item_code, row.get("bom_no") or ""))
             if existing:
@@ -325,6 +359,8 @@ def move_to_exact_match(doc, item_codes):
         if matched_batches:
             for b in matched_batches:
                 matched.append({
+                    "item_number": row.get("item_number") or 0,
+                    "sales_order": row.get("sales_order") or "",
                     "item_code": row.get("item_code"),
                     "item_name": row.get("item_name"),
                     "batch_no": b["batch_no"],
@@ -362,6 +398,8 @@ def finalize_mapping(doc):
 
     for row in doc.get("material_mapping") or []:
         base = {
+            "item_number": row.get("item_number") or 0,
+            "sales_order": row.get("sales_order") or "",
             "item_code": row.get("item_code"),
             "item_name": row.get("item_name"),
             "bom_no": row.get("bom_no"),

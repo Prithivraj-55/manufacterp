@@ -5,6 +5,8 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
+  "item_number",
+  "sales_order",
   "item_code",
   "item_name",
   "bom_no",
@@ -29,6 +31,21 @@
   "store_location"
  ],
  "fields": [
+  {
+   "fieldname": "item_number",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Item No",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sales_order",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Sales Order",
+   "options": "Sales Order",
+   "read_only": 1
+  },
   {
    "fieldname": "item_code",
    "fieldtype": "Link",

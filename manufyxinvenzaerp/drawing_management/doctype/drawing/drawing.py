@@ -5,12 +5,14 @@ from frappe.utils import flt
 
 STRUCTURALS_REQUIRED = ["length", "unit_weight", "sec_qty"]
 PLATES_REQUIRED = ["length", "width", "thickness", "unit_weight", "sec_qty"]
+NUTS_AND_BOLTS_REQUIRED = ["qty"]
 FIELD_LABELS = {
     "length": "Length",
     "width": "Width",
     "thickness": "Thickness",
     "unit_weight": "Unit Weight",
     "sec_qty": "Sec Qty",
+    "qty": "Primary Qty",
 }
 
 class Drawing(Document):
@@ -79,7 +81,11 @@ def _recalculate_row_qty(row):
 
 def _check_row_missing_fields(row, throw):
     group = row.parent_item_group
-    required = {"Structurals": STRUCTURALS_REQUIRED, "Plates": PLATES_REQUIRED}.get(group)
+    required = {
+        "Structurals": STRUCTURALS_REQUIRED,
+        "Plates": PLATES_REQUIRED,
+        "Nuts and Bolts": NUTS_AND_BOLTS_REQUIRED,
+    }.get(group)
     if not required:
         return
     missing = [FIELD_LABELS[f] for f in required if not getattr(row, f, None)]

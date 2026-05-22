@@ -99,10 +99,8 @@ frappe.ui.form.on("Material Planning", {
 			};
 		});
 
-		// Filter batch dropdown to the item in that row
-		frm.set_query("batch", "material_mapping", function(doc, cdt, cdn) {
-			let row = locals[cdt][cdn];
-			return { filters: { item: row.item_code }, description_field: "item" };
+		frm.set_query("batch", "material_mapping", function() {
+			return {};
 		});
 
 		let has_raw = !!(frm.doc.raw_materials || []).length;
@@ -486,9 +484,6 @@ function _show_add_to_mapping_dialog(frm, selected_rows) {
 			fieldtype: "Link",
 			label: __("Assign Batch"),
 			options: "Batch",
-			get_query: (function(item_code) {
-				return function() { return { filters: { item: item_code } }; };
-			})(row.item_code),
 		});
 	});
 

@@ -128,6 +128,7 @@ def create_bom_from_drawing(drawing_name):
                 "uom": d_item.uom,
                 "rate": flt(d_item.rate) or 0,
                 "custom_item_number": d_item.item_number,
+                "custom_sales_order": drawing.sales_order or "",
                 "custom_material_spec": d_item.material_spec,
                 "custom_unit_weight": d_item.unit_weight,
                 "custom_thickness": d_item.thickness,
@@ -173,6 +174,8 @@ def validate_bom_from_drawing(doc, method):
         bom_item.rate = flt(d_item.rate) or 0
         bom_item.base_rate = flt(bom_item.rate) * conversion_rate
         bom_item.uom = d_item.uom
+        bom_item.custom_item_number = d_item.item_number
+        bom_item.custom_sales_order = drawing.sales_order or ""
         bom_item.custom_parent_item_group = d_item.parent_item_group or ""
         bom_item.custom_thickness = flt(d_item.thickness)
         bom_item.custom_length = flt(d_item.length)
