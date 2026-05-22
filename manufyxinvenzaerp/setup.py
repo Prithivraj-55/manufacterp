@@ -507,6 +507,29 @@ def after_migrate():
         create_operations_workstations_routing,
     )
     create_operations_workstations_routing()
+    setup_storage_location()
+
+
+def setup_storage_location():
+    """Create Storage Location records A-1 and A-2, then register as an Inventory Dimension."""
+    # 1. Seed master records
+    for loc in ["A-1", "A-2"]:
+        if not frappe.db.exists("Storage Location", loc):
+            frappe.get_doc({
+                "doctype": "Storage Location",
+                "name": loc,
+            }).insert(ignore_permissions=True)
+
+    # 2. Register as an Inventory Dimension (creates custom fields on all stock doctypes)
+    if not frappe.db.exists("Inventory Dimension", "Storage Location"):
+        frappe.get_doc({
+            "doctype": "Inventory Dimension",
+            "reference_document": "Storage Location",
+            "dimension_name": "Storage Location",
+            "apply_to_all_doctypes": 1,
+        }).insert(ignore_permissions=True)
+
+    frappe.db.commit()
 
 
 def create_item_client_script():
