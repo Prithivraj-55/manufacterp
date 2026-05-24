@@ -93,20 +93,23 @@ def _create_routing():
 
 @frappe.whitelist()
 def get_routing_operations_for_bom(bom_name):
-	"""Return operations from the BOM's routing ordered by sequence_id.
-	Called from Production Plan client script when bom_no changes."""
+	"""Return operations for the BOM — from its routing if set, else from BOM operations directly."""
 	if not bom_name:
 		return []
-	routing = frappe.db.get_value("BOM", bom_name, "routing")
-	if not routing:
-		return []
-	ops = frappe.get_all(
-		"BOM Operation",
-		filters={"parent": routing, "parenttype": "Routing"},
-		fields=["operation", "sequence_id"],
-		order_by="sequence_id asc",
-	)
-	return ops
+	bom = frappe.get_doc("BOM", bom_name)
+	if bom.routing:
+		return frappe.get_all(
+			"BOM Operation",
+			filters={"parent": bom.routing, "parenttype": "Routing"},
+			fields=["operation", "sequence_id"],
+			order_by="sequence_id asc",
+		)
+	if bom.with_operations and bom.operations:
+		return [
+			{"operation": op.operation, "sequence_id": op.sequence_id}
+			for op in sorted(bom.operations, key=lambda o: o.sequence_id or 0)
+		]
+	return []
 
 
 # ─────────────────────────────────────────────────────────────────────────────

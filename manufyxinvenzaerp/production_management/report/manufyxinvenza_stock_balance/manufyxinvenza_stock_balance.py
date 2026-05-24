@@ -54,7 +54,30 @@ def execute(filters=None):
 					"thickness": flt(batch_details.get("custom_thickness", 0)),
 					"width": flt(batch_details.get("custom_width", 0)),
 					"length": flt(batch_details.get("custom_length", 0)),
+					"reserved_qty": 0.0,
+					"free_qty": 0.0,
+					"reserved_mp": "",
+					"reserved_sales_order": "",
+					"reserved_project": "",
+					"reserved_customer": "",
 				})
+
+	# Enrich rows with reservation data
+	all_batch_nos = list({row["batch_no"] for row in data})
+	res_map = get_batch_reservations_map(all_batch_nos)
+
+	for row in data:
+		res = res_map.get(row["batch_no"])
+		if res:
+			reserved_qty = flt(res["reserved_qty"], float_precision)
+			row["reserved_qty"] = reserved_qty
+			row["free_qty"] = flt(max(0.0, row["available_qty"] - reserved_qty), float_precision)
+			row["reserved_mp"] = res["reserved_mp"]
+			row["reserved_sales_order"] = res["reserved_sales_order"]
+			row["reserved_project"] = res["reserved_project"]
+			row["reserved_customer"] = res["reserved_customer"]
+		else:
+			row["free_qty"] = row["available_qty"]
 
 	return columns, data
 
@@ -92,7 +115,7 @@ def get_columns():
 			"fieldname": "batch_no",
 			"fieldtype": "Link",
 			"options": "Batch",
-			"width": 130,
+			"width": 220,
 		},
 		{
 			"label": _("Available Qty"),
@@ -138,7 +161,118 @@ def get_columns():
 			"fieldtype": "Float",
 			"width": 100,
 		},
+		{
+			"label": _("Reserved Qty"),
+			"fieldname": "reserved_qty",
+			"fieldtype": "Float",
+			"width": 120,
+		},
+		{
+			"label": _("Free Qty"),
+			"fieldname": "free_qty",
+			"fieldtype": "Float",
+			"width": 100,
+		},
+		{
+			"label": _("Reserved by MP"),
+			"fieldname": "reserved_mp",
+			"fieldtype": "Data",
+			"width": 180,
+		},
+		{
+			"label": _("Sales Order"),
+			"fieldname": "reserved_sales_order",
+			"fieldtype": "Data",
+			"width": 140,
+		},
+		{
+			"label": _("Project"),
+			"fieldname": "reserved_project",
+			"fieldtype": "Data",
+			"width": 130,
+		},
+		{
+			"label": _("Customer"),
+			"fieldname": "reserved_customer",
+			"fieldtype": "Data",
+			"width": 150,
+		},
 	]
+
+
+def get_batch_reservations_map(batch_nos):
+	"""Return reservation details per batch_no, aggregated across all Material Planning docs."""
+	if not batch_nos:
+		return {}
+
+	rows = frappe.db.sql(
+		"""
+		SELECT mm.batch AS batch_no, mm.parent AS mp_name, mm.sales_order, mm.reserved_qty
+		FROM `tabMaterial Planning Material Mapping` mm
+		WHERE mm.is_reserved = 1 AND mm.batch IN %(batches)s
+
+		UNION ALL
+
+		SELECT arm.batch_no, arm.parent AS mp_name, arm.sales_order, arm.reserved_qty
+		FROM `tabMaterial Planning Available Raw Material` arm
+		WHERE arm.is_reserved = 1 AND arm.batch_no IN %(batches)s
+		""",
+		{"batches": batch_nos},
+		as_dict=True,
+	)
+
+	if not rows:
+		return {}
+
+	# Enrich with customer and project from Sales Order in one query
+	so_names = list({r.sales_order for r in rows if r.get("sales_order")})
+	so_map = {}
+	if so_names:
+		for so in frappe.get_all(
+			"Sales Order",
+			filters={"name": ["in", so_names]},
+			fields=["name", "customer", "project"],
+		):
+			so_map[so.name] = so
+
+	result = {}
+	for row in rows:
+		bn = row.batch_no
+		if bn not in result:
+			result[bn] = {
+				"reserved_qty": 0.0,
+				"mp_names": [],
+				"sales_orders": [],
+				"projects": [],
+				"customers": [],
+			}
+
+		result[bn]["reserved_qty"] += flt(row.reserved_qty)
+
+		if row.mp_name and row.mp_name not in result[bn]["mp_names"]:
+			result[bn]["mp_names"].append(row.mp_name)
+
+		so = row.get("sales_order") or ""
+		if so and so not in result[bn]["sales_orders"]:
+			result[bn]["sales_orders"].append(so)
+
+		so_data = so_map.get(so) or frappe._dict()
+		customer = so_data.get("customer") or ""
+		project = so_data.get("project") or ""
+
+		if customer and customer not in result[bn]["customers"]:
+			result[bn]["customers"].append(customer)
+		if project and project not in result[bn]["projects"]:
+			result[bn]["projects"].append(project)
+
+	for bn in result:
+		d = result[bn]
+		d["reserved_mp"] = ", ".join(d.pop("mp_names"))
+		d["reserved_sales_order"] = ", ".join(d.pop("sales_orders"))
+		d["reserved_project"] = ", ".join(d.pop("projects"))
+		d["reserved_customer"] = ", ".join(d.pop("customers"))
+
+	return result
 
 
 def get_stock_ledger_entries(filters):

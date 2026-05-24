@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-05-24 13:24:49_
+_Generated: 2026-05-24 18:02:00_
 
 ## drawing
 
@@ -123,8 +123,10 @@ _Generated: 2026-05-24 13:24:49_
 | ` get_bom_info` | no |
 | ` get_raw_materials` | no |
 | ` check_stock_availability` | no |
+| ` _get_non_batch_stock` | no |
 | ` move_to_exact_match` | no |
 | ` finalize_mapping` | no |
+| ` get_batch_reservation_summary` | no |
 | ` get_batch_item` | no |
 | ` _get_batch_total_stock` | no |
 | ` _get_batch_reserved_by_others` | no |
@@ -134,9 +136,9 @@ _Generated: 2026-05-24 13:24:49_
 | ` check_mapping_batch_availability` | no |
 | ` unreserve_batches` | no |
 | ` _test_simulate_se_release` | no |
-| ` __init__` | no |
-| ` get` | no |
 | ` __init__` | yes |
+| ` get` | no |
+| ` __init__` | no |
 | ` make_production_plan` | no |
 | ` make_material_request` | no |
 | ` unlink_material_request_on_cancel` | no |

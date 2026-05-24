@@ -564,6 +564,16 @@ def after_save_production_plan(doc, method):
 		_recalculate_sec_qty(row)
 
 
+def unlink_production_plan_on_trash(doc, method):
+	linked = frappe.get_all(
+		"Material Planning",
+		filters={"production_plan": doc.name},
+		fields=["name"],
+	)
+	for mp in linked:
+		frappe.db.set_value("Material Planning", mp.name, "production_plan", "")
+
+
 PLATES_REQUIRED = ["custom_length", "custom_width", "custom_thickness", "custom_unit_weight", "quantity"]
 
 

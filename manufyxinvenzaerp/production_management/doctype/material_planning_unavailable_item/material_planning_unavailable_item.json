@@ -28,6 +28,10 @@
   "alternate_length",
   "alternate_width",
   "alternate_thickness",
+  "alternate_sec_qty",
+  "alternate_unit_weight",
+  "alternate_quantity",
+  "alternate_parent_item_group",
   "store_location"
  ],
  "fields": [
@@ -181,6 +185,29 @@
    "fieldname": "alternate_thickness",
    "fieldtype": "Float",
    "label": "Thickness"
+  },
+  {
+   "fieldname": "alternate_sec_qty",
+   "fieldtype": "Float",
+   "label": "Sec Qty (NOS)"
+  },
+  {
+   "fieldname": "alternate_unit_weight",
+   "fieldtype": "Float",
+   "label": "Unit Weight",
+   "read_only": 1
+  },
+  {
+   "fieldname": "alternate_quantity",
+   "fieldtype": "Float",
+   "label": "Quantity",
+   "read_only": 1
+  },
+  {
+   "fieldname": "alternate_parent_item_group",
+   "fieldtype": "Data",
+   "label": "Alternate Parent Item Group",
+   "hidden": 1
   },
   {
    "fieldname": "store_location",

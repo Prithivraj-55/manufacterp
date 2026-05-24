@@ -29,7 +29,31 @@ frappe.ui.form.on("Production Plan", {
 			"column_break_32",
 			"status",
 			"warehouses",
+			// "BOM Raw Material List" section (Production Plan Item Reference)
+			"section_break_25",
+			"prod_plan_references",
 		], false);
 
+	},
+});
+
+frappe.ui.form.on("Production Plan Item", {
+	bom_no(frm, cdt, cdn) {
+		let row = locals[cdt][cdn];
+		if (!row.bom_no) {
+			frappe.model.set_value(cdt, cdn, "custom_drawing", "");
+			frappe.model.set_value(cdt, cdn, "custom_duno_mark_no", 0);
+			return;
+		}
+		frappe.db.get_value(
+			"BOM",
+			row.bom_no,
+			["custom_drawing", "custom_duno_mark_no"],
+			function(d) {
+				if (!d) return;
+				frappe.model.set_value(cdt, cdn, "custom_drawing", d.custom_drawing || "");
+				frappe.model.set_value(cdt, cdn, "custom_duno_mark_no", d.custom_duno_mark_no || 0);
+			}
+		);
 	},
 });
