@@ -20,3 +20,6 @@ frappe.ui.form.on("Purchase Receipt Item", {
 		calc_total_weight(frm);
 	},
 });
+
+// MP auto-allocation on PR submit — disabled, to be enabled later
+// frappe.ui.form.on("Purchase Receipt", { on_submit(frm) { ... } });

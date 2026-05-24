@@ -1,7 +1,7 @@
 import re
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import flt, now
 
 STRUCTURALS_REQUIRED = ["custom_length", "custom_unit_weight", "custom_sec_qty"]
 PLATES_REQUIRED = ["custom_length", "custom_width", "custom_thickness", "custom_unit_weight", "custom_sec_qty"]
@@ -56,14 +56,26 @@ def before_insert_batch(doc, method):
 
 
 def _setup_batch_from_purchase_receipt(doc):
-    pr_item = frappe.db.get_value(
-        "Purchase Receipt Item",
-        {"parent": doc.reference_name, "item_code": doc.item},
-        ["custom_thickness", "custom_length", "custom_width", "custom_sec_qty", "custom_sec_uom"],
-        as_dict=True,
+    # When multiple rows of the same item exist in the PR, count how many batches
+    # have already been created for this PR + item to pick the correct row by idx.
+    already_created = frappe.db.count(
+        "Batch",
+        filters={
+            "reference_doctype": "Purchase Receipt",
+            "reference_name": doc.reference_name,
+            "item": doc.item,
+        },
     )
-    if not pr_item:
+    pr_items = frappe.db.get_all(
+        "Purchase Receipt Item",
+        filters={"parent": doc.reference_name, "item_code": doc.item},
+        fields=["custom_thickness", "custom_length", "custom_width", "custom_sec_qty", "custom_sec_uom"],
+        order_by="idx asc",
+    )
+    if not pr_items:
         return
+    row_index = already_created if already_created < len(pr_items) else 0
+    pr_item = pr_items[row_index]
 
     batch_prefix = frappe.db.get_value("Item", doc.item, "custom_batch_prefix")
     if not batch_prefix:
@@ -223,3 +235,134 @@ def _check_missing_fields(row, throw):
             frappe.throw(msg)
         else:
             frappe.msgprint(msg, indicator="orange", title=_("Missing Fields"))
+
+
+# ── Material Planning auto-allocation ────────────────────────────────────────
+
+@frappe.whitelist()
+def get_mp_for_pr(pr_name):
+    """Trace PR → PO → MR → Material Planning. Returns list of MP names linked to this PR."""
+    rows = frappe.db.sql(
+        """
+        SELECT DISTINCT mr.custom_material_planning
+        FROM `tabPurchase Receipt Item`  pri
+        JOIN `tabPurchase Order Item`    poi ON poi.name  = pri.purchase_order_item
+        JOIN `tabMaterial Request Item`  mri ON mri.name  = poi.material_request_item
+        JOIN `tabMaterial Request`       mr  ON mr.name   = mri.parent
+        WHERE pri.parent = %(pr)s
+          AND mr.custom_material_planning IS NOT NULL
+          AND mr.custom_material_planning != ''
+        """,
+        {"pr": pr_name},
+    )
+    return [r[0] for r in rows if r[0]]
+
+
+@frappe.whitelist()
+def allocate_pr_stock_to_mp(pr_name, mp_name):
+    """
+    Allocate batches received on a PR into the linked Material Planning.
+    - Original item purchased  → Available Raw Materials (Exact Match)
+    - Alternate item purchased → Material Mapping (Partial Stock)
+    """
+    pr = frappe.get_doc("Purchase Receipt", pr_name)
+    mp = frappe.get_doc("Material Planning", mp_name)
+
+    # Index MP unavailable_items for O(1) lookup
+    by_alternate = {}   # alternate_item → [mp_row, ...]
+    by_original  = {}   # item_code      → [mp_row, ...]
+    for row in (mp.unavailable_items or []):
+        if row.alternate_item:
+            by_alternate.setdefault(row.alternate_item, []).append(row)
+        by_original.setdefault(row.item_code, []).append(row)
+
+    # Existing allocations — avoid duplicates
+    existing_exact   = {(r.item_code, r.batch_no)           for r in (mp.available_raw_materials or [])}
+    existing_mapping = {(r.item_code, r.batch or "")        for r in (mp.material_mapping       or [])}
+
+    added_exact   = 0
+    added_mapping = 0
+
+    for pr_item in pr.items:
+        if not pr_item.purchase_order_item:
+            continue
+
+        # Confirm this PR item traces back to our MP
+        mr_item_name = frappe.db.get_value(
+            "Purchase Order Item", pr_item.purchase_order_item, "material_request_item"
+        )
+        if not mr_item_name:
+            continue
+        mr_name = frappe.db.get_value("Material Request Item", mr_item_name, "parent")
+        if not mr_name:
+            continue
+        item_mp = frappe.db.get_value("Material Request", mr_name, "custom_material_planning")
+        if item_mp != mp_name:
+            continue
+
+        item_code = pr_item.item_code
+        batch_no  = pr_item.batch_no or ""
+
+        if item_code in by_alternate:
+            # Alternate item purchased → Material Mapping
+            for mp_row in by_alternate[item_code]:
+                key = (mp_row.item_code, batch_no)
+                if key in existing_mapping:
+                    continue
+                existing_mapping.add(key)
+                mp.append("material_mapping", {
+                    "item_number":       mp_row.item_number,
+                    "sales_order":       mp_row.sales_order,
+                    "item_code":         mp_row.item_code,
+                    "item_name":         mp_row.item_name,
+                    "bom_no":            mp_row.bom_no,
+                    "duno_mark_no":      mp_row.duno_mark_no,
+                    "qty":               mp_row.qty,
+                    "uom":               mp_row.uom,
+                    "sec_qty":           flt(pr_item.custom_sec_qty) or mp_row.sec_qty,
+                    "sec_uom":           mp_row.sec_uom,
+                    "parent_item_group": mp_row.parent_item_group,
+                    "length":            flt(pr_item.custom_length)    or mp_row.length,
+                    "width":             flt(pr_item.custom_width)     or mp_row.width,
+                    "thickness":         flt(pr_item.custom_thickness) or mp_row.thickness,
+                    "unit_weight":       mp_row.unit_weight,
+                    "batch":             batch_no,
+                    "planned_item":      item_code,
+                })
+                added_mapping += 1
+
+        elif item_code in by_original:
+            # Original item purchased → Available Raw Materials (Exact Match)
+            item_data = frappe.db.get_value(
+                "Item", item_code,
+                ["stock_uom", "custom_secondary_uom"],
+                as_dict=True,
+            ) or {}
+            for mp_row in by_original[item_code]:
+                key = (item_code, batch_no)
+                if key in existing_exact:
+                    continue
+                existing_exact.add(key)
+                mp.append("available_raw_materials", {
+                    "item_number":       mp_row.item_number,
+                    "sales_order":       mp_row.sales_order,
+                    "item_code":         item_code,
+                    "item_name":         pr_item.item_name or mp_row.item_name,
+                    "batch_no":          batch_no,
+                    "parent_item_group": mp_row.parent_item_group,
+                    "length":            flt(pr_item.custom_length)    or mp_row.length,
+                    "width":             flt(pr_item.custom_width)     or mp_row.width,
+                    "thickness":         flt(pr_item.custom_thickness) or mp_row.thickness,
+                    "required_qty":      mp_row.qty,
+                    "available_qty":     pr_item.qty,
+                    "sec_qty":           flt(pr_item.custom_sec_qty)   or mp_row.sec_qty,
+                    "sec_uom":           item_data.get("custom_secondary_uom") or mp_row.sec_uom,
+                    "uom":               item_data.get("stock_uom")    or mp_row.uom,
+                    "warehouse":         pr_item.warehouse or mp.for_warehouse,
+                })
+                added_exact += 1
+
+    if added_exact or added_mapping:
+        mp.save(ignore_permissions=True)
+
+    return {"added_exact": added_exact, "added_mapping": added_mapping}

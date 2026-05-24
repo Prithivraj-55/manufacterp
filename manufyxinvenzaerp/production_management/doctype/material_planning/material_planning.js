@@ -146,6 +146,18 @@ frappe.ui.form.on("Material Planning", {
 			g.refresh();
 		});
 
+		// Lock BOM Items once a Production Plan has been created
+		if (frm.doc.production_plan) {
+			frm.set_df_property("bom_items", "read_only", 1);
+			let bom_grid = frm.fields_dict["bom_items"] && frm.fields_dict["bom_items"].grid;
+			if (bom_grid) {
+				bom_grid.df.read_only = 1;
+				bom_grid.cannot_add_rows = true;
+				bom_grid.df.cannot_delete_rows = true;
+				bom_grid.refresh();
+			}
+		}
+
 		// Grid toolbar buttons — guard against duplicates on re-render
 		if (!frm._grid_btns_added) {
 			frm._grid_btns_added = true;
@@ -640,10 +652,13 @@ function _show_material_request_dialog(frm) {
 		frappe.msgprint(__("No unavailable items to request."));
 		return;
 	}
-	// Save first so the server reads current unavailable_items state
-	frm.save()
-		.then(function() { _build_material_request_dialog(frm, items); })
-		.catch(function() { frappe.msgprint(__("Please save the document successfully before creating a Material Request.")); });
+	if (frm.is_dirty()) {
+		frm.save()
+			.then(function() { _build_material_request_dialog(frm, items); })
+			.catch(function() { frappe.msgprint(__("Please save the document successfully before creating a Material Request.")); });
+	} else {
+		_build_material_request_dialog(frm, items);
+	}
 }
 
 function _build_material_request_dialog(frm, items) {
@@ -658,10 +673,15 @@ function _build_material_request_dialog(frm, items) {
 	];
 
 	items.forEach(function (row, idx) {
+		let display_item = row.alternate_item ? row.alternate_item : `${row.item_code} — ${row.item_name || ""}`;
+		let display_qty  = row.alternate_item && row.alternate_quantity
+			? `${flt(row.alternate_quantity).toFixed(3)} Kg`
+			: `${row.qty} ${row.uom || ""}`;
+		let alt_suffix   = row.alternate_item ? ` (Alt for ${row.item_code})` : "";
 		fields.push({
 			fieldname: "item_" + idx,
 			fieldtype: "Check",
-			label: `${row.item_code} — ${row.item_name || ""} | Qty: ${row.qty} ${row.uom || ""}`,
+			label: `${display_item} | Qty: ${display_qty}${alt_suffix}`,
 			default: 1,
 		});
 	});
@@ -708,37 +728,97 @@ function _build_material_request_dialog(frm, items) {
 	d.show();
 }
 
+// ── Alternate dimension UI helpers ───────────────────────────────────────────
+
+function _apply_alternate_dim_ui(frm, cdt, cdn, group) {
+	let get_df = function(fn) {
+		return frappe.meta.get_docfield("Material Planning Unavailable Item", fn, frm.doc.name);
+	};
+
+	// Defaults: hide all, not required
+	let cfg = {
+		alternate_length:    { hidden: 1, reqd: 0 },
+		alternate_width:     { hidden: 1, reqd: 0 },
+		alternate_thickness: { hidden: 1, reqd: 0 },
+		alternate_sec_qty:   { hidden: 1, reqd: 0 },
+	};
+
+	if (group === "Structurals") {
+		cfg.alternate_length.hidden  = 0; cfg.alternate_length.reqd  = 1;
+		cfg.alternate_sec_qty.hidden = 0; cfg.alternate_sec_qty.reqd = 1;
+	} else if (group === "Plates") {
+		cfg.alternate_length.hidden    = 0; cfg.alternate_length.reqd    = 1;
+		cfg.alternate_width.hidden     = 0; cfg.alternate_width.reqd     = 1;
+		cfg.alternate_thickness.hidden = 0; cfg.alternate_thickness.reqd = 1;
+		cfg.alternate_sec_qty.hidden   = 0; cfg.alternate_sec_qty.reqd   = 1;
+	}
+
+	Object.keys(cfg).forEach(function(fn) {
+		let df = get_df(fn);
+		if (df) { df.hidden = cfg[fn].hidden; df.reqd = cfg[fn].reqd; }
+	});
+
+	frm.refresh_field("unavailable_items");
+}
+
+function _recalc_alternate_quantity(frm, cdt, cdn) {
+	let row = locals[cdt][cdn];
+	let group = row.alternate_parent_item_group || "";
+	let L  = flt(row.alternate_length);
+	let W  = flt(row.alternate_width);
+	let T  = flt(row.alternate_thickness);
+	let S  = flt(row.alternate_sec_qty);
+	let UW = flt(row.alternate_unit_weight);
+
+	let qty = 0;
+	if (group === "Structurals" && L && UW && S) {
+		qty = (L / 1000) * UW * S;
+	} else if (group === "Plates" && L && W && T && UW && S) {
+		qty = (L / 1000) * (W / 1000) * T * UW * S;
+	}
+	frappe.model.set_value(cdt, cdn, "alternate_quantity", qty);
+}
+
 frappe.ui.form.on("Material Planning Unavailable Item", {
+	form_render(frm, cdt, cdn) {
+		// Restore field visibility when an existing row is expanded
+		let row = locals[cdt][cdn];
+		_apply_alternate_dim_ui(frm, cdt, cdn, row.alternate_parent_item_group || null);
+	},
+
 	alternate_item(frm, cdt, cdn) {
 		let row = locals[cdt][cdn];
 		if (!row.alternate_item) {
-			// Hide all alternate dimension fields when cleared
-			frappe.model.set_value(cdt, cdn, "alternate_length", 0);
-			frappe.model.set_value(cdt, cdn, "alternate_width", 0);
-			frappe.model.set_value(cdt, cdn, "alternate_thickness", 0);
-			frappe.meta.get_docfield("Material Planning Unavailable Item", "alternate_length", frm.doc.name).hidden = 1;
-			frappe.meta.get_docfield("Material Planning Unavailable Item", "alternate_width", frm.doc.name).hidden = 1;
-			frappe.meta.get_docfield("Material Planning Unavailable Item", "alternate_thickness", frm.doc.name).hidden = 1;
+			frappe.model.set_value(cdt, cdn, "alternate_length",            0);
+			frappe.model.set_value(cdt, cdn, "alternate_width",             0);
+			frappe.model.set_value(cdt, cdn, "alternate_thickness",         0);
+			frappe.model.set_value(cdt, cdn, "alternate_sec_qty",           0);
+			frappe.model.set_value(cdt, cdn, "alternate_unit_weight",       0);
+			frappe.model.set_value(cdt, cdn, "alternate_quantity",          0);
+			frappe.model.set_value(cdt, cdn, "alternate_parent_item_group", "");
+			_apply_alternate_dim_ui(frm, cdt, cdn, null);
 			return;
 		}
-		// Read the 3 mandatory checkboxes from the alternate Item and show only relevant dimension fields
 		frappe.db.get_value(
 			"Item",
 			row.alternate_item,
-			["custom_mandatory_length", "custom_mandatory_width", "custom_mandatory_thickness"],
-			function (d) {
+			["custom_parent_item_group", "custom_unit_weight"],
+			function(d) {
 				if (!d) return;
-				let show_l = d.custom_mandatory_length  ? 1 : 0;
-				let show_w = d.custom_mandatory_width   ? 1 : 0;
-				let show_t = d.custom_mandatory_thickness ? 1 : 0;
-
-				frappe.meta.get_docfield("Material Planning Unavailable Item", "alternate_length",    frm.doc.name).hidden = show_l ? 0 : 1;
-				frappe.meta.get_docfield("Material Planning Unavailable Item", "alternate_width",     frm.doc.name).hidden = show_w ? 0 : 1;
-				frappe.meta.get_docfield("Material Planning Unavailable Item", "alternate_thickness", frm.doc.name).hidden = show_t ? 0 : 1;
-				frm.refresh_field("unavailable_items");
+				let group = d.custom_parent_item_group || "";
+				frappe.model.set_value(cdt, cdn, "alternate_parent_item_group", group);
+				frappe.model.set_value(cdt, cdn, "alternate_unit_weight", flt(d.custom_unit_weight));
+				_apply_alternate_dim_ui(frm, cdt, cdn, group);
+				_recalc_alternate_quantity(frm, cdt, cdn);
 			}
 		);
 	},
+
+	alternate_length(frm, cdt, cdn)    { _recalc_alternate_quantity(frm, cdt, cdn); },
+	alternate_width(frm, cdt, cdn)     { _recalc_alternate_quantity(frm, cdt, cdn); },
+	alternate_thickness(frm, cdt, cdn) { _recalc_alternate_quantity(frm, cdt, cdn); },
+	alternate_sec_qty(frm, cdt, cdn)   { _recalc_alternate_quantity(frm, cdt, cdn); },
+	alternate_unit_weight(frm, cdt, cdn) { _recalc_alternate_quantity(frm, cdt, cdn); },
 });
 
 // Table 3: batch field events on Material Mapping rows

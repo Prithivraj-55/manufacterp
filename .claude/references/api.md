@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-05-24 13:24:49_
+_Generated: 2026-05-24 18:02:00_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -27,11 +27,16 @@ All `@frappe.whitelist()` methods. Call from JS:
 | Method | Line |
 |--------|------|
 | `create_production_plan_from_bom` | 235 |
-| `parse_drawing_items_csv` | 286 |
+| `parse_drawing_items_csv` | 288 |
 | `mark_as_final_revision` | 45 |
 | `get_batches_for_drawing_item` | 59 |
 | `create_drawings_from_so` | 7 |
 | `create_bom_from_drawing` | 91 |
+## item_management/item.py
+
+| Method | Line |
+|--------|------|
+| `has_item_transactions` | 125 |
 ## material_request_management/material_request.py
 
 | Method | Line |
@@ -41,26 +46,27 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `check_stock_availability` | 180 |
+| `check_stock_availability` | 172 |
 | `@frappe.validate_and_sanitize_search_inputs` | 19 |
-| `move_to_exact_match` | 323 |
-| `finalize_mapping` | 386 |
-| `get_batch_item` | 430 |
-| `reserve_batches` | 480 |
-| `get_bom_info` | 52 |
-| `reserve_exact_match_batches` | 565 |
-| `unreserve_exact_match_batches` | 643 |
-| `check_mapping_batch_availability` | 684 |
-| `unreserve_batches` | 735 |
-| `_test_simulate_se_release` | 776 |
-| `make_production_plan` | 795 |
-| `make_material_request` | 838 |
-| `get_raw_materials` | 100 |
+| `move_to_exact_match` | 372 |
+| `finalize_mapping` | 435 |
+| `get_bom_info` | 44 |
+| `get_batch_reservation_summary` | 479 |
+| `get_batch_item` | 513 |
+| `reserve_batches` | 563 |
+| `reserve_exact_match_batches` | 648 |
+| `unreserve_exact_match_batches` | 726 |
+| `check_mapping_batch_availability` | 767 |
+| `unreserve_batches` | 818 |
+| `_test_simulate_se_release` | 859 |
+| `make_production_plan` | 878 |
+| `get_raw_materials` | 92 |
+| `make_material_request` | 936 |
 ## production_management/production_utils.py
 
 | Method | Line |
 |--------|------|
-| `get_raw_materials_for_job_card` | 117 |
+| `get_raw_materials_for_job_card` | 120 |
 | `get_routing_operations_for_bom` | 95 |
 ## production_plan_management/production_plan.py
 
@@ -96,4 +102,4 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 ## Total
 
-_44 whitelisted methods_
+_46 whitelisted methods_

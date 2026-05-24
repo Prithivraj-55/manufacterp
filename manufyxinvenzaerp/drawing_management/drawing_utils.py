@@ -254,6 +254,8 @@ def create_production_plan_from_bom(bom_name):
             "planned_qty": flt(bom.quantity) or 1,
             "planned_start_date": frappe.utils.now_datetime(),
             "stock_uom": stock_uom,
+            "custom_drawing": bom.get("custom_drawing") or "",
+            "custom_duno_mark_no": bom.get("custom_duno_mark_no") or 0,
         },
     )
 

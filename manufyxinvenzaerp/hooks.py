@@ -58,6 +58,7 @@ doctype_js = {
     "BOM": "public/js/bom.js",
     "Purchase Order": "public/js/purchase_order.js",
     "Purchase Receipt": "public/js/purchase_receipt.js",
+    "Batch": "public/js/batch.js",
 }
 # Svg Icons
 # ------------------
@@ -194,6 +195,8 @@ doc_events = {
 	},
 	"Production Plan": {
 		"validate": "manufyxinvenzaerp.production_plan_management.production_plan.after_save_production_plan",
+		"on_trash": "manufyxinvenzaerp.production_plan_management.production_plan.unlink_production_plan_on_trash",
+		"on_cancel": "manufyxinvenzaerp.production_plan_management.production_plan.unlink_production_plan_on_trash",
 	},
 }
 

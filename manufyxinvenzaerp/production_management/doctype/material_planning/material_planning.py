@@ -27,6 +27,7 @@ def search_bom(doctype, txt, searchfield, start, page_len, filters):
         SELECT b.name, b.item, b.item_name, b.custom_duno_mark_no
         FROM `tabBOM` b
         WHERE b.docstatus < 2
+          AND b.routing = 'Standard Manufacturing Routing'
           AND (
               b.name LIKE %(txt)s
               OR b.item LIKE %(txt)s
@@ -171,12 +172,14 @@ def get_raw_materials(doc):
 @frappe.whitelist()
 def check_stock_availability(doc):
     """
-    For each row in raw_materials classify into three buckets:
-      - available_raw_materials : exact dimension batch match found
-      - material_mapping        : some stock exists but no exact dimension match
-      - unavailable_items       : no stock at all in the warehouse
+    For each row in raw_materials classify into buckets:
+      Batch items:
+        - available_raw_materials : exact dimension + batch match found
+        - material_mapping        : no dimension-matching batch stock remaining
+      Non-batch items:
+        - available_raw_materials : plain stock qty >= required
+        - unavailable_items       : plain stock qty < required (needs purchase)
     Also updates raw_materials rows with available_qty and shortage_qty.
-    Returns dict with all four lists.
     """
     from manufyxinvenzaerp.production_plan_management.production_plan import get_sbb_available_qty
 
@@ -190,8 +193,6 @@ def check_stock_availability(doc):
     location = doc.get("store_location") or None
 
     # Capture existing reserved rows so they survive a re-check.
-    # Key = (item_code, bom_no) — unique enough since BOM explosion won't
-    # produce two rows for the same item from the same BOM.
     reserved_by_key = {}
     for r in doc.get("material_mapping") or []:
         if r.get("is_reserved"):
@@ -203,43 +204,23 @@ def check_stock_availability(doc):
     material_mapping = []
     unavailable_items = []
 
-    # Track remaining qty per batch across all rows so the same batch is not
-    # double-counted when multiple raw material rows share the same item/dimensions.
+    # Track remaining qty per batch so the same batch is not double-counted.
     batch_remaining = {}
+    mp_name = doc.get("name") or ""
+
+    # Pre-fetch has_batch_no for all items in one query.
+    all_item_codes = list({r.get("item_code") for r in doc.get("raw_materials") or [] if r.get("item_code")})
+    item_batch_flag = {}
+    if all_item_codes:
+        for rec in frappe.get_all("Item", filters={"name": ["in", all_item_codes]}, fields=["name", "has_batch_no"]):
+            item_batch_flag[rec.name] = rec.has_batch_no
 
     for row in doc.get("raw_materials") or []:
         item_code = row.get("item_code")
         required_qty = flt(row.get("qty"))
-        dimensions = {
-            "custom_length": flt(row.get("length")),
-            "custom_thickness": flt(row.get("thickness")),
-            "custom_width": flt(row.get("width")),
-        }
+        has_batch = item_batch_flag.get(item_code, 0)
 
-        _, raw_matched_batches = get_sbb_available_qty(item_code, warehouse, dimensions, location=location)
-
-        # Seed batch_remaining for batches seen for the first time
-        for b in raw_matched_batches:
-            if b["batch_no"] not in batch_remaining:
-                batch_remaining[b["batch_no"]] = flt(b["qty"])
-
-        # Use remaining quantities — skip batches already fully consumed
-        matched_batches = [
-            {**b, "qty": batch_remaining[b["batch_no"]]}
-            for b in raw_matched_batches
-            if batch_remaining.get(b["batch_no"], 0) > 0
-        ]
-
-        available_qty = sum(flt(b["qty"]) for b in matched_batches)
-        shortage = max(0.0, required_qty - available_qty)
-
-        updated_row = dict(row)
-        updated_row["available_qty"] = available_qty
-        updated_row["shortage_qty"] = shortage
-        updated_row["store_location"] = location or ""
-        updated_raw_materials.append(updated_row)
-
-        base_mapping = {
+        base_row = {
             "item_number": row.get("item_number") or 0,
             "sales_order": row.get("sales_order") or "",
             "item_code": item_code,
@@ -259,49 +240,111 @@ def check_stock_availability(doc):
             "store_location": location or "",
         }
 
-        if matched_batches:
-            # Deduct this row's required_qty from batch_remaining in order
-            to_consume = required_qty
-            for b in matched_batches:
-                if to_consume <= 0:
-                    break
-                consumed = min(batch_remaining[b["batch_no"]], to_consume)
-                batch_remaining[b["batch_no"]] -= consumed
-                to_consume -= consumed
+        if has_batch:
+            # ── Batch item: match by exact dimensions via SBB ──────────────
+            dimensions = {
+                "custom_length": flt(row.get("length")),
+                "custom_thickness": flt(row.get("thickness")),
+                "custom_width": flt(row.get("width")),
+            }
 
-            for b in matched_batches:
+            _, raw_matched_batches = get_sbb_available_qty(item_code, warehouse, dimensions, location=location)
+
+            for b in raw_matched_batches:
+                if b["batch_no"] not in batch_remaining:
+                    reserved_by_others = _get_batch_reserved_by_others(b["batch_no"], mp_name)
+                    net_qty = max(0.0, flt(b["qty"]) - reserved_by_others)
+                    batch_remaining[b["batch_no"]] = net_qty
+
+            matched_batches = [
+                {**b, "qty": batch_remaining[b["batch_no"]]}
+                for b in raw_matched_batches
+                if batch_remaining.get(b["batch_no"], 0) > 0
+            ]
+
+            available_qty = sum(flt(b["qty"]) for b in matched_batches)
+            shortage = max(0.0, required_qty - available_qty)
+
+            updated_row = dict(row)
+            updated_row["available_qty"] = available_qty
+            updated_row["shortage_qty"] = shortage
+            updated_row["store_location"] = location or ""
+            updated_raw_materials.append(updated_row)
+
+            if matched_batches:
+                to_consume = required_qty
+                for b in matched_batches:
+                    if to_consume <= 0:
+                        break
+                    consumed = min(batch_remaining[b["batch_no"]], to_consume)
+                    batch_remaining[b["batch_no"]] -= consumed
+                    to_consume -= consumed
+
+                for b in matched_batches:
+                    available_raw_materials.append({
+                        "item_number": row.get("item_number") or 0,
+                        "sales_order": row.get("sales_order") or "",
+                        "item_code": item_code,
+                        "item_name": row.get("item_name"),
+                        "batch_no": b["batch_no"],
+                        "required_qty": required_qty,
+                        "available_qty": flt(b["qty"]),
+                        "sec_qty": flt(b.get("custom_sec_qty")),
+                        "sec_uom": b.get("custom_sec_uom") or row.get("sec_uom"),
+                        "uom": row.get("uom"),
+                        "length": flt(row.get("length")),
+                        "thickness": flt(row.get("thickness")),
+                        "width": flt(row.get("width")),
+                        "warehouse": warehouse,
+                        "parent_item_group": row.get("parent_item_group"),
+                        "store_location": location or "",
+                    })
+            else:
+                # No dimension-matching batch stock — send to Material Mapping.
+                existing = reserved_by_key.get((item_code, row.get("bom_no") or ""))
+                if existing:
+                    base_row.update({
+                        "batch": existing.get("batch"),
+                        "planned_item": existing.get("planned_item"),
+                        "is_reserved": existing.get("is_reserved"),
+                        "reserved_qty": existing.get("reserved_qty"),
+                        "shortfall_qty": existing.get("shortfall_qty"),
+                        "reserved_on": existing.get("reserved_on"),
+                    })
+                material_mapping.append(base_row)
+
+        else:
+            # ── Non-batch item: check plain stock qty in the warehouse ──────
+            available_qty = _get_non_batch_stock(item_code, warehouse)
+            shortage = max(0.0, required_qty - available_qty)
+
+            updated_row = dict(row)
+            updated_row["available_qty"] = min(available_qty, required_qty)
+            updated_row["shortage_qty"] = shortage
+            updated_row["store_location"] = location or ""
+            updated_raw_materials.append(updated_row)
+
+            if available_qty >= required_qty:
                 available_raw_materials.append({
                     "item_number": row.get("item_number") or 0,
                     "sales_order": row.get("sales_order") or "",
                     "item_code": item_code,
                     "item_name": row.get("item_name"),
-                    "batch_no": b["batch_no"],
+                    "batch_no": "",
                     "required_qty": required_qty,
-                    "available_qty": flt(b["qty"]),
-                    "sec_qty": flt(b.get("custom_sec_qty")),
-                    "sec_uom": b.get("custom_sec_uom") or row.get("sec_uom"),
+                    "available_qty": available_qty,
+                    "sec_qty": flt(row.get("sec_qty")),
+                    "sec_uom": row.get("sec_uom") or "",
                     "uom": row.get("uom"),
-                    "length": flt(row.get("length")),
-                    "thickness": flt(row.get("thickness")),
-                    "width": flt(row.get("width")),
+                    "length": 0.0,
+                    "thickness": 0.0,
+                    "width": 0.0,
                     "warehouse": warehouse,
                     "parent_item_group": row.get("parent_item_group"),
                     "store_location": location or "",
                 })
-        else:
-            # No remaining stock in any matching batch — send to Material Mapping.
-            # Restore reservation data if this row was previously reserved.
-            existing = reserved_by_key.get((item_code, row.get("bom_no") or ""))
-            if existing:
-                base_mapping.update({
-                    "batch": existing.get("batch"),
-                    "planned_item": existing.get("planned_item"),
-                    "is_reserved": existing.get("is_reserved"),
-                    "reserved_qty": existing.get("reserved_qty"),
-                    "shortfall_qty": existing.get("shortfall_qty"),
-                    "reserved_on": existing.get("reserved_on"),
-                })
-            material_mapping.append(base_mapping)
+            else:
+                unavailable_items.append(base_row)
 
     return {
         "raw_materials": updated_raw_materials,
@@ -309,6 +352,21 @@ def check_stock_availability(doc):
         "material_mapping": material_mapping,
         "unavailable_items": unavailable_items,
     }
+
+
+def _get_non_batch_stock(item_code, warehouse):
+    """Return current stock balance for a non-batch item in a warehouse via SLE."""
+    result = frappe.db.sql(
+        """
+        SELECT COALESCE(SUM(actual_qty), 0) AS qty
+        FROM `tabStock Ledger Entry`
+        WHERE item_code = %s AND warehouse = %s
+          AND is_cancelled = 0 AND docstatus < 2
+        """,
+        (item_code, warehouse),
+        as_dict=True,
+    )
+    return flt(result[0].qty if result else 0)
 
 
 @frappe.whitelist()
@@ -416,6 +474,40 @@ def finalize_mapping(doc):
         "material_mapping": mapped,
         "unavailable_items": unavailable,
     }
+
+
+@frappe.whitelist()
+def get_batch_reservation_summary(batch_no):
+    """Return all active reservations for a batch, enriched with SO customer and project."""
+    rows = frappe.db.sql(
+        """
+        SELECT mm.parent AS mp_name, mm.sales_order, mm.reserved_qty, mm.item_code, mm.item_name
+        FROM `tabMaterial Planning Material Mapping` mm
+        WHERE mm.batch = %s AND mm.is_reserved = 1
+
+        UNION ALL
+
+        SELECT arm.parent AS mp_name, arm.sales_order, arm.reserved_qty, arm.item_code, arm.item_name
+        FROM `tabMaterial Planning Available Raw Material` arm
+        WHERE arm.batch_no = %s AND arm.is_reserved = 1
+        """,
+        (batch_no, batch_no),
+        as_dict=True,
+    )
+
+    so_cache = {}
+    for row in rows:
+        so = row.get("sales_order") or ""
+        if so and so not in so_cache:
+            so_data = frappe.db.get_value(
+                "Sales Order", so, ["customer", "project"], as_dict=True
+            ) or {}
+            so_cache[so] = so_data
+        d = so_cache.get(so) or {}
+        row["customer"] = d.get("customer") or ""
+        row["project"] = d.get("project") or ""
+
+    return rows
 
 
 @frappe.whitelist()
@@ -805,6 +897,8 @@ def make_production_plan(material_planning_name):
     pp.ignore_existing_ordered_qty = mp.ignore_existing_ordered_qty
     pp.get_items_from = "Sales Order"
 
+    from manufyxinvenzaerp.production_management.production_utils import get_routing_operations_for_bom
+
     for row in mp.bom_items:
         item_code = row.item_code or frappe.db.get_value("BOM", row.bom_no, "item")
         item_name = row.item_name or frappe.db.get_value("Item", item_code, "item_name") or item_code
@@ -819,7 +913,20 @@ def make_production_plan(material_planning_name):
             "sales_order": row.sales_order or "",
             "custom_customer": row.customer or "",
             "warehouse": mp.for_warehouse or "",
+            "custom_drawing": row.drawing or "",
+            "custom_duno_mark_no": row.duno_mark_no or 0,
+            "custom_material_planning": material_planning_name,
         })
+
+    # Populate Process Planning from the first BOM's operations
+    if mp.bom_items:
+        first_bom = mp.bom_items[0].bom_no
+        if first_bom:
+            for op in get_routing_operations_for_bom(first_bom):
+                pp.append("custom_process_planning", {
+                    "operation_name": op.get("operation"),
+                    "work_type": "Internal Jobcard",
+                })
 
     pp.insert(ignore_permissions=True)
     frappe.db.set_value("Material Planning", material_planning_name, "production_plan", pp.name)
@@ -868,43 +975,63 @@ def make_material_request(material_planning_name, selected_items):
     mr.set("items", [])
 
     for row in rows_to_request:
-        # Use alternate item if specified, otherwise use the original item
         order_item = row.alternate_item or row.item_code
-        order_item_name = (
-            frappe.db.get_value("Item", order_item, "item_name") if row.alternate_item
-            else row.item_name
-        )
-        uom = frappe.db.get_value("Item", order_item, "stock_uom") or row.uom or "Nos"
+        item_data = frappe.db.get_value(
+            "Item", order_item,
+            ["item_name", "stock_uom", "custom_parent_item_group", "custom_unit_weight"],
+            as_dict=True,
+        ) or {}
 
-        # Use alternate item's dimensions if set, else fall back to original row dimensions
-        use_length    = flt(row.alternate_length)    if row.alternate_item and flt(row.alternate_length)    else flt(row.length)
-        use_width     = flt(row.alternate_width)     if row.alternate_item and flt(row.alternate_width)     else flt(row.width)
-        use_thickness = flt(row.alternate_thickness) if row.alternate_item and flt(row.alternate_thickness) else flt(row.thickness)
+        order_item_name = item_data.get("item_name") or order_item
+        uom             = item_data.get("stock_uom") or row.uom or "Nos"
+        group           = item_data.get("custom_parent_item_group") or ""
 
-        # Validate mandatory dimensions based on the ordered item's flags (if custom fields exist)
-        try:
-            flags = frappe.db.get_value(
-                "Item", order_item,
-                ["custom_mandatory_length", "custom_mandatory_width", "custom_mandatory_thickness"],
-                as_dict=True,
-            ) or {}
-        except Exception:
-            flags = {}
-        missing = []
-        if flags.get("custom_mandatory_length") and not use_length:
-            missing.append("Length")
-        if flags.get("custom_mandatory_width") and not use_width:
-            missing.append("Width")
-        if flags.get("custom_mandatory_thickness") and not use_thickness:
-            missing.append("Thickness")
-        if missing:
-            frappe.throw(
-                _("Item {0}: {1} {2} mandatory but not set. Fill the dimension(s) before creating a Material Request.").format(
-                    order_item,
-                    ", ".join(missing),
-                    _("is") if len(missing) == 1 else _("are"),
+        # Dimensions — alternate item values take priority
+        if row.alternate_item:
+            use_length      = flt(row.alternate_length)
+            use_width       = flt(row.alternate_width)
+            use_thickness   = flt(row.alternate_thickness)
+            use_sec_qty     = flt(row.alternate_sec_qty) or flt(row.sec_qty)
+            use_unit_weight = flt(row.alternate_unit_weight) or flt(item_data.get("custom_unit_weight"))
+        else:
+            use_length      = flt(row.length)
+            use_width       = flt(row.width)
+            use_thickness   = flt(row.thickness)
+            use_sec_qty     = flt(row.sec_qty)
+            use_unit_weight = flt(row.unit_weight)
+
+        # Validate mandatory dimensions by parent item group
+        if group == "Structurals":
+            missing = []
+            if not use_length:      missing.append("Length")
+            if not use_sec_qty:     missing.append("Sec Qty")
+            if not use_unit_weight: missing.append("Unit Weight")
+            if missing:
+                frappe.throw(
+                    _("Item {0}: {1} required for Structurals formula.").format(
+                        order_item, ", ".join(missing)
+                    )
                 )
-            )
+        elif group == "Plates":
+            missing = []
+            if not use_length:      missing.append("Length")
+            if not use_width:       missing.append("Width")
+            if not use_thickness:   missing.append("Thickness")
+            if not use_sec_qty:     missing.append("Sec Qty")
+            if not use_unit_weight: missing.append("Unit Weight")
+            if missing:
+                frappe.throw(
+                    _("Item {0}: {1} required for Plates formula.").format(
+                        order_item, ", ".join(missing)
+                    )
+                )
+
+        # Calculate qty using the same formula as Purchase Order
+        qty = flt(row.qty) or 1
+        if group == "Structurals" and use_length and use_unit_weight and use_sec_qty:
+            qty = (use_length / 1000) * use_unit_weight * use_sec_qty
+        elif group == "Plates" and all([use_length, use_width, use_thickness, use_unit_weight, use_sec_qty]):
+            qty = (use_length / 1000) * (use_width / 1000) * use_thickness * use_unit_weight * use_sec_qty
 
         dim_parts = []
         if use_length:    dim_parts.append(f"L={use_length}mm")
@@ -916,24 +1043,25 @@ def make_material_request(material_planning_name, selected_items):
             description += f" [Alt for {row.item_code}]"
 
         mr.append("items", {
-            "item_code":        order_item,
-            "item_name":        order_item_name,
-            "qty":              ceil(flt(row.qty) or 1),
-            "uom":              uom,
-            "stock_uom":        uom,
-            "conversion_factor": 1,
-            "schedule_date":    today(),
-            "warehouse":        mp.for_warehouse or "",
-            "description":      description,
-            "custom_length":    use_length,
-            "custom_width":     use_width,
-            "custom_thickness": use_thickness,
+            "item_code":                order_item,
+            "item_name":                order_item_name,
+            "qty":                      qty,
+            "uom":                      uom,
+            "stock_uom":                uom,
+            "conversion_factor":        1,
+            "schedule_date":            today(),
+            "warehouse":                mp.for_warehouse or "",
+            "description":              description,
+            "custom_length":            use_length,
+            "custom_width":             use_width,
+            "custom_thickness":         use_thickness,
+            "custom_unit_weight":       use_unit_weight,
+            "custom_sec_qty":           use_sec_qty,
+            "custom_parent_item_group": group,
         })
 
     mr.custom_material_planning = material_planning_name
     mr.insert(ignore_permissions=True)
-
-    frappe.db.commit()
     return mr.name
 
 

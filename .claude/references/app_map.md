@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-05-24 13:24:49_
+_Generated: 2026-05-24 18:02:00_
 
 ## Modules
 
@@ -114,11 +114,12 @@ _Total: 84_
 
 ## JavaScript files
 
-_Total: 8_
+_Total: 9_
 
 - drawing_management/doctype/drawing/drawing.js
 - production_management/doctype/material_planning/material_planning.js
 - production_management/report/manufyxinvenza_stock_balance/manufyxinvenza_stock_balance.js
+- public/js/batch.js
 - public/js/bom.js
 - public/js/item.js
 - public/js/production_plan.js
@@ -213,8 +214,10 @@ _Total: 20_
   - get_bom_info:
   - get_raw_materials:
   - check_stock_availability:
+  - _get_non_batch_stock:
   - move_to_exact_match:
   - finalize_mapping:
+  - get_batch_reservation_summary:
   - get_batch_item:
   - _get_batch_total_stock:
   - _get_batch_reserved_by_others:
@@ -299,19 +302,22 @@ Functions:
   - 91:create_bom_from_drawing:
   - 147:validate_bom_from_drawing:
   - 235:create_production_plan_from_bom:
-  - 286:parse_drawing_items_csv:
-  - 403:get_so_dashboard_data:
+  - 288:parse_drawing_items_csv:
+  - 405:get_so_dashboard_data:
 
 ### hooks.py
 
 ### item_management/item.py
 Functions:
-  - 7:validate_item:
-  - 15:validate_parent_item_group:
-  - 20:set_calculation_type:
-  - 27:validate_uom_configuration:
-  - 68:validate_batch_configuration:
-  - 83:validate_batch_prefix:
+  - 15:validate_item:
+  - 24:validate_parent_item_group:
+  - 29:set_calculation_type:
+  - 36:validate_uom_configuration:
+  - 77:validate_batch_configuration:
+  - 92:validate_batch_prefix:
+  - 104:_has_transactions:
+  - 112:validate_locked_fields:
+  - 125:has_item_transactions:
 
 ### material_request_management/material_request.py
 Functions:
@@ -334,11 +340,11 @@ Functions:
   - 47:_create_workstations:
   - 62:_create_routing:
   - 95:get_routing_operations_for_bom:
-  - 117:get_raw_materials_for_job_card:
-  - 168:_get_transferred_qty_for_item:
-  - 179:_get_previous_operation_consumed:
-  - 218:_get_prev_soe_consumed_for_jc:
-  - 262:validate_final_operation_consumption:
+  - 120:get_raw_materials_for_job_card:
+  - 171:_get_transferred_qty_for_item:
+  - 182:_get_previous_operation_consumed:
+  - 221:_get_prev_soe_consumed_for_jc:
+  - 265:validate_final_operation_consumption:
 
 ### production_management/stock_entry.py
 Functions:
@@ -364,7 +370,8 @@ Functions:
   - 402:get_material_request_items:
   - 491:make_material_request:
   - 562:after_save_production_plan:
-  - 570:_recalculate_sec_qty:
+  - 567:unlink_production_plan_on_trash:
+  - 580:_recalculate_sec_qty:
 
 ### pull_live.py
 Functions:
@@ -391,12 +398,12 @@ Functions:
   - 45:before_submit_purchase_receipt:
   - 50:before_insert_batch:
   - 58:_setup_batch_from_purchase_receipt:
-  - 97:_setup_batch_from_stock_entry:
-  - 157:_get_receipt_suffix:
-  - 165:_get_se_suffix:
-  - 173:_copy_from_po_item:
-  - 193:_recalculate_qty:
-  - 209:_check_missing_fields:
+  - 109:_setup_batch_from_stock_entry:
+  - 169:_get_receipt_suffix:
+  - 177:_get_se_suffix:
+  - 185:_copy_from_po_item:
+  - 205:_recalculate_qty:
+  - 221:_check_missing_fields:
 
 ### rfq_management/request_for_quotation.py
 Functions:
@@ -550,6 +557,7 @@ Functions:
 
 ## Whitelisted API methods
 
+- `item_management/item.py:125` — `has_item_transactions`
 - `purchase_order_management/purchase_order.py:16` — `get_po_item_uom`
 - `sq_management/supplier_quotation.py:27` — `get_sq_item_uom`
 - `drawing_management/drawing_utils.py:7` — `create_drawings_from_so`
@@ -557,7 +565,7 @@ Functions:
 - `drawing_management/drawing_utils.py:59` — `get_batches_for_drawing_item`
 - `drawing_management/drawing_utils.py:91` — `create_bom_from_drawing`
 - `drawing_management/drawing_utils.py:235` — `create_production_plan_from_bom`
-- `drawing_management/drawing_utils.py:286` — `parse_drawing_items_csv`
+- `drawing_management/drawing_utils.py:288` — `parse_drawing_items_csv`
 - `drawing_management/bom_class_override.py:353` — `get_routing`
 - `drawing_management/bom_class_override.py:424` — `get_bom_material_detail`
 - `drawing_management/bom_class_override.py:509` — `update_cost`
@@ -577,22 +585,23 @@ Functions:
 - `subcontracting_management/subcontracting.py:343` — `create_wip_transfer_stock_entry`
 - `subcontracting_management/subcontracting.py:401` — `create_return_stock_entry`
 - `production_management/production_utils.py:95` — `get_routing_operations_for_bom`
-- `production_management/production_utils.py:117` — `get_raw_materials_for_job_card`
+- `production_management/production_utils.py:120` — `get_raw_materials_for_job_card`
 - `production_management/doctype/material_planning/material_planning.py:19` — `@frappe.validate_and_sanitize_search_inputs`
-- `production_management/doctype/material_planning/material_planning.py:52` — `get_bom_info`
-- `production_management/doctype/material_planning/material_planning.py:100` — `get_raw_materials`
-- `production_management/doctype/material_planning/material_planning.py:180` — `check_stock_availability`
-- `production_management/doctype/material_planning/material_planning.py:323` — `move_to_exact_match`
-- `production_management/doctype/material_planning/material_planning.py:386` — `finalize_mapping`
-- `production_management/doctype/material_planning/material_planning.py:430` — `get_batch_item`
-- `production_management/doctype/material_planning/material_planning.py:480` — `reserve_batches`
-- `production_management/doctype/material_planning/material_planning.py:565` — `reserve_exact_match_batches`
-- `production_management/doctype/material_planning/material_planning.py:643` — `unreserve_exact_match_batches`
-- `production_management/doctype/material_planning/material_planning.py:684` — `check_mapping_batch_availability`
-- `production_management/doctype/material_planning/material_planning.py:735` — `unreserve_batches`
-- `production_management/doctype/material_planning/material_planning.py:776` — `_test_simulate_se_release`
-- `production_management/doctype/material_planning/material_planning.py:795` — `make_production_plan`
-- `production_management/doctype/material_planning/material_planning.py:838` — `make_material_request`
+- `production_management/doctype/material_planning/material_planning.py:44` — `get_bom_info`
+- `production_management/doctype/material_planning/material_planning.py:92` — `get_raw_materials`
+- `production_management/doctype/material_planning/material_planning.py:172` — `check_stock_availability`
+- `production_management/doctype/material_planning/material_planning.py:372` — `move_to_exact_match`
+- `production_management/doctype/material_planning/material_planning.py:435` — `finalize_mapping`
+- `production_management/doctype/material_planning/material_planning.py:479` — `get_batch_reservation_summary`
+- `production_management/doctype/material_planning/material_planning.py:513` — `get_batch_item`
+- `production_management/doctype/material_planning/material_planning.py:563` — `reserve_batches`
+- `production_management/doctype/material_planning/material_planning.py:648` — `reserve_exact_match_batches`
+- `production_management/doctype/material_planning/material_planning.py:726` — `unreserve_exact_match_batches`
+- `production_management/doctype/material_planning/material_planning.py:767` — `check_mapping_batch_availability`
+- `production_management/doctype/material_planning/material_planning.py:818` — `unreserve_batches`
+- `production_management/doctype/material_planning/material_planning.py:859` — `_test_simulate_se_release`
+- `production_management/doctype/material_planning/material_planning.py:878` — `make_production_plan`
+- `production_management/doctype/material_planning/material_planning.py:936` — `make_material_request`
 - `purchase_receipt_management/purchase_receipt.py:18` — `get_pr_item_uom`
 
 ## hooks.py — doc_events
@@ -643,6 +652,8 @@ doc_events = {
 	},
 	"Production Plan": {
 		"validate": "manufyxinvenzaerp.production_plan_management.production_plan.after_save_production_plan",
+		"on_trash": "manufyxinvenzaerp.production_plan_management.production_plan.unlink_production_plan_on_trash",
+		"on_cancel": "manufyxinvenzaerp.production_plan_management.production_plan.unlink_production_plan_on_trash",
 	},
 }
 

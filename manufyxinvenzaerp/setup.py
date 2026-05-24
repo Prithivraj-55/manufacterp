@@ -1378,7 +1378,7 @@ frappe.ui.form.on("Production Plan", {
 frappe.ui.form.on("Production Plan Item", {
 	bom_no(frm, cdt, cdn) {
 		var row = locals[cdt][cdn];
-		if (!row.bom_no) return;
+		if (!row.bom_no || row.idx !== 1) return;
 		frappe.call({
 			method: "manufyxinvenzaerp.production_management.production_utils.get_routing_operations_for_bom",
 			args: { bom_name: row.bom_no },
