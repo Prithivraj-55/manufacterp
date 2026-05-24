@@ -124,6 +124,17 @@ frappe.ui.form.on("Material Planning", {
 			_style_btn("check_stock_btn",        "search",  "Check Stock Availability");
 			_style_btn("update_exact_match_btn", "tick",    "Update Exact Match");
 			_style_btn("finalize_mapping_btn",   "move",    "Move to Unavailable Items");
+
+			// "View All" button injected right after "Get Raw Materials"
+			let $raw_btn = frm.fields_dict["get_raw_materials_btn"] && frm.fields_dict["get_raw_materials_btn"].$input;
+			if ($raw_btn && $raw_btn.length) {
+				$raw_btn.closest(".frappe-control").find(".view-all-raw-btn").remove();
+				let $view_all = $('<button class="btn btn-default btn-sm view-all-raw-btn" style="margin-left:8px;">'
+					+ frappe.utils.icon("eye", "sm") + "&nbsp;" + __("View All")
+					+ "</button>");
+				$view_all.on("click", function () { _show_raw_materials_view(frm); });
+				$raw_btn.after($view_all);
+			}
 		}, 50);
 
 		// Disable add/delete rows on all auto-populated tables
@@ -144,8 +155,12 @@ frappe.ui.form.on("Material Planning", {
 				_add_io_buttons(frm, tbl);
 			});
 
-			// Reserve / Unreserve on Material Mapping
+
+			// Reserve / Unreserve on Material Mapping (Partial Stock)
 			_add_reservation_buttons(frm);
+
+			// Reserve / Unreserve on Available Raw Materials (Exact Match)
+			_add_exact_match_reservation_buttons(frm);
 
 			// Action buttons on Unavailable Items
 			let $map_btn = frm.fields_dict["unavailable_items"].grid.add_custom_button(
@@ -222,6 +237,66 @@ frappe.ui.form.on("Material Planning", {
 	},
 });
 
+// Batch availability warning popup shown before save
+function _show_batch_warning_popup(warnings) {
+	let lines = warnings.map(function(w) {
+		return `<tr>
+			<td>${w.item_code}</td>
+			<td>${w.item_name || ""}</td>
+			<td>${w.batch}</td>
+			<td>${w.required_qty} ${w.uom}</td>
+			<td>${w.batch_stock} ${w.uom}</td>
+			<td>${w.available_to_reserve} ${w.uom}</td>
+			<td style="color:red;font-weight:bold">${w.shortfall_qty} ${w.uom}</td>
+		</tr>`;
+	}).join("");
+	frappe.msgprint({
+		title: __("Batch Stock Warning — Insufficient Stock"),
+		indicator: "orange",
+		message: `<p>${__("The following Material Mapping rows have insufficient batch stock for full reservation:")}</p>
+			<table class="table table-bordered table-condensed" style="font-size:12px">
+				<thead><tr>
+					<th>${__("Item Code")}</th>
+					<th>${__("Item Name")}</th>
+					<th>${__("Batch")}</th>
+					<th>${__("Required")}</th>
+					<th>${__("Batch Stock")}</th>
+					<th>${__("Available to Reserve")}</th>
+					<th>${__("Shortfall")}</th>
+				</tr></thead>
+				<tbody>${lines}</tbody>
+			</table>
+			<p class="text-muted" style="margin-top:8px">
+				<b>${__("Action required:")}</b>
+				${__("Assign a different batch with sufficient stock, or click")}
+				<b>${__("Move to Unavailable Items")}</b>
+				${__("to handle the shortfall separately.")}
+			</p>`,
+	});
+}
+
+frappe.ui.form.on("Material Planning", {
+	before_save(frm) {
+		// Skip check for new unsaved docs — warehouse may not be committed yet
+		if (frm.doc.__islocal || !frm.doc.for_warehouse) return;
+
+		let has_unresolved = (frm.doc.material_mapping || []).some(r => r.batch);
+		if (!has_unresolved) return;
+
+		return frappe.call({
+			method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.check_mapping_batch_availability",
+			args: { doc: frm.doc },
+		}).then(function(r) {
+			let warnings = r.message || [];
+			if (warnings.length) {
+				_show_batch_warning_popup(warnings);
+				// Warning only — save is allowed to proceed so the user
+				// can still persist batch assignments and fix them afterward.
+			}
+		});
+	},
+});
+
 frappe.ui.form.on("Material Planning", {
 	check_stock_btn(frm) {
 		if (!frm.doc.for_warehouse) {
@@ -282,6 +357,7 @@ frappe.ui.form.on("Material Planning", {
 						message: __("Stock checked: {0} matched, {1} to map, {2} unavailable.", [avail, mapping, unavail]),
 						indicator: "green",
 					}, 6);
+					frm.save();
 				},
 			});
 		};
@@ -338,6 +414,7 @@ frappe.ui.form.on("Material Planning", {
 					message: __("{0} mapped, {1} moved to Unavailable Items.", [mapped, unavail]),
 					indicator: "blue",
 				}, 5);
+				frm.save();
 			},
 		});
 	},
@@ -431,6 +508,7 @@ frappe.ui.form.on("Material Planning", {
 						message: __("{0} raw material row(s) loaded.", [r.message.length]),
 						indicator: "green",
 					}, 5);
+					frm.save();
 				},
 			});
 		};
@@ -705,6 +783,28 @@ frappe.ui.form.on("Material Planning Material Mapping", {
 	},
 });
 
+// Shared helper: build the partial-reservation warning table HTML
+function _partial_reservation_html(partial) {
+	let lines = partial.map(function(p) {
+		return `<tr>
+			<td>${p.item_code}</td>
+			<td>${p.batch}</td>
+			<td>${p.required_qty} ${p.uom}</td>
+			<td>${p.reserved_qty} ${p.uom}</td>
+			<td style="color:red">${p.shortfall_qty} ${p.uom}</td>
+		</tr>`;
+	}).join("");
+	return `<p>${__("Some batches had insufficient stock. Partial quantities were reserved:")}</p>
+		<table class="table table-bordered table-condensed" style="font-size:12px">
+			<thead><tr>
+				<th>${__("Item")}</th><th>${__("Batch")}</th>
+				<th>${__("Required")}</th><th>${__("Reserved")}</th>
+				<th>${__("Shortfall")}</th>
+			</tr></thead>
+			<tbody>${lines}</tbody>
+		</table>`;
+}
+
 // Reserve / Unreserve toolbar buttons on the Material Mapping grid
 function _add_reservation_buttons(frm) {
 	let grid = frm.fields_dict["material_mapping"] && frm.fields_dict["material_mapping"].grid;
@@ -719,7 +819,6 @@ function _add_reservation_buttons(frm) {
 				return;
 			}
 			frappe.confirm(__("Reserve all batches assigned in Material Mapping?"), function () {
-				// Save any unsaved batch assignments first, then call reserve
 				let do_reserve = function() {
 					frappe.call({
 						method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.reserve_batches",
@@ -731,27 +830,10 @@ function _add_reservation_buttons(frm) {
 							frm.reload_doc();
 							let partial = r.message.partial || [];
 							if (partial.length) {
-								let lines = partial.map(function(p) {
-									return `<tr>
-										<td>${p.item_code}</td>
-										<td>${p.batch}</td>
-										<td>${p.required_qty} ${p.uom}</td>
-										<td>${p.reserved_qty} ${p.uom}</td>
-										<td style="color:red">${p.shortfall_qty} ${p.uom}</td>
-									</tr>`;
-								}).join("");
 								frappe.msgprint({
 									title: __("Partial Reservation — Stock Shortfall"),
 									indicator: "orange",
-									message: `<p>${__("Some batches had insufficient stock. Partial quantities were reserved:")}</p>
-										<table class="table table-bordered table-condensed" style="font-size:12px">
-											<thead><tr>
-												<th>${__("Item")}</th><th>${__("Batch")}</th>
-												<th>${__("Required")}</th><th>${__("Reserved")}</th>
-												<th>${__("Shortfall")}</th>
-											</tr></thead>
-											<tbody>${lines}</tbody>
-										</table>`,
+									message: _partial_reservation_html(partial),
 								});
 							} else {
 								frappe.show_alert({ message: __("Batches reserved."), indicator: "green" }, 4);
@@ -778,13 +860,7 @@ function _add_reservation_buttons(frm) {
 				frappe.msgprint(__("No reserved rows to unreserve."));
 				return;
 			}
-			// Show checklist of reserved rows
-			let fields = [
-				{
-					fieldtype: "Section Break",
-					label: __("Select rows to unreserve"),
-				},
-			];
+			let fields = [{ fieldtype: "Section Break", label: __("Select rows to unreserve") }];
 			reserved.forEach(function (row, idx) {
 				fields.push({
 					fieldname: "row_" + idx,
@@ -803,16 +879,164 @@ function _add_reservation_buttons(frm) {
 					reserved.forEach(function (row, idx) {
 						if (values["row_" + idx]) targets.push(row.name);
 					});
-					if (!targets.length) {
-						frappe.msgprint(__("Select at least one row."));
-						return;
-					}
+					if (!targets.length) { frappe.msgprint(__("Select at least one row.")); return; }
 					frappe.call({
 						method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.unreserve_batches",
-						args: {
-							material_planning_name: frm.doc.name,
-							row_names: JSON.stringify(targets),
+						args: { material_planning_name: frm.doc.name, row_names: JSON.stringify(targets) },
+						freeze: true,
+						freeze_message: __("Unreserving…"),
+						callback(r) {
+							d.hide();
+							frm.reload_doc();
+							frappe.show_alert({ message: __("Batches unreserved."), indicator: "orange" }, 4);
 						},
+					});
+				},
+			});
+			d.show();
+		}
+	);
+}
+
+// View All popup for Raw Materials table — read-only, all columns, scrollable
+function _show_raw_materials_view(frm) {
+	let rows = frm.doc.raw_materials || [];
+	if (!rows.length) {
+		frappe.msgprint(__("No raw materials to display."));
+		return;
+	}
+
+	const cols = [
+		{ fieldname: "item_number",       label: "Item No" },
+		{ fieldname: "sales_order",       label: "Sales Order" },
+		{ fieldname: "item_code",         label: "Item Code" },
+		{ fieldname: "item_name",         label: "Item Name" },
+		{ fieldname: "bom_no",            label: "Source BOM" },
+		{ fieldname: "duno_mark_no",      label: "DUNO/Mark No" },
+		{ fieldname: "parent_item_group", label: "Item Group" },
+		{ fieldname: "length",            label: "Length (mm)" },
+		{ fieldname: "width",             label: "Width (mm)" },
+		{ fieldname: "thickness",         label: "Thickness" },
+		{ fieldname: "sec_qty",           label: "Sec Qty" },
+		{ fieldname: "sec_uom",           label: "Sec UOM" },
+		{ fieldname: "qty",               label: "Required Qty" },
+		{ fieldname: "uom",               label: "UOM" },
+		{ fieldname: "available_qty",     label: "Available Qty" },
+		{ fieldname: "shortage_qty",      label: "Shortage Qty" },
+		{ fieldname: "unit_weight",       label: "Unit Weight" },
+		{ fieldname: "material_spec",     label: "Material Spec" },
+		{ fieldname: "warehouse",         label: "Warehouse" },
+		{ fieldname: "store_location",    label: "Store Location" },
+	];
+
+	let th_style = "white-space:nowrap;padding:6px 10px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;";
+	let thead = "<tr>" + cols.map(c =>
+		`<th style="${th_style}">${__(c.label)}</th>`
+	).join("") + "</tr>";
+
+	let tbody = rows.map(function (row, idx) {
+		let cells = cols.map(function (c) {
+			let val = row[c.fieldname];
+			if (val === null || val === undefined) val = "";
+			return `<td style="padding:5px 10px;white-space:nowrap;border-bottom:1px solid #f0f0f0;">${frappe.utils.escape_html(String(val))}</td>`;
+		}).join("");
+		let bg = idx % 2 !== 0 ? "background:#fafbfc;" : "";
+		return `<tr style="${bg}">${cells}</tr>`;
+	}).join("");
+
+	let html = `<div style="overflow:auto;max-height:70vh;">
+		<table style="font-size:12px;border-collapse:collapse;width:100%;">
+			<thead style="position:sticky;top:0;z-index:1;">${thead}</thead>
+			<tbody>${tbody}</tbody>
+		</table>
+	</div>`;
+
+	let d = new frappe.ui.Dialog({
+		title: __("Raw Materials — {0} item(s)", [rows.length]),
+		size: "extra-large",
+	});
+	d.$body.html(html);
+	d.show();
+}
+
+// Reserve / Unreserve toolbar buttons on the Available Raw Materials (Exact Match) grid
+function _add_exact_match_reservation_buttons(frm) {
+	let grid = frm.fields_dict["available_raw_materials"] && frm.fields_dict["available_raw_materials"].grid;
+	if (!grid) return;
+
+	grid.add_custom_button(
+		frappe.utils.icon("lock", "xs") + " " + __("Reserve"),
+		function () {
+			let has_batch = (frm.doc.available_raw_materials || []).some(r => r.batch_no && !r.is_reserved);
+			if (!has_batch) {
+				frappe.msgprint(__("No un-reserved rows with a batch to reserve."));
+				return;
+			}
+			frappe.confirm(__("Reserve all batches in Available Raw Materials (Exact Match)?"), function () {
+				let do_reserve = function() {
+					frappe.call({
+						method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.reserve_exact_match_batches",
+						args: { material_planning_name: frm.doc.name },
+						freeze: true,
+						freeze_message: __("Reserving batches…"),
+						callback(r) {
+							if (!r.message) return;
+							frm.reload_doc();
+							let partial = r.message.partial || [];
+							if (partial.length) {
+								frappe.msgprint({
+									title: __("Partial Reservation — Stock Shortfall"),
+									indicator: "orange",
+									message: _partial_reservation_html(partial),
+								});
+							} else {
+								frappe.show_alert({ message: __("Batches reserved."), indicator: "green" }, 4);
+							}
+						},
+					});
+				};
+				if (frm.is_dirty()) {
+					frm.save().then(do_reserve).catch(function() {
+						frappe.msgprint(__("Save failed. Fix any errors before reserving."));
+					});
+				} else {
+					do_reserve();
+				}
+			});
+		}
+	);
+
+	grid.add_custom_button(
+		frappe.utils.icon("unlock", "xs") + " " + __("Unreserve"),
+		function () {
+			let reserved = (frm.doc.available_raw_materials || []).filter(r => r.is_reserved);
+			if (!reserved.length) {
+				frappe.msgprint(__("No reserved rows to unreserve."));
+				return;
+			}
+			let fields = [{ fieldtype: "Section Break", label: __("Select rows to unreserve") }];
+			reserved.forEach(function (row, idx) {
+				fields.push({
+					fieldname: "row_" + idx,
+					fieldtype: "Check",
+					label: `${row.item_code} — Batch: ${row.batch_no || ""}`,
+					default: 1,
+				});
+			});
+
+			let d = new frappe.ui.Dialog({
+				title: __("Unreserve Exact Match Batches"),
+				fields: fields,
+				primary_action_label: __("Unreserve"),
+				primary_action(values) {
+					let targets = [];
+					reserved.forEach(function (row, idx) {
+						if (values["row_" + idx]) targets.push(row.name);
+					});
+					if (!targets.length) { frappe.msgprint(__("Select at least one row.")); return; }
+					frappe.call({
+						method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.unreserve_exact_match_batches",
+						args: { material_planning_name: frm.doc.name, row_names: JSON.stringify(targets) },
 						freeze: true,
 						freeze_message: __("Unreserving…"),
 						callback(r) {

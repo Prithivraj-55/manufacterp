@@ -33,6 +33,10 @@ def validate_purchase_order(doc, method):
     for row in doc.items:
         _recalculate_qty(row)
         _check_missing_fields(row, throw=False)
+    doc.custom_total_weight = sum(
+        row.qty for row in doc.items
+        if row.custom_parent_item_group in ("Structurals", "Plates")
+    )
 
 
 def before_submit_purchase_order(doc, method):
@@ -54,6 +58,9 @@ def _recalculate_qty(row):
                 * row.custom_unit_weight
                 * row.custom_sec_qty
             )
+    elif group == "Nuts and Bolts":
+        if row.custom_unit_weight and row.qty:
+            row.custom_sec_qty = row.custom_unit_weight * row.qty
 
 
 def _check_missing_fields(row, throw):

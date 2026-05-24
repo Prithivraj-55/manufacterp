@@ -18,20 +18,12 @@ class MaterialPlanning(Document):
 @frappe.whitelist()
 @frappe.validate_and_sanitize_search_inputs
 def search_bom(doctype, txt, searchfield, start, page_len, filters):
-    """Custom BOM search: matches name, item, item_name, or DUNO/Mark No (int exact match)."""
+    """Custom BOM search: matches name, item, item_name, or DUNO/Mark No (substring)."""
     like_txt = f"%{txt}%"
-    duno_clause = ""
     values = {"txt": like_txt, "page_len": int(page_len), "start": int(start)}
 
-    try:
-        duno_val = int(txt.strip())
-        duno_clause = "OR b.custom_duno_mark_no = %(duno)s"
-        values["duno"] = duno_val
-    except (ValueError, TypeError):
-        pass
-
     return frappe.db.sql(
-        f"""
+        """
         SELECT b.name, b.item, b.item_name, b.custom_duno_mark_no
         FROM `tabBOM` b
         WHERE b.docstatus < 2
@@ -39,7 +31,7 @@ def search_bom(doctype, txt, searchfield, start, page_len, filters):
               b.name LIKE %(txt)s
               OR b.item LIKE %(txt)s
               OR b.item_name LIKE %(txt)s
-              {duno_clause}
+              OR CAST(b.custom_duno_mark_no AS CHAR) LIKE %(txt)s
           )
         ORDER BY b.name
         LIMIT %(page_len)s OFFSET %(start)s
@@ -450,8 +442,12 @@ def _get_batch_total_stock(batch_no, warehouse):
 
 
 def _get_batch_reserved_by_others(batch_no, exclude_mp):
-    """Return total reserved_qty already committed to other Material Planning docs for this batch."""
-    result = frappe.db.sql(
+    """Return total reserved_qty committed to other Material Planning docs for this batch.
+
+    Checks both material_mapping (field: batch) and available_raw_materials
+    (field: batch_no) so reservations in either table are counted.
+    """
+    mm = frappe.db.sql(
         """
         SELECT COALESCE(SUM(reserved_qty), 0) AS total
         FROM `tabMaterial Planning Material Mapping`
@@ -460,7 +456,16 @@ def _get_batch_reserved_by_others(batch_no, exclude_mp):
         (batch_no, exclude_mp),
         as_dict=True,
     )
-    return flt(result[0].total) if result else 0.0
+    arm = frappe.db.sql(
+        """
+        SELECT COALESCE(SUM(reserved_qty), 0) AS total
+        FROM `tabMaterial Planning Available Raw Material`
+        WHERE batch_no = %s AND is_reserved = 1 AND parent != %s
+        """,
+        (batch_no, exclude_mp),
+        as_dict=True,
+    )
+    return flt(mm[0].total if mm else 0) + flt(arm[0].total if arm else 0)
 
 
 @frappe.whitelist()
@@ -481,17 +486,26 @@ def reserve_batches(material_planning_name):
 
     reserved_count = 0
     partial_rows = []
+    # Track qty allocated within this doc so the same batch used in multiple
+    # rows is not double-counted against available stock.
+    batch_allocated_here = {}
 
     for row in mp.material_mapping:
         if not row.batch:
             continue
         if row.is_reserved:
+            # Count already-reserved rows toward intra-doc tracking so
+            # subsequent new rows see a realistic remaining balance.
+            batch_allocated_here[row.batch] = (
+                batch_allocated_here.get(row.batch, 0.0) + flt(row.reserved_qty)
+            )
             continue
 
         required_qty = flt(row.qty)
         batch_stock = _get_batch_total_stock(row.batch, mp.for_warehouse)
         reserved_by_others = _get_batch_reserved_by_others(row.batch, material_planning_name)
-        available = max(0.0, flt(batch_stock) - flt(reserved_by_others))
+        allocated_here = batch_allocated_here.get(row.batch, 0.0)
+        available = max(0.0, flt(batch_stock) - flt(reserved_by_others) - allocated_here)
 
         reserved_qty = min(required_qty, available)
         shortfall_qty = max(0.0, required_qty - reserved_qty)
@@ -500,6 +514,7 @@ def reserve_batches(material_planning_name):
         row.reserved_qty = flt(reserved_qty, 3)
         row.shortfall_qty = flt(shortfall_qty, 3)
         row.reserved_on = now()
+        batch_allocated_here[row.batch] = allocated_here + reserved_qty
         reserved_count += 1
 
         if shortfall_qty > 0:
@@ -512,7 +527,7 @@ def reserve_batches(material_planning_name):
                 "shortfall_qty": flt(shortfall_qty, 3),
                 "uom": row.uom or "",
                 "batch_stock": flt(batch_stock, 3),
-                "reserved_by_others": flt(reserved_by_others, 3),
+                "reserved_by_others": flt(reserved_by_others + allocated_here, 3),
             })
 
     if not reserved_count:
@@ -536,6 +551,176 @@ def reserve_batches(material_planning_name):
         ],
         "partial": partial_rows,
     }
+
+
+@frappe.whitelist()
+def reserve_exact_match_batches(material_planning_name):
+    """
+    Reserve batches in available_raw_materials (Exact Match) with partial-stock awareness.
+    Mirrors reserve_batches logic but targets the available_raw_materials table and uses
+    the batch_no / required_qty field names used by that child doctype.
+    """
+    mp = frappe.get_doc("Material Planning", material_planning_name)
+    if not mp.available_raw_materials:
+        frappe.throw(_("No items in Available Raw Materials to reserve."))
+    if not mp.for_warehouse:
+        frappe.throw(_("Set 'Raw Materials Warehouse' on the Material Planning before reserving."))
+
+    reserved_count = 0
+    partial_rows = []
+    batch_allocated_here = {}
+
+    for row in mp.available_raw_materials:
+        if not row.batch_no:
+            continue
+        if row.is_reserved:
+            batch_allocated_here[row.batch_no] = (
+                batch_allocated_here.get(row.batch_no, 0.0) + flt(row.reserved_qty)
+            )
+            continue
+
+        required_qty = flt(row.required_qty)
+        batch_stock = _get_batch_total_stock(row.batch_no, mp.for_warehouse)
+        reserved_by_others = _get_batch_reserved_by_others(row.batch_no, material_planning_name)
+        allocated_here = batch_allocated_here.get(row.batch_no, 0.0)
+        available = max(0.0, flt(batch_stock) - flt(reserved_by_others) - allocated_here)
+
+        reserved_qty = min(required_qty, available)
+        shortfall_qty = max(0.0, required_qty - reserved_qty)
+
+        row.is_reserved = 1
+        row.reserved_qty = flt(reserved_qty, 3)
+        row.shortfall_qty = flt(shortfall_qty, 3)
+        row.reserved_on = now()
+        batch_allocated_here[row.batch_no] = allocated_here + reserved_qty
+        reserved_count += 1
+
+        if shortfall_qty > 0:
+            partial_rows.append({
+                "item_code": row.item_code,
+                "item_name": row.item_name or "",
+                "batch": row.batch_no,
+                "required_qty": required_qty,
+                "reserved_qty": flt(reserved_qty, 3),
+                "shortfall_qty": flt(shortfall_qty, 3),
+                "uom": row.uom or "",
+                "batch_stock": flt(batch_stock, 3),
+                "reserved_by_others": flt(reserved_by_others + allocated_here, 3),
+            })
+
+    if not reserved_count:
+        frappe.throw(_("All rows with a batch are already reserved."))
+
+    mp.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "rows": [
+            {
+                "name": row.name,
+                "item_code": row.item_code,
+                "batch_no": row.batch_no,
+                "is_reserved": row.is_reserved,
+                "reserved_qty": flt(row.reserved_qty, 3),
+                "shortfall_qty": flt(row.shortfall_qty, 3),
+                "reserved_on": str(row.reserved_on) if row.reserved_on else "",
+            }
+            for row in mp.available_raw_materials
+        ],
+        "partial": partial_rows,
+    }
+
+
+@frappe.whitelist()
+def unreserve_exact_match_batches(material_planning_name, row_names):
+    """
+    Clear reservation on specified available_raw_materials rows (by child row name).
+    row_names: JSON list of child row names to unreserve.
+    """
+    if isinstance(row_names, str):
+        row_names = json.loads(row_names)
+
+    mp = frappe.get_doc("Material Planning", material_planning_name)
+    target = set(row_names)
+    unreserved_count = 0
+
+    for row in mp.available_raw_materials:
+        if row.name in target:
+            row.is_reserved = 0
+            row.reserved_qty = 0
+            row.shortfall_qty = 0
+            row.reserved_on = None
+            unreserved_count += 1
+
+    if not unreserved_count:
+        frappe.throw(_("No matching reserved rows found."))
+
+    mp.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    return [
+        {
+            "name": row.name,
+            "item_code": row.item_code,
+            "batch_no": row.batch_no,
+            "is_reserved": row.is_reserved,
+            "reserved_qty": flt(row.reserved_qty, 3),
+            "shortfall_qty": flt(row.shortfall_qty, 3),
+            "reserved_on": str(row.reserved_on) if row.reserved_on else "",
+        }
+        for row in mp.available_raw_materials
+    ]
+
+
+@frappe.whitelist()
+def check_mapping_batch_availability(doc):
+    """
+    For every Material Mapping row that has a batch assigned, compute how much
+    stock is actually available to reserve (considering other MPs and intra-doc
+    same-batch rows).  Returns a list of rows where a shortfall would occur so
+    the JS can show a warning popup before/after save.
+    """
+    if isinstance(doc, str):
+        doc = frappe._dict(json.loads(doc))
+
+    warehouse = doc.get("for_warehouse")
+    if not warehouse:
+        return []
+
+    mp_name = doc.get("name") or ""
+    warnings = []
+    batch_allocated_here = {}
+
+    for row in doc.get("material_mapping") or []:
+        batch = row.get("batch") if isinstance(row, dict) else getattr(row, "batch", None)
+        if not batch:
+            continue
+
+        required_qty = flt(row.get("qty") if isinstance(row, dict) else row.qty)
+        batch_stock = _get_batch_total_stock(batch, warehouse)
+        reserved_by_others = _get_batch_reserved_by_others(batch, mp_name)
+        allocated_here = batch_allocated_here.get(batch, 0.0)
+        available = max(0.0, flt(batch_stock) - flt(reserved_by_others) - allocated_here)
+
+        can_reserve = min(required_qty, available)
+        shortfall = max(0.0, required_qty - can_reserve)
+
+        if shortfall > 0:
+            item_code = row.get("item_code") if isinstance(row, dict) else row.item_code
+            warnings.append({
+                "item_code": item_code,
+                "item_name": (row.get("item_name") if isinstance(row, dict) else row.item_name) or "",
+                "batch": batch,
+                "required_qty": flt(required_qty, 3),
+                "batch_stock": flt(batch_stock, 3),
+                "available_to_reserve": flt(can_reserve, 3),
+                "shortfall_qty": flt(shortfall, 3),
+                "uom": (row.get("uom") if isinstance(row, dict) else row.uom) or "",
+            })
+
+        batch_allocated_here[batch] = allocated_here + can_reserve
+
+    return warnings
 
 
 @frappe.whitelist()
