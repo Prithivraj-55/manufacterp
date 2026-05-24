@@ -1,5 +1,13 @@
 const FORMULA_GROUPS = ["Structurals", "Plates"];
 
+const TRANSACTION_LOCKED_FIELDS = [
+	"custom_parent_item_group",
+	"stock_uom",
+	"custom_unit_weight",
+	"custom_secondary_uom",
+	"custom_batch_prefix",
+];
+
 function set_calculation_type(frm) {
 	const group = frm.doc.custom_parent_item_group;
 	if (FORMULA_GROUPS.includes(group)) {
@@ -28,10 +36,27 @@ function apply_batch_ui(frm) {
 
 	if (has_batch && is_formula_group) {
 		frm.set_value("create_new_batch", 1);
+		frm.set_df_property("create_new_batch", "read_only", 1);
 		frm.toggle_display("batch_number_series", false);
 	} else {
+		frm.set_df_property("create_new_batch", "read_only", 0);
 		frm.toggle_display("batch_number_series", true);
 	}
+}
+
+function lock_transacted_fields(frm) {
+	if (frm.is_new()) return;
+	frappe.call({
+		method: "manufyxinvenzaerp.item_management.item.has_item_transactions",
+		args: { item_code: frm.doc.name },
+		callback(r) {
+			if (r.message) {
+				TRANSACTION_LOCKED_FIELDS.forEach(field => {
+					frm.set_df_property(field, "read_only", 1);
+				});
+			}
+		},
+	});
 }
 
 function lock_item_group_filter(frm) {
@@ -64,18 +89,11 @@ function lock_item_group_filter(frm) {
 	});
 }
 
-// Make custom_unit_weight mandatory for specific item groups
 function make_unit_weight_mand_based_on_item_group(frm) {
-    if (frm.doc.custom_parent_item_group) {
-        if (["Nuts and Bolts", "Plates", "Structurals"].includes(frm.doc.custom_parent_item_group)) {
-            frm.set_df_property("custom_unit_weight", "reqd", 1);
-        } else {
-            frm.set_df_property("custom_unit_weight", "reqd", 0);
-        }
-    }
-	else {
-		frm.set_df_property("custom_unit_weight", "reqd", 0);
-	}
+	const reqd = ["Nuts and Bolts", "Plates", "Structurals"].includes(frm.doc.custom_parent_item_group)
+		? 1
+		: 0;
+	frm.set_df_property("custom_unit_weight", "reqd", reqd);
 }
 
 frappe.ui.form.on("Item", {
@@ -84,7 +102,8 @@ frappe.ui.form.on("Item", {
 		frm.set_query("custom_parent_item_group", () => ({ filters: { is_group: 1 } }));
 		lock_item_group_filter(frm);
 		apply_batch_ui(frm);
-		make_unit_weight_mand_based_on_item_group(frm)
+		make_unit_weight_mand_based_on_item_group(frm);
+		lock_transacted_fields(frm);
 	},
 
 	custom_parent_item_group(frm) {
@@ -92,12 +111,10 @@ frappe.ui.form.on("Item", {
 		set_default_uoms(frm);
 		frm.set_value("item_group", "");
 		apply_batch_ui(frm);
+		make_unit_weight_mand_based_on_item_group(frm);
 	},
 
 	has_batch_no(frm) {
 		apply_batch_ui(frm);
 	},
-	custom_parent_item_group(frm){
-		make_unit_weight_mand_based_on_item_group(frm)
-	}
 });

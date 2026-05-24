@@ -3,6 +3,14 @@ from frappe import _
 
 FORMULA_GROUPS = {"Structurals", "Plates"}
 
+_LOCKED_FIELDS = {
+    "custom_parent_item_group": "Parent Item Group",
+    "stock_uom": "Default Unit of Measure",
+    "custom_unit_weight": "Unit Weight",
+    "custom_secondary_uom": "Secondary UOM",
+    "custom_batch_prefix": "Custom Batch Abbreviation",
+}
+
 
 def validate_item(doc, method):
     validate_parent_item_group(doc)
@@ -10,6 +18,7 @@ def validate_item(doc, method):
     validate_uom_configuration(doc)
     validate_batch_configuration(doc)
     validate_batch_prefix(doc)
+    validate_locked_fields(doc)
 
 
 def validate_parent_item_group(doc):
@@ -90,3 +99,28 @@ def validate_batch_prefix(doc):
                 frappe.throw(
                     _("Cannot change the Custom Batch Abbreviation for Item {0} because existing transactions are linked to it.").format(doc.name)
                 )
+
+
+def _has_transactions(item_code):
+    return bool(
+        frappe.db.exists("Stock Ledger Entry", {"item_code": item_code})
+        or frappe.db.exists("Purchase Order Item", {"item_code": item_code, "docstatus": 1})
+        or frappe.db.exists("Sales Order Item", {"item_code": item_code, "docstatus": 1})
+    )
+
+
+def validate_locked_fields(doc):
+    if doc.is_new() or not _has_transactions(doc.name):
+        return
+    for field, label in _LOCKED_FIELDS.items():
+        if frappe.db.get_value("Item", doc.name, field) != doc.get(field):
+            frappe.throw(
+                _("Cannot change {0} for Item {1} because transactions already exist.").format(
+                    label, doc.name
+                )
+            )
+
+
+@frappe.whitelist()
+def has_item_transactions(item_code):
+    return _has_transactions(item_code)

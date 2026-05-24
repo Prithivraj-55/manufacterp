@@ -36,6 +36,10 @@ def validate_purchase_receipt(doc, method):
         _copy_from_po_item(row)
         _recalculate_qty(row)
         _check_missing_fields(row, throw=False)
+    doc.custom_total_weight = sum(
+        row.qty for row in doc.items
+        if row.custom_parent_item_group in ("Structurals", "Plates")
+    )
 
 
 def before_submit_purchase_receipt(doc, method):
@@ -96,16 +100,26 @@ def _setup_batch_from_stock_entry(doc):
     if se.stock_entry_type not in ("Repack", "Material Receipt"):
         return
 
-    target_row = next(
-        (
-            r for r in se.items
-            if r.item_code == doc.item
-            and (se.stock_entry_type == "Material Receipt" or r.is_finished_item)
-        ),
-        None,
-    )
-    if not target_row:
+    matching_rows = [
+        r for r in se.items
+        if r.item_code == doc.item
+        and (se.stock_entry_type == "Material Receipt" or r.is_finished_item)
+    ]
+    if not matching_rows:
         return
+
+    # Count batches already inserted for this SE + item to pick the correct row.
+    # before_insert fires before this batch is committed, so existing count = index of current row.
+    already_created = frappe.db.count(
+        "Batch",
+        filters={
+            "reference_doctype": "Stock Entry",
+            "reference_name": doc.reference_name,
+            "item": doc.item,
+        },
+    )
+    row_index = already_created if already_created < len(matching_rows) else 0
+    target_row = matching_rows[row_index]
 
     batch_prefix = frappe.db.get_value("Item", doc.item, "custom_batch_prefix")
     if not batch_prefix:

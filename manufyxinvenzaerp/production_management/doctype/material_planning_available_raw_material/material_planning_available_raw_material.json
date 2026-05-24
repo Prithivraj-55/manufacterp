@@ -20,7 +20,11 @@
   "sec_uom",
   "uom",
   "warehouse",
-  "store_location"
+  "store_location",
+  "is_reserved",
+  "reserved_qty",
+  "shortfall_qty",
+  "reserved_on"
  ],
  "fields": [
   {
@@ -142,6 +146,34 @@
    "in_list_view": 0,
    "label": "Store Location",
    "options": "Store Location",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "is_reserved",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Reserved",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reserved_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Reserved Qty",
+   "read_only": 1
+  },
+  {
+   "fieldname": "shortfall_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Shortfall Qty",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reserved_on",
+   "fieldtype": "Datetime",
+   "label": "Reserved On",
    "read_only": 1
   }
  ],
