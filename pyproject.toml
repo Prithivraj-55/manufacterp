@@ -1,7 +1,7 @@
 [project]
 name = "manufyxinvenzaerp"
 authors = [
-    { name = "Craft", email = "prithivrajthangadurai@gmail.com"}
+    { name = "Maiyamdev", email = "prithivrajthangadurai@gmail.com"}
 ]
 description = "Custom ERP application"
 requires-python = ">=3.10"
