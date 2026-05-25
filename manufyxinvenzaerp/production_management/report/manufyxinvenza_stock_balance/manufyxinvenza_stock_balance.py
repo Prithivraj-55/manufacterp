@@ -20,7 +20,20 @@ def execute(filters=None):
 	batch_map = get_batch_details()
 	iwb_map = get_item_warehouse_batch_map(filters, float_precision)
 
+	# Apply item_group filter to batch items by restricting the map
+	if filters.get("item_group"):
+		items_in_group = {
+			r.name for r in frappe.get_all(
+				"Item",
+				filters={"item_group": filters["item_group"], "has_batch_no": 1},
+				fields=["name"],
+			)
+		}
+		iwb_map = {item: wh_map for item, wh_map in iwb_map.items() if item in items_in_group}
+
 	data = []
+
+	# ── Batch items ──────────────────────────────────────────────────────────
 	for item in sorted(iwb_map):
 		for wh in sorted(iwb_map[item]):
 			for batch in sorted(iwb_map[item][wh]):
@@ -62,22 +75,59 @@ def execute(filters=None):
 					"reserved_customer": "",
 				})
 
-	# Enrich rows with reservation data
-	all_batch_nos = list({row["batch_no"] for row in data})
+	# ── Non-batch items ───────────────────────────────────────────────────────
+	for nb in get_non_batch_stock(filters, float_precision):
+		item_details = item_map.get(nb["item_code"], frappe._dict())
+		data.append({
+			"item_code": nb["item_code"],
+			"item_name": item_details.get("item_name", ""),
+			"description": item_details.get("description", ""),
+			"warehouse": nb["warehouse"],
+			"batch_no": "",
+			"available_qty": flt(nb["bal_qty"], float_precision),
+			"uom": item_details.get("stock_uom", ""),
+			"available_sec_qty": 0.0,
+			"sec_uom": "",
+			"thickness": None,
+			"width": None,
+			"length": None,
+			"reserved_qty": 0.0,
+			"free_qty": 0.0,
+			"reserved_mp": "",
+			"reserved_sales_order": "",
+			"reserved_project": "",
+			"reserved_customer": "",
+		})
+
+	# ── Enrich with reservation data ─────────────────────────────────────────
+	all_batch_nos = list({row["batch_no"] for row in data if row["batch_no"]})
 	res_map = get_batch_reservations_map(all_batch_nos)
 
+	non_batch_pairs = [(row["item_code"], row["warehouse"]) for row in data if not row["batch_no"]]
+	nb_res_map = get_non_batch_reservations_map(non_batch_pairs)
+
 	for row in data:
-		res = res_map.get(row["batch_no"])
-		if res:
-			reserved_qty = flt(res["reserved_qty"], float_precision)
-			row["reserved_qty"] = reserved_qty
-			row["free_qty"] = flt(max(0.0, row["available_qty"] - reserved_qty), float_precision)
-			row["reserved_mp"] = res["reserved_mp"]
-			row["reserved_sales_order"] = res["reserved_sales_order"]
-			row["reserved_project"] = res["reserved_project"]
-			row["reserved_customer"] = res["reserved_customer"]
+		if row["batch_no"]:
+			res = res_map.get(row["batch_no"])
+			if res:
+				reserved_qty = flt(res["reserved_qty"], float_precision)
+				row["reserved_qty"] = reserved_qty
+				row["free_qty"] = flt(max(0.0, row["available_qty"] - reserved_qty), float_precision)
+				row["reserved_mp"] = res["reserved_mp"]
+				row["reserved_sales_order"] = res["reserved_sales_order"]
+				row["reserved_project"] = res["reserved_project"]
+				row["reserved_customer"] = res["reserved_customer"]
+			else:
+				row["free_qty"] = row["available_qty"]
 		else:
-			row["free_qty"] = row["available_qty"]
+			res = nb_res_map.get((row["item_code"], row["warehouse"]))
+			if res:
+				reserved_qty = flt(res["reserved_qty"], float_precision)
+				row["reserved_qty"] = reserved_qty
+				row["free_qty"] = flt(max(0.0, row["available_qty"] - reserved_qty), float_precision)
+				row["reserved_mp"] = res["reserved_mp"]
+			else:
+				row["free_qty"] = row["available_qty"]
 
 	return columns, data
 
@@ -378,6 +428,74 @@ def get_item_details():
 			.run(as_dict=True)
 		)
 	}
+
+
+def get_non_batch_stock(filters, float_precision):
+	"""Return balance qty per (item_code, warehouse) for non-batch items."""
+	conditions = [
+		"(sle.batch_no IS NULL OR sle.batch_no = '')",
+		"sle.is_cancelled = 0",
+		"sle.docstatus < 2",
+		"i.has_batch_no = 0",
+	]
+	values = {}
+
+	if filters.get("company"):
+		conditions.append("sle.company = %(company)s")
+		values["company"] = filters["company"]
+	if filters.get("warehouse"):
+		conditions.append("sle.warehouse = %(warehouse)s")
+		values["warehouse"] = filters["warehouse"]
+	if filters.get("item_code"):
+		conditions.append("sle.item_code = %(item_code)s")
+		values["item_code"] = filters["item_code"]
+	if filters.get("item_group"):
+		conditions.append("i.item_group = %(item_group)s")
+		values["item_group"] = filters["item_group"]
+
+	where_clause = " AND ".join(conditions)
+	return frappe.db.sql(
+		f"""
+		SELECT sle.item_code, sle.warehouse, COALESCE(SUM(sle.actual_qty), 0) AS bal_qty
+		FROM `tabStock Ledger Entry` sle
+		INNER JOIN `tabItem` i ON i.name = sle.item_code
+		WHERE {where_clause}
+		GROUP BY sle.item_code, sle.warehouse
+		HAVING COALESCE(SUM(sle.actual_qty), 0) > 0
+		""",
+		values,
+		as_dict=True,
+	) or []
+
+
+def get_non_batch_reservations_map(item_warehouse_pairs):
+	"""Return reservation totals per (item_code, warehouse) for non-batch items."""
+	if not item_warehouse_pairs:
+		return {}
+
+	rows = frappe.db.sql(
+		"""
+		SELECT arm.item_code, arm.warehouse, arm.parent AS mp_name, arm.reserved_qty
+		FROM `tabMaterial Planning Available Raw Material` arm
+		WHERE arm.is_reserved = 1
+		  AND (arm.batch_no IS NULL OR arm.batch_no = '')
+		""",
+		as_dict=True,
+	)
+
+	result = {}
+	for row in rows:
+		key = (row.item_code, row.warehouse)
+		if key not in result:
+			result[key] = {"reserved_qty": 0.0, "mp_names": []}
+		result[key]["reserved_qty"] += flt(row.reserved_qty)
+		if row.mp_name and row.mp_name not in result[key]["mp_names"]:
+			result[key]["mp_names"].append(row.mp_name)
+
+	for key in result:
+		result[key]["reserved_mp"] = ", ".join(result[key].pop("mp_names"))
+
+	return result
 
 
 def get_batch_details():

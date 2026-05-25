@@ -12,14 +12,21 @@ frappe.query_reports["Manufyxinvenza Stock Balance"] = {
 			reqd: 1,
 		},
 		{
+			fieldname: "item_group",
+			label: __("Item Group"),
+			fieldtype: "Link",
+			options: "Item Group",
+		},
+		{
 			fieldname: "item_code",
 			label: __("Item Code"),
 			fieldtype: "Link",
 			options: "Item",
 			get_query: function () {
+				let item_group = frappe.query_report.get_filter_value("item_group");
 				return {
 					filters: {
-						has_batch_no: 1,
+						...(item_group && { item_group }),
 					},
 				};
 			},
