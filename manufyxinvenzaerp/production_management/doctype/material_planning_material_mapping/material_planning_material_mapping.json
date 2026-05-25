@@ -24,7 +24,21 @@
   "unit_weight",
   "section_batch",
   "batch",
+  "batch_mapped",
   "planned_item",
+  "batch_parent_item_group",
+  "col_break_batch_dim",
+  "batch_length",
+  "batch_width",
+  "batch_thickness",
+  "batch_unit_weight",
+  "col_break_batch_calc",
+  "batch_sec_qty",
+  "batch_calc_qty",
+  "col_break_batch_stock",
+  "batch_total_qty",
+  "batch_reserved_qty",
+  "batch_free_qty",
   "is_reserved",
   "reserved_qty",
   "shortfall_qty",
@@ -165,11 +179,95 @@
    "options": "Batch"
   },
   {
+   "fieldname": "batch_mapped",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Status",
+   "read_only": 1
+  },
+  {
    "fieldname": "planned_item",
    "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Planned Item (from Batch)",
    "options": "Item",
+   "read_only": 1
+  },
+  {
+   "fieldname": "batch_parent_item_group",
+   "fieldtype": "Data",
+   "label": "Batch Item Group",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_batch_dim",
+   "fieldtype": "Column Break",
+   "label": "Batch Dimensions"
+  },
+  {
+   "fieldname": "batch_length",
+   "fieldtype": "Float",
+   "label": "Batch Length (mm)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "batch_width",
+   "fieldtype": "Float",
+   "label": "Batch Width (mm)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "batch_thickness",
+   "fieldtype": "Float",
+   "label": "Batch Thickness",
+   "read_only": 1
+  },
+  {
+   "fieldname": "batch_unit_weight",
+   "fieldtype": "Float",
+   "label": "Batch Unit Weight",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_batch_calc",
+   "fieldtype": "Column Break",
+   "label": "Calculated Qty"
+  },
+  {
+   "fieldname": "batch_sec_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Sec Qty (NOS)"
+  },
+  {
+   "fieldname": "batch_calc_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Calc Qty (Kg)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_batch_stock",
+   "fieldtype": "Column Break",
+   "label": "Batch Stock"
+  },
+  {
+   "fieldname": "batch_total_qty",
+   "fieldtype": "Float",
+   "label": "Total Qty (Kg)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "batch_reserved_qty",
+   "fieldtype": "Float",
+   "label": "Reserved Qty (Kg)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "batch_free_qty",
+   "fieldtype": "Float",
+   "label": "Free Qty (Kg)",
    "read_only": 1
   },
   {

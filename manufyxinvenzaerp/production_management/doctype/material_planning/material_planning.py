@@ -12,6 +12,38 @@ class MaterialPlanning(Document):
         self.available_raw_materials = [r for r in (self.available_raw_materials or []) if r.item_code]
         self.material_mapping = [r for r in (self.material_mapping or []) if r.item_code]
         self.unavailable_items = [r for r in (self.unavailable_items or []) if r.item_code]
+        if self.material_mapping and self.for_warehouse:
+            self._validate_batch_calc_qty()
+
+    def _validate_batch_calc_qty(self):
+        mp_name = self.name or ""
+        for row in self.material_mapping:
+            if not row.batch:
+                continue
+
+            group = row.batch_parent_item_group or ""
+            if group in ("Structurals", "Plates") and not flt(row.batch_sec_qty):
+                frappe.throw(
+                    _("Row {0}: Enter Sec Qty (NOS) for batch {1} to calculate the required weight "
+                      "before saving.").format(row.idx, row.batch)
+                )
+
+            batch_calc_qty = flt(row.batch_calc_qty)
+            if not batch_calc_qty:
+                continue
+
+            batch_stock = _get_batch_total_stock(row.batch, self.for_warehouse)
+            reserved_by_others = _get_batch_reserved_by_others(row.batch, mp_name)
+            available = max(0.0, batch_stock - reserved_by_others)
+            if batch_calc_qty > available:
+                frappe.throw(
+                    _("Row {0}: Calculated Qty ({1} Kg) for batch {2} exceeds free stock ({3} Kg) "
+                      "(Total: {4} Kg, Reserved by others: {5} Kg). "
+                      "Reduce Sec Qty or choose a different batch.").format(
+                        row.idx, flt(batch_calc_qty, 3), row.batch,
+                        flt(available, 3), flt(batch_stock, 3), flt(reserved_by_others, 3)
+                    )
+                )
 
 
 
@@ -310,12 +342,17 @@ def check_stock_availability(doc):
                         "reserved_qty": existing.get("reserved_qty"),
                         "shortfall_qty": existing.get("shortfall_qty"),
                         "reserved_on": existing.get("reserved_on"),
+                        "batch_mapped": "Mapped" if existing.get("batch") else "Not Mapped",
                     })
+                else:
+                    base_row["batch_mapped"] = "Not Mapped"
                 material_mapping.append(base_row)
 
         else:
-            # ── Non-batch item: check plain stock qty in the warehouse ──────
-            available_qty = _get_non_batch_stock(item_code, warehouse)
+            # ── Non-batch item: net of cross-MP reservations ─────────────────
+            total_stock = _get_non_batch_stock(item_code, warehouse)
+            reserved_by_others = _get_non_batch_reserved_by_others(item_code, warehouse, mp_name)
+            available_qty = max(0.0, total_stock - reserved_by_others)
             shortage = max(0.0, required_qty - available_qty)
 
             updated_row = dict(row)
@@ -372,10 +409,13 @@ def _get_non_batch_stock(item_code, warehouse):
 @frappe.whitelist()
 def move_to_exact_match(doc, item_codes):
     """
-    For each selected unavailable item, check if an exact-dimension batch now exists.
-    Returns:
-      matched  — list of T2 rows (available_raw_materials) for items that have an exact match
-      failed   — list of item_codes that still have no exact match
+    For each unavailable item, re-check stock availability:
+      Batch items:
+        - exact dimension batch found with free stock → matched (available_raw_materials)
+        - no matching free batch                       → failed  (material_mapping, assign manually)
+      Non-batch items:
+        - plain stock >= required                      → matched (available_raw_materials, no batch)
+        - plain stock < required                       → still_unavailable (stays in unavailable_items)
     """
     from manufyxinvenzaerp.production_plan_management.production_plan import get_sbb_available_qty
 
@@ -389,47 +429,109 @@ def move_to_exact_match(doc, item_codes):
         frappe.throw(_("Set 'Raw Materials Warehouse' before checking stock."))
 
     location = doc.get("store_location") or None
+    mp_name = doc.get("name") or ""
     item_set = set(item_codes)
     matched = []
     failed = []
+    still_unavailable = []
+    batch_remaining = {}
+
+    # Pre-fetch has_batch_no for all items in one query
+    item_batch_flag = {}
+    if item_set:
+        for rec in frappe.get_all("Item", filters={"name": ["in", list(item_set)]}, fields=["name", "has_batch_no"]):
+            item_batch_flag[rec.name] = rec.has_batch_no
 
     for row in doc.get("unavailable_items") or []:
-        if row.get("item_code") not in item_set:
+        item_code = row.get("item_code")
+        if item_code not in item_set:
             continue
 
-        dimensions = {
-            "custom_length": flt(row.get("length")),
-            "custom_thickness": flt(row.get("thickness")),
-            "custom_width": flt(row.get("width")),
-        }
-        _available_qty, matched_batches = get_sbb_available_qty(
-            row.get("item_code"), warehouse, dimensions, location=location
-        )
+        required_qty = flt(row.get("qty"))
+        has_batch = item_batch_flag.get(item_code, 0)
 
-        if matched_batches:
-            for b in matched_batches:
+        if has_batch:
+            # ── Batch item: match by exact dimensions via SBB ──────────────
+            dimensions = {
+                "custom_length": flt(row.get("length")),
+                "custom_thickness": flt(row.get("thickness")),
+                "custom_width": flt(row.get("width")),
+            }
+            _available_qty, raw_batches = get_sbb_available_qty(
+                item_code, warehouse, dimensions, location=location
+            )
+
+            for b in raw_batches:
+                if b["batch_no"] not in batch_remaining:
+                    reserved_by_others = _get_batch_reserved_by_others(b["batch_no"], mp_name)
+                    batch_remaining[b["batch_no"]] = max(0.0, flt(b["qty"]) - reserved_by_others)
+
+            free_batches = [
+                {**b, "qty": batch_remaining[b["batch_no"]]}
+                for b in raw_batches
+                if batch_remaining.get(b["batch_no"], 0) > 0
+            ]
+
+            if free_batches:
+                to_consume = required_qty
+                for b in free_batches:
+                    if to_consume <= 0:
+                        break
+                    consumed = min(batch_remaining[b["batch_no"]], to_consume)
+                    batch_remaining[b["batch_no"]] -= consumed
+                    to_consume -= consumed
+
+                for b in free_batches:
+                    matched.append({
+                        "item_number": row.get("item_number") or 0,
+                        "sales_order": row.get("sales_order") or "",
+                        "item_code": item_code,
+                        "item_name": row.get("item_name"),
+                        "batch_no": b["batch_no"],
+                        "required_qty": required_qty,
+                        "available_qty": flt(b["qty"]),
+                        "sec_qty": flt(b.get("custom_sec_qty")),
+                        "sec_uom": b.get("custom_sec_uom") or row.get("sec_uom"),
+                        "uom": row.get("uom"),
+                        "length": flt(row.get("length")),
+                        "thickness": flt(row.get("thickness")),
+                        "width": flt(row.get("width")),
+                        "warehouse": warehouse,
+                        "parent_item_group": row.get("parent_item_group"),
+                        "store_location": location or "",
+                    })
+            else:
+                failed.append(item_code)
+
+        else:
+            # ── Non-batch item: check plain stock ──────────────────────────
+            total_stock = _get_non_batch_stock(item_code, warehouse)
+            reserved_by_others = _get_non_batch_reserved_by_others(item_code, warehouse, mp_name)
+            available_qty = max(0.0, total_stock - reserved_by_others)
+
+            if available_qty >= required_qty:
                 matched.append({
                     "item_number": row.get("item_number") or 0,
                     "sales_order": row.get("sales_order") or "",
-                    "item_code": row.get("item_code"),
+                    "item_code": item_code,
                     "item_name": row.get("item_name"),
-                    "batch_no": b["batch_no"],
-                    "required_qty": flt(row.get("qty")),
-                    "available_qty": flt(b["qty"]),
-                    "sec_qty": flt(b.get("custom_sec_qty")),
-                    "sec_uom": b.get("custom_sec_uom") or row.get("sec_uom"),
+                    "batch_no": "",
+                    "required_qty": required_qty,
+                    "available_qty": available_qty,
+                    "sec_qty": flt(row.get("sec_qty")),
+                    "sec_uom": row.get("sec_uom") or "",
                     "uom": row.get("uom"),
-                    "length": flt(row.get("length")),
-                    "thickness": flt(row.get("thickness")),
-                    "width": flt(row.get("width")),
+                    "length": 0.0,
+                    "thickness": 0.0,
+                    "width": 0.0,
                     "warehouse": warehouse,
                     "parent_item_group": row.get("parent_item_group"),
                     "store_location": location or "",
                 })
-        else:
-            failed.append(row.get("item_code"))
+            else:
+                still_unavailable.append(item_code)
 
-    return {"matched": matched, "failed": failed}
+    return {"matched": matched, "failed": failed, "still_unavailable": still_unavailable}
 
 
 @frappe.whitelist()
@@ -466,7 +568,12 @@ def finalize_mapping(doc):
             "alternate_item": row.get("alternate_item") or "",
         }
         if row.get("batch"):
-            mapped.append(dict(base, batch=row.get("batch"), planned_item=row.get("planned_item")))
+            mapped.append(dict(
+                base,
+                batch=row.get("batch"),
+                planned_item=row.get("planned_item"),
+                batch_mapped="Mapped",
+            ))
         else:
             unavailable.append(base)
 
@@ -518,6 +625,19 @@ def get_batch_item(batch_no):
     return frappe.db.get_value("Batch", batch_no, "item")
 
 
+@frappe.whitelist()
+def get_batch_stock_summary(batch_no, warehouse, mp_name=""):
+    """Return total, reserved-by-others, and free qty for a batch in a warehouse."""
+    total_qty = _get_batch_total_stock(batch_no, warehouse)
+    reserved_qty = _get_batch_reserved_by_others(batch_no, mp_name)
+    free_qty = max(0.0, total_qty - reserved_qty)
+    return {
+        "total_qty": flt(total_qty, 3),
+        "reserved_qty": flt(reserved_qty, 3),
+        "free_qty": flt(free_qty, 3),
+    }
+
+
 def _get_batch_total_stock(batch_no, warehouse):
     """Return net stock qty for a batch in the given warehouse (submitted SBBs only)."""
     result = frappe.db.sql(
@@ -560,6 +680,22 @@ def _get_batch_reserved_by_others(batch_no, exclude_mp):
     return flt(mm[0].total if mm else 0) + flt(arm[0].total if arm else 0)
 
 
+def _get_non_batch_reserved_by_others(item_code, warehouse, exclude_mp):
+    """Return total reserved_qty committed to other MPs for a non-batch item in a warehouse."""
+    result = frappe.db.sql(
+        """
+        SELECT COALESCE(SUM(reserved_qty), 0) AS total
+        FROM `tabMaterial Planning Available Raw Material`
+        WHERE item_code = %s AND warehouse = %s
+          AND (batch_no IS NULL OR batch_no = '')
+          AND is_reserved = 1 AND parent != %s
+        """,
+        (item_code, warehouse, exclude_mp),
+        as_dict=True,
+    )
+    return flt(result[0].total if result else 0)
+
+
 @frappe.whitelist()
 def reserve_batches(material_planning_name):
     """
@@ -593,14 +729,30 @@ def reserve_batches(material_planning_name):
             )
             continue
 
+        batch_calc_qty = flt(row.batch_calc_qty)
         required_qty = flt(row.qty)
+
+        # When a different-dimension batch is assigned, batch_calc_qty is the
+        # Kg we actually take from that batch. Validate it covers the requirement.
+        if batch_calc_qty > 0:
+            if batch_calc_qty < required_qty:
+                frappe.throw(
+                    _("Row {0}: Calculated Qty ({1} Kg) is less than Required Qty ({2} Kg) for item {3}. "
+                      "Increase Sec Qty so the allocated batch material covers the requirement.").format(
+                        row.idx, flt(batch_calc_qty, 3), required_qty, row.item_code
+                    )
+                )
+            to_reserve = batch_calc_qty
+        else:
+            to_reserve = required_qty
+
         batch_stock = _get_batch_total_stock(row.batch, mp.for_warehouse)
         reserved_by_others = _get_batch_reserved_by_others(row.batch, material_planning_name)
         allocated_here = batch_allocated_here.get(row.batch, 0.0)
         available = max(0.0, flt(batch_stock) - flt(reserved_by_others) - allocated_here)
 
-        reserved_qty = min(required_qty, available)
-        shortfall_qty = max(0.0, required_qty - reserved_qty)
+        reserved_qty = min(to_reserve, available)
+        shortfall_qty = max(0.0, to_reserve - reserved_qty)
 
         row.is_reserved = 1
         row.reserved_qty = flt(reserved_qty, 3)
@@ -614,7 +766,7 @@ def reserve_batches(material_planning_name):
                 "item_code": row.item_code,
                 "item_name": row.item_name or "",
                 "batch": row.batch,
-                "required_qty": required_qty,
+                "required_qty": flt(to_reserve, 3),
                 "reserved_qty": flt(reserved_qty, 3),
                 "shortfall_qty": flt(shortfall_qty, 3),
                 "uom": row.uom or "",
@@ -661,47 +813,85 @@ def reserve_exact_match_batches(material_planning_name):
     reserved_count = 0
     partial_rows = []
     batch_allocated_here = {}
+    nonbatch_allocated = {}  # (item_code, warehouse) → qty allocated within this doc
 
     for row in mp.available_raw_materials:
-        if not row.batch_no:
-            continue
         if row.is_reserved:
-            batch_allocated_here[row.batch_no] = (
-                batch_allocated_here.get(row.batch_no, 0.0) + flt(row.reserved_qty)
-            )
+            if row.batch_no:
+                batch_allocated_here[row.batch_no] = (
+                    batch_allocated_here.get(row.batch_no, 0.0) + flt(row.reserved_qty)
+                )
+            else:
+                key = (row.item_code, row.warehouse or mp.for_warehouse)
+                nonbatch_allocated[key] = nonbatch_allocated.get(key, 0.0) + flt(row.reserved_qty)
             continue
 
         required_qty = flt(row.required_qty)
-        batch_stock = _get_batch_total_stock(row.batch_no, mp.for_warehouse)
-        reserved_by_others = _get_batch_reserved_by_others(row.batch_no, material_planning_name)
-        allocated_here = batch_allocated_here.get(row.batch_no, 0.0)
-        available = max(0.0, flt(batch_stock) - flt(reserved_by_others) - allocated_here)
 
-        reserved_qty = min(required_qty, available)
-        shortfall_qty = max(0.0, required_qty - reserved_qty)
+        if row.batch_no:
+            # ── Batch item ──────────────────────────────────────────────────
+            batch_stock = _get_batch_total_stock(row.batch_no, mp.for_warehouse)
+            reserved_by_others = _get_batch_reserved_by_others(row.batch_no, material_planning_name)
+            allocated_here = batch_allocated_here.get(row.batch_no, 0.0)
+            available = max(0.0, flt(batch_stock) - flt(reserved_by_others) - allocated_here)
 
-        row.is_reserved = 1
-        row.reserved_qty = flt(reserved_qty, 3)
-        row.shortfall_qty = flt(shortfall_qty, 3)
-        row.reserved_on = now()
-        batch_allocated_here[row.batch_no] = allocated_here + reserved_qty
-        reserved_count += 1
+            reserved_qty = min(required_qty, available)
+            shortfall_qty = max(0.0, required_qty - reserved_qty)
 
-        if shortfall_qty > 0:
-            partial_rows.append({
-                "item_code": row.item_code,
-                "item_name": row.item_name or "",
-                "batch": row.batch_no,
-                "required_qty": required_qty,
-                "reserved_qty": flt(reserved_qty, 3),
-                "shortfall_qty": flt(shortfall_qty, 3),
-                "uom": row.uom or "",
-                "batch_stock": flt(batch_stock, 3),
-                "reserved_by_others": flt(reserved_by_others + allocated_here, 3),
-            })
+            row.is_reserved = 1
+            row.reserved_qty = flt(reserved_qty, 3)
+            row.shortfall_qty = flt(shortfall_qty, 3)
+            row.reserved_on = now()
+            batch_allocated_here[row.batch_no] = allocated_here + reserved_qty
+            reserved_count += 1
+
+            if shortfall_qty > 0:
+                partial_rows.append({
+                    "item_code": row.item_code,
+                    "item_name": row.item_name or "",
+                    "batch": row.batch_no,
+                    "required_qty": required_qty,
+                    "reserved_qty": flt(reserved_qty, 3),
+                    "shortfall_qty": flt(shortfall_qty, 3),
+                    "uom": row.uom or "",
+                    "batch_stock": flt(batch_stock, 3),
+                    "reserved_by_others": flt(reserved_by_others + allocated_here, 3),
+                })
+
+        else:
+            # ── Non-batch item ───────────────────────────────────────────────
+            wh = row.warehouse or mp.for_warehouse
+            key = (row.item_code, wh)
+            stock = _get_non_batch_stock(row.item_code, wh)
+            reserved_by_others = _get_non_batch_reserved_by_others(row.item_code, wh, material_planning_name)
+            allocated_here = nonbatch_allocated.get(key, 0.0)
+            available = max(0.0, stock - reserved_by_others - allocated_here)
+
+            reserved_qty = min(required_qty, available)
+            shortfall_qty = max(0.0, required_qty - reserved_qty)
+
+            row.is_reserved = 1
+            row.reserved_qty = flt(reserved_qty, 3)
+            row.shortfall_qty = flt(shortfall_qty, 3)
+            row.reserved_on = now()
+            nonbatch_allocated[key] = allocated_here + reserved_qty
+            reserved_count += 1
+
+            if shortfall_qty > 0:
+                partial_rows.append({
+                    "item_code": row.item_code,
+                    "item_name": row.item_name or "",
+                    "batch": "",
+                    "required_qty": required_qty,
+                    "reserved_qty": flt(reserved_qty, 3),
+                    "shortfall_qty": flt(shortfall_qty, 3),
+                    "uom": row.uom or "",
+                    "batch_stock": flt(stock, 3),
+                    "reserved_by_others": flt(reserved_by_others + allocated_here, 3),
+                })
 
     if not reserved_count:
-        frappe.throw(_("All rows with a batch are already reserved."))
+        frappe.throw(_("All rows are already reserved."))
 
     mp.save(ignore_permissions=True)
     frappe.db.commit()
@@ -788,7 +978,10 @@ def check_mapping_batch_availability(doc):
         if not batch:
             continue
 
-        required_qty = flt(row.get("qty") if isinstance(row, dict) else row.qty)
+        base_qty = flt(row.get("qty") if isinstance(row, dict) else row.qty)
+        batch_calc_qty = flt(row.get("batch_calc_qty") if isinstance(row, dict) else getattr(row, "batch_calc_qty", 0))
+        required_qty = batch_calc_qty if batch_calc_qty > 0 else base_qty
+
         batch_stock = _get_batch_total_stock(batch, warehouse)
         reserved_by_others = _get_batch_reserved_by_others(batch, mp_name)
         allocated_here = batch_allocated_here.get(batch, 0.0)

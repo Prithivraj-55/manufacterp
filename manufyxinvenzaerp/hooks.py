@@ -1,6 +1,6 @@
 app_name = "manufyxinvenzaerp"
 app_title = "Manufyxinvenzaerp"
-app_publisher = "Craft"
+app_publisher = "Maiyamdev"
 app_description = "Custom ERP application"
 app_email = "prithivrajthangadurai@gmail.com"
 app_license = "mit"
