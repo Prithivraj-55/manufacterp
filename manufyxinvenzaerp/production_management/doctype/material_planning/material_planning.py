@@ -573,6 +573,21 @@ def finalize_mapping(doc):
                 batch=row.get("batch"),
                 planned_item=row.get("planned_item"),
                 batch_mapped="Mapped",
+                batch_parent_item_group=row.get("batch_parent_item_group") or "",
+                batch_length=flt(row.get("batch_length")),
+                batch_width=flt(row.get("batch_width")),
+                batch_thickness=flt(row.get("batch_thickness")),
+                batch_unit_weight=flt(row.get("batch_unit_weight")),
+                batch_sec_qty=flt(row.get("batch_sec_qty")),
+                batch_calc_qty=flt(row.get("batch_calc_qty")),
+                batch_total_qty=flt(row.get("batch_total_qty")),
+                batch_reserved_qty=flt(row.get("batch_reserved_qty")),
+                batch_free_qty=flt(row.get("batch_free_qty")),
+                is_reserved=row.get("is_reserved") or 0,
+                reserved_qty=flt(row.get("reserved_qty")),
+                shortfall_qty=flt(row.get("shortfall_qty")),
+                reserved_on=row.get("reserved_on") or "",
+                store_location=row.get("store_location") or "",
             ))
         else:
             unavailable.append(base)

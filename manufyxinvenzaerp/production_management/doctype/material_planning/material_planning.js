@@ -82,6 +82,54 @@ function _add_io_buttons(frm, fieldname) {
 	// );
 }
 
+function _update_weight_summary(frm) {
+	let total_raw = 0;
+	(frm.doc.raw_materials || []).forEach(r => { total_raw += flt(r.qty); });
+
+	let total_exact = 0;
+	(frm.doc.available_raw_materials || []).forEach(r => { total_exact += flt(r.required_qty); });
+
+	let expected_mapping = 0;
+	let cross_mapped = 0;
+	(frm.doc.material_mapping || []).forEach(r => {
+		expected_mapping += flt(r.qty);
+		cross_mapped    += flt(r.batch_calc_qty);
+	});
+
+	let diff = cross_mapped - expected_mapping;
+
+	frm.set_value("total_weight_plates_structurals", flt(total_raw, 3));
+	frm.set_value("weight_exact_raw_material",       flt(total_exact, 3));
+	frm.set_value("expected_weight_material_mapping", flt(expected_mapping, 3));
+	frm.set_value("weight_cross_item_mapped",         flt(cross_mapped, 3));
+
+	// Render the coloured difference HTML
+	let $wrap = frm.fields_dict["diff_weight_html"] && frm.fields_dict["diff_weight_html"].$wrapper;
+	if (!$wrap) return;
+
+	let html = "";
+	if (!expected_mapping && !cross_mapped) {
+		$wrap.html("");
+		return;
+	}
+
+	let sign    = diff >= 0 ? "+" : "";
+	let color   = diff >= 0 ? "#2e7d32" : "#c62828";
+	let val_str = sign + flt(diff, 3).toFixed(3) + " Kg";
+
+	html = `<div style="margin-top:6px;">
+		<label class="control-label" style="font-size:11px;color:#8d99a6;">Difference in Kg</label>
+		<div style="font-size:15px;font-weight:700;color:${color};margin-top:2px;">${val_str}</div>`;
+
+	if (diff > 0) {
+		html += `<div style="margin-top:8px;padding:8px 12px;background:#f1f8e9;border-left:3px solid #66bb6a;border-radius:3px;font-size:12px;color:#33691e;">
+			<b>Excess material:</b> If this material is transferred to the supplier, ensure they return the excess quantity.
+		</div>`;
+	}
+	html += "</div>";
+	$wrap.html(html);
+}
+
 frappe.ui.form.on("Material Planning", {
 
 	refresh(frm) {
@@ -122,7 +170,7 @@ frappe.ui.form.on("Material Planning", {
 		setTimeout(function () {
 			_style_btn("get_raw_materials_btn",  "refresh", "Get Raw Materials");
 			_style_btn("check_stock_btn",        "search",  "Check Stock Availability");
-			_style_btn("update_exact_match_btn", "tick",    "Update Exact Match");
+			_style_btn("update_exact_match_btn", "tick",    "Update & Map Exact Matches");
 			_style_btn("finalize_mapping_btn",   "move",    "Move to Unavailable Items");
 
 			// "View All" button injected right after "Get Raw Materials"
@@ -185,7 +233,7 @@ frappe.ui.form.on("Material Planning", {
 			});
 
 
-			// Reserve / Unreserve on Material Mapping (Partial Stock)
+			// Reserve / Unreserve on Material Mapping (Alternate Stock)
 			_add_reservation_buttons(frm);
 
 			// Reserve / Unreserve on Available Raw Materials (Exact Match)
@@ -197,6 +245,8 @@ frappe.ui.form.on("Material Planning", {
 				function () { _show_material_request_dialog(frm); }
 			);
 		}
+
+		_update_weight_summary(frm);
 
 		// "Create → Production Plan" — available in draft and submitted states
 		if (frm.doc.docstatus !== 2) {
@@ -311,7 +361,7 @@ frappe.ui.form.on("Material Planning", {
 						</tr>
 						<tr style="background:${s.mapping ? "#fffbf0" : ""};">
 							<td style="padding:8px 12px;">
-								${__("Added to <b>Material Mapping (Partial Stock)</b>")}
+								${__("Added to <b>Material Mapping (Alternate Stock)</b>")}
 								${s.mapping ? `<br><span class="text-muted" style="font-size:11px;">${__("No exact batch match — assign a batch manually")}</span>` : ""}
 							</td>
 							<td style="padding:8px 12px;font-weight:700;text-align:center;color:${s.mapping ? "orange" : "green"};">${s.mapping}</td>
@@ -341,13 +391,30 @@ frappe.ui.form.on("Material Planning", {
 			let s = frm._finalize_mapping_summary;
 			frm._finalize_mapping_summary = null;
 
+			let reservation_detail = "";
+			if (s.mapped) {
+				reservation_detail = `
+					<div style="margin-top:6px;display:flex;gap:12px;flex-wrap:wrap;">
+						<span style="font-size:11px;background:#e8f5e9;color:#2e7d32;padding:3px 8px;border-radius:10px;font-weight:600;">
+							&#10003; ${s.reserved} Reserved
+						</span>
+						<span style="font-size:11px;background:${s.not_reserved ? "#fff8e1" : "#e8f5e9"};color:${s.not_reserved ? "#e65100" : "#2e7d32"};padding:3px 8px;border-radius:10px;font-weight:600;">
+							&#9675; ${s.not_reserved} Not Reserved
+						</span>
+					</div>
+					${s.not_reserved ? `<div style="margin-top:6px;font-size:11px;color:#e65100;padding:4px 0;">
+						&#9888; Reserve the unresolved batches to avoid duplication mapping across other Material Plans.
+					</div>` : ""}`;
+			}
+
 			let rows_html = `
 				<table class="table table-bordered" style="font-size:13px;margin-top:8px;">
 					<tbody>
 						<tr style="background:${s.mapped ? "#f6fff6" : ""};">
 							<td style="padding:8px 12px;width:80%;">
-								${__("Rows remaining in <b>Material Mapping (Partial Stock)</b>")}
-								${s.mapped ? `<br><span class="text-muted" style="font-size:11px;">${__("Batch assigned — ready to reserve")}</span>` : ""}
+								${__("Rows remaining in <b>Material Mapping (Alternate Stock)</b>")}
+								<br><span class="text-muted" style="font-size:11px;">${s.mapped} batch${s.mapped !== 1 ? "es" : ""} assigned</span>
+								${reservation_detail}
 							</td>
 							<td style="padding:8px 12px;font-weight:700;text-align:center;color:${s.mapped ? "green" : ""};">${s.mapped}</td>
 						</tr>
@@ -402,7 +469,7 @@ frappe.ui.form.on("Material Planning", {
 						</tr>
 						<tr style="background:${s.mapping_added ? "#fffbf0" : ""};">
 							<td style="padding:8px 12px;">
-								${__("Added to <b>Material Mapping (Partial Stock)</b>")}
+								${__("Added to <b>Material Mapping (Alternate Stock)</b>")}
 								${s.mapping_added ? `<br><span class="text-muted" style="font-size:11px;">${__("Batch items with no exact match — assign a batch manually")}</span>` : ""}
 							</td>
 							<td style="padding:8px 12px;font-weight:700;text-align:center;color:${s.mapping_added ? "orange" : "green"};">${s.mapping_added}</td>
@@ -500,6 +567,8 @@ frappe.ui.form.on("Material Planning", {
 					frm.set_df_property("finalize_mapping_btn",   "hidden", mapping  ? 0 : 1);
 					frm.set_df_property("update_exact_match_btn", "hidden", unavail  ? 0 : 1);
 
+					_update_weight_summary(frm);
+
 					// Stash summary for after_save popup
 					frm._check_stock_summary = { avail, mapping, unavail };
 					frm.save();
@@ -549,6 +618,11 @@ frappe.ui.form.on("Material Planning", {
 			frappe.msgprint(__("No items in Material Mapping to finalize."));
 			return;
 		}
+		let unmapped = (frm.doc.material_mapping || []).filter(r => !r.batch);
+		if (!unmapped.length) {
+			frappe.msgprint(__("No items to move to purchase table, all are mapped."));
+			return;
+		}
 		frappe.call({
 			method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.finalize_mapping",
 			args: { doc: frm.doc },
@@ -575,13 +649,17 @@ frappe.ui.form.on("Material Planning", {
 				});
 				frm.refresh_field("unavailable_items");
 
-				let mapped  = (result.material_mapping || []).length;
-				let unavail = (frm.doc.unavailable_items || []).length;
+				let mapped       = (result.material_mapping || []).length;
+				let reserved     = (result.material_mapping || []).filter(r => r.is_reserved).length;
+				let not_reserved = mapped - reserved;
+				let unavail      = (frm.doc.unavailable_items || []).length;
 
 				frm.set_df_property("finalize_mapping_btn",   "hidden", mapped  ? 0 : 1);
 				frm.set_df_property("update_exact_match_btn", "hidden", unavail ? 0 : 1);
 
-				frm._finalize_mapping_summary = { mapped, unavail };
+				_update_weight_summary(frm);
+
+				frm._finalize_mapping_summary = { mapped, reserved, not_reserved, unavail };
 				frm.save();
 			},
 		});
@@ -657,6 +735,8 @@ frappe.ui.form.on("Material Planning", {
 				frm.set_df_property("finalize_mapping_btn", "hidden",
 					(frm.doc.material_mapping || []).length ? 0 : 1);
 
+				_update_weight_summary(frm);
+
 				// Stash summary so after_save can show the popup once the form is stable
 				frm._update_exact_summary = {
 					unavail_total:    unavail_total,
@@ -688,7 +768,7 @@ frappe.ui.form.on("Material Planning", {
 		if (has_exact_reserved || has_mapping_reserved) {
 			let tables = [];
 			if (has_exact_reserved)   tables.push(__("Available Raw Materials (Exact Match)"));
-			if (has_mapping_reserved) tables.push(__("Material Mapping (Partial Stock)"));
+			if (has_mapping_reserved) tables.push(__("Material Mapping (Alternate Stock)"));
 			frappe.msgprint({
 				title: __("Cannot Refetch Raw Materials"),
 				indicator: "red",
@@ -729,6 +809,8 @@ frappe.ui.form.on("Material Planning", {
 					frm.set_df_property("check_stock_btn",        "hidden", 0);
 					frm.set_df_property("finalize_mapping_btn",   "hidden", 1);
 					frm.set_df_property("update_exact_match_btn", "hidden", 1);
+
+					_update_weight_summary(frm);
 
 					frappe.show_alert({
 						message: __("{0} raw material row(s) loaded.", [r.message.length]),
@@ -778,7 +860,7 @@ frappe.ui.form.on("Material Planning", {
 			frappe.confirm(
 				__("This will replace the existing raw materials list.<br><br>"
 					+ "Rows in <b>Available Raw Materials (Exact Match)</b>, "
-					+ "<b>Material Mapping (Partial Stock)</b>, and "
+					+ "<b>Material Mapping (Alternate Stock)</b>, and "
 					+ "<b>Unavailable Items (No Stock — Needs Purchase)</b> "
 					+ "will also be removed. Continue?"),
 				_fetch
@@ -1215,6 +1297,7 @@ frappe.ui.form.on("Material Planning Material Mapping", {
 
 	batch_sec_qty(frm, cdt, cdn) {
 		_recalc_batch_qty(frm, cdt, cdn);
+		_update_weight_summary(frm);
 	},
 });
 
