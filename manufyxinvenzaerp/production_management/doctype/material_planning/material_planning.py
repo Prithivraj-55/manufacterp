@@ -17,6 +17,7 @@ class MaterialPlanning(Document):
 
     def _validate_batch_calc_qty(self):
         mp_name = self.name or ""
+        batch_allocated = {}
         for row in self.material_mapping:
             if not row.batch:
                 continue
@@ -28,13 +29,18 @@ class MaterialPlanning(Document):
                       "before saving.").format(row.idx, row.batch)
                 )
 
+            # Only validate stock coverage for Structurals/Plates (batch_calc_qty = weight used)
+            if group not in ("Structurals", "Plates"):
+                continue
+
             batch_calc_qty = flt(row.batch_calc_qty)
             if not batch_calc_qty:
                 continue
 
             batch_stock = _get_batch_total_stock(row.batch, self.for_warehouse)
             reserved_by_others = _get_batch_reserved_by_others(row.batch, mp_name)
-            available = max(0.0, batch_stock - reserved_by_others)
+            allocated_so_far = batch_allocated.get(row.batch, 0.0)
+            available = max(0.0, batch_stock - reserved_by_others - allocated_so_far)
             if batch_calc_qty > available:
                 frappe.throw(
                     _("Row {0}: Calculated Qty ({1} Kg) for batch {2} exceeds free stock ({3} Kg) "
@@ -44,6 +50,7 @@ class MaterialPlanning(Document):
                         flt(available, 3), flt(batch_stock, 3), flt(reserved_by_others, 3)
                     )
                 )
+            batch_allocated[row.batch] = allocated_so_far + batch_calc_qty
 
 
 
@@ -169,6 +176,8 @@ def get_raw_materials(doc):
                 denom = (length / 1000) * (width / 1000) * thickness * unit_weight
                 if denom:
                     sec_qty = ceil(qty / denom)
+            elif group == "Nuts and Bolts" and unit_weight:
+                sec_qty = flt(qty * unit_weight, 3)
 
             sec_uom = (
                 frappe.db.get_value("Item", detail.get("item_code"), "custom_secondary_uom") or ""
@@ -343,6 +352,13 @@ def check_stock_availability(doc):
                         "shortfall_qty": existing.get("shortfall_qty"),
                         "reserved_on": existing.get("reserved_on"),
                         "batch_mapped": "Mapped" if existing.get("batch") else "Not Mapped",
+                        "batch_sec_qty": existing.get("batch_sec_qty"),
+                        "batch_calc_qty": existing.get("batch_calc_qty"),
+                        "batch_length": existing.get("batch_length"),
+                        "batch_width": existing.get("batch_width"),
+                        "batch_thickness": existing.get("batch_thickness"),
+                        "batch_unit_weight": existing.get("batch_unit_weight"),
+                        "batch_parent_item_group": existing.get("batch_parent_item_group"),
                     })
                 else:
                     base_row["batch_mapped"] = "Not Mapped"
@@ -436,6 +452,14 @@ def move_to_exact_match(doc, item_codes):
     still_unavailable = []
     batch_remaining = {}
 
+    # Pre-deduct stock already allocated to existing available_raw_materials rows
+    # in this MP so the same batch is not double-counted across operations.
+    pre_allocated = {}
+    for r in doc.get("available_raw_materials") or []:
+        bn = r.get("batch_no") or ""
+        if bn:
+            pre_allocated[bn] = pre_allocated.get(bn, 0.0) + flt(r.get("required_qty"))
+
     # Pre-fetch has_batch_no for all items in one query
     item_batch_flag = {}
     if item_set:
@@ -464,7 +488,10 @@ def move_to_exact_match(doc, item_codes):
             for b in raw_batches:
                 if b["batch_no"] not in batch_remaining:
                     reserved_by_others = _get_batch_reserved_by_others(b["batch_no"], mp_name)
-                    batch_remaining[b["batch_no"]] = max(0.0, flt(b["qty"]) - reserved_by_others)
+                    already_allocated  = pre_allocated.get(b["batch_no"], 0.0)
+                    batch_remaining[b["batch_no"]] = max(
+                        0.0, flt(b["qty"]) - reserved_by_others - already_allocated
+                    )
 
             free_batches = [
                 {**b, "qty": batch_remaining[b["batch_no"]]}
@@ -573,6 +600,21 @@ def finalize_mapping(doc):
                 batch=row.get("batch"),
                 planned_item=row.get("planned_item"),
                 batch_mapped="Mapped",
+                batch_parent_item_group=row.get("batch_parent_item_group") or "",
+                batch_length=flt(row.get("batch_length")),
+                batch_width=flt(row.get("batch_width")),
+                batch_thickness=flt(row.get("batch_thickness")),
+                batch_unit_weight=flt(row.get("batch_unit_weight")),
+                batch_sec_qty=flt(row.get("batch_sec_qty")),
+                batch_calc_qty=flt(row.get("batch_calc_qty")),
+                batch_total_qty=flt(row.get("batch_total_qty")),
+                batch_reserved_qty=flt(row.get("batch_reserved_qty")),
+                batch_free_qty=flt(row.get("batch_free_qty")),
+                is_reserved=row.get("is_reserved") or 0,
+                reserved_qty=flt(row.get("reserved_qty")),
+                shortfall_qty=flt(row.get("shortfall_qty")),
+                reserved_on=row.get("reserved_on") or "",
+                store_location=row.get("store_location") or "",
             ))
         else:
             unavailable.append(base)
@@ -733,8 +775,9 @@ def reserve_batches(material_planning_name):
         required_qty = flt(row.qty)
 
         # When a different-dimension batch is assigned, batch_calc_qty is the
-        # Kg we actually take from that batch. Validate it covers the requirement.
-        if batch_calc_qty > 0:
+        # Kg we actually take from that batch (Structurals/Plates only).
+        # For Nuts and Bolts, always reserve required_qty (in Nos/Kg stock units).
+        if batch_calc_qty > 0 and row.batch_parent_item_group in ("Structurals", "Plates"):
             if batch_calc_qty < required_qty:
                 frappe.throw(
                     _("Row {0}: Calculated Qty ({1} Kg) is less than Required Qty ({2} Kg) for item {3}. "
@@ -980,7 +1023,8 @@ def check_mapping_batch_availability(doc):
 
         base_qty = flt(row.get("qty") if isinstance(row, dict) else row.qty)
         batch_calc_qty = flt(row.get("batch_calc_qty") if isinstance(row, dict) else getattr(row, "batch_calc_qty", 0))
-        required_qty = batch_calc_qty if batch_calc_qty > 0 else base_qty
+        group = (row.get("batch_parent_item_group") if isinstance(row, dict) else getattr(row, "batch_parent_item_group", "")) or ""
+        required_qty = batch_calc_qty if (batch_calc_qty > 0 and group in ("Structurals", "Plates")) else base_qty
 
         batch_stock = _get_batch_total_stock(batch, warehouse)
         reserved_by_others = _get_batch_reserved_by_others(batch, mp_name)
@@ -1087,7 +1131,6 @@ def make_production_plan(material_planning_name):
     pp.company = mp.company
     pp.posting_date = today()
     pp.for_warehouse = mp.for_warehouse
-    pp.ignore_existing_ordered_qty = mp.ignore_existing_ordered_qty
     pp.get_items_from = "Sales Order"
 
     from manufyxinvenzaerp.production_management.production_utils import get_routing_operations_for_bom
@@ -1225,6 +1268,8 @@ def make_material_request(material_planning_name, selected_items):
             qty = (use_length / 1000) * use_unit_weight * use_sec_qty
         elif group == "Plates" and all([use_length, use_width, use_thickness, use_unit_weight, use_sec_qty]):
             qty = (use_length / 1000) * (use_width / 1000) * use_thickness * use_unit_weight * use_sec_qty
+        elif group == "Nuts and Bolts" and use_unit_weight and qty:
+            use_sec_qty = flt(qty * use_unit_weight, 3)
 
         dim_parts = []
         if use_length:    dim_parts.append(f"L={use_length}mm")

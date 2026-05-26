@@ -91,13 +91,23 @@ frappe.ui.form.on("Purchase Order", {
 
 frappe.ui.form.on("Purchase Order Item", {
 \titem_code(frm, cdt, cdn) {
-\t\tsetTimeout(function() { calculate_qty(frm, cdt, cdn); }, 600);
+\t\tsetTimeout(function() {
+\t\t\tcalculate_qty(frm, cdt, cdn);
+\t\t\tpo_toggle_dims(frm, cdt, cdn);
+\t\t}, 600);
+\t},
+\tqty(frm, cdt, cdn) {
+\t\tvar row = locals[cdt][cdn];
+\t\tif (row.custom_parent_item_group === "Nuts and Bolts") {
+\t\t\tcalculate_qty(frm, cdt, cdn);
+\t\t}
 \t},
 \tcustom_length(frm, cdt, cdn) { calculate_qty(frm, cdt, cdn); },
 \tcustom_width(frm, cdt, cdn) { calculate_qty(frm, cdt, cdn); },
 \tcustom_thickness(frm, cdt, cdn) { calculate_qty(frm, cdt, cdn); },
 \tcustom_sec_qty(frm, cdt, cdn) { calculate_qty(frm, cdt, cdn); },
 \tcustom_unit_weight(frm, cdt, cdn) { calculate_qty(frm, cdt, cdn); },
+\tform_render(frm, cdt, cdn) { po_toggle_dims(frm, cdt, cdn); },
 \tuom(frm, cdt, cdn) {
 \t\tvar row = locals[cdt][cdn];
 \t\tif (row.uom && row.stock_uom && row.uom !== row.stock_uom) {
@@ -110,27 +120,43 @@ frappe.ui.form.on("Purchase Order Item", {
 \t}
 });
 
+function po_toggle_dims(frm, cdt, cdn) {
+\tvar row = locals[cdt][cdn];
+\tvar group = row.custom_parent_item_group;
+\tvar show_len   = group === "Structurals" || group === "Plates";
+\tvar show_thick = group === "Plates";
+\t$.each(frm.fields_dict["items"].grid.grid_rows, function(i, gr) {
+\t\tif (gr.doc && gr.doc.name === cdn && gr.grid_form) {
+\t\t\tgr.grid_form.toggle_display("custom_length",    show_len);
+\t\t\tgr.grid_form.toggle_display("custom_thickness", show_thick);
+\t\t\tgr.grid_form.toggle_display("custom_width",     show_thick);
+\t\t}
+\t});
+}
+
 function calculate_qty(frm, cdt, cdn) {
 \tvar row = locals[cdt][cdn];
 \tvar group = row.custom_parent_item_group;
-\tvar qty = null;
 
 \tif (group === "Structurals") {
 \t\tif (row.custom_length && row.custom_unit_weight && row.custom_sec_qty) {
-\t\t\tqty = (row.custom_length / 1000) * row.custom_unit_weight * row.custom_sec_qty;
+\t\t\tfrappe.model.set_value(cdt, cdn, "qty", flt((row.custom_length / 1000) * row.custom_unit_weight * row.custom_sec_qty, 3));
 \t\t} else {
 \t\t\twarn_missing_fields(row, group);
 \t\t}
 \t} else if (group === "Plates") {
 \t\tif (row.custom_length && row.custom_width && row.custom_thickness && row.custom_unit_weight && row.custom_sec_qty) {
-\t\t\tqty = (row.custom_length / 1000) * (row.custom_width / 1000) * row.custom_thickness * row.custom_unit_weight * row.custom_sec_qty;
+\t\t\tfrappe.model.set_value(cdt, cdn, "qty", flt((row.custom_length / 1000) * (row.custom_width / 1000) * row.custom_thickness * row.custom_unit_weight * row.custom_sec_qty, 3));
 \t\t} else {
 \t\t\twarn_missing_fields(row, group);
 \t\t}
-\t}
-
-\tif (qty !== null) {
-\t\tfrappe.model.set_value(cdt, cdn, "qty", flt(qty, 3));
+\t} else if (group === "Nuts and Bolts") {
+\t\tif (row.qty && row.custom_unit_weight) {
+\t\t\tvar new_sec = flt(row.qty * row.custom_unit_weight, 3);
+\t\t\tif (flt(row.custom_sec_qty, 3) !== new_sec) {
+\t\t\t\tfrappe.model.set_value(cdt, cdn, "custom_sec_qty", new_sec);
+\t\t\t}
+\t\t}
 \t}
 }
 
@@ -171,13 +197,23 @@ frappe.ui.form.on("Purchase Receipt", {
 
 frappe.ui.form.on("Purchase Receipt Item", {
 \titem_code(frm, cdt, cdn) {
-\t\tsetTimeout(function() { pr_calculate_qty(frm, cdt, cdn); }, 600);
+\t\tsetTimeout(function() {
+\t\t\tpr_calculate_qty(frm, cdt, cdn);
+\t\t\tpr_toggle_dims(frm, cdt, cdn);
+\t\t}, 600);
+\t},
+\tqty(frm, cdt, cdn) {
+\t\tvar row = locals[cdt][cdn];
+\t\tif (row.custom_parent_item_group === "Nuts and Bolts") {
+\t\t\tpr_calculate_qty(frm, cdt, cdn);
+\t\t}
 \t},
 \tcustom_length(frm, cdt, cdn) { pr_calculate_qty(frm, cdt, cdn); },
 \tcustom_width(frm, cdt, cdn) { pr_calculate_qty(frm, cdt, cdn); },
 \tcustom_thickness(frm, cdt, cdn) { pr_calculate_qty(frm, cdt, cdn); },
 \tcustom_sec_qty(frm, cdt, cdn) { pr_calculate_qty(frm, cdt, cdn); },
 \tcustom_unit_weight(frm, cdt, cdn) { pr_calculate_qty(frm, cdt, cdn); },
+\tform_render(frm, cdt, cdn) { pr_toggle_dims(frm, cdt, cdn); },
 \tuom(frm, cdt, cdn) {
 \t\tvar row = locals[cdt][cdn];
 \t\tif (row.uom && row.stock_uom && row.uom !== row.stock_uom) {
@@ -190,27 +226,43 @@ frappe.ui.form.on("Purchase Receipt Item", {
 \t}
 });
 
+function pr_toggle_dims(frm, cdt, cdn) {
+\tvar row = locals[cdt][cdn];
+\tvar group = row.custom_parent_item_group;
+\tvar show_len   = group === "Structurals" || group === "Plates";
+\tvar show_thick = group === "Plates";
+\t$.each(frm.fields_dict["items"].grid.grid_rows, function(i, gr) {
+\t\tif (gr.doc && gr.doc.name === cdn && gr.grid_form) {
+\t\t\tgr.grid_form.toggle_display("custom_length",    show_len);
+\t\t\tgr.grid_form.toggle_display("custom_thickness", show_thick);
+\t\t\tgr.grid_form.toggle_display("custom_width",     show_thick);
+\t\t}
+\t});
+}
+
 function pr_calculate_qty(frm, cdt, cdn) {
 \tvar row = locals[cdt][cdn];
 \tvar group = row.custom_parent_item_group;
-\tvar qty = null;
 
 \tif (group === "Structurals") {
 \t\tif (row.custom_length && row.custom_unit_weight && row.custom_sec_qty) {
-\t\t\tqty = (row.custom_length / 1000) * row.custom_unit_weight * row.custom_sec_qty;
+\t\t\tfrappe.model.set_value(cdt, cdn, "qty", flt((row.custom_length / 1000) * row.custom_unit_weight * row.custom_sec_qty, 3));
 \t\t} else {
 \t\t\tpr_warn_missing_fields(row, group);
 \t\t}
 \t} else if (group === "Plates") {
 \t\tif (row.custom_length && row.custom_width && row.custom_thickness && row.custom_unit_weight && row.custom_sec_qty) {
-\t\t\tqty = (row.custom_length / 1000) * (row.custom_width / 1000) * row.custom_thickness * row.custom_unit_weight * row.custom_sec_qty;
+\t\t\tfrappe.model.set_value(cdt, cdn, "qty", flt((row.custom_length / 1000) * (row.custom_width / 1000) * row.custom_thickness * row.custom_unit_weight * row.custom_sec_qty, 3));
 \t\t} else {
 \t\t\tpr_warn_missing_fields(row, group);
 \t\t}
-\t}
-
-\tif (qty !== null) {
-\t\tfrappe.model.set_value(cdt, cdn, "qty", flt(qty, 3));
+\t} else if (group === "Nuts and Bolts") {
+\t\tif (row.qty && row.custom_unit_weight) {
+\t\t\tvar new_sec = flt(row.qty * row.custom_unit_weight, 3);
+\t\t\tif (flt(row.custom_sec_qty, 3) !== new_sec) {
+\t\t\t\tfrappe.model.set_value(cdt, cdn, "custom_sec_qty", new_sec);
+\t\t\t}
+\t\t}
 \t}
 }
 
@@ -251,13 +303,23 @@ frappe.ui.form.on("Material Request", {
 
 frappe.ui.form.on("Material Request Item", {
 \titem_code(frm, cdt, cdn) {
-\t\tsetTimeout(function() { mr_calculate_qty(frm, cdt, cdn); }, 600);
+\t\tsetTimeout(function() {
+\t\t\tmr_calculate_qty(frm, cdt, cdn);
+\t\t\tmr_toggle_dims(frm, cdt, cdn);
+\t\t}, 600);
+\t},
+\tqty(frm, cdt, cdn) {
+\t\tvar row = locals[cdt][cdn];
+\t\tif (row.custom_parent_item_group === "Nuts and Bolts") {
+\t\t\tmr_calculate_qty(frm, cdt, cdn);
+\t\t}
 \t},
 \tcustom_length(frm, cdt, cdn) { mr_calculate_qty(frm, cdt, cdn); },
 \tcustom_width(frm, cdt, cdn) { mr_calculate_qty(frm, cdt, cdn); },
 \tcustom_thickness(frm, cdt, cdn) { mr_calculate_qty(frm, cdt, cdn); },
 \tcustom_sec_qty(frm, cdt, cdn) { mr_calculate_qty(frm, cdt, cdn); },
 \tcustom_unit_weight(frm, cdt, cdn) { mr_calculate_qty(frm, cdt, cdn); },
+\tform_render(frm, cdt, cdn) { mr_toggle_dims(frm, cdt, cdn); },
 \tuom(frm, cdt, cdn) {
 \t\tvar row = locals[cdt][cdn];
 \t\tif (row.uom && row.stock_uom && row.uom !== row.stock_uom) {
@@ -270,27 +332,43 @@ frappe.ui.form.on("Material Request Item", {
 \t}
 });
 
+function mr_toggle_dims(frm, cdt, cdn) {
+\tvar row = locals[cdt][cdn];
+\tvar group = row.custom_parent_item_group;
+\tvar show_len   = group === "Structurals" || group === "Plates";
+\tvar show_thick = group === "Plates";
+\t$.each(frm.fields_dict["items"].grid.grid_rows, function(i, gr) {
+\t\tif (gr.doc && gr.doc.name === cdn && gr.grid_form) {
+\t\t\tgr.grid_form.toggle_display("custom_length",    show_len);
+\t\t\tgr.grid_form.toggle_display("custom_thickness", show_thick);
+\t\t\tgr.grid_form.toggle_display("custom_width",     show_thick);
+\t\t}
+\t});
+}
+
 function mr_calculate_qty(frm, cdt, cdn) {
 \tvar row = locals[cdt][cdn];
 \tvar group = row.custom_parent_item_group;
-\tvar qty = null;
 
 \tif (group === "Structurals") {
 \t\tif (row.custom_length && row.custom_unit_weight && row.custom_sec_qty) {
-\t\t\tqty = (row.custom_length / 1000) * row.custom_unit_weight * row.custom_sec_qty;
+\t\t\tfrappe.model.set_value(cdt, cdn, "qty", flt((row.custom_length / 1000) * row.custom_unit_weight * row.custom_sec_qty, 3));
 \t\t} else {
 \t\t\tmr_warn_missing_fields(row, group);
 \t\t}
 \t} else if (group === "Plates") {
 \t\tif (row.custom_length && row.custom_width && row.custom_thickness && row.custom_unit_weight && row.custom_sec_qty) {
-\t\t\tqty = (row.custom_length / 1000) * (row.custom_width / 1000) * row.custom_thickness * row.custom_unit_weight * row.custom_sec_qty;
+\t\t\tfrappe.model.set_value(cdt, cdn, "qty", flt((row.custom_length / 1000) * (row.custom_width / 1000) * row.custom_thickness * row.custom_unit_weight * row.custom_sec_qty, 3));
 \t\t} else {
 \t\t\tmr_warn_missing_fields(row, group);
 \t\t}
-\t}
-
-\tif (qty !== null) {
-\t\tfrappe.model.set_value(cdt, cdn, "qty", flt(qty, 3));
+\t} else if (group === "Nuts and Bolts") {
+\t\tif (row.qty && row.custom_unit_weight) {
+\t\t\tvar new_sec = flt(row.qty * row.custom_unit_weight, 3);
+\t\t\tif (flt(row.custom_sec_qty, 3) !== new_sec) {
+\t\t\t\tfrappe.model.set_value(cdt, cdn, "custom_sec_qty", new_sec);
+\t\t\t}
+\t\t}
 \t}
 }
 
@@ -328,6 +406,24 @@ frappe.ui.form.on("Request for Quotation", {
 \t\t});
 \t}
 });
+
+frappe.ui.form.on("Request for Quotation Item", {
+\tform_render(frm, cdt, cdn) { rfq_toggle_dims(frm, cdt, cdn); }
+});
+
+function rfq_toggle_dims(frm, cdt, cdn) {
+\tvar row = locals[cdt][cdn];
+\tvar group = row.custom_parent_item_group;
+\tvar show_len   = group === "Structurals" || group === "Plates";
+\tvar show_thick = group === "Plates";
+\t$.each(frm.fields_dict["items"].grid.grid_rows, function(i, gr) {
+\t\tif (gr.doc && gr.doc.name === cdn && gr.grid_form) {
+\t\t\tgr.grid_form.toggle_display("custom_length",    show_len);
+\t\t\tgr.grid_form.toggle_display("custom_thickness", show_thick);
+\t\t\tgr.grid_form.toggle_display("custom_width",     show_thick);
+\t\t}
+\t});
+}
 """.strip()
 
 SQ_CLIENT_SCRIPT = """
@@ -345,13 +441,23 @@ frappe.ui.form.on("Supplier Quotation", {
 
 frappe.ui.form.on("Supplier Quotation Item", {
 \titem_code(frm, cdt, cdn) {
-\t\tsetTimeout(function() { sq_calculate_qty(frm, cdt, cdn); }, 600);
+\t\tsetTimeout(function() {
+\t\t\tsq_calculate_qty(frm, cdt, cdn);
+\t\t\tsq_toggle_dims(frm, cdt, cdn);
+\t\t}, 600);
+\t},
+\tqty(frm, cdt, cdn) {
+\t\tvar row = locals[cdt][cdn];
+\t\tif (row.custom_parent_item_group === "Nuts and Bolts") {
+\t\t\tsq_calculate_qty(frm, cdt, cdn);
+\t\t}
 \t},
 \tcustom_length(frm, cdt, cdn) { sq_calculate_qty(frm, cdt, cdn); },
 \tcustom_width(frm, cdt, cdn) { sq_calculate_qty(frm, cdt, cdn); },
 \tcustom_thickness(frm, cdt, cdn) { sq_calculate_qty(frm, cdt, cdn); },
 \tcustom_sec_qty(frm, cdt, cdn) { sq_calculate_qty(frm, cdt, cdn); },
 \tcustom_unit_weight(frm, cdt, cdn) { sq_calculate_qty(frm, cdt, cdn); },
+\tform_render(frm, cdt, cdn) { sq_toggle_dims(frm, cdt, cdn); },
 \tuom(frm, cdt, cdn) {
 \t\tvar row = locals[cdt][cdn];
 \t\tif (row.uom && row.stock_uom && row.uom !== row.stock_uom) {
@@ -364,27 +470,43 @@ frappe.ui.form.on("Supplier Quotation Item", {
 \t}
 });
 
+function sq_toggle_dims(frm, cdt, cdn) {
+\tvar row = locals[cdt][cdn];
+\tvar group = row.custom_parent_item_group;
+\tvar show_len   = group === "Structurals" || group === "Plates";
+\tvar show_thick = group === "Plates";
+\t$.each(frm.fields_dict["items"].grid.grid_rows, function(i, gr) {
+\t\tif (gr.doc && gr.doc.name === cdn && gr.grid_form) {
+\t\t\tgr.grid_form.toggle_display("custom_length",    show_len);
+\t\t\tgr.grid_form.toggle_display("custom_thickness", show_thick);
+\t\t\tgr.grid_form.toggle_display("custom_width",     show_thick);
+\t\t}
+\t});
+}
+
 function sq_calculate_qty(frm, cdt, cdn) {
 \tvar row = locals[cdt][cdn];
 \tvar group = row.custom_parent_item_group;
-\tvar qty = null;
 
 \tif (group === "Structurals") {
 \t\tif (row.custom_length && row.custom_unit_weight && row.custom_sec_qty) {
-\t\t\tqty = (row.custom_length / 1000) * row.custom_unit_weight * row.custom_sec_qty;
+\t\t\tfrappe.model.set_value(cdt, cdn, "qty", flt((row.custom_length / 1000) * row.custom_unit_weight * row.custom_sec_qty, 3));
 \t\t} else {
 \t\t\tsq_warn_missing_fields(row, group);
 \t\t}
 \t} else if (group === "Plates") {
 \t\tif (row.custom_length && row.custom_width && row.custom_thickness && row.custom_unit_weight && row.custom_sec_qty) {
-\t\t\tqty = (row.custom_length / 1000) * (row.custom_width / 1000) * row.custom_thickness * row.custom_unit_weight * row.custom_sec_qty;
+\t\t\tfrappe.model.set_value(cdt, cdn, "qty", flt((row.custom_length / 1000) * (row.custom_width / 1000) * row.custom_thickness * row.custom_unit_weight * row.custom_sec_qty, 3));
 \t\t} else {
 \t\t\tsq_warn_missing_fields(row, group);
 \t\t}
-\t}
-
-\tif (qty !== null) {
-\t\tfrappe.model.set_value(cdt, cdn, "qty", flt(qty, 3));
+\t} else if (group === "Nuts and Bolts") {
+\t\tif (row.qty && row.custom_unit_weight) {
+\t\t\tvar new_sec = flt(row.qty * row.custom_unit_weight, 3);
+\t\t\tif (flt(row.custom_sec_qty, 3) !== new_sec) {
+\t\t\t\tfrappe.model.set_value(cdt, cdn, "custom_sec_qty", new_sec);
+\t\t\t}
+\t\t}
 \t}
 }
 
@@ -675,6 +797,7 @@ def create_purchase_order_custom_fields():
                 "fieldname": "custom_thickness",
                 "label": "Thickness",
                 "fieldtype": "Float",
+                "depends_on": "eval:doc.custom_parent_item_group === 'Plates'",
                 "insert_after": "custom_unit_weight",
                 "in_list_view": 1,
             },
@@ -682,6 +805,7 @@ def create_purchase_order_custom_fields():
                 "fieldname": "custom_length",
                 "label": "Length",
                 "fieldtype": "Float",
+                "depends_on": "eval:['Structurals','Plates'].includes(doc.custom_parent_item_group)",
                 "insert_after": "custom_thickness",
                 "in_list_view": 1,
             },
@@ -689,6 +813,7 @@ def create_purchase_order_custom_fields():
                 "fieldname": "custom_width",
                 "label": "Width",
                 "fieldtype": "Float",
+                "depends_on": "eval:doc.custom_parent_item_group === 'Plates'",
                 "insert_after": "custom_length",
                 "in_list_view": 1,
             },
@@ -779,6 +904,7 @@ def create_purchase_receipt_custom_fields():
                 "label": "Thickness",
                 "fieldtype": "Float",
                 "mandatory_depends_on": "eval:doc.custom_parent_item_group==='Plates'",
+                "depends_on": "eval:doc.custom_parent_item_group === 'Plates'",
                 "insert_after": "custom_unit_weight",
                 "in_list_view": 1,
             },
@@ -787,6 +913,7 @@ def create_purchase_receipt_custom_fields():
                 "label": "Length",
                 "fieldtype": "Float",
                 "mandatory_depends_on": "eval:['Structurals','Plates'].includes(doc.custom_parent_item_group)",
+                "depends_on": "eval:['Structurals','Plates'].includes(doc.custom_parent_item_group)",
                 "insert_after": "custom_thickness",
                 "in_list_view": 1,
             },
@@ -795,6 +922,7 @@ def create_purchase_receipt_custom_fields():
                 "label": "Width",
                 "fieldtype": "Float",
                 "mandatory_depends_on": "eval:doc.custom_parent_item_group==='Plates'",
+                "depends_on": "eval:doc.custom_parent_item_group === 'Plates'",
                 "insert_after": "custom_length",
                 "in_list_view": 1,
             },
@@ -926,6 +1054,7 @@ def create_material_request_custom_fields():
                 "label": "Thickness",
                 "fieldtype": "Float",
                 "mandatory_depends_on": "eval:doc.custom_parent_item_group==='Plates'",
+                "depends_on": "eval:doc.custom_parent_item_group === 'Plates'",
                 "insert_after": "custom_unit_weight",
                 "in_list_view": 1,
             },
@@ -934,6 +1063,7 @@ def create_material_request_custom_fields():
                 "label": "Length",
                 "fieldtype": "Float",
                 "mandatory_depends_on": "eval:['Structurals','Plates'].includes(doc.custom_parent_item_group)",
+                "depends_on": "eval:['Structurals','Plates'].includes(doc.custom_parent_item_group)",
                 "insert_after": "custom_thickness",
                 "in_list_view": 1,
             },
@@ -942,6 +1072,7 @@ def create_material_request_custom_fields():
                 "label": "Width",
                 "fieldtype": "Float",
                 "mandatory_depends_on": "eval:doc.custom_parent_item_group==='Plates'",
+                "depends_on": "eval:doc.custom_parent_item_group === 'Plates'",
                 "insert_after": "custom_length",
                 "in_list_view": 1,
             },
@@ -1015,6 +1146,7 @@ def create_rfq_custom_fields():
                 "label": "Thickness",
                 "fieldtype": "Float",
                 "read_only": 1,
+                "depends_on": "eval:doc.custom_parent_item_group === 'Plates'",
                 "insert_after": "custom_unit_weight",
                 "in_list_view": 1,
             },
@@ -1023,6 +1155,7 @@ def create_rfq_custom_fields():
                 "label": "Length",
                 "fieldtype": "Float",
                 "read_only": 1,
+                "depends_on": "eval:['Structurals','Plates'].includes(doc.custom_parent_item_group)",
                 "insert_after": "custom_thickness",
                 "in_list_view": 1,
             },
@@ -1031,6 +1164,7 @@ def create_rfq_custom_fields():
                 "label": "Width",
                 "fieldtype": "Float",
                 "read_only": 1,
+                "depends_on": "eval:doc.custom_parent_item_group === 'Plates'",
                 "insert_after": "custom_length",
                 "in_list_view": 1,
             },
@@ -1107,6 +1241,7 @@ def create_sq_custom_fields():
                 "label": "Thickness",
                 "fieldtype": "Float",
                 "mandatory_depends_on": "eval:doc.custom_parent_item_group==='Plates'",
+                "depends_on": "eval:doc.custom_parent_item_group === 'Plates'",
                 "insert_after": "custom_unit_weight",
                 "in_list_view": 1,
             },
@@ -1115,6 +1250,7 @@ def create_sq_custom_fields():
                 "label": "Length",
                 "fieldtype": "Float",
                 "mandatory_depends_on": "eval:['Structurals','Plates'].includes(doc.custom_parent_item_group)",
+                "depends_on": "eval:['Structurals','Plates'].includes(doc.custom_parent_item_group)",
                 "insert_after": "custom_thickness",
                 "in_list_view": 1,
             },
@@ -1123,6 +1259,7 @@ def create_sq_custom_fields():
                 "label": "Width",
                 "fieldtype": "Float",
                 "mandatory_depends_on": "eval:doc.custom_parent_item_group==='Plates'",
+                "depends_on": "eval:doc.custom_parent_item_group === 'Plates'",
                 "insert_after": "custom_length",
                 "in_list_view": 1,
             },

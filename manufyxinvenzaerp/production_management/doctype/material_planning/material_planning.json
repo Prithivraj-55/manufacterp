@@ -1,22 +1,26 @@
 {
  "actions": [],
  "autoname": "naming_series:",
- "creation": "2026-05-09 00:00:00.000000",
+ "creation": "2026-05-09 00:00:00",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
   "tab_details",
   "naming_series",
   "posting_date",
-  "status",
   "column_break_top",
   "company",
   "production_plan",
   "section_production_settings",
-  "for_warehouse",
   "store_location",
   "column_break_settings",
-  "ignore_existing_ordered_qty",
+  "section_weight_summary",
+  "total_weight_plates_structurals",
+  "weight_exact_raw_material",
+  "column_break_weight",
+  "expected_weight_material_mapping",
+  "weight_cross_item_mapped",
+  "diff_weight_html",
   "tab_bom_items",
   "bom_items",
   "tab_stock_analysis",
@@ -24,6 +28,7 @@
   "get_raw_materials_btn",
   "raw_materials",
   "section_available_raw_materials",
+  "for_warehouse",
   "check_stock_btn",
   "available_raw_materials",
   "section_material_mapping",
@@ -31,8 +36,7 @@
   "material_mapping",
   "section_unavailable_items",
   "update_exact_match_btn",
-  "unavailable_items",
-  "amended_from"
+  "unavailable_items"
  ],
  "fields": [
   {
@@ -73,9 +77,9 @@
    "fieldname": "production_plan",
    "fieldtype": "Link",
    "label": "Production Plan",
+   "no_copy": 1,
    "options": "Production Plan",
-   "read_only": 1,
-   "no_copy": 1
+   "read_only": 1
   },
   {
    "fieldname": "section_production_settings",
@@ -89,21 +93,16 @@
    "options": "Warehouse"
   },
   {
+   "description": "Filter stock check to this sub-location within the warehouse.",
    "fieldname": "store_location",
    "fieldtype": "Link",
+   "hidden": 1,
    "label": "Store Location",
-   "options": "Store Location",
-   "description": "Filter stock check to this sub-location within the warehouse."
+   "options": "Store Location"
   },
   {
    "fieldname": "column_break_settings",
    "fieldtype": "Column Break"
-  },
-  {
-   "default": "0",
-   "fieldname": "ignore_existing_ordered_qty",
-   "fieldtype": "Check",
-   "label": "Ignore Available Stock"
   },
   {
    "fieldname": "get_raw_materials_btn",
@@ -127,7 +126,7 @@
    "label": "Stock Details"
   },
   {
-   "description": "All raw materials exploded from the selected BOMs. Shows required qty, available qty in the selected warehouse, and shortage qty for each item. Use 'Get Raw Materials' to populate this list, then 'Check Stock Availability' to classify items into the sections below.",
+   "description": "All raw materials exploded from the selected BOMs.",
    "fieldname": "section_raw_materials",
    "fieldtype": "Section Break",
    "label": "Raw Materials"
@@ -152,7 +151,7 @@
   {
    "fieldname": "update_exact_match_btn",
    "fieldtype": "Button",
-   "label": "Update Exact Match"
+   "label": "Update & Map Exact Matches"
   },
   {
    "fieldname": "available_raw_materials",
@@ -161,10 +160,10 @@
    "options": "Material Planning Available Raw Material"
   },
   {
-   "description": "Items that have some stock in the warehouse but no batch with an exact dimension match. Assign a batch manually, then click 'Finalize Mapping' \u2014 items with no batch assigned move to Unavailable Items.",
+   "description": "Items that have some stock in the warehouse but no batch with an exact dimension match. Assign a batch manually and reserve it. Items with no batch assigned move to Unavailable Items.",
    "fieldname": "section_material_mapping",
    "fieldtype": "Section Break",
-   "label": "Material Mapping (Partial Stock)"
+   "label": "Material Mapping (Alternate Stock)"
   },
   {
    "fieldname": "finalize_mapping_btn",
@@ -178,7 +177,7 @@
    "options": "Material Planning Material Mapping"
   },
   {
-   "description": "Items with no stock at all in the warehouse. These must be purchased before production can proceed. Once a purchase receipt is created and stock is available, re-run 'Check Stock Availability' to move them to Material Mapping.",
+   "description": "Items with no stock at selected in the warehouse. These must be purchased before production can proceed. Once a purchase receipt is created and stock is available, Click 'Update &amp; Map Exact Matches' to move them to exact matching table and Material Mapping to assign batch manually.",
    "fieldname": "section_unavailable_items",
    "fieldtype": "Section Break",
    "label": "Unavailable Items (No Stock \u2014 Needs Purchase)"
@@ -190,19 +189,54 @@
    "options": "Material Planning Unavailable Item"
   },
   {
-   "fieldname": "amended_from",
-   "fieldtype": "Link",
-   "ignore_user_permissions": 1,
-   "label": "Amended From",
-   "no_copy": 1,
-   "options": "Material Planning",
-   "print_hide": 1,
+   "fieldname": "section_weight_summary",
+   "fieldtype": "Section Break",
+   "label": "Weight Summary"
+  },
+  {
+   "description": "Sum of required Kg across all items in Raw Materials.",
+   "fieldname": "total_weight_plates_structurals",
+   "fieldtype": "Float",
+   "label": "Total Weight \u2014 Plates & Structurals (Kg)",
+   "precision": "3",
    "read_only": 1
+  },
+  {
+   "description": "Sum of required Kg in Available Raw Materials (Exact Match).",
+   "fieldname": "weight_exact_raw_material",
+   "fieldtype": "Float",
+   "label": "Weight \u2014 Exact Raw Material (Kg)",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_weight",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Sum of required Kg for primary items in Material Mapping (Alternate Stock).",
+   "fieldname": "expected_weight_material_mapping",
+   "fieldtype": "Float",
+   "label": "Expected Item Weight \u2014 Material Mapping (Kg)",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "description": "Sum of Calc Qty (Kg) for all batches assigned in Material Mapping.",
+   "fieldname": "weight_cross_item_mapped",
+   "fieldtype": "Float",
+   "label": "Weight of Cross Item Mapped (Kg)",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "fieldname": "diff_weight_html",
+   "fieldtype": "HTML",
+   "label": "Difference in Kg"
   }
  ],
- "is_submittable": 0,
  "links": [],
- "modified": "2026-05-09 00:00:00.000000",
+ "modified": "2026-05-26 10:45:10.211238",
  "modified_by": "Administrator",
  "module": "Production Management",
  "name": "Material Planning",
@@ -210,8 +244,6 @@
  "owner": "Administrator",
  "permissions": [
   {
-   "amend": 1,
-   "cancel": 1,
    "create": 1,
    "delete": 1,
    "email": 1,
@@ -221,12 +253,9 @@
    "report": 1,
    "role": "System Manager",
    "share": 1,
-   "submit": 1,
    "write": 1
   },
   {
-   "amend": 1,
-   "cancel": 1,
    "create": 1,
    "email": 1,
    "export": 1,
@@ -235,7 +264,6 @@
    "report": 1,
    "role": "Manufacturing Manager",
    "share": 1,
-   "submit": 1,
    "write": 1
   },
   {
@@ -246,26 +274,13 @@
    "report": 1,
    "role": "Manufacturing User",
    "share": 1,
-   "submit": 1,
    "write": 1
   }
  ],
- "search_fields": "company,status",
+ "row_format": "Dynamic",
+ "search_fields": "company",
  "sort_field": "modified",
  "sort_order": "DESC",
- "states": [
-  {
-   "color": "Blue",
-   "title": "Draft"
-  },
-  {
-   "color": "Green",
-   "title": "Submitted"
-  },
-  {
-   "color": "Red",
-   "title": "Cancelled"
-  }
- ],
+ "states": [],
  "track_changes": 1
 }

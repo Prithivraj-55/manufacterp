@@ -82,6 +82,57 @@ function _add_io_buttons(frm, fieldname) {
 	// );
 }
 
+function _update_weight_summary(frm) {
+	let total_raw = 0;
+	(frm.doc.raw_materials || []).forEach(r => {
+		let g = r.parent_item_group || "";
+		if (g === "Structurals" || g === "Plates") total_raw += flt(r.qty);
+	});
+
+	let total_exact = 0;
+	(frm.doc.available_raw_materials || []).forEach(r => { total_exact += flt(r.required_qty); });
+
+	let expected_mapping = 0;
+	let cross_mapped = 0;
+	(frm.doc.material_mapping || []).forEach(r => {
+		expected_mapping += flt(r.qty);
+		cross_mapped    += flt(r.batch_calc_qty);
+	});
+
+	let diff = cross_mapped - expected_mapping;
+
+	frm.set_value("total_weight_plates_structurals", flt(total_raw, 3));
+	frm.set_value("weight_exact_raw_material",       flt(total_exact, 3));
+	frm.set_value("expected_weight_material_mapping", flt(expected_mapping, 3));
+	frm.set_value("weight_cross_item_mapped",         flt(cross_mapped, 3));
+
+	// Render the coloured difference HTML
+	let $wrap = frm.fields_dict["diff_weight_html"] && frm.fields_dict["diff_weight_html"].$wrapper;
+	if (!$wrap) return;
+
+	let html = "";
+	if (!expected_mapping && !cross_mapped) {
+		$wrap.html("");
+		return;
+	}
+
+	let sign    = diff >= 0 ? "+" : "";
+	let color   = diff >= 0 ? "#2e7d32" : "#c62828";
+	let val_str = sign + flt(diff, 3).toFixed(3) + " Kg";
+
+	html = `<div style="margin-top:6px;">
+		<label class="control-label" style="font-size:11px;color:#8d99a6;">Difference in Kg</label>
+		<div style="font-size:15px;font-weight:700;color:${color};margin-top:2px;">${val_str}</div>`;
+
+	if (diff > 0) {
+		html += `<div style="margin-top:8px;padding:8px 12px;background:#f1f8e9;border-left:3px solid #66bb6a;border-radius:3px;font-size:12px;color:#33691e;">
+			<b>Excess material:</b> If this material is transferred to the supplier, ensure they return the excess quantity.
+		</div>`;
+	}
+	html += "</div>";
+	$wrap.html(html);
+}
+
 frappe.ui.form.on("Material Planning", {
 
 	refresh(frm) {
@@ -122,19 +173,28 @@ frappe.ui.form.on("Material Planning", {
 		setTimeout(function () {
 			_style_btn("get_raw_materials_btn",  "refresh", "Get Raw Materials");
 			_style_btn("check_stock_btn",        "search",  "Check Stock Availability");
-			_style_btn("update_exact_match_btn", "tick",    "Update Exact Match");
+			_style_btn("update_exact_match_btn", "tick",    "Update & Map Exact Matches");
 			_style_btn("finalize_mapping_btn",   "move",    "Move to Unavailable Items");
 
-			// "View All" button injected right after "Get Raw Materials"
-			let $raw_btn = frm.fields_dict["get_raw_materials_btn"] && frm.fields_dict["get_raw_materials_btn"].$input;
-			if ($raw_btn && $raw_btn.length) {
-				$raw_btn.closest(".frappe-control").find(".view-all-raw-btn").remove();
-				let $view_all = $('<button class="btn btn-default btn-sm view-all-raw-btn" style="margin-left:8px;">'
-					+ frappe.utils.icon("eye", "sm") + "&nbsp;" + __("View All")
-					+ "</button>");
-				$view_all.on("click", function () { _show_raw_materials_view(frm); });
-				$raw_btn.after($view_all);
+			// "View All" injected next to each section's action button
+			function _inject_view_all($anchor_input, css_class, fieldname) {
+				if (!$anchor_input || !$anchor_input.length) return;
+				$anchor_input.closest(".frappe-control").find("." + css_class).remove();
+				let $va = $('<button class="btn btn-default btn-sm ' + css_class + '" style="margin-left:8px;"></button>');
+				$va.html(frappe.utils.icon("eye", "sm") + "&nbsp;" + __("View All"));
+				$va.on("click", function () { _show_table_popup(frm, fieldname); });
+				$anchor_input.after($va);
 			}
+
+			let $raw_btn  = frm.fields_dict["get_raw_materials_btn"]  && frm.fields_dict["get_raw_materials_btn"].$input;
+			let $chk_btn  = frm.fields_dict["check_stock_btn"]        && frm.fields_dict["check_stock_btn"].$input;
+			let $fin_btn  = frm.fields_dict["finalize_mapping_btn"]   && frm.fields_dict["finalize_mapping_btn"].$input;
+			let $upd_btn  = frm.fields_dict["update_exact_match_btn"] && frm.fields_dict["update_exact_match_btn"].$input;
+
+			_inject_view_all($raw_btn,  "view-all-raw-btn", "raw_materials");
+			_inject_view_all($chk_btn,  "view-all-arm-btn", "available_raw_materials");
+			_inject_view_all($fin_btn,  "view-all-mm-btn",  "material_mapping");
+			_inject_view_all($upd_btn,  "view-all-ui-btn",  "unavailable_items");
 		}, 50);
 
 		// Colour-coded Status badge on Material Mapping rows
@@ -163,8 +223,11 @@ frappe.ui.form.on("Material Planning", {
 			g.refresh();
 		});
 
-		// Lock BOM Items once a Production Plan has been created
-		if (frm.doc.production_plan) {
+		// Lock BOM Items once a Production Plan exists OR any stock is reserved
+		let has_any_reserved = (frm.doc.available_raw_materials || []).some(r => r.is_reserved)
+			|| (frm.doc.material_mapping || []).some(r => r.is_reserved);
+
+		if (frm.doc.production_plan || has_any_reserved) {
 			frm.set_df_property("bom_items", "read_only", 1);
 			let bom_grid = frm.fields_dict["bom_items"] && frm.fields_dict["bom_items"].grid;
 			if (bom_grid) {
@@ -172,6 +235,10 @@ frappe.ui.form.on("Material Planning", {
 				bom_grid.cannot_add_rows = true;
 				bom_grid.df.cannot_delete_rows = true;
 				bom_grid.refresh();
+			}
+			if (has_any_reserved && !frm.doc.production_plan) {
+				frm.set_df_property("bom_items", "description",
+					"⚠ BOM Items are locked because stock is already reserved. Unreserve all batches before modifying BOMs.");
 			}
 		}
 
@@ -185,7 +252,8 @@ frappe.ui.form.on("Material Planning", {
 			});
 
 
-			// Reserve / Unreserve on Material Mapping (Partial Stock)
+
+			// Reserve / Unreserve on Material Mapping (Alternate Stock)
 			_add_reservation_buttons(frm);
 
 			// Reserve / Unreserve on Available Raw Materials (Exact Match)
@@ -197,6 +265,8 @@ frappe.ui.form.on("Material Planning", {
 				function () { _show_material_request_dialog(frm); }
 			);
 		}
+
+		_update_weight_summary(frm);
 
 		// "Create → Production Plan" — available in draft and submitted states
 		if (frm.doc.docstatus !== 2) {
@@ -311,7 +381,7 @@ frappe.ui.form.on("Material Planning", {
 						</tr>
 						<tr style="background:${s.mapping ? "#fffbf0" : ""};">
 							<td style="padding:8px 12px;">
-								${__("Added to <b>Material Mapping (Partial Stock)</b>")}
+								${__("Added to <b>Material Mapping (Alternate Stock)</b>")}
 								${s.mapping ? `<br><span class="text-muted" style="font-size:11px;">${__("No exact batch match — assign a batch manually")}</span>` : ""}
 							</td>
 							<td style="padding:8px 12px;font-weight:700;text-align:center;color:${s.mapping ? "orange" : "green"};">${s.mapping}</td>
@@ -341,13 +411,30 @@ frappe.ui.form.on("Material Planning", {
 			let s = frm._finalize_mapping_summary;
 			frm._finalize_mapping_summary = null;
 
+			let reservation_detail = "";
+			if (s.mapped) {
+				reservation_detail = `
+					<div style="margin-top:6px;display:flex;gap:12px;flex-wrap:wrap;">
+						<span style="font-size:11px;background:#e8f5e9;color:#2e7d32;padding:3px 8px;border-radius:10px;font-weight:600;">
+							&#10003; ${s.reserved} Reserved
+						</span>
+						<span style="font-size:11px;background:${s.not_reserved ? "#fff8e1" : "#e8f5e9"};color:${s.not_reserved ? "#e65100" : "#2e7d32"};padding:3px 8px;border-radius:10px;font-weight:600;">
+							&#9675; ${s.not_reserved} Not Reserved
+						</span>
+					</div>
+					${s.not_reserved ? `<div style="margin-top:6px;font-size:11px;color:#e65100;padding:4px 0;">
+						&#9888; Reserve the unresolved batches to avoid duplication mapping across other Material Plans.
+					</div>` : ""}`;
+			}
+
 			let rows_html = `
 				<table class="table table-bordered" style="font-size:13px;margin-top:8px;">
 					<tbody>
 						<tr style="background:${s.mapped ? "#f6fff6" : ""};">
 							<td style="padding:8px 12px;width:80%;">
-								${__("Rows remaining in <b>Material Mapping (Partial Stock)</b>")}
-								${s.mapped ? `<br><span class="text-muted" style="font-size:11px;">${__("Batch assigned — ready to reserve")}</span>` : ""}
+								${__("Rows remaining in <b>Material Mapping (Alternate Stock)</b>")}
+								<br><span class="text-muted" style="font-size:11px;">${s.mapped} batch${s.mapped !== 1 ? "es" : ""} assigned</span>
+								${reservation_detail}
 							</td>
 							<td style="padding:8px 12px;font-weight:700;text-align:center;color:${s.mapped ? "green" : ""};">${s.mapped}</td>
 						</tr>
@@ -402,7 +489,7 @@ frappe.ui.form.on("Material Planning", {
 						</tr>
 						<tr style="background:${s.mapping_added ? "#fffbf0" : ""};">
 							<td style="padding:8px 12px;">
-								${__("Added to <b>Material Mapping (Partial Stock)</b>")}
+								${__("Added to <b>Material Mapping (Alternate Stock)</b>")}
 								${s.mapping_added ? `<br><span class="text-muted" style="font-size:11px;">${__("Batch items with no exact match — assign a batch manually")}</span>` : ""}
 							</td>
 							<td style="padding:8px 12px;font-weight:700;text-align:center;color:${s.mapping_added ? "orange" : "green"};">${s.mapping_added}</td>
@@ -500,6 +587,8 @@ frappe.ui.form.on("Material Planning", {
 					frm.set_df_property("finalize_mapping_btn",   "hidden", mapping  ? 0 : 1);
 					frm.set_df_property("update_exact_match_btn", "hidden", unavail  ? 0 : 1);
 
+					_update_weight_summary(frm);
+
 					// Stash summary for after_save popup
 					frm._check_stock_summary = { avail, mapping, unavail };
 					frm.save();
@@ -507,12 +596,16 @@ frappe.ui.form.on("Material Planning", {
 			});
 		};
 
-		let has_exact_reserved = (frm.doc.available_raw_materials || []).some(r => r.is_reserved);
-		if (has_exact_reserved) {
+		let has_exact_reserved   = (frm.doc.available_raw_materials || []).some(r => r.is_reserved);
+		let has_mapping_reserved = (frm.doc.material_mapping || []).some(r => r.is_reserved);
+		if (has_exact_reserved || has_mapping_reserved) {
+			let which = [];
+			if (has_exact_reserved)   which.push(__("<b>Available Raw Materials (Exact Match)</b>"));
+			if (has_mapping_reserved) which.push(__("<b>Material Mapping (Alternate Stock)</b>"));
 			frappe.msgprint({
 				title: __("Cannot Re-check Stock"),
 				indicator: "red",
-				message: __("Stocks are already reserved against items in <b>Available Raw Materials (Exact Match)</b>. Unreserve it to remap the available batches."),
+				message: __("Stocks are already reserved in: {0}. Unreserve all reservations before re-checking.", [which.join(", ")]),
 			});
 			return;
 		}
@@ -545,8 +638,17 @@ frappe.ui.form.on("Material Planning", {
 	},
 
 	finalize_mapping_btn(frm) {
+		if (frm.is_dirty()) {
+			frappe.msgprint(__("There is unsaved changes, save it to move items to unavailable item table."));
+			return;
+		}
 		if (!(frm.doc.material_mapping || []).length) {
 			frappe.msgprint(__("No items in Material Mapping to finalize."));
+			return;
+		}
+		let unmapped = (frm.doc.material_mapping || []).filter(r => !r.batch);
+		if (!unmapped.length) {
+			frappe.msgprint(__("No items to move to purchase table, all are mapped."));
 			return;
 		}
 		frappe.call({
@@ -566,22 +668,28 @@ frappe.ui.form.on("Material Planning", {
 				});
 				frm.refresh_field("material_mapping");
 
-				// Merge newly-unmapped rows with any existing unavailable items
+				// Merge newly-unmapped rows with existing unavailable items (de-duplicate by item_code+bom_no)
 				let existing = (frm.doc.unavailable_items || []).filter(r => r.item_code);
+				let existing_keys = new Set(existing.map(r => `${r.item_code}|${r.bom_no || ""}`));
+				let new_rows = (result.unavailable_items || []).filter(r => !existing_keys.has(`${r.item_code}|${r.bom_no || ""}`));
 				frm.clear_table("unavailable_items");
-				existing.concat(result.unavailable_items || []).forEach(function(row) {
+				existing.concat(new_rows).forEach(function(row) {
 					let child = frm.add_child("unavailable_items");
 					Object.keys(row).forEach(function(k) { if (k !== "name" && k !== "idx") child[k] = row[k]; });
 				});
 				frm.refresh_field("unavailable_items");
 
-				let mapped  = (result.material_mapping || []).length;
-				let unavail = (frm.doc.unavailable_items || []).length;
+				let mapped       = (result.material_mapping || []).length;
+				let reserved     = (result.material_mapping || []).filter(r => r.is_reserved).length;
+				let not_reserved = mapped - reserved;
+				let unavail      = (frm.doc.unavailable_items || []).length;
 
 				frm.set_df_property("finalize_mapping_btn",   "hidden", mapped  ? 0 : 1);
 				frm.set_df_property("update_exact_match_btn", "hidden", unavail ? 0 : 1);
 
-				frm._finalize_mapping_summary = { mapped, unavail };
+				_update_weight_summary(frm);
+
+				frm._finalize_mapping_summary = { mapped, reserved, not_reserved, unavail };
 				frm.save();
 			},
 		});
@@ -657,6 +765,8 @@ frappe.ui.form.on("Material Planning", {
 				frm.set_df_property("finalize_mapping_btn", "hidden",
 					(frm.doc.material_mapping || []).length ? 0 : 1);
 
+				_update_weight_summary(frm);
+
 				// Stash summary so after_save can show the popup once the form is stable
 				frm._update_exact_summary = {
 					unavail_total:    unavail_total,
@@ -688,7 +798,7 @@ frappe.ui.form.on("Material Planning", {
 		if (has_exact_reserved || has_mapping_reserved) {
 			let tables = [];
 			if (has_exact_reserved)   tables.push(__("Available Raw Materials (Exact Match)"));
-			if (has_mapping_reserved) tables.push(__("Material Mapping (Partial Stock)"));
+			if (has_mapping_reserved) tables.push(__("Material Mapping (Alternate Stock)"));
 			frappe.msgprint({
 				title: __("Cannot Refetch Raw Materials"),
 				indicator: "red",
@@ -729,6 +839,8 @@ frappe.ui.form.on("Material Planning", {
 					frm.set_df_property("check_stock_btn",        "hidden", 0);
 					frm.set_df_property("finalize_mapping_btn",   "hidden", 1);
 					frm.set_df_property("update_exact_match_btn", "hidden", 1);
+
+					_update_weight_summary(frm);
 
 					frappe.show_alert({
 						message: __("{0} raw material row(s) loaded.", [r.message.length]),
@@ -778,7 +890,7 @@ frappe.ui.form.on("Material Planning", {
 			frappe.confirm(
 				__("This will replace the existing raw materials list.<br><br>"
 					+ "Rows in <b>Available Raw Materials (Exact Match)</b>, "
-					+ "<b>Material Mapping (Partial Stock)</b>, and "
+					+ "<b>Material Mapping (Alternate Stock)</b>, and "
 					+ "<b>Unavailable Items (No Stock — Needs Purchase)</b> "
 					+ "will also be removed. Continue?"),
 				_fetch
@@ -1089,6 +1201,8 @@ function _recalc_batch_qty(frm, cdt, cdn) {
 		qty = (L / 1000) * UW * S;
 	} else if (group === "Plates" && L && W && T && UW && S) {
 		qty = (L / 1000) * (W / 1000) * T * UW * S;
+	} else if (group === "Nuts and Bolts" && S && UW) {
+		qty = flt(S * UW, 3);
 	}
 	frappe.model.set_value(cdt, cdn, "batch_calc_qty", flt(qty, 3));
 }
@@ -1215,6 +1329,7 @@ frappe.ui.form.on("Material Planning Material Mapping", {
 
 	batch_sec_qty(frm, cdt, cdn) {
 		_recalc_batch_qty(frm, cdt, cdn);
+		_update_weight_summary(frm);
 	},
 });
 
@@ -1289,6 +1404,7 @@ function _add_reservation_buttons(frm) {
 						freeze_message: __("Reserving batches…"),
 						callback(r) {
 							if (!r.message) return;
+							frm._grid_btns_added = false;
 							frm.reload_doc();
 							let partial = r.message.partial || [];
 							if (partial.length) {
@@ -1349,6 +1465,7 @@ function _add_reservation_buttons(frm) {
 						freeze_message: __("Unreserving…"),
 						callback(r) {
 							d.hide();
+							frm._grid_btns_added = false;
 							frm.reload_doc();
 							frappe.show_alert({ message: __("Batches unreserved."), indicator: "orange" }, 4);
 						},
@@ -1360,44 +1477,118 @@ function _add_reservation_buttons(frm) {
 	);
 }
 
-// View All popup for Raw Materials table — read-only, all columns, scrollable
-function _show_raw_materials_view(frm) {
-	let rows = frm.doc.raw_materials || [];
+// Column definitions for each table's View All popup
+const _TABLE_VIEW_CONFIG = {
+	raw_materials: {
+		title: "Raw Materials",
+		cols: [
+			{ fieldname: "item_number",       label: "Item No" },
+			{ fieldname: "sales_order",       label: "Sales Order" },
+			{ fieldname: "item_code",         label: "Item Code" },
+			{ fieldname: "item_name",         label: "Item Name" },
+			{ fieldname: "bom_no",            label: "Source BOM" },
+			{ fieldname: "duno_mark_no",      label: "DUNO/Mark No" },
+			{ fieldname: "parent_item_group", label: "Item Group" },
+			{ fieldname: "length",            label: "Length (mm)" },
+			{ fieldname: "width",             label: "Width (mm)" },
+			{ fieldname: "thickness",         label: "Thickness" },
+			{ fieldname: "sec_qty",           label: "Sec Qty" },
+			{ fieldname: "sec_uom",           label: "Sec UOM" },
+			{ fieldname: "qty",               label: "Required Qty" },
+			{ fieldname: "uom",               label: "UOM" },
+			{ fieldname: "available_qty",     label: "Available Qty" },
+			{ fieldname: "shortage_qty",      label: "Shortage Qty" },
+			{ fieldname: "unit_weight",       label: "Unit Weight" },
+			{ fieldname: "material_spec",     label: "Material Spec" },
+			{ fieldname: "warehouse",         label: "Warehouse" },
+			{ fieldname: "store_location",    label: "Store Location" },
+		],
+	},
+	available_raw_materials: {
+		title: "Available Raw Materials (Exact Match)",
+		cols: [
+			{ fieldname: "item_number",       label: "Item No" },
+			{ fieldname: "sales_order",       label: "Sales Order" },
+			{ fieldname: "item_code",         label: "Item Code" },
+			{ fieldname: "item_name",         label: "Item Name" },
+			{ fieldname: "batch_no",          label: "Batch No" },
+			{ fieldname: "parent_item_group", label: "Item Group" },
+			{ fieldname: "length",            label: "Length (mm)" },
+			{ fieldname: "width",             label: "Width (mm)" },
+			{ fieldname: "thickness",         label: "Thickness" },
+			{ fieldname: "sec_qty",           label: "Sec Qty" },
+			{ fieldname: "sec_uom",           label: "Sec UOM" },
+			{ fieldname: "required_qty",      label: "Required Qty" },
+			{ fieldname: "available_qty",     label: "Available Qty" },
+			{ fieldname: "uom",               label: "UOM" },
+			{ fieldname: "is_reserved",       label: "Reserved" },
+			{ fieldname: "reserved_qty",      label: "Reserved Qty" },
+			{ fieldname: "shortfall_qty",     label: "Shortfall Qty" },
+			{ fieldname: "warehouse",         label: "Warehouse" },
+		],
+	},
+	material_mapping: {
+		title: "Material Mapping (Alternate Stock)",
+		cols: [
+			{ fieldname: "item_number",       label: "Item No" },
+			{ fieldname: "sales_order",       label: "Sales Order" },
+			{ fieldname: "item_code",         label: "Item Code" },
+			{ fieldname: "item_name",         label: "Item Name" },
+			{ fieldname: "qty",               label: "Req Qty" },
+			{ fieldname: "uom",               label: "UOM" },
+			{ fieldname: "parent_item_group", label: "Item Group" },
+			{ fieldname: "length",            label: "Length (mm)" },
+			{ fieldname: "width",             label: "Width (mm)" },
+			{ fieldname: "thickness",         label: "Thickness" },
+			{ fieldname: "sec_qty",           label: "Sec Qty" },
+			{ fieldname: "batch",             label: "Batch" },
+			{ fieldname: "batch_mapped",      label: "Status" },
+			{ fieldname: "batch_length",      label: "Batch Length" },
+			{ fieldname: "batch_sec_qty",     label: "Batch Sec Qty" },
+			{ fieldname: "batch_calc_qty",    label: "Calc Qty (Kg)" },
+			{ fieldname: "is_reserved",       label: "Reserved" },
+			{ fieldname: "reserved_qty",      label: "Reserved Qty" },
+		],
+	},
+	unavailable_items: {
+		title: "Unavailable Items (No Stock — Needs Purchase)",
+		cols: [
+			{ fieldname: "item_number",        label: "Item No" },
+			{ fieldname: "sales_order",        label: "Sales Order" },
+			{ fieldname: "item_code",          label: "Item Code" },
+			{ fieldname: "item_name",          label: "Item Name" },
+			{ fieldname: "qty",                label: "Required Qty" },
+			{ fieldname: "uom",                label: "UOM" },
+			{ fieldname: "parent_item_group",  label: "Item Group" },
+			{ fieldname: "length",             label: "Length (mm)" },
+			{ fieldname: "width",              label: "Width (mm)" },
+			{ fieldname: "thickness",          label: "Thickness" },
+			{ fieldname: "sec_qty",            label: "Sec Qty" },
+			{ fieldname: "sec_uom",            label: "Sec UOM" },
+			{ fieldname: "unit_weight",        label: "Unit Weight" },
+			{ fieldname: "alternate_item",     label: "Alt Item" },
+			{ fieldname: "alternate_quantity", label: "Alt Qty (Kg)" },
+		],
+	},
+};
+
+// Generic View All popup — read-only, all configured columns, scrollable
+function _show_table_popup(frm, fieldname) {
+	let cfg  = _TABLE_VIEW_CONFIG[fieldname];
+	if (!cfg) return;
+	let rows = frm.doc[fieldname] || [];
 	if (!rows.length) {
-		frappe.msgprint(__("No raw materials to display."));
+		frappe.msgprint(__("No data to display."));
 		return;
 	}
 
-	const cols = [
-		{ fieldname: "item_number",       label: "Item No" },
-		{ fieldname: "sales_order",       label: "Sales Order" },
-		{ fieldname: "item_code",         label: "Item Code" },
-		{ fieldname: "item_name",         label: "Item Name" },
-		{ fieldname: "bom_no",            label: "Source BOM" },
-		{ fieldname: "duno_mark_no",      label: "DUNO/Mark No" },
-		{ fieldname: "parent_item_group", label: "Item Group" },
-		{ fieldname: "length",            label: "Length (mm)" },
-		{ fieldname: "width",             label: "Width (mm)" },
-		{ fieldname: "thickness",         label: "Thickness" },
-		{ fieldname: "sec_qty",           label: "Sec Qty" },
-		{ fieldname: "sec_uom",           label: "Sec UOM" },
-		{ fieldname: "qty",               label: "Required Qty" },
-		{ fieldname: "uom",               label: "UOM" },
-		{ fieldname: "available_qty",     label: "Available Qty" },
-		{ fieldname: "shortage_qty",      label: "Shortage Qty" },
-		{ fieldname: "unit_weight",       label: "Unit Weight" },
-		{ fieldname: "material_spec",     label: "Material Spec" },
-		{ fieldname: "warehouse",         label: "Warehouse" },
-		{ fieldname: "store_location",    label: "Store Location" },
-	];
-
 	let th_style = "white-space:nowrap;padding:6px 10px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;";
-	let thead = "<tr>" + cols.map(c =>
+	let thead = "<tr>" + cfg.cols.map(c =>
 		`<th style="${th_style}">${__(c.label)}</th>`
 	).join("") + "</tr>";
 
 	let tbody = rows.map(function (row, idx) {
-		let cells = cols.map(function (c) {
+		let cells = cfg.cols.map(function (c) {
 			let val = row[c.fieldname];
 			if (val === null || val === undefined) val = "";
 			return `<td style="padding:5px 10px;white-space:nowrap;border-bottom:1px solid #f0f0f0;">${frappe.utils.escape_html(String(val))}</td>`;
@@ -1414,7 +1605,7 @@ function _show_raw_materials_view(frm) {
 	</div>`;
 
 	let d = new frappe.ui.Dialog({
-		title: __("Raw Materials — {0} item(s)", [rows.length]),
+		title: __(cfg.title + " — {0} item(s)", [rows.length]),
 		size: "extra-large",
 	});
 	d.$body.html(html);
@@ -1443,6 +1634,7 @@ function _add_exact_match_reservation_buttons(frm) {
 						freeze_message: __("Reserving batches…"),
 						callback(r) {
 							if (!r.message) return;
+							frm._grid_btns_added = false;
 							frm.reload_doc();
 							let partial = r.message.partial || [];
 							if (partial.length) {
@@ -1503,6 +1695,7 @@ function _add_exact_match_reservation_buttons(frm) {
 						freeze_message: __("Unreserving…"),
 						callback(r) {
 							d.hide();
+							frm._grid_btns_added = false;
 							frm.reload_doc();
 							frappe.show_alert({ message: __("Batches unreserved."), indicator: "orange" }, 4);
 						},
