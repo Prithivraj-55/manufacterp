@@ -1,19 +1,17 @@
 {
  "actions": [],
  "autoname": "naming_series:",
- "creation": "2026-05-09 00:00:00.000000",
+ "creation": "2026-05-09 00:00:00",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
   "tab_details",
   "naming_series",
   "posting_date",
-  "status",
   "column_break_top",
   "company",
   "production_plan",
   "section_production_settings",
-  "for_warehouse",
   "store_location",
   "column_break_settings",
   "section_weight_summary",
@@ -30,6 +28,7 @@
   "get_raw_materials_btn",
   "raw_materials",
   "section_available_raw_materials",
+  "for_warehouse",
   "check_stock_btn",
   "available_raw_materials",
   "section_material_mapping",
@@ -78,9 +77,9 @@
    "fieldname": "production_plan",
    "fieldtype": "Link",
    "label": "Production Plan",
+   "no_copy": 1,
    "options": "Production Plan",
-   "read_only": 1,
-   "no_copy": 1
+   "read_only": 1
   },
   {
    "fieldname": "section_production_settings",
@@ -94,11 +93,12 @@
    "options": "Warehouse"
   },
   {
+   "description": "Filter stock check to this sub-location within the warehouse.",
    "fieldname": "store_location",
    "fieldtype": "Link",
+   "hidden": 1,
    "label": "Store Location",
-   "options": "Store Location",
-   "description": "Filter stock check to this sub-location within the warehouse."
+   "options": "Store Location"
   },
   {
    "fieldname": "column_break_settings",
@@ -194,40 +194,40 @@
    "label": "Weight Summary"
   },
   {
+   "description": "Sum of required Kg across all items in Raw Materials.",
    "fieldname": "total_weight_plates_structurals",
    "fieldtype": "Float",
-   "label": "Total Weight — Plates & Structurals (Kg)",
-   "read_only": 1,
+   "label": "Total Weight \u2014 Plates & Structurals (Kg)",
    "precision": "3",
-   "description": "Sum of required Kg across all items in Raw Materials."
+   "read_only": 1
   },
   {
+   "description": "Sum of required Kg in Available Raw Materials (Exact Match).",
    "fieldname": "weight_exact_raw_material",
    "fieldtype": "Float",
-   "label": "Weight — Exact Raw Material (Kg)",
-   "read_only": 1,
+   "label": "Weight \u2014 Exact Raw Material (Kg)",
    "precision": "3",
-   "description": "Sum of required Kg in Available Raw Materials (Exact Match)."
+   "read_only": 1
   },
   {
    "fieldname": "column_break_weight",
    "fieldtype": "Column Break"
   },
   {
+   "description": "Sum of required Kg for primary items in Material Mapping (Alternate Stock).",
    "fieldname": "expected_weight_material_mapping",
    "fieldtype": "Float",
-   "label": "Expected Item Weight — Material Mapping (Kg)",
-   "read_only": 1,
+   "label": "Expected Item Weight \u2014 Material Mapping (Kg)",
    "precision": "3",
-   "description": "Sum of required Kg for primary items in Material Mapping (Alternate Stock)."
+   "read_only": 1
   },
   {
+   "description": "Sum of Calc Qty (Kg) for all batches assigned in Material Mapping.",
    "fieldname": "weight_cross_item_mapped",
    "fieldtype": "Float",
    "label": "Weight of Cross Item Mapped (Kg)",
-   "read_only": 1,
    "precision": "3",
-   "description": "Sum of Calc Qty (Kg) for all batches assigned in Material Mapping."
+   "read_only": 1
   },
   {
    "fieldname": "diff_weight_html",
@@ -235,9 +235,8 @@
    "label": "Difference in Kg"
   }
  ],
- "is_submittable": 0,
  "links": [],
- "modified": "2026-05-09 00:00:00.000000",
+ "modified": "2026-05-26 10:45:10.211238",
  "modified_by": "Administrator",
  "module": "Production Management",
  "name": "Material Planning",
@@ -245,8 +244,6 @@
  "owner": "Administrator",
  "permissions": [
   {
-   "amend": 1,
-   "cancel": 1,
    "create": 1,
    "delete": 1,
    "email": 1,
@@ -256,12 +253,9 @@
    "report": 1,
    "role": "System Manager",
    "share": 1,
-   "submit": 1,
    "write": 1
   },
   {
-   "amend": 1,
-   "cancel": 1,
    "create": 1,
    "email": 1,
    "export": 1,
@@ -270,7 +264,6 @@
    "report": 1,
    "role": "Manufacturing Manager",
    "share": 1,
-   "submit": 1,
    "write": 1
   },
   {
@@ -281,26 +274,13 @@
    "report": 1,
    "role": "Manufacturing User",
    "share": 1,
-   "submit": 1,
    "write": 1
   }
  ],
- "search_fields": "company,status",
+ "row_format": "Dynamic",
+ "search_fields": "company",
  "sort_field": "modified",
  "sort_order": "DESC",
- "states": [
-  {
-   "color": "Blue",
-   "title": "Draft"
-  },
-  {
-   "color": "Green",
-   "title": "Submitted"
-  },
-  {
-   "color": "Red",
-   "title": "Cancelled"
-  }
- ],
+ "states": [],
  "track_changes": 1
 }
