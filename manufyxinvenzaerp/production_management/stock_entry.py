@@ -41,7 +41,7 @@ def on_submit_stock_entry(doc, method):
 			if not row.is_finished_item and row.batch_no and flt(row.get("custom_sec_qty")):
 				_reduce_batch_sec_qty(row.batch_no, row.custom_sec_qty)
 
-	elif doc.stock_entry_type == "Material Receipt" and doc.get("custom_supplier"):
+	elif doc.stock_entry_type == "Material Receipt":
 		for row in doc.items:
 			batch_nos = set()
 			if row.batch_no:
@@ -56,8 +56,22 @@ def on_submit_stock_entry(doc, method):
 					fields=["batch_no"],
 				)
 				batch_nos.update(e.batch_no for e in entries if e.batch_no)
+			if not batch_nos:
+				continue
+			updates = {}
+			if row.get("custom_supplier"):
+				updates["supplier"] = row.custom_supplier
+			group = (row.get("custom_parent_item_group") or "").strip()
+			if group in FORMULA_GROUPS:
+				if row.get("custom_existing_supplier_invoice_no"):
+					updates["custom_existing_supplier_invoice_no"] = row.custom_existing_supplier_invoice_no
+				if row.get("custom_existing_invoice_wt"):
+					updates["custom_existing_invoice_wt"] = row.custom_existing_invoice_wt
+				if row.get("custom_existing_inward_date"):
+					updates["custom_existing_inward_date"] = row.custom_existing_inward_date
 			for batch_no in batch_nos:
-				frappe.db.set_value("Batch", batch_no, "supplier", doc.custom_supplier)
+				if updates:
+					frappe.db.set_value("Batch", batch_no, updates)
 
 	# Release reservations for all consumed batches
 	_release_material_planning_reservations(doc)

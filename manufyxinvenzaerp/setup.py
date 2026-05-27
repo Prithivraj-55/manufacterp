@@ -970,6 +970,27 @@ def create_batch_custom_fields():
                 "read_only": 1,
                 "insert_after": "custom_sec_qty",
             },
+            {
+                "fieldname": "custom_existing_supplier_invoice_no",
+                "label": "Existing Supplier Invoice No",
+                "fieldtype": "Data",
+                "read_only": 1,
+                "insert_after": "custom_sec_uom",
+            },
+            {
+                "fieldname": "custom_existing_invoice_wt",
+                "label": "Existing Invoice Wt",
+                "fieldtype": "Float",
+                "read_only": 1,
+                "insert_after": "custom_existing_supplier_invoice_no",
+            },
+            {
+                "fieldname": "custom_existing_inward_date",
+                "label": "Existing Inward Date",
+                "fieldtype": "Date",
+                "read_only": 1,
+                "insert_after": "custom_existing_invoice_wt",
+            },
         ],
     }
     create_custom_fields(custom_fields, update=True)
@@ -1707,6 +1728,19 @@ frappe.ui.form.on("Stock Entry Detail", {
 \titem_code(frm, cdt, cdn) {
 \t\tvar row = locals[cdt][cdn];
 \t\tif (!row.item_code) return;
+
+\t\t// Dismiss the "Add Batch Nos" dialog that ERPNext auto-opens for batch items —
+\t\t// batches are auto-created on submit; the user must not fill them manually here.
+\t\tif (frm.doc.stock_entry_type === "Material Receipt") {
+\t\t\tvar _check = setInterval(function() {
+\t\t\t\tif (cur_dialog && cur_dialog.get_title && cur_dialog.get_title() === __("Add Batch Nos")) {
+\t\t\t\t\tcur_dialog.hide();
+\t\t\t\t\tclearInterval(_check);
+\t\t\t\t}
+\t\t\t}, 50);
+\t\t\tsetTimeout(function() { clearInterval(_check); }, 5000);
+\t\t}
+
 \t\tfrappe.db.get_value(
 \t\t\t"Item", row.item_code,
 \t\t\t["custom_parent_item_group", "custom_unit_weight", "custom_secondary_uom"],
@@ -1883,6 +1917,34 @@ def create_stock_entry_custom_fields():
                     "label": "Width (mm)",
                     "depends_on": "eval:doc.custom_parent_item_group=='Plates'",
                     "insert_after": "custom_length",
+                },
+                {
+                    "fieldname": "custom_supplier",
+                    "fieldtype": "Link",
+                    "options": "Supplier",
+                    "label": "Supplier",
+                    "insert_after": "custom_width",
+                },
+                {
+                    "fieldname": "custom_existing_supplier_invoice_no",
+                    "fieldtype": "Data",
+                    "label": "Existing Supplier Invoice No",
+                    "depends_on": "eval:['Structurals','Plates'].includes(doc.custom_parent_item_group)",
+                    "insert_after": "custom_supplier",
+                },
+                {
+                    "fieldname": "custom_existing_invoice_wt",
+                    "fieldtype": "Float",
+                    "label": "Existing Invoice Wt",
+                    "depends_on": "eval:['Structurals','Plates'].includes(doc.custom_parent_item_group)",
+                    "insert_after": "custom_existing_supplier_invoice_no",
+                },
+                {
+                    "fieldname": "custom_existing_inward_date",
+                    "fieldtype": "Date",
+                    "label": "Existing Inward Date",
+                    "depends_on": "eval:['Structurals','Plates'].includes(doc.custom_parent_item_group)",
+                    "insert_after": "custom_existing_invoice_wt",
                 },
             ],
         },
