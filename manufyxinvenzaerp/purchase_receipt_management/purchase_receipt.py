@@ -165,6 +165,12 @@ def _setup_batch_from_stock_entry(doc):
     doc.custom_sec_qty = flt(target_row.custom_sec_qty)
     doc.custom_sec_uom = target_row.custom_sec_uom
 
+    group = (target_row.get("custom_parent_item_group") or "").strip()
+    if group in {"Structurals", "Plates"}:
+        doc.custom_existing_supplier_invoice_no = target_row.get("custom_existing_supplier_invoice_no") or ""
+        doc.custom_existing_invoice_wt = flt(target_row.get("custom_existing_invoice_wt"))
+        doc.custom_existing_inward_date = target_row.get("custom_existing_inward_date")
+
 
 def _get_receipt_suffix(pr_name):
     """Extract last 3 digits from the numeric part of a receipt name (e.g. MAT-PRE-2024-00010 → '010')."""
