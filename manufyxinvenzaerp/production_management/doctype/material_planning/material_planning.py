@@ -248,6 +248,7 @@ def check_stock_availability(doc):
     # Track remaining qty per batch so the same batch is not double-counted.
     batch_remaining = {}
     mp_name = doc.get("name") or ""
+    shortfall_count = 0
 
     # Pre-fetch has_batch_no for all items in one query.
     all_item_codes = list({r.get("item_code") for r in doc.get("raw_materials") or [] if r.get("item_code")})
@@ -340,6 +341,22 @@ def check_stock_availability(doc):
                         "parent_item_group": row.get("parent_item_group"),
                         "store_location": location or "",
                     })
+
+                # Partial stock — add a shortfall row to Material Mapping so the gap
+                # is visible immediately (NOS/Kg check) without waiting for reservation.
+                if shortage > 0:
+                    required_sec_qty = flt(row.get("sec_qty"))
+                    if required_sec_qty and required_qty:
+                        shortfall_nos = ceil(shortage / (required_qty / required_sec_qty))
+                    else:
+                        shortfall_nos = 0.0
+                    shortfall_row = dict(base_row)
+                    shortfall_row["qty"] = flt(shortage, 3)
+                    shortfall_row["sec_qty"] = flt(shortfall_nos)
+                    shortfall_row["batch_mapped"] = "Not Mapped"
+                    material_mapping.append(shortfall_row)
+                    shortfall_count += 1
+
             else:
                 # No dimension-matching batch stock — send to Material Mapping.
                 existing = reserved_by_key.get((item_code, row.get("bom_no") or ""))
@@ -404,6 +421,7 @@ def check_stock_availability(doc):
         "available_raw_materials": available_raw_materials,
         "material_mapping": material_mapping,
         "unavailable_items": unavailable_items,
+        "shortfall_mapping_count": shortfall_count,
     }
 
 

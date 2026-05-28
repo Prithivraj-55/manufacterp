@@ -382,7 +382,10 @@ frappe.ui.form.on("Material Planning", {
 						<tr style="background:${s.mapping ? "#fffbf0" : ""};">
 							<td style="padding:8px 12px;">
 								${__("Added to <b>Material Mapping (Alternate Stock)</b>")}
-								${s.mapping ? `<br><span class="text-muted" style="font-size:11px;">${__("No exact batch match — assign a batch manually")}</span>` : ""}
+								${s.mapping ? `<br><span class="text-muted" style="font-size:11px;">
+									${s.shortfall_mapping ? `<span style="color:#e65100;">&#9888; ${s.shortfall_mapping} row(s) from partial stock — NOS/Kg not fully available</span><br>` : ""}
+									${__("Assign a batch manually to cover each row")}
+								</span>` : ""}
 							</td>
 							<td style="padding:8px 12px;font-weight:700;text-align:center;color:${s.mapping ? "orange" : "green"};">${s.mapping}</td>
 						</tr>
@@ -583,6 +586,7 @@ frappe.ui.form.on("Material Planning", {
 					let mapping = (result.material_mapping || []).length;
 					let unavail = (result.unavailable_items || []).length;
 					let avail   = (result.available_raw_materials || []).length;
+					let shortfall_mapping = result.shortfall_mapping_count || 0;
 
 					frm.set_df_property("finalize_mapping_btn",   "hidden", mapping  ? 0 : 1);
 					frm.set_df_property("update_exact_match_btn", "hidden", unavail  ? 0 : 1);
@@ -590,7 +594,7 @@ frappe.ui.form.on("Material Planning", {
 					_update_weight_summary(frm);
 
 					// Stash summary for after_save popup
-					frm._check_stock_summary = { avail, mapping, unavail };
+					frm._check_stock_summary = { avail, mapping, unavail, shortfall_mapping };
 					frm.save();
 				},
 			});
@@ -1638,10 +1642,19 @@ function _add_exact_match_reservation_buttons(frm) {
 							frm.reload_doc();
 							let partial = r.message.partial || [];
 							if (partial.length) {
+								let partial_codes = new Set(partial.map(p => p.item_code));
+								let already_in_mapping = (frm.doc.material_mapping || []).some(row => partial_codes.has(row.item_code));
+								let note = already_in_mapping
+									? `<div style="margin-top:10px;padding:8px 12px;background:#e8f4fd;border-left:4px solid #2490ef;border-radius:3px;font-size:12px;">
+											<b>${__("Next step:")}</b> ${__("Shortfall rows are already in <b>Material Mapping (Alternate Stock)</b>. Assign a batch to each row to cover the gap, then reserve.")}
+										</div>`
+									: `<div style="margin-top:10px;padding:8px 12px;background:#fff8e1;border-left:4px solid #f9a825;border-radius:3px;font-size:12px;">
+											<b>${__("Tip:")}</b> ${__("Re-run <b>Check Stock Availability</b> to automatically add shortfall rows to Material Mapping.")}
+										</div>`;
 								frappe.msgprint({
 									title: __("Partial Reservation — Stock Shortfall"),
 									indicator: "orange",
-									message: _partial_reservation_html(partial),
+									message: _partial_reservation_html(partial) + note,
 								});
 							} else {
 								frappe.show_alert({ message: __("Batches reserved."), indicator: "green" }, 4);
