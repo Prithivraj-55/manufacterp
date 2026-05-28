@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-05-27 22:44:03_
+_Generated: 2026-05-28 15:41:38_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -46,23 +46,23 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `check_mapping_batch_availability` | 1001 |
-| `unreserve_batches` | 1056 |
-| `_test_simulate_se_release` | 1097 |
-| `make_production_plan` | 1116 |
-| `make_material_request` | 1173 |
+| `check_mapping_batch_availability` | 1019 |
+| `unreserve_batches` | 1074 |
+| `_test_simulate_se_release` | 1115 |
+| `make_production_plan` | 1134 |
+| `make_material_request` | 1191 |
 | `get_raw_materials` | 132 |
 | `check_stock_availability` | 214 |
-| `move_to_exact_match` | 426 |
-| `finalize_mapping` | 565 |
+| `move_to_exact_match` | 444 |
 | `@frappe.validate_and_sanitize_search_inputs` | 58 |
-| `get_batch_reservation_summary` | 629 |
-| `get_batch_item` | 663 |
-| `get_batch_stock_summary` | 671 |
-| `reserve_batches` | 742 |
+| `finalize_mapping` | 583 |
+| `get_batch_reservation_summary` | 647 |
+| `get_batch_item` | 681 |
+| `get_batch_stock_summary` | 689 |
+| `reserve_batches` | 760 |
 | `get_bom_info` | 84 |
-| `reserve_exact_match_batches` | 844 |
-| `unreserve_exact_match_batches` | 960 |
+| `reserve_exact_match_batches` | 862 |
+| `unreserve_exact_match_batches` | 978 |
 ## production_management/production_utils.py
 
 | Method | Line |

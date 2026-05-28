@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-05-27 22:44:03_
+_Generated: 2026-05-28 15:41:38_
 
 ## Modules
 
@@ -596,19 +596,19 @@ Functions:
 - `production_management/doctype/material_planning/material_planning.py:84` — `get_bom_info`
 - `production_management/doctype/material_planning/material_planning.py:132` — `get_raw_materials`
 - `production_management/doctype/material_planning/material_planning.py:214` — `check_stock_availability`
-- `production_management/doctype/material_planning/material_planning.py:426` — `move_to_exact_match`
-- `production_management/doctype/material_planning/material_planning.py:565` — `finalize_mapping`
-- `production_management/doctype/material_planning/material_planning.py:629` — `get_batch_reservation_summary`
-- `production_management/doctype/material_planning/material_planning.py:663` — `get_batch_item`
-- `production_management/doctype/material_planning/material_planning.py:671` — `get_batch_stock_summary`
-- `production_management/doctype/material_planning/material_planning.py:742` — `reserve_batches`
-- `production_management/doctype/material_planning/material_planning.py:844` — `reserve_exact_match_batches`
-- `production_management/doctype/material_planning/material_planning.py:960` — `unreserve_exact_match_batches`
-- `production_management/doctype/material_planning/material_planning.py:1001` — `check_mapping_batch_availability`
-- `production_management/doctype/material_planning/material_planning.py:1056` — `unreserve_batches`
-- `production_management/doctype/material_planning/material_planning.py:1097` — `_test_simulate_se_release`
-- `production_management/doctype/material_planning/material_planning.py:1116` — `make_production_plan`
-- `production_management/doctype/material_planning/material_planning.py:1173` — `make_material_request`
+- `production_management/doctype/material_planning/material_planning.py:444` — `move_to_exact_match`
+- `production_management/doctype/material_planning/material_planning.py:583` — `finalize_mapping`
+- `production_management/doctype/material_planning/material_planning.py:647` — `get_batch_reservation_summary`
+- `production_management/doctype/material_planning/material_planning.py:681` — `get_batch_item`
+- `production_management/doctype/material_planning/material_planning.py:689` — `get_batch_stock_summary`
+- `production_management/doctype/material_planning/material_planning.py:760` — `reserve_batches`
+- `production_management/doctype/material_planning/material_planning.py:862` — `reserve_exact_match_batches`
+- `production_management/doctype/material_planning/material_planning.py:978` — `unreserve_exact_match_batches`
+- `production_management/doctype/material_planning/material_planning.py:1019` — `check_mapping_batch_availability`
+- `production_management/doctype/material_planning/material_planning.py:1074` — `unreserve_batches`
+- `production_management/doctype/material_planning/material_planning.py:1115` — `_test_simulate_se_release`
+- `production_management/doctype/material_planning/material_planning.py:1134` — `make_production_plan`
+- `production_management/doctype/material_planning/material_planning.py:1191` — `make_material_request`
 - `purchase_receipt_management/purchase_receipt.py:18` — `get_pr_item_uom`
 - `purchase_receipt_management/purchase_receipt.py:252` — `get_mp_for_pr`
 - `purchase_receipt_management/purchase_receipt.py:271` — `allocate_pr_stock_to_mp`
