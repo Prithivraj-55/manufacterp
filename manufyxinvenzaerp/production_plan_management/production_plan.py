@@ -359,6 +359,7 @@ def get_bom_items_direct(item_details, company, bom_no, include_non_stock_items,
 			item.custom_parent_item_group,
 			bi.custom_unit_weight,
 			bi.custom_item_number,
+			bi.custom_sec_qty,
 		)
 		.where(
 			(bi.docstatus < 2)
