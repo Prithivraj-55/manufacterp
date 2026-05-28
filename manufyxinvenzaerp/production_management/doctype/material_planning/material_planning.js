@@ -94,12 +94,23 @@ function _update_weight_summary(frm) {
 
 	let expected_mapping = 0;
 	let cross_mapped = 0;
-	(frm.doc.material_mapping || []).forEach(r => {
+	let mapping_rows = frm.doc.material_mapping || [];
+	mapping_rows.forEach(r => {
 		expected_mapping += flt(r.qty);
 		cross_mapped    += flt(r.batch_calc_qty);
 	});
 
-	let diff = cross_mapped - expected_mapping;
+	// Diff: only consider rows that have been mapped
+	let mapped_expected = 0;
+	let mapped_cross    = 0;
+	mapping_rows.forEach(r => {
+		if (r.batch_mapped === "Mapped") {
+			mapped_expected += flt(r.qty);
+			mapped_cross    += flt(r.batch_calc_qty);
+		}
+	});
+
+	let diff = mapped_cross - mapped_expected;
 
 	frm.set_value("total_weight_plates_structurals", flt(total_raw, 3));
 	frm.set_value("weight_exact_raw_material",       flt(total_exact, 3));
@@ -111,7 +122,16 @@ function _update_weight_summary(frm) {
 	if (!$wrap) return;
 
 	let html = "";
-	if (!expected_mapping && !cross_mapped) {
+
+	// Show difference as soon as at least one Material Mapping row is mapped
+	let any_mapped = mapping_rows.some(r => r.batch_mapped === "Mapped");
+
+	if (!any_mapped) {
+		$wrap.html("");
+		return;
+	}
+
+	if (!mapped_expected && !mapped_cross) {
 		$wrap.html("");
 		return;
 	}
@@ -120,8 +140,13 @@ function _update_weight_summary(frm) {
 	let color   = diff >= 0 ? "#2e7d32" : "#c62828";
 	let val_str = sign + flt(diff, 3).toFixed(3) + " Kg";
 
+	let mapped_count = mapping_rows.filter(r => r.batch_mapped === "Mapped").length;
+	let total_count  = mapping_rows.length;
 	html = `<div style="margin-top:6px;">
-		<label class="control-label" style="font-size:11px;color:#8d99a6;">Difference in Kg</label>
+		<label class="control-label" style="font-size:11px;color:#8d99a6;">
+			Difference in Kg — Batch Mapped Items
+			<span style="font-weight:400;color:#aaa;">(${mapped_count} of ${total_count} mapped)</span>
+		</label>
 		<div style="font-size:15px;font-weight:700;color:${color};margin-top:2px;">${val_str}</div>`;
 
 	if (diff > 0) {
@@ -1544,7 +1569,7 @@ const _TABLE_VIEW_CONFIG = {
 			{ fieldname: "length",            label: "Length (mm)" },
 			{ fieldname: "width",             label: "Width (mm)" },
 			{ fieldname: "thickness",         label: "Thickness" },
-			{ fieldname: "sec_qty",           label: "Sec Qty" },
+			{ fieldname: "sec_qty",           label: "Required Sec Qty" },
 			{ fieldname: "batch",             label: "Batch" },
 			{ fieldname: "batch_mapped",      label: "Status" },
 			{ fieldname: "batch_length",      label: "Batch Length" },

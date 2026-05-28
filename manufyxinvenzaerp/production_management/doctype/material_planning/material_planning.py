@@ -148,6 +148,8 @@ def get_raw_materials(doc):
         frappe.throw(_("Company is required before fetching raw materials."))
 
     rows = []
+    mismatches = []
+
     for bom_row in doc.get("bom_items") or []:
         bom_no = bom_row.get("bom_no")
         planned_qty = flt(bom_row.get("qty_to_manufacture")) or 1
@@ -171,13 +173,24 @@ def get_raw_materials(doc):
             if group == "Structurals" and length and unit_weight:
                 denom = (length / 1000) * unit_weight
                 if denom:
-                    sec_qty = ceil(qty / denom)
+                    sec_qty = ceil(round(qty / denom, 9))
             elif group == "Plates" and length and width and thickness and unit_weight:
                 denom = (length / 1000) * (width / 1000) * thickness * unit_weight
                 if denom:
-                    sec_qty = ceil(qty / denom)
+                    sec_qty = ceil(round(qty / denom, 9))
             elif group == "Nuts and Bolts" and unit_weight:
                 sec_qty = flt(qty * unit_weight, 3)
+
+            # Validate computed sec_qty against BOM's stored custom_sec_qty
+            bom_sec_qty = flt(detail.get("custom_sec_qty"))
+            if group in ("Structurals", "Plates") and bom_sec_qty and sec_qty != bom_sec_qty:
+                mismatches.append({
+                    "item_number": detail.get("custom_item_number") or 0,
+                    "item_code": detail.get("item_code") or "",
+                    "bom_no": bom_no,
+                    "bom_sec_qty": bom_sec_qty,
+                    "computed_sec_qty": sec_qty,
+                })
 
             sec_uom = (
                 frappe.db.get_value("Item", detail.get("item_code"), "custom_secondary_uom") or ""
@@ -205,6 +218,27 @@ def get_raw_materials(doc):
                 "warehouse": warehouse,
                 "store_location": location,
             })
+
+    if mismatches:
+        rows_html = "".join(
+            f"<tr><td>{m['item_number']}</td><td>{m['item_code']}</td>"
+            f"<td>{m['bom_no']}</td>"
+            f"<td style='color:red;font-weight:700;'>{m['bom_sec_qty']}</td>"
+            f"<td style='color:red;font-weight:700;'>{m['computed_sec_qty']}</td></tr>"
+            for m in mismatches
+        )
+        frappe.msgprint(
+            msg=(
+                "<p>Sec Qty mismatch detected between the BOM and the formula-computed value. "
+                "Please contact your system administrator to resolve this.</p>"
+                "<table class='table table-bordered table-sm' style='margin-top:8px;font-size:12px;'>"
+                "<thead><tr><th>Item No</th><th>Item Code</th><th>BOM</th>"
+                "<th>BOM Sec Qty</th><th>Computed Sec Qty</th></tr></thead>"
+                f"<tbody>{rows_html}</tbody></table>"
+            ),
+            title=_("⚠ Sec Qty Mismatch Found"),
+            indicator="red",
+        )
 
     return rows
 
@@ -345,11 +379,13 @@ def check_stock_availability(doc):
                 # Partial stock — add a shortfall row to Material Mapping so the gap
                 # is visible immediately (NOS/Kg check) without waiting for reservation.
                 if shortage > 0:
+                    available_sec_qty = sum(flt(b.get("custom_sec_qty")) for b in matched_batches)
                     required_sec_qty = flt(row.get("sec_qty"))
-                    if required_sec_qty and required_qty:
-                        shortfall_nos = ceil(shortage / (required_qty / required_sec_qty))
-                    else:
-                        shortfall_nos = 0.0
+                    if not available_sec_qty and required_sec_qty and required_qty:
+                        # batch has no custom_sec_qty — derive NOS from Kg ratio
+                        # use flt(..., 0) (round to nearest) to avoid ceil float over-count
+                        available_sec_qty = flt(available_qty / (required_qty / required_sec_qty), 0)
+                    shortfall_nos = max(0.0, required_sec_qty - available_sec_qty)
                     shortfall_row = dict(base_row)
                     shortfall_row["qty"] = flt(shortage, 3)
                     shortfall_row["sec_qty"] = flt(shortfall_nos)
