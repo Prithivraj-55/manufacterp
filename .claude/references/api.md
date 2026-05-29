@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-05-28 18:06:28_
+_Generated: 2026-05-29 17:28:32_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -21,13 +21,13 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `check_existing_bom` | 104 |
+| `check_existing_bom` | 100 |
 ## drawing_management/drawing_utils.py
 
 | Method | Line |
 |--------|------|
-| `create_production_plan_from_bom` | 235 |
-| `parse_drawing_items_csv` | 288 |
+| `create_production_plan_from_bom` | 204 |
+| `parse_drawing_items_csv` | 257 |
 | `mark_as_final_revision` | 45 |
 | `get_batches_for_drawing_item` | 59 |
 | `create_drawings_from_so` | 7 |

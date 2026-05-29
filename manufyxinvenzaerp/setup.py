@@ -534,32 +534,52 @@ function sq_warn_missing_fields(row, group) {
 
 SO_CLIENT_SCRIPT = """
 frappe.ui.form.on("Sales Order", {
-\trefresh(frm) {
-\t\tif (frm.doc.docstatus === 1) {
-\t\t\tfrm.add_custom_button(__("Drawing"), function() {
-\t\t\t\tfrappe.call({
-\t\t\t\t\tmethod: "manufyxinvenzaerp.drawing_management.drawing_utils.create_drawings_from_so",
-\t\t\t\t\targs: { so_name: frm.doc.name },
-\t\t\t\t\tfreeze: true,
-\t\t\t\t\tfreeze_message: __("Creating Drawings..."),
-\t\t\t\t\tcallback: function(r) {
-\t\t\t\t\t\tif (r.message && r.message.length) {
-\t\t\t\t\t\t\tvar links = r.message.map(function(name) {
-\t\t\t\t\t\t\t\treturn '<a href="/app/drawing/' + encodeURIComponent(name) + '" target="_blank">' + name + '</a>';
-\t\t\t\t\t\t\t}).join(', ');
-\t\t\t\t\t\t\tfrappe.msgprint({
-\t\t\t\t\t\t\t\ttitle: __("Drawings Created"),
-\t\t\t\t\t\t\t\tmessage: r.message.length + ' ' + __('Drawing(s) created') + ': ' + links,
-\t\t\t\t\t\t\t\tindicator: 'green'
-\t\t\t\t\t\t\t});
-\t\t\t\t\t\t\tfrm.reload_doc();
-\t\t\t\t\t\t}
-\t\t\t\t\t}
-\t\t\t\t});
-\t\t\t}, __("Create"));
-\t\t}
-\t}
+	refresh(frm) {
+		_toggle_duno_tab(frm);
+		_set_duno_item_query(frm);
+		if (frm.doc.docstatus === 1 && !frm.doc.custom_is_production_order) {
+			frm.add_custom_button(__("Drawing"), function() {
+				frappe.call({
+					method: "manufyxinvenzaerp.drawing_management.drawing_utils.create_drawings_from_so",
+					args: { so_name: frm.doc.name },
+					freeze: true,
+					freeze_message: __("Creating Drawings..."),
+					callback: function(r) {
+						if (r.message && r.message.length) {
+							var links = r.message.map(function(name) {
+								return '<a href="/app/drawing/' + encodeURIComponent(name) + '" target="_blank">' + name + '</a>';
+							}).join(', ');
+							frappe.msgprint({
+								title: __("Drawings Created"),
+								message: r.message.length + ' ' + __('Drawing(s) created') + ': ' + links,
+								indicator: 'green'
+							});
+							frm.reload_doc();
+						}
+					}
+				});
+			}, __("Create"));
+		}
+	},
+	custom_is_production_order(frm) {
+		_toggle_duno_tab(frm);
+	}
 });
+
+function _toggle_duno_tab(frm) {
+	var show = !!frm.doc.custom_is_production_order;
+	frm.toggle_display("custom_tab_duno_mark_no", show);
+	frm.toggle_display("custom_duno_items", show);
+}
+
+function _set_duno_item_query(frm) {
+	frm.set_query("item", "custom_duno_items", function() {
+		var item_codes = (frm.doc.items || []).map(function(r) { return r.item_code; }).filter(Boolean);
+		return {
+			filters: [["Item", "name", "in", item_codes.length ? item_codes : ["__none__"]]]
+		};
+	});
+}
 """.strip()
 
 
@@ -578,6 +598,7 @@ def after_install():
     create_rfq_client_script()
     create_sq_custom_fields()
     create_sq_client_script()
+    create_so_custom_fields()
     create_so_client_script()
     create_bom_custom_fields()
     create_bom_client_script()
@@ -612,6 +633,7 @@ def after_migrate():
     create_rfq_client_script()
     create_sq_custom_fields()
     create_sq_client_script()
+    create_so_custom_fields()
     create_so_client_script()
     create_bom_custom_fields()
     create_bom_client_script()
@@ -1379,6 +1401,36 @@ def create_bom_custom_fields():
                     "read_only": 1,
                 },
             ],
+        },
+        update=True,
+    )
+
+
+def create_so_custom_fields():
+    create_custom_fields(
+        {
+            "Sales Order": [
+                {
+                    "fieldname": "custom_is_production_order",
+                    "fieldtype": "Check",
+                    "label": "Is Production Order",
+                    "insert_after": "po_no",
+                    "default": "0",
+                },
+                {
+                    "fieldname": "custom_tab_duno_mark_no",
+                    "fieldtype": "Tab Break",
+                    "label": "DUNO/Mark No",
+                    "insert_after": "pricing_rules",
+                },
+                {
+                    "fieldname": "custom_duno_items",
+                    "fieldtype": "Table",
+                    "label": "DUNO/Mark No",
+                    "options": "Sales Order DUNO Item",
+                    "insert_after": "custom_tab_duno_mark_no",
+                },
+            ]
         },
         update=True,
     )

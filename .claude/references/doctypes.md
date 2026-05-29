@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-05-28 18:06:28_
+_Generated: 2026-05-29 17:28:32_
 
 ## drawing
 
@@ -57,6 +57,17 @@ _Generated: 2026-05-28 18:06:28_
 | Module | drawing_management |
 | Path | `drawing_management/doctype/production_plan_bom_raw_material` |
 | Controller | `drawing_management/doctype/production_plan_bom_raw_material/production_plan_bom_raw_material.py` |
+| Client script | none |
+
+---
+
+## sales_order_duno_item
+
+| Key | Value |
+|-----|-------|
+| Module | drawing_management |
+| Path | `drawing_management/doctype/sales_order_duno_item` |
+| Controller | `drawing_management/doctype/sales_order_duno_item/sales_order_duno_item.py` |
 | Client script | none |
 
 ---

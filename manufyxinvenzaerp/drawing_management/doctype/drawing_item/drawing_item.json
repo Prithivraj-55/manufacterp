@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2025-01-01 00:00:00.000000",
+ "creation": "2025-01-01 00:00:00",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -25,9 +25,8 @@
   "sec_uom",
   "qty",
   "uom",
-  "column_break_3",
-  "rate",
-  "amount"
+  "total_sec_qty",
+  "total_qty"
  ],
  "fields": [
   {
@@ -37,6 +36,7 @@
    "label": "Item Number"
   },
   {
+   "columns": 2,
    "fieldname": "material_code",
    "fieldtype": "Link",
    "in_list_view": 1,
@@ -44,25 +44,26 @@
    "options": "Item"
   },
   {
+   "columns": 1,
+   "fetch_from": "material_code.item_name",
    "fieldname": "material_name",
    "fieldtype": "Data",
-   "fetch_from": "material_code.item_name",
    "in_list_view": 1,
    "label": "Material Name",
    "read_only": 1
   },
   {
+   "fetch_from": "material_code.item_group",
    "fieldname": "item_group",
    "fieldtype": "Link",
-   "fetch_from": "material_code.item_group",
    "label": "Item Group",
    "options": "Item Group",
    "read_only": 1
   },
   {
+   "fetch_from": "material_code.custom_parent_item_group",
    "fieldname": "parent_item_group",
    "fieldtype": "Data",
-   "fetch_from": "material_code.custom_parent_item_group",
    "hidden": 1,
    "label": "Parent Item Group",
    "read_only": 1
@@ -72,16 +73,16 @@
    "fieldtype": "Column Break"
   },
   {
+   "fetch_from": "material_code.description",
    "fieldname": "raw_material_description",
    "fieldtype": "Small Text",
-   "fetch_from": "material_code.description",
    "label": "Raw Material Description",
    "read_only": 1
   },
   {
+   "fetch_from": "material_code.custom_material_spec",
    "fieldname": "material_spec",
    "fieldtype": "Data",
-   "fetch_from": "material_code.custom_material_spec",
    "label": "Material Spec",
    "read_only": 1
   },
@@ -92,18 +93,17 @@
    "label": "Dimensions"
   },
   {
+   "description": "Select batch if stock is available, otherwise enter the dimensions manually. You can purchase it later. Note: while making a Drawing, stock may be available, but at the time of starting work stock may not be available. Ensure stock availability while making the Production Plan.",
    "fieldname": "batch",
    "fieldtype": "Link",
    "hidden": 1,
    "label": "Batch",
-   "options": "Batch",
-   "description": "Select batch if stock is available, otherwise enter the dimensions manually. You can purchase it later. Note: while making a Drawing, stock may be available, but at the time of starting work stock may not be available. Ensure stock availability while making the Production Plan."
+   "options": "Batch"
   },
   {
+   "fetch_from": "material_code.custom_unit_weight",
    "fieldname": "unit_weight",
    "fieldtype": "Float",
-   "fetch_from": "material_code.custom_unit_weight",
-   "in_list_view": 1,
    "label": "Unit Weight",
    "read_only": 1
   },
@@ -116,7 +116,6 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Thickness",
-   "hidden_depends_on": "eval:doc.parent_item_group === 'Nuts and Bolts'",
    "mandatory_depends_on": "eval:doc.parent_item_group==='Plates'"
   },
   {
@@ -124,7 +123,6 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Length",
-   "hidden_depends_on": "eval:doc.parent_item_group === 'Nuts and Bolts'",
    "mandatory_depends_on": "eval:['Structurals','Plates'].includes(doc.parent_item_group)"
   },
   {
@@ -132,7 +130,6 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Width",
-   "hidden_depends_on": "eval:doc.parent_item_group === 'Nuts and Bolts'",
    "mandatory_depends_on": "eval:doc.parent_item_group==='Plates'"
   },
   {
@@ -148,56 +145,59 @@
    "read_only_depends_on": "eval:doc.parent_item_group === 'Nuts and Bolts'"
   },
   {
+   "fetch_from": "material_code.custom_secondary_uom",
    "fieldname": "sec_uom",
    "fieldtype": "Link",
-   "fetch_from": "material_code.custom_secondary_uom",
    "label": "Sec UOM",
    "options": "UOM",
    "read_only": 1
   },
   {
+   "columns": 1,
+   "description": "Primary Quantity",
    "fieldname": "qty",
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Quantity",
-   "read_only_depends_on": "eval:['Structurals','Plates'].includes(doc.parent_item_group)",
-   "description": "Primary Quantity"
+   "read_only_depends_on": "eval:['Structurals','Plates'].includes(doc.parent_item_group)"
   },
   {
+   "description": "Stock UOM",
+   "fetch_from": "material_code.stock_uom",
    "fieldname": "uom",
    "fieldtype": "Link",
-   "fetch_from": "material_code.stock_uom",
    "label": "UOM",
    "options": "UOM",
-   "read_only": 1,
-   "description": "Stock UOM"
+   "read_only": 1
   },
   {
-   "fieldname": "column_break_3",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "rate",
-   "fieldtype": "Currency",
+   "columns": 1,
+   "description": "Sec Qty \u00d7 No of Qty to Manufacture",
+   "fieldname": "total_sec_qty",
+   "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Rate"
+   "label": "Total Sec Qty",
+   "read_only": 1
   },
   {
-   "fieldname": "amount",
-   "fieldtype": "Currency",
+   "columns": 1,
+   "description": "Total material quantity for all units (Structurals/Plates only)",
+   "fieldname": "total_qty",
+   "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Amount",
+   "label": "Total Quantity",
    "read_only": 1
   }
  ],
  "istable": 1,
  "links": [],
- "modified": "2025-01-01 00:00:00.000000",
+ "modified": "2026-05-29 19:30:22.290128",
  "modified_by": "Administrator",
  "module": "Drawing Management",
  "name": "Drawing Item",
  "owner": "Administrator",
  "permissions": [],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": []

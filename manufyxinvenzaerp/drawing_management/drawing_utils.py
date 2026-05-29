@@ -117,6 +117,7 @@ def create_bom_from_drawing(drawing_name):
     bom.currency = (
         frappe.db.get_value("Company", company, "default_currency") if company else "INR"
     )
+    bom.rm_cost_as_per = "Valuation Rate"
 
     for d_item in drawing.items:
         bom.append(
@@ -126,7 +127,6 @@ def create_bom_from_drawing(drawing_name):
                 "item_name": d_item.material_name,
                 "qty": flt(d_item.qty) or 0,
                 "uom": d_item.uom,
-                "rate": flt(d_item.rate) or 0,
                 "custom_item_number": d_item.item_number,
                 "custom_sales_order": drawing.sales_order or "",
                 "custom_material_spec": d_item.material_spec,
@@ -151,7 +151,6 @@ def validate_bom_from_drawing(doc, method):
     drawing = frappe.get_doc("Drawing", doc.custom_drawing)
     drawing_map = {d.item_number: d for d in drawing.items if d.item_number}
     drawing_list = list(drawing.items)
-    conversion_rate = flt(doc.conversion_rate) or 1
     drawing_item_numbers = {d.item_number for d in drawing.items if d.item_number}
     bom_item_numbers = {b.custom_item_number for b in doc.items if b.custom_item_number}
 
@@ -160,6 +159,7 @@ def validate_bom_from_drawing(doc, method):
         frappe.throw(
             _("Not allowed to remove items from BOM. Please maintain all items as per Drawing.")
         )
+
     qty_warnings = []
     for i, bom_item in enumerate(doc.items):
         d_item = drawing_map.get(bom_item.get("custom_item_number")) or (
@@ -168,11 +168,6 @@ def validate_bom_from_drawing(doc, method):
         if not d_item:
             continue
 
-        # Restore rate from Drawing — must happen AFTER calculate_rm_cost() runs in
-        # ERPNext's validate, which blindly overwrites rates for stock items based on
-        # rm_cost_as_per. We never call calculate_cost() here to avoid re-triggering that.
-        bom_item.rate = flt(d_item.rate) or 0
-        bom_item.base_rate = flt(bom_item.rate) * conversion_rate
         bom_item.uom = d_item.uom
         bom_item.custom_item_number = d_item.item_number
         bom_item.custom_sales_order = drawing.sales_order or ""
@@ -183,6 +178,7 @@ def validate_bom_from_drawing(doc, method):
         bom_item.custom_unit_weight = flt(d_item.unit_weight)
         bom_item.custom_sec_qty = flt(d_item.sec_qty)
         bom_item.custom_sec_uom = d_item.sec_uom or ""
+
         drawing_qty = flt(d_item.qty)
         if drawing_qty and flt(bom_item.qty) != drawing_qty:
             qty_warnings.append(
@@ -191,33 +187,6 @@ def validate_bom_from_drawing(doc, method):
                 )
             )
             bom_item.qty = drawing_qty
-
-        bom_item.amount = flt(bom_item.qty) * flt(bom_item.rate)
-        bom_item.base_amount = flt(bom_item.amount) * conversion_rate
-
-    # Recalculate BOM header totals from restored item amounts without calling
-    # calculate_cost(), which would re-run calculate_rm_cost() and override rates again.
-    raw_material_cost = sum(flt(item.amount) for item in doc.items)
-    doc.raw_material_cost = flt(raw_material_cost, 2)
-    doc.base_raw_material_cost = flt(raw_material_cost * conversion_rate, 2)
-    doc.total_cost = flt(flt(doc.operating_cost) + raw_material_cost - flt(doc.scrap_material_cost), 2)
-    doc.base_total_cost = flt(
-        flt(doc.base_operating_cost) + doc.base_raw_material_cost - flt(doc.base_scrap_material_cost), 2
-    )
-
-    # Validate BOM raw material total matches Drawing total
-    drawing_total = flt(drawing.total_raw_material_cost, 2)
-    bom_total = flt(doc.raw_material_cost, 2)
-    if drawing_total and abs(bom_total - drawing_total) > 0.01:
-        frappe.msgprint(
-            _(
-                "Raw material value is not matching — BOM total ({0}) does not match "
-                "Drawing total ({1}). Kindly check with system admin to verify the rates."
-            ).format(frappe.format(bom_total, {"fieldtype": "Currency"}),
-                     frappe.format(drawing_total, {"fieldtype": "Currency"})),
-            title=_("Raw Material Cost Mismatch"),
-            indicator="orange",
-        )
 
     if qty_warnings:
         frappe.msgprint(
@@ -289,7 +258,7 @@ def parse_drawing_items_csv(csv_content):
 	"""Parse CSV text and return processed Drawing Item rows.
 
 	Expected columns (order-independent, case-insensitive):
-	  item_number, material_code, sec_qty, thickness, length, width, rate
+	  item_number, material_code, sec_qty, thickness, length, width
 
 	Fetches item master data and calculates qty server-side so the client
 	only needs to set_value on each child row.
@@ -358,7 +327,6 @@ def parse_drawing_items_csv(csv_content):
 		thickness = _flt(_col(row, "thickness",  "thickness (mm)", "custom_thickness"))
 		length    = _flt(_col(row, "length",     "length (mm)",    "custom_length"))
 		width     = _flt(_col(row, "width",      "width (mm)",     "custom_width"))
-		rate      = _flt(_col(row, "rate",       "rate (inr)",     "rate (₹)"))
 
 		unit_weight        = flt(item_data.get("custom_unit_weight"))
 		parent_item_group  = (item_data.get("custom_parent_item_group") or "").strip()
@@ -388,8 +356,6 @@ def parse_drawing_items_csv(csv_content):
 			"sec_uom":               item_data.get("custom_secondary_uom") or "",
 			"qty":                   flt(qty, 3),
 			"uom":                   item_data.get("stock_uom") or "",
-			"rate":                  rate,
-			"amount":                flt(rate * qty, 2),
 		})
 		auto_number += 1
 
