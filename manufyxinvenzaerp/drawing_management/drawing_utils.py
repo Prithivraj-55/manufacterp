@@ -125,7 +125,7 @@ def create_bom_from_drawing(drawing_name):
             {
                 "item_code": d_item.material_code,
                 "item_name": d_item.material_name,
-                "qty": flt(d_item.qty) or 0,
+                "qty": flt(d_item.total_qty) or 0,
                 "uom": d_item.uom,
                 "custom_item_number": d_item.item_number,
                 "custom_sales_order": drawing.sales_order or "",
@@ -134,7 +134,7 @@ def create_bom_from_drawing(drawing_name):
                 "custom_thickness": d_item.thickness,
                 "custom_length": d_item.length,
                 "custom_width": d_item.width,
-                "custom_sec_qty": d_item.sec_qty,
+                "custom_sec_qty": flt(d_item.total_sec_qty),
                 "custom_sec_uom": d_item.sec_uom,
                 "custom_parent_item_group": d_item.parent_item_group or "",
             },
@@ -176,10 +176,10 @@ def validate_bom_from_drawing(doc, method):
         bom_item.custom_length = flt(d_item.length)
         bom_item.custom_width = flt(d_item.width)
         bom_item.custom_unit_weight = flt(d_item.unit_weight)
-        bom_item.custom_sec_qty = flt(d_item.sec_qty)
+        bom_item.custom_sec_qty = flt(d_item.total_sec_qty)
         bom_item.custom_sec_uom = d_item.sec_uom or ""
 
-        drawing_qty = flt(d_item.qty)
+        drawing_qty = flt(d_item.total_qty)
         if drawing_qty and flt(bom_item.qty) != drawing_qty:
             qty_warnings.append(
                 _("Row {0}: Quantity changed from {1} to {2} — restored from Drawing.").format(

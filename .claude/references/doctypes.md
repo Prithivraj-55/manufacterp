@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-05-29 17:28:32_
+_Generated: 2026-05-30 10:03:10_
 
 ## drawing
 
@@ -23,6 +23,7 @@ _Generated: 2026-05-29 17:28:32_
 | ` _check_missing_fields` | no |
 | ` _calculate_totals` | no |
 | ` _recalculate_row_qty` | no |
+| ` _recalculate_row_totals` | no |
 | ` _check_row_missing_fields` | no |
 | ` check_existing_bom` | no |
 

@@ -116,6 +116,8 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Thickness",
+   "hidden_depends_on": "eval:['Nuts and Bolts','Structurals'].includes(doc.parent_item_group)",
+   "read_only_depends_on": "eval:['Nuts and Bolts','Structurals'].includes(doc.parent_item_group)",
    "mandatory_depends_on": "eval:doc.parent_item_group==='Plates'"
   },
   {
@@ -123,6 +125,8 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Length",
+   "hidden_depends_on": "eval:doc.parent_item_group === 'Nuts and Bolts'",
+   "read_only_depends_on": "eval:doc.parent_item_group === 'Nuts and Bolts'",
    "mandatory_depends_on": "eval:['Structurals','Plates'].includes(doc.parent_item_group)"
   },
   {
@@ -130,6 +134,8 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Width",
+   "hidden_depends_on": "eval:['Nuts and Bolts','Structurals'].includes(doc.parent_item_group)",
+   "read_only_depends_on": "eval:['Nuts and Bolts','Structurals'].includes(doc.parent_item_group)",
    "mandatory_depends_on": "eval:doc.parent_item_group==='Plates'"
   },
   {

@@ -18,39 +18,122 @@ class MaterialPlanning(Document):
     def _validate_batch_calc_qty(self):
         mp_name = self.name or ""
         batch_allocated = {}
+        shortfall_warnings = []
+
+        # Block save if any reserved row has its qty or batch changed
+        reserved_row_names = [row.name for row in self.material_mapping if row.is_reserved and row.name]
+        if reserved_row_names:
+            db_rows = frappe.db.get_all(
+                "Material Planning Material Mapping",
+                filters={"name": ["in", reserved_row_names]},
+                fields=["name", "batch_sec_qty", "qty", "batch"],
+            )
+            db_map = {r.name: r for r in db_rows}
+            reserved_modified = []
+            for row in self.material_mapping:
+                if not row.is_reserved or not row.name:
+                    continue
+                db = db_map.get(row.name)
+                if not db:
+                    continue
+                if (
+                    flt(row.batch_sec_qty) != flt(db.batch_sec_qty)
+                    or flt(row.qty) != flt(db.qty)
+                    or (row.batch or "") != (db.get("batch") or "")
+                ):
+                    reserved_modified.append(
+                        _("Row {0} (<b>{1}</b>)").format(row.idx, row.item_code)
+                    )
+            if reserved_modified:
+                frappe.throw(
+                    _("Stock is already reserved for the following rows. "
+                      "Unreserve the stock to update the Quantity:<br><br>")
+                    + "<br>".join(reserved_modified),
+                    title=_("Stock Already Reserved — Unable to Save"),
+                )
+
         for row in self.material_mapping:
             if not row.batch:
                 continue
 
             group = row.batch_parent_item_group or ""
-            if group in ("Structurals", "Plates") and not flt(row.batch_sec_qty):
-                frappe.throw(
-                    _("Row {0}: Enter Sec Qty (NOS) for batch {1} to calculate the required weight "
-                      "before saving.").format(row.idx, row.batch)
-                )
 
-            # Only validate stock coverage for Structurals/Plates (batch_calc_qty = weight used)
+            # Only validate stock coverage for Structurals/Plates
             if group not in ("Structurals", "Plates"):
-                continue
-
-            batch_calc_qty = flt(row.batch_calc_qty)
-            if not batch_calc_qty:
                 continue
 
             batch_stock = _get_batch_total_stock(row.batch, self.for_warehouse)
             reserved_by_others = _get_batch_reserved_by_others(row.batch, mp_name)
             allocated_so_far = batch_allocated.get(row.batch, 0.0)
             available = max(0.0, batch_stock - reserved_by_others - allocated_so_far)
-            if batch_calc_qty > available:
+
+            if row.reserve_without_dimensions:
+                # Bypass dimension/calc check — validate Required Qty directly
+                required_qty = flt(row.qty)
+                if required_qty > available:
+                    difference = flt(required_qty - available, 3)
+                    frappe.throw(
+                        _("Row {0} — Batch <b>{1}</b><br>"
+                          "Total available qty &nbsp;— {2} Kg<br>"
+                          "Reserved by others &nbsp;&nbsp;— {3} Kg<br>"
+                          "Free stock &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;— {4} Kg<br>"
+                          "Required Qty &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;— {5} Kg<br>"
+                          "Difference &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;— {6} Kg "
+                          "(Required Qty − Free stock)").format(
+                            row.idx, row.batch,
+                            flt(batch_stock, 3), flt(reserved_by_others, 3),
+                            flt(available, 3), flt(required_qty, 3), difference
+                        ),
+                        title=_("Material Mapping Quantity Difference"),
+                    )
+                batch_allocated[row.batch] = allocated_so_far + required_qty
+                continue
+
+            if not flt(row.batch_sec_qty):
                 frappe.throw(
-                    _("Row {0}: Calculated Qty ({1} Kg) for batch {2} exceeds free stock ({3} Kg) "
-                      "(Total: {4} Kg, Reserved by others: {5} Kg). "
-                      "Reduce Sec Qty or choose a different batch.").format(
-                        row.idx, flt(batch_calc_qty, 3), row.batch,
-                        flt(available, 3), flt(batch_stock, 3), flt(reserved_by_others, 3)
+                    _("Row {0}: Enter Sec Qty (NOS) for batch {1} to calculate the required weight "
+                      "before saving.").format(row.idx, row.batch)
+                )
+
+            batch_calc_qty = flt(row.batch_calc_qty)
+            if not batch_calc_qty:
+                continue
+
+            required_qty = flt(row.qty)
+            if batch_calc_qty < required_qty:
+                alternate = row.planned_item or row.batch
+                shortfall_warnings.append(
+                    _("Row {0}: <b>{1}</b> needs <b>{2} Kg</b>, "
+                      "but alternate item <b>{3}</b> mapped only for <b>{4} Kg</b>.").format(
+                        row.idx, row.item_code,
+                        flt(required_qty, 3), alternate, flt(batch_calc_qty, 3)
                     )
                 )
+
+            if batch_calc_qty > available:
+                difference = flt(batch_calc_qty - available, 3)
+                frappe.throw(
+                    _("Row {0} — Batch <b>{1}</b><br>"
+                      "Total available qty &nbsp;— {2} Kg<br>"
+                      "Reserved by others &nbsp;&nbsp;— {3} Kg<br>"
+                      "Free stock &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;— {4} Kg<br>"
+                      "Calculated Qty &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;— {5} Kg<br>"
+                      "Difference &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;— {6} Kg "
+                      "(Calculated Qty − Free stock)").format(
+                        row.idx, row.batch,
+                        flt(batch_stock, 3), flt(reserved_by_others, 3),
+                        flt(available, 3), flt(batch_calc_qty, 3), difference
+                    ),
+                    title=_("Material Mapping Quantity Difference"),
+                )
             batch_allocated[row.batch] = allocated_so_far + batch_calc_qty
+
+        if shortfall_warnings:
+            frappe.msgprint(
+                "<br>".join(shortfall_warnings),
+                title=_("Batch Qty Shortfall"),
+                indicator="orange",
+            )
 
 
 
@@ -828,10 +911,12 @@ def reserve_batches(material_planning_name):
         batch_calc_qty = flt(row.batch_calc_qty)
         required_qty = flt(row.qty)
 
-        # When a different-dimension batch is assigned, batch_calc_qty is the
-        # Kg we actually take from that batch (Structurals/Plates only).
-        # For Nuts and Bolts, always reserve required_qty (in Nos/Kg stock units).
-        if batch_calc_qty > 0 and row.batch_parent_item_group in ("Structurals", "Plates"):
+        if row.reserve_without_dimensions and row.batch_parent_item_group in ("Structurals", "Plates"):
+            # Skip dimension-based calc; reserve Required Qty directly
+            to_reserve = required_qty
+        elif batch_calc_qty > 0 and row.batch_parent_item_group in ("Structurals", "Plates"):
+            # When a different-dimension batch is assigned, batch_calc_qty is the
+            # Kg we actually take from that batch (Structurals/Plates only).
             if batch_calc_qty < required_qty:
                 frappe.throw(
                     _("Row {0}: Calculated Qty ({1} Kg) is less than Required Qty ({2} Kg) for item {3}. "
@@ -1078,7 +1163,11 @@ def check_mapping_batch_availability(doc):
         base_qty = flt(row.get("qty") if isinstance(row, dict) else row.qty)
         batch_calc_qty = flt(row.get("batch_calc_qty") if isinstance(row, dict) else getattr(row, "batch_calc_qty", 0))
         group = (row.get("batch_parent_item_group") if isinstance(row, dict) else getattr(row, "batch_parent_item_group", "")) or ""
-        required_qty = batch_calc_qty if (batch_calc_qty > 0 and group in ("Structurals", "Plates")) else base_qty
+        reserve_without_dim = int(row.get("reserve_without_dimensions") if isinstance(row, dict) else getattr(row, "reserve_without_dimensions", 0))
+        if reserve_without_dim and group in ("Structurals", "Plates"):
+            required_qty = base_qty
+        else:
+            required_qty = batch_calc_qty if (batch_calc_qty > 0 and group in ("Structurals", "Plates")) else base_qty
 
         batch_stock = _get_batch_total_stock(batch, warehouse)
         reserved_by_others = _get_batch_reserved_by_others(batch, mp_name)
@@ -1091,6 +1180,7 @@ def check_mapping_batch_availability(doc):
         if shortfall > 0:
             item_code = row.get("item_code") if isinstance(row, dict) else row.item_code
             warnings.append({
+                "idx": (row.get("idx") if isinstance(row, dict) else getattr(row, "idx", "")) or "",
                 "item_code": item_code,
                 "item_name": (row.get("item_name") if isinstance(row, dict) else row.item_name) or "",
                 "batch": batch,

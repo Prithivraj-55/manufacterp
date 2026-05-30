@@ -354,6 +354,7 @@ frappe.ui.form.on("Material Planning", {
 function _show_batch_warning_popup(warnings) {
 	let lines = warnings.map(function(w) {
 		return `<tr>
+			<td>${w.idx || ""}</td>
 			<td>${w.item_code}</td>
 			<td>${w.item_name || ""}</td>
 			<td>${w.batch}</td>
@@ -369,6 +370,7 @@ function _show_batch_warning_popup(warnings) {
 		message: `<p>${__("The following Material Mapping rows have insufficient batch stock for full reservation:")}</p>
 			<table class="table table-bordered table-condensed" style="font-size:12px">
 				<thead><tr>
+					<th>${__("Row")}</th>
 					<th>${__("Item Code")}</th>
 					<th>${__("Item Name")}</th>
 					<th>${__("Batch")}</th>
