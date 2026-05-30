@@ -25,6 +25,7 @@
   "section_batch",
   "batch_mapped",
   "batch",
+  "reserve_without_dimensions",
   "planned_item",
   "batch_parent_item_group",
   "col_break_batch_stock",
@@ -175,6 +176,12 @@
    "options": "Batch"
   },
   {
+   "default": "0",
+   "fieldname": "reserve_without_dimensions",
+   "fieldtype": "Check",
+   "label": "Reserve stock without dimensions"
+  },
+  {
    "columns": 1,
    "fieldname": "batch_mapped",
    "fieldtype": "Data",
@@ -228,12 +235,14 @@
   {
    "fieldname": "col_break_batch_calc",
    "fieldtype": "Column Break",
+   "hidden_depends_on": "eval:doc.reserve_without_dimensions",
    "label": "Calculated Qty"
   },
   {
    "columns": 1,
    "fieldname": "batch_sec_qty",
    "fieldtype": "Float",
+   "hidden_depends_on": "eval:doc.reserve_without_dimensions",
    "in_list_view": 1,
    "label": "Sec Qty (NOS)"
   },
@@ -241,6 +250,7 @@
    "columns": 1,
    "fieldname": "batch_calc_qty",
    "fieldtype": "Float",
+   "hidden_depends_on": "eval:doc.reserve_without_dimensions",
    "in_list_view": 1,
    "label": "Calc Qty (Kg)",
    "read_only": 1

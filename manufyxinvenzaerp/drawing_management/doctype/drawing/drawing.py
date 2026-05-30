@@ -37,26 +37,24 @@ class Drawing(Document):
         self.db_set("status", "Old Revision")
 
     def _recalculate_all(self):
+        no_of_qty = flt(self.no_of_qty_to_manufacture)
         for row in self.items:
             _recalculate_row_qty(row)
-            row.amount = flt(flt(row.rate) * flt(row.qty), 2)
+            _recalculate_row_totals(row, no_of_qty)
 
     def _check_missing_fields(self, throw):
         for row in self.items:
             _check_row_missing_fields(row, throw)
 
     def _calculate_totals(self):
-        total_cost = flt(0)
         total_weight = flt(0)
         for row in self.items:
-            total_cost += flt(row.amount)
             uom = (row.uom or "").lower()
             sec_uom = (row.sec_uom or "").lower()
             if uom in ("kg", "kgs"):
                 total_weight += flt(row.qty)
             elif sec_uom in ("kg", "kgs"):
                 total_weight += flt(row.sec_qty)
-        self.total_raw_material_cost = flt(total_cost, 2)
         self.total_weight = flt(total_weight, 3)
 
 
@@ -77,6 +75,29 @@ def _recalculate_row_qty(row):
     elif group == "Nuts and Bolts":
         if row.qty and row.unit_weight:
             row.sec_qty = flt(row.qty * row.unit_weight, 3)
+
+
+def _recalculate_row_totals(row, no_of_qty):
+    group = row.parent_item_group
+    if group == "Nuts and Bolts":
+        row.total_qty = flt(flt(row.qty) * no_of_qty, 3)
+        row.total_sec_qty = flt(row.total_qty * flt(row.unit_weight), 3)
+        return
+    row.total_sec_qty = flt(row.sec_qty) * no_of_qty
+    if group == "Structurals":
+        if row.length and row.unit_weight and row.total_sec_qty:
+            row.total_qty = flt((row.length / 1000) * row.unit_weight * row.total_sec_qty, 3)
+        else:
+            row.total_qty = 0
+    elif group == "Plates":
+        if all([row.length, row.width, row.thickness, row.unit_weight, row.total_sec_qty]):
+            row.total_qty = flt(
+                (row.length / 1000) * (row.width / 1000) * row.thickness * row.unit_weight * row.total_sec_qty, 3
+            )
+        else:
+            row.total_qty = 0
+    else:
+        row.total_qty = 0
 
 
 def _check_row_missing_fields(row, throw):

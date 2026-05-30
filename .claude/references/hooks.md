@@ -1,6 +1,6 @@
 # hooks — manufyxinvenzaerp
 
-_Generated: 2026-05-28 18:06:28_
+_Generated: 2026-05-30 10:03:10_
 
 ## doc_events
 
@@ -8,6 +8,9 @@ _Generated: 2026-05-28 18:06:28_
 doc_events = {
 	"Item": {
 		"validate": "manufyxinvenzaerp.item_management.item.validate_item",
+	},
+	"Sales Order": {
+		"on_submit": "manufyxinvenzaerp.drawing_management.sales_order.on_submit_sales_order",
 	},
 	"Purchase Order": {
 		"validate": "manufyxinvenzaerp.purchase_order_management.purchase_order.validate_purchase_order",

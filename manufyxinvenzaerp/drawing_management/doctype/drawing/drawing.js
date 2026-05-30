@@ -124,7 +124,7 @@ frappe.ui.form.on("Drawing Item", {
 				frappe.model.set_value(cdt, cdn, "unit_weight", r.custom_unit_weight || 0);
 				frappe.model.set_value(cdt, cdn, "sec_uom", r.custom_secondary_uom || "");
 				frappe.model.set_value(cdt, cdn, "uom", r.stock_uom || "");
-				setTimeout(function () { drawing_calculate_qty(frm, cdt, cdn); }, 300);
+				setTimeout(function () { drawing_calculate_qty(frm, cdt, cdn); drawing_calculate_totals(frm, cdt, cdn); }, 300);
 			}
 		);
 	},
@@ -142,23 +142,24 @@ frappe.ui.form.on("Drawing Item", {
 				if (r.custom_length) frappe.model.set_value(cdt, cdn, "length", r.custom_length);
 				if (r.custom_width) frappe.model.set_value(cdt, cdn, "width", r.custom_width);
 				drawing_calculate_qty(frm, cdt, cdn);
+				drawing_calculate_totals(frm, cdt, cdn);
 			}
 		);
 	},
 
-	thickness(frm, cdt, cdn) { drawing_calculate_qty(frm, cdt, cdn); },
-	length(frm, cdt, cdn) { drawing_calculate_qty(frm, cdt, cdn); },
-	width(frm, cdt, cdn) { drawing_calculate_qty(frm, cdt, cdn); },
-	sec_qty(frm, cdt, cdn) { drawing_calculate_qty(frm, cdt, cdn); },
-	unit_weight(frm, cdt, cdn) { drawing_calculate_qty(frm, cdt, cdn); },
+	thickness(frm, cdt, cdn) { drawing_calculate_qty(frm, cdt, cdn); drawing_calculate_totals(frm, cdt, cdn); },
+	length(frm, cdt, cdn) { drawing_calculate_qty(frm, cdt, cdn); drawing_calculate_totals(frm, cdt, cdn); },
+	width(frm, cdt, cdn) { drawing_calculate_qty(frm, cdt, cdn); drawing_calculate_totals(frm, cdt, cdn); },
+	sec_qty(frm, cdt, cdn) { drawing_calculate_qty(frm, cdt, cdn); drawing_calculate_totals(frm, cdt, cdn); },
+	unit_weight(frm, cdt, cdn) { drawing_calculate_qty(frm, cdt, cdn); drawing_calculate_totals(frm, cdt, cdn); },
 
-	rate(frm, cdt, cdn) { drawing_calculate_amount(frm, cdt, cdn); },
 	qty(frm, cdt, cdn) {
 		var row = locals[cdt][cdn];
 		if ((row.parent_item_group || "") === "Nuts and Bolts" && row.unit_weight) {
 			frappe.model.set_value(cdt, cdn, "sec_qty", flt(row.qty * row.unit_weight, 3));
 		}
-		drawing_calculate_amount(frm, cdt, cdn);
+		update_totals(frm);
+		drawing_calculate_totals(frm, cdt, cdn);
 	},
 });
 
@@ -183,28 +184,48 @@ function drawing_calculate_qty(frm, cdt, cdn) {
 		// qty (NOS) is manual; recalculate sec_qty (KG) when unit_weight changes
 		if (row.qty && row.unit_weight) {
 			frappe.model.set_value(cdt, cdn, "sec_qty", flt(row.qty * row.unit_weight, 3));
-			drawing_calculate_amount(frm, cdt, cdn);
+			update_totals(frm);
 		}
 		return;
 	}
 
 	if (qty !== null) {
 		frappe.model.set_value(cdt, cdn, "qty", flt(qty, 3));
-		drawing_calculate_amount(frm, cdt, cdn);
+		update_totals(frm);
 	}
 }
 
-function drawing_calculate_amount(frm, cdt, cdn) {
+function drawing_calculate_totals(frm, cdt, cdn) {
 	var row = locals[cdt][cdn];
-	var amount = flt((row.rate || 0) * (row.qty || 0), 2);
-	frappe.model.set_value(cdt, cdn, "amount", amount);
-	update_totals(frm);
+	var no_of_qty = flt(frm.doc.no_of_qty_to_manufacture);
+	var group = row.parent_item_group || "";
+
+	if (group === "Nuts and Bolts") {
+		var nab_total_qty = flt(row.qty * no_of_qty, 3);
+		frappe.model.set_value(cdt, cdn, "total_qty", nab_total_qty);
+		frappe.model.set_value(cdt, cdn, "total_sec_qty", flt(nab_total_qty * row.unit_weight, 3));
+		return;
+	}
+
+	var total_sec_qty = flt(flt(row.sec_qty) * no_of_qty, 3);
+	frappe.model.set_value(cdt, cdn, "total_sec_qty", total_sec_qty);
+
+	var total_qty = 0;
+	if (group === "Structurals") {
+		if (row.length && row.unit_weight && total_sec_qty) {
+			total_qty = flt((row.length / 1000) * row.unit_weight * total_sec_qty, 3);
+		}
+	} else if (group === "Plates") {
+		if (row.length && row.width && row.thickness && row.unit_weight && total_sec_qty) {
+			total_qty = flt((row.length / 1000) * (row.width / 1000) * row.thickness * row.unit_weight * total_sec_qty, 3);
+		}
+	}
+	frappe.model.set_value(cdt, cdn, "total_qty", total_qty);
 }
 
 function update_totals(frm) {
-	var total_cost = 0, total_weight = 0;
+	var total_weight = 0;
 	(frm.doc.items || []).forEach(function (row) {
-		total_cost += flt(row.amount);
 		var uom = (row.uom || "").toLowerCase();
 		var sec_uom = (row.sec_uom || "").toLowerCase();
 		if (uom === "kg" || uom === "kgs") {
@@ -213,7 +234,6 @@ function update_totals(frm) {
 			total_weight += flt(row.sec_qty);
 		}
 	});
-	frm.set_value("total_raw_material_cost", flt(total_cost, 2));
 	frm.set_value("total_weight", flt(total_weight, 3));
 	render_items_summary(frm);
 }
@@ -232,7 +252,7 @@ function render_items_summary(frm) {
 		["Item Group", "item_group"], ["Material Spec", "material_spec"],
 		["Thickness", "thickness"], ["Length", "length"], ["Width", "width"],
 		["Sec Qty", "sec_qty"], ["Sec UOM", "sec_uom"],
-		["Qty ", "qty"], ["UOM", "uom"], ["Rate (₹)", "rate"], ["Amount (₹)", "amount"]
+		["Qty ", "qty"], ["UOM", "uom"]
 	];
 	var html = '<div style="overflow-x:auto;overflow-y:auto;max-height:320px;width:100%;">';
 	html += '<table class="table table-bordered table-condensed" style="font-size:12px;white-space:nowrap;min-width:1200px;">';
@@ -245,9 +265,6 @@ function render_items_summary(frm) {
 	rows.forEach(function (row) {
 		html += "<tr>" + cols.map(function (c) {
 			var val = row[c[1]] != null ? row[c[1]] : "";
-			if ((c[1] === "rate" || c[1] === "amount") && val !== "") {
-				val = "₹ " + flt(val, 2).toFixed(2);
-			}
 			return "<td>" + val + "</td>";
 		}).join("") + "</tr>";
 	});
@@ -282,15 +299,15 @@ function drawing_warn_missing_fields(row, group) {
 
 /**
  * Download a blank Drawing Items CSV template with three sample rows.
- * Columns: item_number, material_code, sec_qty, thickness, length, width, rate
+ * Columns: item_number, material_code, sec_qty, thickness, length, width
  */
 function drawing_download_csv_template() {
-	var HEADERS = ["item_number", "material_code", "sec_qty", "thickness", "length", "width", "rate"];
-	var LABELS  = ["Item Number", "Item Code",     "Sec Qty", "Thickness (mm)", "Length (mm)", "Width (mm)", "Rate"];
+	var HEADERS = ["item_number", "material_code", "sec_qty", "thickness", "length", "width"];
+	var LABELS  = ["Item Number", "Item Code",     "Sec Qty", "Thickness (mm)", "Length (mm)", "Width (mm)"];
 	var SAMPLES = [
-		["1", "ISMBX250X125", "2", "",   "1500", "",     "200"],
-		["2", "PLATE12",      "1", "12", "1500", "2000", "200"],
-		["3", "BOLTM24",      "2", "",   "",     "",     "200"],
+		["1", "ISMBX250X125", "2", "",   "1500", ""],
+		["2", "PLATE12",      "1", "12", "1500", "2000"],
+		["3", "BOLTM24",      "2", "",   "",     ""],
 	];
 
 	var lines = [
@@ -325,8 +342,6 @@ function drawing_download_items_csv(frm) {
 		["unit_weight",    "unit_weight"],
 		["qty",            "qty"],
 		["uom",            "uom"],
-		["rate",           "rate"],
-		["amount",         "amount"],
 	];
 
 	var lines = [COLS.map(function(c) { return c[0]; }).join(",")];

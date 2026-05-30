@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-05-28 18:06:28_
+_Generated: 2026-05-30 10:03:10_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -21,13 +21,13 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `check_existing_bom` | 104 |
+| `check_existing_bom` | 125 |
 ## drawing_management/drawing_utils.py
 
 | Method | Line |
 |--------|------|
-| `create_production_plan_from_bom` | 235 |
-| `parse_drawing_items_csv` | 288 |
+| `create_production_plan_from_bom` | 204 |
+| `parse_drawing_items_csv` | 257 |
 | `mark_as_final_revision` | 45 |
 | `get_batches_for_drawing_item` | 59 |
 | `create_drawings_from_so` | 7 |
@@ -46,23 +46,23 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `unreserve_exact_match_batches` | 1014 |
-| `check_mapping_batch_availability` | 1055 |
-| `unreserve_batches` | 1110 |
-| `_test_simulate_se_release` | 1151 |
-| `make_production_plan` | 1170 |
-| `make_material_request` | 1227 |
-| `get_raw_materials` | 132 |
-| `check_stock_availability` | 248 |
-| `move_to_exact_match` | 480 |
-| `@frappe.validate_and_sanitize_search_inputs` | 58 |
-| `finalize_mapping` | 619 |
-| `get_batch_reservation_summary` | 683 |
-| `get_batch_item` | 717 |
-| `get_batch_stock_summary` | 725 |
-| `reserve_batches` | 796 |
-| `get_bom_info` | 84 |
-| `reserve_exact_match_batches` | 898 |
+| `unreserve_exact_match_batches` | 1099 |
+| `check_mapping_batch_availability` | 1140 |
+| `unreserve_batches` | 1200 |
+| `_test_simulate_se_release` | 1241 |
+| `make_production_plan` | 1260 |
+| `make_material_request` | 1317 |
+| `@frappe.validate_and_sanitize_search_inputs` | 141 |
+| `get_bom_info` | 167 |
+| `get_raw_materials` | 215 |
+| `check_stock_availability` | 331 |
+| `move_to_exact_match` | 563 |
+| `finalize_mapping` | 702 |
+| `get_batch_reservation_summary` | 766 |
+| `get_batch_item` | 800 |
+| `get_batch_stock_summary` | 808 |
+| `reserve_batches` | 879 |
+| `reserve_exact_match_batches` | 983 |
 ## production_management/production_utils.py
 
 | Method | Line |

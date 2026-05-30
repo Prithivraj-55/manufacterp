@@ -153,6 +153,9 @@ doc_events = {
 	"Item": {
 		"validate": "manufyxinvenzaerp.item_management.item.validate_item",
 	},
+	"Sales Order": {
+		"on_submit": "manufyxinvenzaerp.drawing_management.sales_order.on_submit_sales_order",
+	},
 	"Purchase Order": {
 		"validate": "manufyxinvenzaerp.purchase_order_management.purchase_order.validate_purchase_order",
 		"before_submit": "manufyxinvenzaerp.purchase_order_management.purchase_order.before_submit_purchase_order",

@@ -36,8 +36,6 @@
   "items_summary_html",
   "section_totals",
   "total_weight",
-  "column_break_totals",
-  "total_raw_material_cost",
   "amended_from"
  ],
  "fields": [
@@ -214,11 +212,13 @@
   {
    "fieldname": "section_items_view",
    "fieldtype": "Section Break",
+   "hidden": 1,
    "label": "Items Summary"
   },
   {
    "fieldname": "items_summary_html",
    "fieldtype": "HTML",
+   "hidden": 1,
    "label": "Items Summary"
   },
   {
@@ -231,16 +231,6 @@
    "fieldname": "total_weight",
    "fieldtype": "Float",
    "label": "Total Weight (KG)",
-   "read_only": 1
-  },
-  {
-   "fieldname": "column_break_totals",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "total_raw_material_cost",
-   "fieldtype": "Currency",
-   "label": "Total Raw Material Cost",
    "read_only": 1
   },
   {
