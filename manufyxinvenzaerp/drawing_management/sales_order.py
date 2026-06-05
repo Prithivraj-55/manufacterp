@@ -3,7 +3,7 @@ from frappe.utils import flt
 
 
 def recalculate_raw_material_qty(doc, method):
-    """Recalculate qty on unlocked raw material rows when the SO is saved."""
+    """Recalculate qty, total_sec_qty and total_weight on unlocked raw material rows."""
     # Build lookup: drawing_number → total_quantity from the Drawing List table
     total_qty_map = {}
     for dr in (doc.custom_duno_items or []):
@@ -19,7 +19,7 @@ def recalculate_raw_material_qty(doc, method):
         width = flt(row.width)
         thickness = flt(row.thickness)
         sec_qty = flt(row.sec_qty)
-        total_qty = total_qty_map.get(row.customer_drawing_number, 1.0)
+        tq = total_qty_map.get(row.customer_drawing_number, 1.0)
 
         qty = 0.0
         if pig == "Structurals":
@@ -31,4 +31,6 @@ def recalculate_raw_material_qty(doc, method):
         else:
             qty = sec_qty
 
-        row.qty = flt(qty * total_qty, 3)
+        row.qty = flt(qty, 3)
+        row.total_sec_qty = flt(sec_qty * tq, 3)
+        row.total_weight = flt(qty * tq, 3)

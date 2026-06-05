@@ -7,22 +7,17 @@ from frappe.utils import flt, now as frappe_now, generate_hash
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _calc_qty(pig, length, width, thickness, unit_wt, sec_qty, total_qty=1.0):
-    """Return primary quantity using the same formula as Drawing controller.
-
-    total_qty multiplies the per-unit result (used in SO raw materials table
-    to show the full SO quantity; omit/1 when computing per-unit Drawing rows).
-    """
-    base = 0.0
+def _calc_qty(pig, length, width, thickness, unit_wt, sec_qty):
+    """Return per-unit primary weight using the same formula as Drawing controller."""
     if pig == "Structurals":
         if length and unit_wt and sec_qty:
-            base = (length / 1000.0) * unit_wt * sec_qty
+            return (length / 1000.0) * unit_wt * sec_qty
     elif pig == "Plates":
         if length and width and thickness and unit_wt and sec_qty:
-            base = (length / 1000.0) * (width / 1000.0) * thickness * unit_wt * sec_qty
+            return (length / 1000.0) * (width / 1000.0) * thickness * unit_wt * sec_qty
     else:
-        base = flt(sec_qty)
-    return base * flt(total_qty or 1.0)
+        return flt(sec_qty)
+    return 0.0
 
 
 def _get_file_path(file_url):
@@ -201,6 +196,19 @@ def parse_bom_excel(so_name):
         ):
             item_data_map[item.name] = item
 
+    # --- Warn for Plates missing thickness / Structurals missing unit weight in Excel ---
+    dim_warn = []
+    for cdn, d in new_drawings.items():
+        for item in d["items"]:
+            idata = item_data_map.get(item["material_code"]) or frappe._dict()
+            pig = (idata.get("custom_parent_item_group") or "").strip()
+            if pig == "Plates" and not flt(item.get("thickness")):
+                dim_warn.append(_("{0} / {1}: Plates item missing Thickness in Excel").format(cdn, item["material_code"]))
+            elif pig == "Structurals" and not flt(idata.get("custom_unit_weight")):
+                dim_warn.append(_("{0} / {1}: Structurals item missing Unit Weight in Item master").format(cdn, item["material_code"]))
+    if dim_warn:
+        warnings.extend(dim_warn)
+
     # --- Fetch FG item names ---
     fg_name_map = {}
     if all_fg:
@@ -211,7 +219,7 @@ def parse_bom_excel(so_name):
         ):
             fg_name_map[item.name] = item.item_name
 
-    # --- Clear existing unlocked rows ---
+    # --- Clear existing unlocked rows and reset verification flag ---
     frappe.db.sql(
         "DELETE FROM `tabSales Order Drawing Raw Material` WHERE parent = %s AND is_locked = 0",
         so_name,
@@ -220,6 +228,7 @@ def parse_bom_excel(so_name):
         "DELETE FROM `tabSales Order DUNO Item` WHERE parent = %s AND (drawing IS NULL OR drawing = '')",
         so_name,
     )
+    frappe.db.set_value("Sales Order", so_name, "custom_raw_materials_verified", 0)
 
     # --- Re-index after delete: get next available idx for each table ---
     t1_max = frappe.db.sql(
@@ -263,15 +272,19 @@ def parse_bom_excel(so_name):
         "customer_drawing_number", "item_no", "material_code", "material_name",
         "item_group", "parent_item_group",
         "grade", "thickness", "width", "length",
-        "sec_qty", "sec_uom", "unit_weight", "qty", "uom", "is_locked",
+        "sec_qty", "sec_uom", "total_sec_qty", "unit_weight", "qty", "uom", "total_weight", "is_locked",
     ]
     t2_values = []
     for cdn, d in new_drawings.items():
+        tq = flt(d["total_quantity"]) or 1.0
         for item in d["items"]:
             idata = item_data_map.get(item["material_code"]) or frappe._dict()
             pig = (idata.get("custom_parent_item_group") or "").strip()
             unit_wt = flt(idata.get("custom_unit_weight") or 0)
-            qty = _calc_qty(pig, item["length"], item["width"], item["thickness"], unit_wt, item["sec_qty"], d["total_quantity"])
+            sec_qty = flt(item["sec_qty"])
+            qty = _calc_qty(pig, item["length"], item["width"], item["thickness"], unit_wt, sec_qty)
+            total_sec_qty = flt(sec_qty * tq, 3)
+            total_weight = flt(qty * tq, 3)
             t2_values.append((
                 generate_hash(length=10),
                 so_name, "Sales Order", "custom_so_raw_materials", t2_idx,
@@ -284,11 +297,13 @@ def parse_bom_excel(so_name):
                 pig,
                 item["grade"],
                 flt(item["thickness"], 3), flt(item["width"], 3), flt(item["length"], 3),
-                flt(item["sec_qty"], 3),
+                flt(sec_qty, 3),
                 idata.get("custom_secondary_uom") or "",
+                flt(total_sec_qty, 3),
                 flt(unit_wt, 6),
                 flt(qty, 3),
                 idata.get("stock_uom") or "",
+                flt(total_weight, 3),
                 0,
             ))
             t2_idx += 1
@@ -364,82 +379,93 @@ def create_drawings_from_import(so_name):
                 )
             )
 
-    created = []
+    results = []
 
     for dr in pending_rows:
         cdn = dr.drawing_number
-        rm_rows = rm_by_cdn.get(cdn, [])
+        result = {"drawing_number": cdn, "drawing": None, "status": "error", "error": ""}
 
-        item_data = {}
-        if dr.item:
-            item_data = frappe.db.get_value(
-                "Item", dr.item, ["item_name", "description"], as_dict=True
-            ) or {}
+        try:
+            rm_rows = rm_by_cdn.get(cdn, [])
 
-        drawing = frappe.get_doc({
-            "doctype": "Drawing",
-            "sales_order": so_name,
-            "customer": so.customer,
-            "customer_name": so.customer_name,
-            "customer_no": so.customer,
-            "project": so.get("project"),
-            "cust_po_no": so.get("po_no"),
-            "fg_item_code": dr.item or "",
-            "fg_item_name": item_data.get("item_name") or "",
-            "fg_description": item_data.get("description") or "",
-            "no_of_qty_to_manufacture": flt(dr.total_quantity),
-            "duno_mark_no": dr.duno_mark_no or "",
-            "customer_drawing_number": cdn or "",
-            "customer_provided_wt": flt(dr.total_weight),
-            "status": "Working",
-        })
+            item_data = {}
+            if dr.item:
+                item_data = frappe.db.get_value(
+                    "Item", dr.item, ["item_name", "description"], as_dict=True
+                ) or {}
 
-        no_of_qty = flt(dr.total_quantity) or 1
-
-        for rm in rm_rows:
-            pig = rm.parent_item_group or ""
-            unit_wt = flt(rm.unit_weight)
-            sec_qty = flt(rm.sec_qty)
-            qty = _calc_qty(pig, flt(rm.length), flt(rm.width), flt(rm.thickness), unit_wt, sec_qty)
-            total_qty = flt(qty) * no_of_qty
-            total_sec_qty = sec_qty * no_of_qty
-
-            drawing.append("items", {
-                "item_number": 0,
-                "material_code": rm.material_code,
-                "material_name": rm.material_name or "",
-                "item_group": rm.item_group or "",
-                "parent_item_group": pig,
-                "thickness": flt(rm.thickness, 3),
-                "length": flt(rm.length, 3),
-                "width": flt(rm.width, 3),
-                "sec_qty": flt(sec_qty, 3),
-                "sec_uom": rm.sec_uom or "",
-                "unit_weight": flt(unit_wt, 6),
-                "qty": flt(qty, 3),
-                "uom": rm.uom or "",
-                "total_sec_qty": flt(total_sec_qty, 3),
-                "total_qty": flt(total_qty, 3),
+            drawing = frappe.get_doc({
+                "doctype": "Drawing",
+                "sales_order": so_name,
+                "customer": so.customer,
+                "customer_name": so.customer_name,
+                "customer_no": so.customer,
+                "project": so.get("project"),
+                "cust_po_no": so.get("po_no"),
+                "fg_item_code": dr.item or "",
+                "fg_item_name": item_data.get("item_name") or "",
+                "fg_description": item_data.get("description") or "",
+                "no_of_qty_to_manufacture": flt(dr.total_quantity),
+                "duno_mark_no": dr.duno_mark_no or "",
+                "customer_drawing_number": cdn or "",
+                "customer_provided_wt": flt(dr.total_weight),
+                "status": "Working",
             })
 
-        drawing.insert(ignore_permissions=True)
-        created.append(drawing.name)
+            no_of_qty = flt(dr.total_quantity) or 1
 
-        # Link drawing back to Table 1 row
-        frappe.db.set_value("Sales Order DUNO Item", dr.name, "drawing", drawing.name)
+            for rm in rm_rows:
+                pig = rm.parent_item_group or ""
+                unit_wt = flt(rm.unit_weight)
+                sec_qty = flt(rm.sec_qty)
+                qty = _calc_qty(pig, flt(rm.length), flt(rm.width), flt(rm.thickness), unit_wt, sec_qty)
+                total_qty = flt(qty) * no_of_qty
+                total_sec_qty = sec_qty * no_of_qty
 
-        # Lock matching Table 2 rows
-        frappe.db.sql(
-            """
-            UPDATE `tabSales Order Drawing Raw Material`
-            SET is_locked = 1
-            WHERE parent = %s AND customer_drawing_number = %s
-            """,
-            (so_name, cdn),
-        )
+                drawing.append("items", {
+                    "item_number": 0,
+                    "material_code": rm.material_code,
+                    "material_name": rm.material_name or "",
+                    "item_group": rm.item_group or "",
+                    "parent_item_group": pig,
+                    "thickness": flt(rm.thickness, 3),
+                    "length": flt(rm.length, 3),
+                    "width": flt(rm.width, 3),
+                    "sec_qty": flt(sec_qty, 3),
+                    "sec_uom": rm.sec_uom or "",
+                    "unit_weight": flt(unit_wt, 6),
+                    "qty": flt(qty, 3),
+                    "uom": rm.uom or "",
+                    "total_sec_qty": flt(total_sec_qty, 3),
+                    "total_qty": flt(total_qty, 3),
+                })
 
-    frappe.db.commit()
-    return created
+            drawing.insert(ignore_permissions=True)
+            result["drawing"] = drawing.name
+            result["status"] = "success"
+
+            # Link drawing back to Table 1 row
+            frappe.db.set_value("Sales Order DUNO Item", dr.name, "drawing", drawing.name)
+
+            # Lock matching Table 2 rows
+            frappe.db.sql(
+                """
+                UPDATE `tabSales Order Drawing Raw Material`
+                SET is_locked = 1
+                WHERE parent = %s AND customer_drawing_number = %s
+                """,
+                (so_name, cdn),
+            )
+            frappe.db.commit()
+
+        except Exception as e:
+            frappe.db.rollback()
+            frappe.local.message_log = []
+            result["error"] = str(e)
+
+        results.append(result)
+
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -514,6 +540,8 @@ def process_drawings(so_name, step):
                 frappe.throw(_("Unknown step: {0}").format(step))
 
         except Exception as e:
+            frappe.db.rollback()
+            frappe.local.message_log = []  # prevent throw() messages surfacing as a popup
             result["status"] = "error"
             result["error"] = str(e)
 
@@ -523,6 +551,62 @@ def process_drawings(so_name, step):
 
 
 # ---------------------------------------------------------------------------
+
+@frappe.whitelist()
+def verify_raw_materials(so_name):
+    """
+    Validate all unlocked Raw Material rows on the Sales Order.
+    Sets custom_raw_materials_verified = 1 if no issues found.
+    Returns {issues: [...], verified: bool}.
+    """
+    so = frappe.get_doc("Sales Order", so_name)
+    unlocked = [r for r in (so.custom_so_raw_materials or []) if not r.is_locked]
+
+    if not unlocked:
+        frappe.db.set_value("Sales Order", so_name, "custom_raw_materials_verified", 1)
+        frappe.db.commit()
+        return {"issues": [], "verified": True}
+
+    all_mat = {r.material_code for r in unlocked if r.material_code}
+    existing = set(frappe.db.get_all(
+        "Item", filters={"name": ["in", list(all_mat)]}, pluck="name"
+    )) if all_mat else set()
+
+    issues = []
+    for row in unlocked:
+        cdn = row.customer_drawing_number or "?"
+        mat = row.material_code or ""
+        pig = row.parent_item_group or ""
+
+        if not mat:
+            issues.append(_("Drawing {0}, Item {1}: Material Code is missing").format(cdn, row.item_no or "?"))
+            continue
+
+        if mat not in existing:
+            issues.append(_("Drawing {0} / {1}: Not found in Item master").format(cdn, mat))
+            continue
+
+        if pig == "Plates":
+            missing = []
+            if not flt(row.thickness): missing.append("Thickness")
+            if not flt(row.width):     missing.append("Width")
+            if not flt(row.length):    missing.append("Length")
+            if not flt(row.unit_weight): missing.append("Unit Weight (check Item master)")
+            if missing:
+                issues.append(_("Drawing {0} / {1} (Plates): Missing — {2}").format(cdn, mat, ", ".join(missing)))
+
+        elif pig == "Structurals":
+            missing = []
+            if not flt(row.length):      missing.append("Length")
+            if not flt(row.unit_weight): missing.append("Unit Weight (check Item master)")
+            if missing:
+                issues.append(_("Drawing {0} / {1} (Structurals): Missing — {2}").format(cdn, mat, ", ".join(missing)))
+
+    verified = len(issues) == 0
+    frappe.db.set_value("Sales Order", so_name, "custom_raw_materials_verified", 1 if verified else 0)
+    frappe.db.commit()
+    return {"issues": issues, "verified": verified}
+
 
 @frappe.whitelist()
 def download_bom_template():
@@ -593,8 +677,9 @@ def clear_drawing_import(so_name):
         so_name,
     )
 
-    # Clear the file attachment field on the SO
+    # Clear the file attachment field and verification flag on the SO
     frappe.db.set_value("Sales Order", so_name, "custom_bom_excel_file", "")
+    frappe.db.set_value("Sales Order", so_name, "custom_raw_materials_verified", 0)
     frappe.db.commit()
 
     return {"deleted_drawings": int(t1_del), "deleted_items": int(t2_del)}

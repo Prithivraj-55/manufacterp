@@ -164,7 +164,7 @@
    "fieldname": "qty",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Quantity",
+   "label": "Weight (Primary UOM)",
    "read_only_depends_on": "eval:['Structurals','Plates'].includes(doc.parent_item_group)"
   },
   {
