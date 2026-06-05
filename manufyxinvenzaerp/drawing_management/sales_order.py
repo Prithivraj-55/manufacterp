@@ -1,47 +1,34 @@
 import frappe
-from frappe import _
+from frappe.utils import flt
 
 
-def on_submit_sales_order(doc, method):
-    """Auto-create one Drawing per DUNO/Mark No row when Is Production Order is enabled."""
-    if not doc.get("custom_is_production_order"):
-        return
+def recalculate_raw_material_qty(doc, method):
+    """Recalculate qty on unlocked raw material rows when the SO is saved."""
+    # Build lookup: drawing_number → total_quantity from the Drawing List table
+    total_qty_map = {}
+    for dr in (doc.custom_duno_items or []):
+        if dr.drawing_number:
+            total_qty_map[dr.drawing_number] = flt(dr.total_quantity) or 1.0
 
-    if not doc.get("custom_duno_items"):
-        frappe.throw(
-            _("DUNO/Mark No table is empty. Please add item rows before submitting a Production Order.")
-        )
+    for row in (doc.custom_so_raw_materials or []):
+        if row.is_locked:
+            continue
+        pig = row.parent_item_group or ""
+        unit_wt = flt(row.unit_weight)
+        length = flt(row.length)
+        width = flt(row.width)
+        thickness = flt(row.thickness)
+        sec_qty = flt(row.sec_qty)
+        total_qty = total_qty_map.get(row.customer_drawing_number, 1.0)
 
-    created = []
-    for row in doc.custom_duno_items:
-        item_data = frappe.db.get_value(
-            "Item", row.item, ["item_name", "description"], as_dict=True
-        ) or {}
+        qty = 0.0
+        if pig == "Structurals":
+            if length and unit_wt and sec_qty:
+                qty = (length / 1000.0) * unit_wt * sec_qty
+        elif pig == "Plates":
+            if length and width and thickness and unit_wt and sec_qty:
+                qty = (length / 1000.0) * (width / 1000.0) * thickness * unit_wt * sec_qty
+        else:
+            qty = sec_qty
 
-        drawing = frappe.get_doc({
-            "doctype": "Drawing",
-            "sales_order": doc.name,
-            "customer": doc.customer,
-            "customer_name": doc.customer_name,
-            "customer_no": doc.customer,
-            "project": doc.get("project"),
-            "cust_po_no": doc.get("po_no"),
-            "fg_item_code": row.item,
-            "fg_item_name": item_data.get("item_name") or "",
-            "fg_description": item_data.get("description") or "",
-            "no_of_qty_to_manufacture": row.total_quantity,
-            "duno_mark_no": row.duno_mark_no,
-            "status": "Working",
-        })
-        drawing.insert(ignore_permissions=True)
-        created.append(drawing.name)
-
-    links = "".join(
-        '<li><a href="/app/drawing/{0}" target="_blank">{0}</a></li>'.format(name)
-        for name in created
-    )
-    frappe.msgprint(
-        _("{0} Drawing(s) created:<ul>{1}</ul>").format(len(created), links),
-        title=_("Drawings Created"),
-        indicator="green",
-    )
+        row.qty = flt(qty * total_qty, 3)

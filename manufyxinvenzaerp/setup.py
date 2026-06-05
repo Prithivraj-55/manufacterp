@@ -533,51 +533,268 @@ function sq_warn_missing_fields(row, group) {
 """.strip()
 
 SO_CLIENT_SCRIPT = """
+// ── Sales Order: Drawing Import ────────────────────────────────────────────
+
 frappe.ui.form.on("Sales Order", {
 	refresh(frm) {
-		_toggle_duno_tab(frm);
-		_set_duno_item_query(frm);
-		if (frm.doc.docstatus === 1 && !frm.doc.custom_is_production_order) {
-			frm.add_custom_button(__("Drawing"), function() {
-				frappe.call({
-					method: "manufyxinvenzaerp.drawing_management.drawing_utils.create_drawings_from_so",
-					args: { so_name: frm.doc.name },
-					freeze: true,
-					freeze_message: __("Creating Drawings..."),
-					callback: function(r) {
-						if (r.message && r.message.length) {
-							var links = r.message.map(function(name) {
-								return '<a href="/app/drawing/' + encodeURIComponent(name) + '" target="_blank">' + name + '</a>';
-							}).join(', ');
-							frappe.msgprint({
-								title: __("Drawings Created"),
-								message: r.message.length + ' ' + __('Drawing(s) created') + ': ' + links,
-								indicator: 'green'
-							});
-							frm.reload_doc();
-						}
-					}
-				});
-			}, __("Create"));
-		}
+		_so_render_file_buttons(frm);
+		_so_render_drawing_buttons(frm);
 	},
-	custom_is_production_order(frm) {
-		_toggle_duno_tab(frm);
+	custom_bom_excel_file(frm) {
+		_so_render_file_buttons(frm);
 	}
 });
 
-function _toggle_duno_tab(frm) {
-	var show = !!frm.doc.custom_is_production_order;
-	frm.toggle_display("custom_tab_duno_mark_no", show);
-	frm.toggle_display("custom_duno_items", show);
+// ── Qty calculation in Raw Materials child table ───────────────────────────
+
+frappe.ui.form.on("Sales Order Drawing Raw Material", {
+	material_code(frm, cdt, cdn) {
+		var row = locals[cdt][cdn];
+		if (row.is_locked || !row.material_code) return;
+		frappe.db.get_value("Item", row.material_code,
+			["custom_unit_weight", "custom_parent_item_group"],
+			function(v) {
+				if (v) {
+					frappe.model.set_value(cdt, cdn, "unit_weight", v.custom_unit_weight || 0);
+					frappe.model.set_value(cdt, cdn, "parent_item_group", v.custom_parent_item_group || "");
+				}
+				_so_calc_rm_qty(frm, cdt, cdn);
+			}
+		);
+	},
+	sec_qty(frm, cdt, cdn)   { _so_calc_rm_qty(frm, cdt, cdn); },
+	thickness(frm, cdt, cdn) { _so_calc_rm_qty(frm, cdt, cdn); },
+	width(frm, cdt, cdn)     { _so_calc_rm_qty(frm, cdt, cdn); },
+	length(frm, cdt, cdn)    { _so_calc_rm_qty(frm, cdt, cdn); }
+});
+
+function _so_calc_rm_qty(frm, cdt, cdn) {
+	var row = locals[cdt][cdn];
+	if (row.is_locked) return;
+	var pig = row.parent_item_group || "";
+	var uw = flt(row.unit_weight), L = flt(row.length),
+	    W = flt(row.width), T = flt(row.thickness), sq = flt(row.sec_qty);
+
+	// Look up total_quantity from the Drawing List for this drawing number
+	var total_qty = 1;
+	var cdn_val = row.customer_drawing_number;
+	if (cdn_val && frm.doc.custom_duno_items) {
+		var dr = frm.doc.custom_duno_items.find(function(r) { return r.drawing_number === cdn_val; });
+		if (dr && dr.total_quantity) total_qty = flt(dr.total_quantity);
+	}
+
+	var qty = 0;
+	if (pig === "Structurals") {
+		if (L && uw && sq) qty = (L / 1000) * uw * sq;
+	} else if (pig === "Plates") {
+		if (L && W && T && uw && sq) qty = (L / 1000) * (W / 1000) * T * uw * sq;
+	} else {
+		qty = sq;
+	}
+	frappe.model.set_value(cdt, cdn, "qty", flt(qty * total_qty, 3));
 }
 
-function _set_duno_item_query(frm) {
-	frm.set_query("item", "custom_duno_items", function() {
-		var item_codes = (frm.doc.items || []).map(function(r) { return r.item_code; }).filter(Boolean);
-		return {
-			filters: [["Item", "name", "in", item_codes.length ? item_codes : ["__none__"]]]
-		};
+// ── Inline Load / Clear buttons next to the attach field ──────────────────
+
+function _so_render_file_buttons(frm) {
+	var fd = frm.fields_dict["custom_bom_action_btns"];
+	if (!fd) return;
+	var $w = fd.$wrapper;
+	$w.empty();
+	if (frm.doc.__islocal || frm.doc.docstatus === 2) return;
+
+	var has_file = !!frm.doc.custom_bom_excel_file;
+	var has_drawing_created = (frm.doc.custom_duno_items || []).some(function(r) { return !!r.drawing; });
+
+	var $row = $('<div style="display:flex;gap:8px;padding:4px 0 8px">').appendTo($w);
+
+	if (!has_file) {
+		// No file yet — show Download Template only
+		$('<button class="btn btn-sm btn-default">')
+			.text(__("Download Template"))
+			.on("click", function() {
+				window.open(frappe.urllib.get_full_url(
+					"/api/method/manufyxinvenzaerp.drawing_management.so_drawing_import.download_bom_template"
+				));
+			})
+			.appendTo($row);
+	} else {
+		// File attached — show Load Items and Clear Items
+		$('<button class="btn btn-sm btn-primary">')
+			.text(__("Load Items"))
+			.on("click", function() { _so_load_excel(frm); })
+			.appendTo($row);
+
+		var $clear = $('<button class="btn btn-sm btn-default">')
+			.text(__("Clear Items"))
+			.appendTo($row);
+		if (has_drawing_created) {
+			$clear.prop("disabled", true)
+				.attr("title", __("Drawings have been created — clear is disabled"));
+		} else {
+			$clear.on("click", function() { _so_clear_import(frm); });
+		}
+	}
+}
+
+// ── Drawing group buttons (top bar) ───────────────────────────────────────
+
+function _so_render_drawing_buttons(frm) {
+	if (frm.doc.__islocal || frm.doc.docstatus === 2) return;
+
+	var items = frm.doc.custom_duno_items || [];
+
+	// Create Drawing — synchronous: no drawing exists yet
+	var has_pending = items.some(function(r) { return r.create_drawing && !r.drawing; });
+	if (has_pending) {
+		frm.add_custom_button(__("Create Drawing"), function() {
+			_so_create_drawings(frm);
+		}, __("Drawing"));
+	}
+
+	// Remaining 3 buttons depend on live drawing docstatus — fetch async
+	var drawing_names = items.filter(function(r) { return !!r.drawing; }).map(function(r) { return r.drawing; });
+	if (!drawing_names.length) return;
+
+	frappe.db.get_list("Drawing", {
+		filters: [["name", "in", drawing_names]],
+		fields: ["name", "docstatus", "status"],
+		limit: drawing_names.length
+	}).then(function(drawings) {
+		var drafts   = new Set(drawings.filter(function(d) { return d.docstatus === 0; }).map(function(d) { return d.name; }));
+		var subm_nf  = new Set(drawings.filter(function(d) { return d.docstatus === 1 && d.status !== "Final Revision"; }).map(function(d) { return d.name; }));
+		var final    = new Set(drawings.filter(function(d) { return d.status === "Final Revision"; }).map(function(d) { return d.name; }));
+
+		// Submit Drawing — only if drafts exist with checkbox on
+		var submit_count = items.filter(function(r) { return r.submit_drawing && drafts.has(r.drawing); }).length;
+		if (submit_count) {
+			frm.add_custom_button(__("Submit Drawing"), function() {
+				_so_run_step(frm, "submit", __("Submit Drawing"), __("Submitting Drawings…"), submit_count, __("Submit"));
+			}, __("Drawing"));
+		}
+
+		// Mark as Final Revision — only if submitted (non-final) drawings with checkbox on
+		var final_count = items.filter(function(r) { return r.mark_final_revision && subm_nf.has(r.drawing); }).length;
+		if (final_count) {
+			frm.add_custom_button(__("Mark as Final Revision"), function() {
+				_so_run_step(frm, "final_revision", __("Mark as Final Revision"), __("Marking Final Revision…"), final_count, __("Final Revision"));
+			}, __("Drawing"));
+		}
+
+		// Create BOM — only if final revision drawings with checkbox on
+		var bom_count = items.filter(function(r) { return r.create_bom && final.has(r.drawing); }).length;
+		if (bom_count) {
+			frm.add_custom_button(__("Create BOM"), function() {
+				_so_run_step(frm, "create_bom", __("Create BOM"), __("Creating BOMs…"), bom_count, __("Create BOM"));
+			}, __("Drawing"));
+		}
+	});
+}
+
+// ── Action implementations ─────────────────────────────────────────────────
+
+function _so_load_excel(frm) {
+	var has_locked = (frm.doc.custom_duno_items || []).some(function(r) { return !!r.drawing; });
+	var do_load = function() {
+		frappe.call({
+			method: "manufyxinvenzaerp.drawing_management.so_drawing_import.parse_bom_excel",
+			args: { so_name: frm.doc.name },
+			freeze: true,
+			freeze_message: __("Parsing Excel file…"),
+			callback: function(r) {
+				if (!r.message) return;
+				var res = r.message;
+				var msg = __("{0} drawing(s) and {1} raw material row(s) loaded.", [res.drawing_count, res.item_count]);
+				if (res.warnings && res.warnings.length) {
+					frappe.msgprint({ title: __("Loaded with Warnings"),
+						message: msg + "<br><br><b>" + __("Warnings:") + "</b><br>" + res.warnings.join("<br>"),
+						indicator: "orange" });
+				} else {
+					frappe.show_alert({ message: msg, indicator: "green" }, 5);
+				}
+				frm.reload_doc();
+			}
+		});
+	};
+	if (has_locked) {
+		frappe.confirm(__("Some drawings are already created. Only rows without a drawing will be reloaded. Continue?"), do_load);
+	} else {
+		do_load();
+	}
+}
+
+function _so_create_drawings(frm) {
+	var items = frm.doc.custom_duno_items || [];
+	var count = items.filter(function(r) { return r.create_drawing && !r.drawing; }).length;
+	var confirm_msg = __("{0} drawing(s) will be created.", [count]) + "<br><br>" +
+		__("To skip any drawing, uncheck <b>Create Drawing</b> in the Drawing List row.");
+	frappe.confirm(confirm_msg, function() {
+		frappe.call({
+			method: "manufyxinvenzaerp.drawing_management.so_drawing_import.create_drawings_from_import",
+			args: { so_name: frm.doc.name },
+			freeze: true,
+			freeze_message: __("Creating Drawings…"),
+			callback: function(r) {
+				if (!r.message) return;
+				var names = r.message;
+				var links = names.map(function(n) {
+					return '<a href="/app/drawing/' + encodeURIComponent(n) + '" target="_blank">' + n + '</a>';
+				}).join(", ");
+				frappe.msgprint({ title: __("Drawings Created"),
+					message: names.length + " " + __("Drawing(s) created:") + " " + links,
+					indicator: "green" });
+				frm.reload_doc();
+			}
+		});
+	});
+}
+
+function _so_run_step(frm, step, label, freeze_msg, count, checkbox_label) {
+	var confirm_msg = __("{0} drawing(s) will be processed: <b>{1}</b>.", [count || "", label]) + "<br><br>" +
+		__("To skip any drawing, uncheck <b>{0}</b> in the Drawing List row.", [checkbox_label || label]);
+	frappe.confirm(confirm_msg, function() {
+		frappe.call({
+			method: "manufyxinvenzaerp.drawing_management.so_drawing_import.process_drawings",
+			args: { so_name: frm.doc.name, step: step },
+			freeze: true,
+			freeze_message: __(freeze_msg),
+			callback: function(r) {
+				if (!r.message) return;
+				var results = r.message;
+				var ok  = results.filter(function(x) { return x.status === "success"; });
+				var err = results.filter(function(x) { return x.status === "error"; });
+				var msg = ok.length + " " + __("drawing(s) done.");
+				if (err.length) {
+					msg += "<br><br><b>" + __("Errors:") + "</b><br>" +
+						err.map(function(e) { return (e.drawing_number || e.drawing) + ": " + e.error; }).join("<br>");
+				}
+				frappe.msgprint({ title: label + " " + __("Complete"),
+					message: msg, indicator: err.length ? "orange" : "green" });
+				frm.reload_doc();
+			}
+		});
+	});
+}
+
+function _so_clear_import(frm) {
+	var has_locked = (frm.doc.custom_duno_items || []).some(function(r) { return !!r.drawing; });
+	var msg = has_locked
+		? __("Remove the attached file and all import rows without a created Drawing? Rows with Drawings will be kept.")
+		: __("Remove the attached file and all import rows?");
+	frappe.confirm(msg, function() {
+		frappe.call({
+			method: "manufyxinvenzaerp.drawing_management.so_drawing_import.clear_drawing_import",
+			args: { so_name: frm.doc.name },
+			freeze: true,
+			freeze_message: __("Clearing…"),
+			callback: function(r) {
+				if (!r.message) return;
+				var res = r.message;
+				frappe.show_alert({ message: __("{0} drawing row(s) and {1} item row(s) cleared.",
+					[res.deleted_drawings, res.deleted_items]), indicator: "blue" }, 5);
+				frm.reload_doc();
+			}
+		});
 	});
 }
 """.strip()
@@ -1411,24 +1628,55 @@ def create_so_custom_fields():
         {
             "Sales Order": [
                 {
-                    "fieldname": "custom_is_production_order",
-                    "fieldtype": "Check",
-                    "label": "Is Production Order",
-                    "insert_after": "po_no",
-                    "default": "0",
-                },
-                {
                     "fieldname": "custom_tab_duno_mark_no",
                     "fieldtype": "Tab Break",
-                    "label": "DUNO/Mark No",
+                    "label": "Drawing Import",
                     "insert_after": "pricing_rules",
+                },
+                {
+                    "fieldname": "custom_bom_import_section",
+                    "fieldtype": "Section Break",
+                    "label": "BOM File",
+                    "insert_after": "custom_tab_duno_mark_no",
+                },
+                {
+                    "fieldname": "custom_bom_excel_file",
+                    "fieldtype": "Attach",
+                    "label": "BOM Excel File",
+                    "insert_after": "custom_bom_import_section",
+                    "description": "Upload the customer BOM Excel file.",
+                },
+                {
+                    "fieldname": "custom_bom_action_btns",
+                    "fieldtype": "HTML",
+                    "label": "BOM Actions",
+                    "insert_after": "custom_bom_excel_file",
+                },
+                {
+                    "fieldname": "custom_drawing_list_section",
+                    "fieldtype": "Section Break",
+                    "label": "Drawing List",
+                    "insert_after": "custom_bom_excel_file",
                 },
                 {
                     "fieldname": "custom_duno_items",
                     "fieldtype": "Table",
-                    "label": "DUNO/Mark No",
+                    "label": "Drawing List",
                     "options": "Sales Order DUNO Item",
-                    "insert_after": "custom_tab_duno_mark_no",
+                    "insert_after": "custom_drawing_list_section",
+                },
+                {
+                    "fieldname": "custom_raw_materials_section",
+                    "fieldtype": "Section Break",
+                    "label": "Raw Materials",
+                    "insert_after": "custom_duno_items",
+                },
+                {
+                    "fieldname": "custom_so_raw_materials",
+                    "fieldtype": "Table",
+                    "label": "Raw Materials",
+                    "options": "Sales Order Drawing Raw Material",
+                    "insert_after": "custom_raw_materials_section",
                 },
             ]
         },

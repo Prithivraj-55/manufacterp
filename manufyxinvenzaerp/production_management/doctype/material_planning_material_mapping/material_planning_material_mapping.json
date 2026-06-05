@@ -89,7 +89,7 @@
   {
    "columns": 1,
    "fieldname": "duno_mark_no",
-   "fieldtype": "Int",
+   "fieldtype": "Data",
    "in_list_view": 1,
    "label": "DUNO/Mark No",
    "read_only": 1
