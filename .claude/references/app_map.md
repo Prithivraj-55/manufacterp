@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-05-30 10:03:10_
+_Generated: 2026-06-06 01:34:57_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-05-30 10:03:10_
 
 ## Python files
 
-_Total: 88_
+_Total: 91_
 
 - config/__init__.py
 - drawing_management/bom_class_override.py
@@ -38,11 +38,14 @@ _Total: 88_
 - drawing_management/doctype/nature_of_work/nature_of_work.py
 - drawing_management/doctype/production_plan_bom_raw_material/__init__.py
 - drawing_management/doctype/production_plan_bom_raw_material/production_plan_bom_raw_material.py
+- drawing_management/doctype/sales_order_drawing_raw_material/__init__.py
+- drawing_management/doctype/sales_order_drawing_raw_material/sales_order_drawing_raw_material.py
 - drawing_management/doctype/sales_order_duno_item/__init__.py
 - drawing_management/doctype/sales_order_duno_item/sales_order_duno_item.py
 - drawing_management/drawing_utils.py
 - drawing_management/__init__.py
 - drawing_management/sales_order.py
+- drawing_management/so_drawing_import.py
 - hooks.py
 - __init__.py
 - item_management/__init__.py
@@ -132,12 +135,13 @@ _Total: 9_
 
 ## JSON files
 
-_Total: 21_
+_Total: 22_
 
 - drawing_management/doctype/drawing/drawing.json
 - drawing_management/doctype/drawing_item/drawing_item.json
 - drawing_management/doctype/nature_of_work/nature_of_work.json
 - drawing_management/doctype/production_plan_bom_raw_material/production_plan_bom_raw_material.json
+- drawing_management/doctype/sales_order_drawing_raw_material/sales_order_drawing_raw_material.json
 - drawing_management/doctype/sales_order_duno_item/sales_order_duno_item.json
 - fixtures/custom_field.json
 - fixtures/property_setter.json
@@ -188,6 +192,11 @@ _Total: 21_
 ### production_plan_bom_raw_material
 - Path: `drawing_management/doctype/production_plan_bom_raw_material`
 - Controller: `drawing_management/doctype/production_plan_bom_raw_material/production_plan_bom_raw_material.py`
+- Client script: none
+
+### sales_order_drawing_raw_material
+- Path: `drawing_management/doctype/sales_order_drawing_raw_material`
+- Controller: `drawing_management/doctype/sales_order_drawing_raw_material/sales_order_drawing_raw_material.py`
 - Client script: none
 
 ### sales_order_duno_item
@@ -321,7 +330,19 @@ Functions:
 
 ### drawing_management/sales_order.py
 Functions:
-  - 5:on_submit_sales_order:
+  - 5:recalculate_raw_material_qty:
+
+### drawing_management/so_drawing_import.py
+Functions:
+  - 10:_calc_qty:
+  - 28:_get_file_path:
+  - 43:_parse_excel:
+  - 134:parse_bom_excel:
+  - 309:_bulk_insert:
+  - 329:create_drawings_from_import:
+  - 448:process_drawings:
+  - 528:download_bom_template:
+  - 570:clear_drawing_import:
 
 ### hooks.py
 
@@ -436,37 +457,37 @@ Functions:
 
 ### setup.py
 Functions:
-  - 586:after_install:
-  - 621:after_migrate:
-  - 657:setup_storage_location:
-  - 679:create_item_client_script:
-  - 695:create_item_custom_fields:
-  - 771:create_purchase_order_custom_fields:
-  - 847:hide_purchase_order_weight_fields:
-  - 861:create_purchase_order_client_script:
-  - 877:create_purchase_receipt_custom_fields:
-  - 956:create_batch_custom_fields:
-  - 1021:create_purchase_receipt_client_script:
-  - 1037:create_material_request_custom_fields:
-  - 1127:create_material_request_client_script:
-  - 1143:create_rfq_custom_fields:
-  - 1219:create_rfq_client_script:
-  - 1235:create_sq_custom_fields:
-  - 1314:create_sq_client_script:
-  - 1330:create_bom_custom_fields:
-  - 1409:create_so_custom_fields:
-  - 1439:create_so_client_script:
-  - 1455:create_bom_client_script:
-  - 1475:create_production_plan_custom_fields:
-  - 1611:create_production_plan_client_script:
-  - 1633:create_job_card_custom_fields:
-  - 1898:create_job_card_client_script:
-  - 1916:create_stock_entry_custom_fields:
-  - 2007:create_stock_entry_client_script:
-  - 2029:remove_sco_purchase_order_mandatory:
-  - 2040:create_sco_custom_fields:
-  - 2292:create_sco_client_script:
-  - 2308:create_soe_client_script:
+  - 803:after_install:
+  - 838:after_migrate:
+  - 874:setup_storage_location:
+  - 896:create_item_client_script:
+  - 912:create_item_custom_fields:
+  - 988:create_purchase_order_custom_fields:
+  - 1064:hide_purchase_order_weight_fields:
+  - 1078:create_purchase_order_client_script:
+  - 1094:create_purchase_receipt_custom_fields:
+  - 1173:create_batch_custom_fields:
+  - 1238:create_purchase_receipt_client_script:
+  - 1254:create_material_request_custom_fields:
+  - 1344:create_material_request_client_script:
+  - 1360:create_rfq_custom_fields:
+  - 1436:create_rfq_client_script:
+  - 1452:create_sq_custom_fields:
+  - 1531:create_sq_client_script:
+  - 1547:create_bom_custom_fields:
+  - 1626:create_so_custom_fields:
+  - 1687:create_so_client_script:
+  - 1703:create_bom_client_script:
+  - 1723:create_production_plan_custom_fields:
+  - 1859:create_production_plan_client_script:
+  - 1881:create_job_card_custom_fields:
+  - 2146:create_job_card_client_script:
+  - 2164:create_stock_entry_custom_fields:
+  - 2255:create_stock_entry_client_script:
+  - 2277:remove_sco_purchase_order_mandatory:
+  - 2288:create_sco_custom_fields:
+  - 2540:create_sco_client_script:
+  - 2556:create_soe_client_script:
 
 ### sq_management/supplier_quotation.py
 Functions:
@@ -595,6 +616,11 @@ Functions:
 - `drawing_management/bom_class_override.py:1467` — `get_bom_diff`
 - `drawing_management/bom_class_override.py:1522` — `@frappe.validate_and_sanitize_search_inputs`
 - `drawing_management/bom_class_override.py:1574` — `make_variant_bom`
+- `drawing_management/so_drawing_import.py:134` — `parse_bom_excel`
+- `drawing_management/so_drawing_import.py:329` — `create_drawings_from_import`
+- `drawing_management/so_drawing_import.py:448` — `process_drawings`
+- `drawing_management/so_drawing_import.py:528` — `download_bom_template`
+- `drawing_management/so_drawing_import.py:570` — `clear_drawing_import`
 - `drawing_management/doctype/drawing/drawing.py:125` — `check_existing_bom`
 - `production_plan_management/production_plan.py:115` — `get_items_for_material_requests`
 - `production_plan_management/production_plan.py:492` — `make_material_request`
@@ -635,7 +661,7 @@ doc_events = {
 		"validate": "manufyxinvenzaerp.item_management.item.validate_item",
 	},
 	"Sales Order": {
-		"on_submit": "manufyxinvenzaerp.drawing_management.sales_order.on_submit_sales_order",
+		"validate": "manufyxinvenzaerp.drawing_management.sales_order.recalculate_raw_material_qty",
 	},
 	"Purchase Order": {
 		"validate": "manufyxinvenzaerp.purchase_order_management.purchase_order.validate_purchase_order",

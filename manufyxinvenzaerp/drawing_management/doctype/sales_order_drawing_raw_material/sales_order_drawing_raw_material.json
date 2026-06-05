@@ -1,0 +1,171 @@
+{
+ "actions": [],
+ "creation": "2026-06-03 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "customer_drawing_number",
+  "item_no",
+  "material_code",
+  "material_name",
+  "item_group",
+  "parent_item_group",
+  "column_break_1",
+  "grade",
+  "thickness",
+  "width",
+  "length",
+  "section_break_qty",
+  "sec_qty",
+  "sec_uom",
+  "unit_weight",
+  "qty",
+  "uom",
+  "is_locked"
+ ],
+ "fields": [
+  {
+   "fieldname": "customer_drawing_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Drawing No",
+   "read_only_depends_on": "eval:doc.is_locked"
+  },
+  {
+   "fieldname": "item_no",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Item No",
+   "read_only_depends_on": "eval:doc.is_locked"
+  },
+  {
+   "columns": 2,
+   "fieldname": "material_code",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Material Code",
+   "options": "Item",
+   "read_only_depends_on": "eval:doc.is_locked"
+  },
+  {
+   "fetch_from": "material_code.item_name",
+   "fieldname": "material_name",
+   "fieldtype": "Data",
+   "label": "Material Name",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "material_code.item_group",
+   "fieldname": "item_group",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Item Group",
+   "options": "Item Group",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "material_code.custom_parent_item_group",
+   "fieldname": "parent_item_group",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Parent Item Group",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "grade",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Grade",
+   "read_only_depends_on": "eval:doc.is_locked"
+  },
+  {
+   "fieldname": "thickness",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Thickness",
+   "read_only_depends_on": "eval:doc.is_locked"
+  },
+  {
+   "fieldname": "width",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Width",
+   "read_only_depends_on": "eval:doc.is_locked"
+  },
+  {
+   "fieldname": "length",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Length",
+   "read_only_depends_on": "eval:doc.is_locked"
+  },
+  {
+   "fieldname": "section_break_qty",
+   "fieldtype": "Section Break",
+   "label": "Quantity"
+  },
+  {
+   "fieldname": "sec_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Reqd Qty",
+   "read_only_depends_on": "eval:doc.is_locked"
+  },
+  {
+   "fetch_from": "material_code.custom_secondary_uom",
+   "fieldname": "sec_uom",
+   "fieldtype": "Link",
+   "label": "Sec UOM",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "material_code.custom_unit_weight",
+   "fieldname": "unit_weight",
+   "fieldtype": "Float",
+   "hidden": 1,
+   "label": "Unit Weight",
+   "read_only": 1
+  },
+  {
+   "fieldname": "qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Qty (Calculated)",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "material_code.stock_uom",
+   "fieldname": "uom",
+   "fieldtype": "Link",
+   "label": "UOM",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "is_locked",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "label": "Locked",
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-03 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Drawing Management",
+ "name": "Sales Order Drawing Raw Material",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

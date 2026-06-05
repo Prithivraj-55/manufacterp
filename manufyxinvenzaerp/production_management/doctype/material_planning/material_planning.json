@@ -7,6 +7,7 @@
  "field_order": [
   "tab_details",
   "naming_series",
+  "planning_status",
   "posting_date",
   "column_break_top",
   "company",
@@ -53,6 +54,15 @@
    "print_hide": 1,
    "reqd": 1,
    "set_only_once": 1
+  },
+  {
+   "default": "Open",
+   "fieldname": "planning_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Open\nIn Progress\nCompleted",
+   "read_only": 1
   },
   {
    "default": "Today",
@@ -281,6 +291,11 @@
  "search_fields": "company",
  "sort_field": "modified",
  "sort_order": "DESC",
- "states": [],
+ "states": [
+  {"color": "Blue", "style": "Primary", "title": "Open"},
+  {"color": "Orange", "style": "Warning", "title": "In Progress"},
+  {"color": "Green", "style": "Success", "title": "Completed"}
+ ],
+ "state_fieldname": "planning_status",
  "track_changes": 1
 }
