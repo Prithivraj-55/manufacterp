@@ -1,0 +1,29 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  deploy:
+    name: SSH Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Test SSH connection — create sample file
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          port: ${{ secrets.SSH_PORT }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo "✅ SSH connection established at $(date)" 
+            touch /home/$USER/cicd_connection_test.txt
+            echo "Connection test from GitHub Actions - $(date)" >> /home/$USER/cicd_connection_test.txt
+            ls -la /home/$USER/cicd_connection_test.txt
+            echo "✅ File created successfully"
