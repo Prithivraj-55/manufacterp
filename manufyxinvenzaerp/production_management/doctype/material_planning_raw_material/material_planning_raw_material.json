@@ -125,7 +125,7 @@
    "fieldname": "qty",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Required Qty",
+   "label": "Weight (Primary UOM)",
    "read_only": 1
   },
   {

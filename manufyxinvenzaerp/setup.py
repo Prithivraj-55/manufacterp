@@ -538,6 +538,7 @@ SO_CLIENT_SCRIPT = """
 frappe.ui.form.on("Sales Order", {
 	refresh(frm) {
 		_so_render_file_buttons(frm);
+		_so_render_rm_verify_btn(frm);
 		_so_render_drawing_buttons(frm);
 	},
 	custom_bom_excel_file(frm) {
@@ -551,6 +552,7 @@ frappe.ui.form.on("Sales Order Drawing Raw Material", {
 	material_code(frm, cdt, cdn) {
 		var row = locals[cdt][cdn];
 		if (row.is_locked || !row.material_code) return;
+		_so_reset_verification(frm);
 		frappe.db.get_value("Item", row.material_code,
 			["custom_unit_weight", "custom_parent_item_group"],
 			function(v) {
@@ -562,10 +564,10 @@ frappe.ui.form.on("Sales Order Drawing Raw Material", {
 			}
 		);
 	},
-	sec_qty(frm, cdt, cdn)   { _so_calc_rm_qty(frm, cdt, cdn); },
-	thickness(frm, cdt, cdn) { _so_calc_rm_qty(frm, cdt, cdn); },
-	width(frm, cdt, cdn)     { _so_calc_rm_qty(frm, cdt, cdn); },
-	length(frm, cdt, cdn)    { _so_calc_rm_qty(frm, cdt, cdn); }
+	sec_qty(frm, cdt, cdn)   { _so_reset_verification(frm); _so_calc_rm_qty(frm, cdt, cdn); },
+	thickness(frm, cdt, cdn) { _so_reset_verification(frm); _so_calc_rm_qty(frm, cdt, cdn); },
+	width(frm, cdt, cdn)     { _so_reset_verification(frm); _so_calc_rm_qty(frm, cdt, cdn); },
+	length(frm, cdt, cdn)    { _so_reset_verification(frm); _so_calc_rm_qty(frm, cdt, cdn); }
 });
 
 function _so_calc_rm_qty(frm, cdt, cdn) {
@@ -576,11 +578,11 @@ function _so_calc_rm_qty(frm, cdt, cdn) {
 	    W = flt(row.width), T = flt(row.thickness), sq = flt(row.sec_qty);
 
 	// Look up total_quantity from the Drawing List for this drawing number
-	var total_qty = 1;
+	var tq = 1;
 	var cdn_val = row.customer_drawing_number;
 	if (cdn_val && frm.doc.custom_duno_items) {
 		var dr = frm.doc.custom_duno_items.find(function(r) { return r.drawing_number === cdn_val; });
-		if (dr && dr.total_quantity) total_qty = flt(dr.total_quantity);
+		if (dr && dr.total_quantity) tq = flt(dr.total_quantity);
 	}
 
 	var qty = 0;
@@ -591,7 +593,65 @@ function _so_calc_rm_qty(frm, cdt, cdn) {
 	} else {
 		qty = sq;
 	}
-	frappe.model.set_value(cdt, cdn, "qty", flt(qty * total_qty, 3));
+	frappe.model.set_value(cdt, cdn, "qty", flt(qty, 3));
+	frappe.model.set_value(cdt, cdn, "total_sec_qty", flt(sq * tq, 3));
+	frappe.model.set_value(cdt, cdn, "total_weight", flt(qty * tq, 3));
+}
+
+// ── Verify Raw Materials button above the RM table ────────────────────────
+
+function _so_render_rm_verify_btn(frm) {
+	var fd = frm.fields_dict["custom_rm_verify_btn"];
+	if (!fd) return;
+	var $w = fd.$wrapper;
+	$w.empty();
+	if (frm.doc.__islocal || frm.doc.docstatus === 2) return;
+
+	var has_unlocked = (frm.doc.custom_so_raw_materials || []).some(function(r) { return !r.is_locked; });
+	if (!has_unlocked) return;
+
+	var verified = !!frm.doc.custom_raw_materials_verified;
+	var $row = $('<div style="display:flex;align-items:center;gap:10px;padding:4px 0 8px">').appendTo($w);
+
+	$('<button class="btn btn-sm btn-default">')
+		.text(__("Verify Raw Materials"))
+		.on("click", function() { _so_verify_rm(frm); })
+		.appendTo($row);
+
+	if (verified) {
+		$('<span style="color:green;font-weight:bold;font-size:13px;">').html("&#10003; " + __("Verified")).appendTo($row);
+	} else {
+		$('<span style="color:orange;font-size:12px;">').text(__("Not verified — required before creating drawings")).appendTo($row);
+	}
+}
+
+function _so_reset_verification(frm) {
+	if (frm.doc.custom_raw_materials_verified) {
+		frm.doc.custom_raw_materials_verified = 0;
+		_so_render_rm_verify_btn(frm);
+	}
+}
+
+function _so_verify_rm(frm) {
+	frappe.call({
+		method: "manufyxinvenzaerp.drawing_management.so_drawing_import.verify_raw_materials",
+		args: { so_name: frm.doc.name },
+		freeze: true,
+		freeze_message: __("Verifying raw materials…"),
+		callback: function(r) {
+			if (!r.message) return;
+			var res = r.message;
+			frm.doc.custom_raw_materials_verified = res.verified ? 1 : 0;
+			_so_render_rm_verify_btn(frm);
+			if (res.verified) {
+				frappe.show_alert({ message: __("All raw materials verified!"), indicator: "green" }, 5);
+			} else {
+				var msg = "<b>" + res.issues.length + " " + __("issue(s) found:") + "</b><br><br>" +
+					res.issues.map(function(i) { return "• " + i; }).join("<br>");
+				frappe.msgprint({ title: __("Raw Material Issues"), message: msg, indicator: "orange" });
+			}
+		}
+	});
 }
 
 // ── Inline Load / Clear buttons next to the attach field ──────────────────
@@ -724,6 +784,14 @@ function _so_load_excel(frm) {
 }
 
 function _so_create_drawings(frm) {
+	if (!frm.doc.custom_raw_materials_verified) {
+		frappe.msgprint({
+			title: __("Verification Required"),
+			message: __("Please click <b>Verify Raw Materials</b> above the Raw Materials table and resolve all issues before creating drawings."),
+			indicator: "orange"
+		});
+		return;
+	}
 	var items = frm.doc.custom_duno_items || [];
 	var count = items.filter(function(r) { return r.create_drawing && !r.drawing; }).length;
 	var confirm_msg = __("{0} drawing(s) will be created.", [count]) + "<br><br>" +
@@ -736,13 +804,26 @@ function _so_create_drawings(frm) {
 			freeze_message: __("Creating Drawings…"),
 			callback: function(r) {
 				if (!r.message) return;
-				var names = r.message;
-				var links = names.map(function(n) {
-					return '<a href="/app/drawing/' + encodeURIComponent(n) + '" target="_blank">' + n + '</a>';
-				}).join(", ");
-				frappe.msgprint({ title: __("Drawings Created"),
-					message: names.length + " " + __("Drawing(s) created:") + " " + links,
-					indicator: "green" });
+				var results = r.message;
+				var ok  = results.filter(function(x) { return x.status === "success"; });
+				var err = results.filter(function(x) { return x.status === "error"; });
+
+				var parts = [];
+				if (ok.length)  parts.push("<b>" + ok.length + " " + __("created") + "</b>");
+				if (err.length) parts.push("<span style='color:red'><b>" + err.length + " " + __("failed") + "</b></span>");
+				var msg = parts.join(" &nbsp;|&nbsp; ");
+
+				if (err.length) {
+					msg += "<br><br><b>" + __("Failed — fix and create manually:") + "</b><br>" +
+						err.map(function(e) {
+							return "<b>" + (e.drawing_number || "") + "</b> — " + e.error;
+						}).join("<br>");
+				}
+				frappe.msgprint({
+					title: __("Create Drawing Complete"),
+					message: msg,
+					indicator: err.length ? "orange" : "green"
+				});
 				frm.reload_doc();
 			}
 		});
@@ -761,15 +842,31 @@ function _so_run_step(frm, step, label, freeze_msg, count, checkbox_label) {
 			callback: function(r) {
 				if (!r.message) return;
 				var results = r.message;
-				var ok  = results.filter(function(x) { return x.status === "success"; });
-				var err = results.filter(function(x) { return x.status === "error"; });
-				var msg = ok.length + " " + __("drawing(s) done.");
+				var ok       = results.filter(function(x) { return x.status === "success"; });
+				var err      = results.filter(function(x) { return x.status === "error"; });
+				var unchk    = results.filter(function(x) { return x.status === "unchecked"; });
+				var already  = results.filter(function(x) { return x.status === "already_done"; });
+
+				var parts = [];
+				if (ok.length)     parts.push("<b>" + ok.length + " " + __("successful") + "</b>");
+				if (err.length)    parts.push("<span style='color:red'><b>" + err.length + " " + __("failed") + "</b></span>");
+				if (unchk.length)  parts.push(unchk.length + " " + __("skipped (unchecked)"));
+				if (already.length) parts.push(already.length + " " + __("already done"));
+				var msg = parts.join(" &nbsp;|&nbsp; ");
+
 				if (err.length) {
-					msg += "<br><br><b>" + __("Errors:") + "</b><br>" +
-						err.map(function(e) { return (e.drawing_number || e.drawing) + ": " + e.error; }).join("<br>");
+					msg += "<br><br><b>" + __("Failed — fix and submit manually:") + "</b><br>" +
+						err.map(function(e) {
+							var lbl = e.drawing_number || e.drawing;
+							var link = '<a href="/app/drawing/' + encodeURIComponent(e.drawing) + '" target="_blank">' + lbl + '</a>';
+							return link + " — " + e.error;
+						}).join("<br>");
 				}
-				frappe.msgprint({ title: label + " " + __("Complete"),
-					message: msg, indicator: err.length ? "orange" : "green" });
+				frappe.msgprint({
+					title: label + " " + __("Complete"),
+					message: msg,
+					indicator: err.length ? "orange" : "green"
+				});
 				frm.reload_doc();
 			}
 		});
@@ -1672,11 +1769,25 @@ def create_so_custom_fields():
                     "insert_after": "custom_duno_items",
                 },
                 {
+                    "fieldname": "custom_rm_verify_btn",
+                    "fieldtype": "HTML",
+                    "label": "RM Verify Button",
+                    "insert_after": "custom_raw_materials_section",
+                },
+                {
+                    "fieldname": "custom_raw_materials_verified",
+                    "fieldtype": "Check",
+                    "label": "Raw Materials Verified",
+                    "read_only": 1,
+                    "hidden": 1,
+                    "insert_after": "custom_rm_verify_btn",
+                },
+                {
                     "fieldname": "custom_so_raw_materials",
                     "fieldtype": "Table",
                     "label": "Raw Materials",
                     "options": "Sales Order Drawing Raw Material",
-                    "insert_after": "custom_raw_materials_section",
+                    "insert_after": "custom_raw_materials_verified",
                 },
             ]
         },
