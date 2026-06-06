@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-06-06 01:34:57_
+_Generated: 2026-06-06 04:32:37_
 
 ## Modules
 
@@ -335,14 +335,15 @@ Functions:
 ### drawing_management/so_drawing_import.py
 Functions:
   - 10:_calc_qty:
-  - 28:_get_file_path:
-  - 43:_parse_excel:
-  - 134:parse_bom_excel:
-  - 309:_bulk_insert:
-  - 329:create_drawings_from_import:
-  - 448:process_drawings:
-  - 528:download_bom_template:
-  - 570:clear_drawing_import:
+  - 23:_get_file_path:
+  - 38:_parse_excel:
+  - 129:parse_bom_excel:
+  - 324:_bulk_insert:
+  - 344:create_drawings_from_import:
+  - 474:process_drawings:
+  - 556:verify_raw_materials:
+  - 612:download_bom_template:
+  - 654:clear_drawing_import:
 
 ### hooks.py
 
@@ -457,37 +458,37 @@ Functions:
 
 ### setup.py
 Functions:
-  - 803:after_install:
-  - 838:after_migrate:
-  - 874:setup_storage_location:
-  - 896:create_item_client_script:
-  - 912:create_item_custom_fields:
-  - 988:create_purchase_order_custom_fields:
-  - 1064:hide_purchase_order_weight_fields:
-  - 1078:create_purchase_order_client_script:
-  - 1094:create_purchase_receipt_custom_fields:
-  - 1173:create_batch_custom_fields:
-  - 1238:create_purchase_receipt_client_script:
-  - 1254:create_material_request_custom_fields:
-  - 1344:create_material_request_client_script:
-  - 1360:create_rfq_custom_fields:
-  - 1436:create_rfq_client_script:
-  - 1452:create_sq_custom_fields:
-  - 1531:create_sq_client_script:
-  - 1547:create_bom_custom_fields:
-  - 1626:create_so_custom_fields:
-  - 1687:create_so_client_script:
-  - 1703:create_bom_client_script:
-  - 1723:create_production_plan_custom_fields:
-  - 1859:create_production_plan_client_script:
-  - 1881:create_job_card_custom_fields:
-  - 2146:create_job_card_client_script:
-  - 2164:create_stock_entry_custom_fields:
-  - 2255:create_stock_entry_client_script:
-  - 2277:remove_sco_purchase_order_mandatory:
-  - 2288:create_sco_custom_fields:
-  - 2540:create_sco_client_script:
-  - 2556:create_soe_client_script:
+  - 900:after_install:
+  - 935:after_migrate:
+  - 971:setup_storage_location:
+  - 993:create_item_client_script:
+  - 1009:create_item_custom_fields:
+  - 1085:create_purchase_order_custom_fields:
+  - 1161:hide_purchase_order_weight_fields:
+  - 1175:create_purchase_order_client_script:
+  - 1191:create_purchase_receipt_custom_fields:
+  - 1270:create_batch_custom_fields:
+  - 1335:create_purchase_receipt_client_script:
+  - 1351:create_material_request_custom_fields:
+  - 1441:create_material_request_client_script:
+  - 1457:create_rfq_custom_fields:
+  - 1533:create_rfq_client_script:
+  - 1549:create_sq_custom_fields:
+  - 1628:create_sq_client_script:
+  - 1644:create_bom_custom_fields:
+  - 1723:create_so_custom_fields:
+  - 1798:create_so_client_script:
+  - 1814:create_bom_client_script:
+  - 1834:create_production_plan_custom_fields:
+  - 1970:create_production_plan_client_script:
+  - 1992:create_job_card_custom_fields:
+  - 2257:create_job_card_client_script:
+  - 2275:create_stock_entry_custom_fields:
+  - 2366:create_stock_entry_client_script:
+  - 2388:remove_sco_purchase_order_mandatory:
+  - 2399:create_sco_custom_fields:
+  - 2651:create_sco_client_script:
+  - 2667:create_soe_client_script:
 
 ### sq_management/supplier_quotation.py
 Functions:
@@ -616,11 +617,12 @@ Functions:
 - `drawing_management/bom_class_override.py:1467` — `get_bom_diff`
 - `drawing_management/bom_class_override.py:1522` — `@frappe.validate_and_sanitize_search_inputs`
 - `drawing_management/bom_class_override.py:1574` — `make_variant_bom`
-- `drawing_management/so_drawing_import.py:134` — `parse_bom_excel`
-- `drawing_management/so_drawing_import.py:329` — `create_drawings_from_import`
-- `drawing_management/so_drawing_import.py:448` — `process_drawings`
-- `drawing_management/so_drawing_import.py:528` — `download_bom_template`
-- `drawing_management/so_drawing_import.py:570` — `clear_drawing_import`
+- `drawing_management/so_drawing_import.py:129` — `parse_bom_excel`
+- `drawing_management/so_drawing_import.py:344` — `create_drawings_from_import`
+- `drawing_management/so_drawing_import.py:474` — `process_drawings`
+- `drawing_management/so_drawing_import.py:556` — `verify_raw_materials`
+- `drawing_management/so_drawing_import.py:612` — `download_bom_template`
+- `drawing_management/so_drawing_import.py:654` — `clear_drawing_import`
 - `drawing_management/doctype/drawing/drawing.py:125` — `check_existing_bom`
 - `production_plan_management/production_plan.py:115` — `get_items_for_material_requests`
 - `production_plan_management/production_plan.py:492` — `make_material_request`

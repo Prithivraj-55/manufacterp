@@ -51,7 +51,7 @@
    "fieldname": "drawing_number",
    "fieldtype": "Data",
    "in_list_view": 1,
-   "label": "Drawing Number"
+   "label": "Cust Drawing Number"
   },
   {
    "fieldname": "total_quantity",

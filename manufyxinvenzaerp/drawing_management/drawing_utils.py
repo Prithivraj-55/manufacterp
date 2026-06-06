@@ -112,6 +112,7 @@ def create_bom_from_drawing(drawing_name):
     bom.quantity = drawing.no_of_qty_to_manufacture or 1
     bom.custom_drawing = drawing_name
     bom.custom_duno_mark_no = drawing.duno_mark_no or 0
+    bom.custom_customer_drawing_number = drawing.customer_drawing_number or ""
     bom.project = drawing.project or ""
     bom.company = company
     bom.currency = (
@@ -151,11 +152,9 @@ def validate_bom_from_drawing(doc, method):
     drawing = frappe.get_doc("Drawing", doc.custom_drawing)
     drawing_map = {d.item_number: d for d in drawing.items if d.item_number}
     drawing_list = list(drawing.items)
-    drawing_item_numbers = {d.item_number for d in drawing.items if d.item_number}
-    bom_item_numbers = {b.custom_item_number for b in doc.items if b.custom_item_number}
 
-    missing_items = drawing_item_numbers - bom_item_numbers
-    if missing_items:
+    # Guard against actual row deletion (not item_number mismatch from type migrations)
+    if len(doc.items) < len(drawing.items):
         frappe.throw(
             _("Not allowed to remove items from BOM. Please maintain all items as per Drawing.")
         )
@@ -322,7 +321,7 @@ def parse_drawing_items_csv(csv_content):
 				return 0.0
 
 		raw_item_number = _col(row, "item_number", "item no", "item no.")
-		item_number = int(_flt(raw_item_number)) if raw_item_number else auto_number
+		item_number = str(raw_item_number).strip() if raw_item_number else str(auto_number)
 		sec_qty   = _flt(_col(row, "sec_qty",   "sec qty",   "custom_sec_qty"))
 		thickness = _flt(_col(row, "thickness",  "thickness (mm)", "custom_thickness"))
 		length    = _flt(_col(row, "length",     "length (mm)",    "custom_length"))

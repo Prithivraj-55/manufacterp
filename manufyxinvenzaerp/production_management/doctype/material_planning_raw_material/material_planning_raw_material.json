@@ -11,6 +11,7 @@
   "item_name",
   "bom_no",
   "duno_mark_no",
+  "customer_drawing_number",
   "parent_item_group",
   "length",
   "width",
@@ -30,7 +31,7 @@
   {
    "columns": 1,
    "fieldname": "item_number",
-   "fieldtype": "Int",
+   "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Item No",
    "read_only": 1
@@ -73,6 +74,14 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "DUNO/Mark No",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "customer_drawing_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Cust Drawing Number",
    "read_only": 1
   },
   {

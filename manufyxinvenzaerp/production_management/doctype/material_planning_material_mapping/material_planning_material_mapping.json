@@ -50,7 +50,7 @@
   {
    "columns": 1,
    "fieldname": "item_number",
-   "fieldtype": "Int",
+   "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Item No",
    "read_only": 1

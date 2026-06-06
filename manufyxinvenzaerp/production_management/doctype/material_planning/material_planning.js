@@ -943,14 +943,15 @@ frappe.ui.form.on("Material Planning BOM Item", {
 			callback(r) {
 				if (!r.message) return;
 				let d = r.message;
-				frappe.model.set_value(cdt, cdn, "item_code",          d.item_code || "");
-				frappe.model.set_value(cdt, cdn, "item_name",          d.item_name || "");
-				frappe.model.set_value(cdt, cdn, "drawing",            d.drawing || "");
-				frappe.model.set_value(cdt, cdn, "duno_mark_no",       d.duno_mark_no || 0);
-				frappe.model.set_value(cdt, cdn, "sales_order",        d.sales_order || "");
-				frappe.model.set_value(cdt, cdn, "customer",           d.customer || "");
-				frappe.model.set_value(cdt, cdn, "qty_to_manufacture", d.qty_to_manufacture || 0);
-				frappe.model.set_value(cdt, cdn, "uom",                d.uom || "");
+				frappe.model.set_value(cdt, cdn, "item_code",               d.item_code || "");
+				frappe.model.set_value(cdt, cdn, "item_name",               d.item_name || "");
+				frappe.model.set_value(cdt, cdn, "drawing",                 d.drawing || "");
+				frappe.model.set_value(cdt, cdn, "duno_mark_no",            d.duno_mark_no || 0);
+				frappe.model.set_value(cdt, cdn, "customer_drawing_number", d.customer_drawing_number || "");
+				frappe.model.set_value(cdt, cdn, "sales_order",             d.sales_order || "");
+				frappe.model.set_value(cdt, cdn, "customer",                d.customer || "");
+				frappe.model.set_value(cdt, cdn, "qty_to_manufacture",      d.qty_to_manufacture || 0);
+				frappe.model.set_value(cdt, cdn, "uom",                     d.uom || "");
 			},
 		});
 	},
@@ -1517,9 +1518,10 @@ const _TABLE_VIEW_CONFIG = {
 			{ fieldname: "sales_order",       label: "Sales Order" },
 			{ fieldname: "item_code",         label: "Item Code" },
 			{ fieldname: "item_name",         label: "Item Name" },
-			{ fieldname: "bom_no",            label: "Source BOM" },
-			{ fieldname: "duno_mark_no",      label: "DUNO/Mark No" },
-			{ fieldname: "parent_item_group", label: "Item Group" },
+			{ fieldname: "bom_no",                    label: "Source BOM" },
+			{ fieldname: "duno_mark_no",              label: "DUNO/Mark No" },
+			{ fieldname: "customer_drawing_number",   label: "Cust Drawing Number" },
+			{ fieldname: "parent_item_group",         label: "Item Group" },
 			{ fieldname: "length",            label: "Length (mm)" },
 			{ fieldname: "width",             label: "Width (mm)" },
 			{ fieldname: "thickness",         label: "Thickness" },
@@ -1618,20 +1620,30 @@ function _show_table_popup(frm, fieldname) {
 		`<th style="${th_style}">${__(c.label)}</th>`
 	).join("") + "</tr>";
 
-	let tbody = rows.map(function (row, idx) {
-		let cells = cfg.cols.map(function (c) {
-			let val = row[c.fieldname];
-			if (val === null || val === undefined) val = "";
-			return `<td style="padding:5px 10px;white-space:nowrap;border-bottom:1px solid #f0f0f0;">${frappe.utils.escape_html(String(val))}</td>`;
+	function _render_tbody(filtered_rows) {
+		return filtered_rows.map(function (row, idx) {
+			let cells = cfg.cols.map(function (c) {
+				let val = row[c.fieldname];
+				if (val === null || val === undefined) val = "";
+				return `<td style="padding:5px 10px;white-space:nowrap;border-bottom:1px solid #f0f0f0;">${frappe.utils.escape_html(String(val))}</td>`;
+			}).join("");
+			let bg = idx % 2 !== 0 ? "background:#fafbfc;" : "";
+			return `<tr style="${bg}">${cells}</tr>`;
 		}).join("");
-		let bg = idx % 2 !== 0 ? "background:#fafbfc;" : "";
-		return `<tr style="${bg}">${cells}</tr>`;
-	}).join("");
+	}
 
-	let html = `<div style="overflow:auto;max-height:70vh;">
-		<table style="font-size:12px;border-collapse:collapse;width:100%;">
+	let filter_bar = `<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">
+		<input id="_vw_duno" type="text" placeholder="${__("Filter DUNO/Mark No…")}"
+			style="border:1px solid #d1d8dd;border-radius:4px;padding:4px 8px;font-size:12px;width:180px;">
+		<input id="_vw_cdn" type="text" placeholder="${__("Filter Cust Drawing Number…")}"
+			style="border:1px solid #d1d8dd;border-radius:4px;padding:4px 8px;font-size:12px;width:200px;">
+		<span id="_vw_count" style="font-size:12px;color:#6c757d;"></span>
+	</div>`;
+
+	let table_html = `<div style="overflow:auto;max-height:65vh;">
+		<table style="font-size:12px;border-collapse:collapse;width:100%;" id="_vw_table">
 			<thead style="position:sticky;top:0;z-index:1;">${thead}</thead>
-			<tbody>${tbody}</tbody>
+			<tbody id="_vw_tbody">${_render_tbody(rows)}</tbody>
 		</table>
 	</div>`;
 
@@ -1639,7 +1651,21 @@ function _show_table_popup(frm, fieldname) {
 		title: __(cfg.title + " — {0} item(s)", [rows.length]),
 		size: "extra-large",
 	});
-	d.$body.html(html);
+	d.$body.html(filter_bar + table_html);
+
+	function _apply_filter() {
+		let duno_q = (d.$body.find("#_vw_duno").val() || "").toLowerCase();
+		let cdn_q  = (d.$body.find("#_vw_cdn").val() || "").toLowerCase();
+		let filtered = rows.filter(function(r) {
+			let duno_ok = !duno_q || String(r.duno_mark_no || "").toLowerCase().includes(duno_q);
+			let cdn_ok  = !cdn_q  || String(r.customer_drawing_number || "").toLowerCase().includes(cdn_q);
+			return duno_ok && cdn_ok;
+		});
+		d.$body.find("#_vw_tbody").html(_render_tbody(filtered));
+		d.$body.find("#_vw_count").text(filtered.length + " / " + rows.length + " " + __("rows"));
+	}
+	d.$body.find("#_vw_duno, #_vw_cdn").on("input", _apply_filter);
+	_apply_filter();
 	d.show();
 }
 
