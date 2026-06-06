@@ -1666,6 +1666,25 @@ def create_sq_client_script():
 
 
 def create_bom_custom_fields():
+    # Frappe blocks Int→Data via its API; do it directly in DB if still Int.
+    existing = frappe.db.get_value(
+        "Custom Field",
+        {"dt": "BOM Item", "fieldname": "custom_item_number"},
+        "fieldtype",
+    )
+    if existing == "Int":
+        frappe.db.sql(
+            "UPDATE `tabCustom Field` SET fieldtype='Data' "
+            "WHERE dt='BOM Item' AND fieldname='custom_item_number'"
+        )
+        frappe.db.commit()
+        try:
+            frappe.db.sql_ddl(
+                "ALTER TABLE `tabBOM Item` MODIFY COLUMN custom_item_number VARCHAR(140)"
+            )
+        except Exception:
+            pass  # column may already be VARCHAR on this site
+
     create_custom_fields(
         {
             "BOM": [
