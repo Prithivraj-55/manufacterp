@@ -31,7 +31,7 @@
  "fields": [
   {
    "fieldname": "item_number",
-   "fieldtype": "Int",
+   "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Item Number"
   },

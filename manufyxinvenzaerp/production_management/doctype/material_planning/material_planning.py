@@ -168,7 +168,8 @@ def get_bom_info(bom_no):
     """Return Drawing-derived details for a BOM row (called on bom_no change in JS)."""
     bom = frappe.db.get_value(
         "BOM", bom_no,
-        ["item", "item_name", "quantity", "custom_drawing", "custom_duno_mark_no"],
+        ["item", "item_name", "quantity", "custom_drawing", "custom_duno_mark_no",
+         "custom_customer_drawing_number"],
         as_dict=True,
     )
     if not bom:
@@ -176,6 +177,7 @@ def get_bom_info(bom_no):
 
     drawing_name = bom.custom_drawing
     duno_mark_no = bom.custom_duno_mark_no or 0
+    customer_drawing_number = bom.custom_customer_drawing_number or ""
 
     if not drawing_name:
         stock_uom = frappe.db.get_value("Item", bom.item, "stock_uom") or "" if bom.item else ""
@@ -183,6 +185,7 @@ def get_bom_info(bom_no):
             "item_code": bom.item,
             "item_name": bom.item_name,
             "duno_mark_no": duno_mark_no,
+            "customer_drawing_number": customer_drawing_number,
             "qty_to_manufacture": bom.quantity or 1,
             "uom": stock_uom,
         }
@@ -191,7 +194,7 @@ def get_bom_info(bom_no):
         "Drawing",
         drawing_name,
         ["fg_item_code", "fg_item_name", "duno_mark_no", "sales_order",
-         "no_of_qty_to_manufacture", "customer"],
+         "no_of_qty_to_manufacture", "customer", "customer_drawing_number"],
         as_dict=True,
     )
     if not d:
@@ -204,6 +207,7 @@ def get_bom_info(bom_no):
         "item_code": d.fg_item_code,
         "item_name": d.fg_item_name,
         "duno_mark_no": duno_mark_no or d.duno_mark_no or 0,
+        "customer_drawing_number": customer_drawing_number or d.customer_drawing_number or "",
         "sales_order": d.sales_order,
         "customer": d.customer,
         "qty_to_manufacture": d.no_of_qty_to_manufacture or bom.quantity or 1,
@@ -231,12 +235,12 @@ def get_raw_materials(doc):
         frappe.throw(_("Company is required before fetching raw materials."))
 
     rows = []
-    mismatches = []
 
     for bom_row in doc.get("bom_items") or []:
         bom_no = bom_row.get("bom_no")
         planned_qty = flt(bom_row.get("qty_to_manufacture")) or 1
         duno_mark_no = bom_row.get("duno_mark_no")
+        customer_drawing_number = bom_row.get("customer_drawing_number") or ""
         sales_order = bom_row.get("sales_order") or ""
 
         if not bom_no:
@@ -264,28 +268,18 @@ def get_raw_materials(doc):
             elif group == "Nuts and Bolts" and unit_weight:
                 sec_qty = flt(qty * unit_weight, 3)
 
-            # Validate computed sec_qty against BOM's stored custom_sec_qty
-            bom_sec_qty = flt(detail.get("custom_sec_qty"))
-            if group in ("Structurals", "Plates") and bom_sec_qty and sec_qty != bom_sec_qty:
-                mismatches.append({
-                    "item_number": detail.get("custom_item_number") or 0,
-                    "item_code": detail.get("item_code") or "",
-                    "bom_no": bom_no,
-                    "bom_sec_qty": bom_sec_qty,
-                    "computed_sec_qty": sec_qty,
-                })
-
             sec_uom = (
                 frappe.db.get_value("Item", detail.get("item_code"), "custom_secondary_uom") or ""
             )
 
             rows.append({
-                "item_number": detail.get("custom_item_number") or 0,
+                "item_number": detail.get("custom_item_number") or "",
                 "sales_order": sales_order,
                 "item_code": detail.get("item_code"),
                 "item_name": detail.get("item_name"),
                 "bom_no": bom_no,
                 "duno_mark_no": duno_mark_no,
+                "customer_drawing_number": customer_drawing_number,
                 "parent_item_group": group,
                 "material_spec": "",
                 "unit_weight": unit_weight,
@@ -301,27 +295,6 @@ def get_raw_materials(doc):
                 "warehouse": warehouse,
                 "store_location": location,
             })
-
-    if mismatches:
-        rows_html = "".join(
-            f"<tr><td>{m['item_number']}</td><td>{m['item_code']}</td>"
-            f"<td>{m['bom_no']}</td>"
-            f"<td style='color:red;font-weight:700;'>{m['bom_sec_qty']}</td>"
-            f"<td style='color:red;font-weight:700;'>{m['computed_sec_qty']}</td></tr>"
-            for m in mismatches
-        )
-        frappe.msgprint(
-            msg=(
-                "<p>Sec Qty mismatch detected between the BOM and the formula-computed value. "
-                "Please contact your system administrator to resolve this.</p>"
-                "<table class='table table-bordered table-sm' style='margin-top:8px;font-size:12px;'>"
-                "<thead><tr><th>Item No</th><th>Item Code</th><th>BOM</th>"
-                "<th>BOM Sec Qty</th><th>Computed Sec Qty</th></tr></thead>"
-                f"<tbody>{rows_html}</tbody></table>"
-            ),
-            title=_("⚠ Sec Qty Mismatch Found"),
-            indicator="red",
-        )
 
     return rows
 
@@ -380,12 +353,13 @@ def check_stock_availability(doc):
         has_batch = item_batch_flag.get(item_code, 0)
 
         base_row = {
-            "item_number": row.get("item_number") or 0,
+            "item_number": row.get("item_number") or "",
             "sales_order": row.get("sales_order") or "",
             "item_code": item_code,
             "item_name": row.get("item_name"),
             "bom_no": row.get("bom_no"),
             "duno_mark_no": row.get("duno_mark_no"),
+            "customer_drawing_number": row.get("customer_drawing_number") or "",
             "qty": required_qty,
             "uom": row.get("uom"),
             "sec_qty": flt(row.get("sec_qty")),
@@ -441,7 +415,7 @@ def check_stock_availability(doc):
 
                 for b in matched_batches:
                     available_raw_materials.append({
-                        "item_number": row.get("item_number") or 0,
+                        "item_number": row.get("item_number") or "",
                         "sales_order": row.get("sales_order") or "",
                         "item_code": item_code,
                         "item_name": row.get("item_name"),
@@ -515,7 +489,7 @@ def check_stock_availability(doc):
 
             if available_qty >= required_qty:
                 available_raw_materials.append({
-                    "item_number": row.get("item_number") or 0,
+                    "item_number": row.get("item_number") or "",
                     "sales_order": row.get("sales_order") or "",
                     "item_code": item_code,
                     "item_name": row.get("item_name"),
@@ -647,7 +621,7 @@ def move_to_exact_match(doc, item_codes):
 
                 for b in free_batches:
                     matched.append({
-                        "item_number": row.get("item_number") or 0,
+                        "item_number": row.get("item_number") or "",
                         "sales_order": row.get("sales_order") or "",
                         "item_code": item_code,
                         "item_name": row.get("item_name"),
@@ -675,7 +649,7 @@ def move_to_exact_match(doc, item_codes):
 
             if available_qty >= required_qty:
                 matched.append({
-                    "item_number": row.get("item_number") or 0,
+                    "item_number": row.get("item_number") or "",
                     "sales_order": row.get("sales_order") or "",
                     "item_code": item_code,
                     "item_name": row.get("item_name"),
@@ -714,12 +688,13 @@ def finalize_mapping(doc):
 
     for row in doc.get("material_mapping") or []:
         base = {
-            "item_number": row.get("item_number") or 0,
+            "item_number": row.get("item_number") or "",
             "sales_order": row.get("sales_order") or "",
             "item_code": row.get("item_code"),
             "item_name": row.get("item_name"),
             "bom_no": row.get("bom_no"),
             "duno_mark_no": row.get("duno_mark_no"),
+            "customer_drawing_number": row.get("customer_drawing_number") or "",
             "qty": flt(row.get("qty")),
             "uom": row.get("uom"),
             "sec_qty": flt(row.get("sec_qty")),

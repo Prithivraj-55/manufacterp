@@ -423,7 +423,7 @@ def create_drawings_from_import(so_name):
                 total_sec_qty = sec_qty * no_of_qty
 
                 drawing.append("items", {
-                    "item_number": 0,
+                    "item_number": rm.item_no or "",
                     "material_code": rm.material_code,
                     "material_name": rm.material_name or "",
                     "item_group": rm.item_group or "",
@@ -536,6 +536,19 @@ def process_drawings(so_name, step):
                     result["status"] = "success"
                     result["detail"] = "bom:{0}".format(bom_name)
 
+            elif step == "submit_bom":
+                bom_name = frappe.db.get_value(
+                    "BOM", {"custom_drawing": dr.drawing, "docstatus": 0}, "name"
+                )
+                if not bom_name:
+                    result["status"] = "skipped"
+                    result["detail"] = "no draft BOM"
+                else:
+                    bom_doc = frappe.get_doc("BOM", bom_name)
+                    bom_doc.submit()
+                    result["status"] = "success"
+                    result["detail"] = "bom submitted: {0}".format(bom_name)
+
             else:
                 frappe.throw(_("Unknown step: {0}").format(step))
 
@@ -563,9 +576,10 @@ def verify_raw_materials(so_name):
     unlocked = [r for r in (so.custom_so_raw_materials or []) if not r.is_locked]
 
     if not unlocked:
-        frappe.db.set_value("Sales Order", so_name, "custom_raw_materials_verified", 1)
+        frappe.db.set_value("Sales Order", so_name, "custom_raw_materials_verified", 1, update_modified=False)
         frappe.db.commit()
-        return {"issues": [], "verified": True}
+        modified = frappe.db.get_value("Sales Order", so_name, "modified")
+        return {"issues": [], "verified": True, "modified": str(modified)}
 
     all_mat = {r.material_code for r in unlocked if r.material_code}
     existing = set(frappe.db.get_all(
@@ -603,9 +617,10 @@ def verify_raw_materials(so_name):
                 issues.append(_("Drawing {0} / {1} (Structurals): Missing — {2}").format(cdn, mat, ", ".join(missing)))
 
     verified = len(issues) == 0
-    frappe.db.set_value("Sales Order", so_name, "custom_raw_materials_verified", 1 if verified else 0)
+    frappe.db.set_value("Sales Order", so_name, "custom_raw_materials_verified", 1 if verified else 0, update_modified=False)
     frappe.db.commit()
-    return {"issues": issues, "verified": verified}
+    modified = frappe.db.get_value("Sales Order", so_name, "modified")
+    return {"issues": issues, "verified": verified, "modified": str(modified)}
 
 
 @frappe.whitelist()

@@ -13,6 +13,7 @@
   "col_break_1",
   "drawing",
   "duno_mark_no",
+  "customer_drawing_number",
   "sales_order",
   "customer"
  ],
@@ -70,6 +71,13 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "DUNO/Mark No",
+   "read_only": 1
+  },
+  {
+   "fieldname": "customer_drawing_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Cust Drawing Number",
    "read_only": 1
   },
   {

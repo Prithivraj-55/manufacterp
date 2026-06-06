@@ -633,25 +633,34 @@ function _so_reset_verification(frm) {
 }
 
 function _so_verify_rm(frm) {
-	frappe.call({
-		method: "manufyxinvenzaerp.drawing_management.so_drawing_import.verify_raw_materials",
-		args: { so_name: frm.doc.name },
-		freeze: true,
-		freeze_message: __("Verifying raw materials…"),
-		callback: function(r) {
-			if (!r.message) return;
-			var res = r.message;
-			frm.doc.custom_raw_materials_verified = res.verified ? 1 : 0;
-			_so_render_rm_verify_btn(frm);
-			if (res.verified) {
-				frappe.show_alert({ message: __("All raw materials verified!"), indicator: "green" }, 5);
-			} else {
-				var msg = "<b>" + res.issues.length + " " + __("issue(s) found:") + "</b><br><br>" +
-					res.issues.map(function(i) { return "• " + i; }).join("<br>");
-				frappe.msgprint({ title: __("Raw Material Issues"), message: msg, indicator: "orange" });
+	function _do_verify() {
+		frappe.call({
+			method: "manufyxinvenzaerp.drawing_management.so_drawing_import.verify_raw_materials",
+			args: { so_name: frm.doc.name },
+			freeze: true,
+			freeze_message: __("Verifying raw materials…"),
+			callback: function(r) {
+				if (!r.message) return;
+				var res = r.message;
+				// Sync modified timestamp so subsequent saves don't get conflict errors
+				if (res.modified) { frm.doc.modified = res.modified; }
+				frm.doc.custom_raw_materials_verified = res.verified ? 1 : 0;
+				_so_render_rm_verify_btn(frm);
+				if (res.verified) {
+					frappe.show_alert({ message: __("All raw materials verified!"), indicator: "green" }, 5);
+				} else {
+					var msg = "<b>" + res.issues.length + " " + __("issue(s) found:") + "</b><br><br>" +
+						res.issues.map(function(i) { return "• " + i; }).join("<br>");
+					frappe.msgprint({ title: __("Raw Material Issues"), message: msg, indicator: "orange" });
+				}
 			}
-		}
-	});
+		});
+	}
+	if (frm.is_dirty()) {
+		frm.save(undefined, function() { _do_verify(); });
+	} else {
+		_do_verify();
+	}
 }
 
 // ── Inline Load / Clear buttons next to the attach field ──────────────────
@@ -748,6 +757,19 @@ function _so_render_drawing_buttons(frm) {
 				_so_run_step(frm, "create_bom", __("Create BOM"), __("Creating BOMs…"), bom_count, __("Create BOM"));
 			}, __("Drawing"));
 		}
+
+		// Submit BOM — needs BOM docstatus check (separate async call)
+		frappe.db.get_list("BOM", {
+			filters: [["custom_drawing", "in", drawing_names], ["docstatus", "=", 0]],
+			fields: ["name", "custom_drawing"],
+			limit: drawing_names.length
+		}).then(function(draft_boms) {
+			if (draft_boms.length) {
+				frm.add_custom_button(__("Submit BOM"), function() {
+					_so_run_step(frm, "submit_bom", __("Submit BOM"), __("Submitting BOMs…"), draft_boms.length, null);
+				}, __("Drawing"));
+			}
+		});
 	});
 }
 
@@ -831,8 +853,10 @@ function _so_create_drawings(frm) {
 }
 
 function _so_run_step(frm, step, label, freeze_msg, count, checkbox_label) {
-	var confirm_msg = __("{0} drawing(s) will be processed: <b>{1}</b>.", [count || "", label]) + "<br><br>" +
-		__("To skip any drawing, uncheck <b>{0}</b> in the Drawing List row.", [checkbox_label || label]);
+	var confirm_msg = __("{0} drawing(s) will be processed: <b>{1}</b>.", [count || "", label]);
+	if (checkbox_label) {
+		confirm_msg += "<br><br>" + __("To skip any drawing, uncheck <b>{0}</b> in the Drawing List row.", [checkbox_label]);
+	}
 	frappe.confirm(confirm_msg, function() {
 		frappe.call({
 			method: "manufyxinvenzaerp.drawing_management.so_drawing_import.process_drawings",
@@ -1654,12 +1678,21 @@ def create_bom_custom_fields():
                     "read_only": 1,
                     "no_copy": 1,
                     "print_hide": 1,
-                }
+                },
+                {
+                    "fieldname": "custom_customer_drawing_number",
+                    "fieldtype": "Data",
+                    "label": "Cust Drawing Number",
+                    "insert_after": "custom_drawing",
+                    "read_only": 1,
+                    "in_standard_filter": 1,
+                    "no_copy": 1,
+                },
             ],
             "BOM Item": [
                 {
                     "fieldname": "custom_item_number",
-                    "fieldtype": "Int",
+                    "fieldtype": "Data",
                     "label": "Item Number",
                     "insert_after": "item_code",
                     "read_only": 1,
