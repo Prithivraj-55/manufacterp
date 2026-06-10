@@ -335,67 +335,83 @@ def _bulk_insert(table, fields, values, chunk_size=200):
 # ---------------------------------------------------------------------------
 
 @frappe.whitelist()
-def create_drawings_from_import(so_name):
+def create_drawings_from_import(so_name, batch_start=0, batch_size=30):
     """
-    Create Draft Drawing documents from Table 1 rows where create_drawing=1
-    and drawing is blank. Pre-populates Drawing.items from matching Table 2 rows.
-    Locks those Table 2 rows after creation.
-    Returns list of created Drawing names.
+    Create Draft Drawing documents in batches to avoid HTTP timeouts on large imports.
+    Uses direct SQL to avoid loading the full SO doc (3000+ child rows) on every call.
+    Returns {results, total, processed, next_start}.
     """
-    so = frappe.get_doc("Sales Order", so_name)
+    batch_start = int(batch_start)
+    batch_size = int(batch_size)
 
-    pending_rows = [
-        r for r in (so.custom_duno_items or [])
-        if r.create_drawing and not r.drawing
-    ]
-    if not pending_rows:
+    # Lightweight SQL — never load the full SO doc with all child tables
+    all_pending = frappe.db.sql(
+        """SELECT name, drawing_number, item, duno_mark_no, total_quantity, total_weight
+           FROM `tabSales Order DUNO Item`
+           WHERE parent = %s AND create_drawing = 1
+             AND (drawing IS NULL OR drawing = '')
+           ORDER BY idx""",
+        so_name, as_dict=True,
+    )
+    total = len(all_pending)
+    if not all_pending:
         frappe.throw(_("No pending rows to create drawings for."))
 
-    # Index raw material rows by drawing number
+    batch = all_pending[batch_start: batch_start + batch_size]
+    if not batch:
+        return {"results": [], "total": total, "processed": batch_start, "next_start": None}
+
+    # SO header only — no child table load
+    so_hdr = frappe.db.get_value(
+        "Sales Order", so_name,
+        ["customer", "customer_name", "project", "po_no"],
+        as_dict=True,
+    ) or frappe._dict()
+
+    batch_cdns = [r.drawing_number for r in batch]
+
+    # Load raw material rows only for this batch's CDNs
+    rm_rows_raw = frappe.db.sql(
+        """SELECT customer_drawing_number, item_no, material_code, material_name,
+                  item_group, parent_item_group, grade, thickness, width, length,
+                  sec_qty, sec_uom, unit_weight, uom
+           FROM `tabSales Order Drawing Raw Material`
+           WHERE parent = %s AND customer_drawing_number IN ({placeholders})
+        """.format(placeholders=", ".join(["%s"] * len(batch_cdns))),
+        [so_name] + batch_cdns, as_dict=True,
+    )
     rm_by_cdn = {}
-    for r in (so.custom_so_raw_materials or []):
+    for r in rm_rows_raw:
         rm_by_cdn.setdefault(r.customer_drawing_number, []).append(r)
 
-    # Validate: all material codes must exist
-    all_mat = {
-        r.material_code
-        for rows in rm_by_cdn.values()
-        for r in rows
-        if r.material_code
-    }
-    if all_mat:
-        existing = set(frappe.db.get_all("Item", filters={"name": ["in", list(all_mat)]}, pluck="name"))
-        missing = sorted(all_mat - existing)
-        if missing:
-            frappe.throw(
-                _("Cannot create drawings — material codes not in Item master:<br>{0}").format(
-                    "<br>".join(missing)
-                )
-            )
+    # Pre-fetch FG item data for this batch in one query
+    fg_items = list({r.item for r in batch if r.item})
+    item_cache = {}
+    if fg_items:
+        for item in frappe.db.get_all(
+            "Item", filters={"name": ["in", fg_items]},
+            fields=["name", "item_name", "description"],
+        ):
+            item_cache[item.name] = item
 
     results = []
+    created = []  # (duno_row_name, drawing_name, cdn)
 
-    for dr in pending_rows:
+    for dr in batch:
         cdn = dr.drawing_number
         result = {"drawing_number": cdn, "drawing": None, "status": "error", "error": ""}
-
         try:
-            rm_rows = rm_by_cdn.get(cdn, [])
-
-            item_data = {}
-            if dr.item:
-                item_data = frappe.db.get_value(
-                    "Item", dr.item, ["item_name", "description"], as_dict=True
-                ) or {}
+            item_data = item_cache.get(dr.item) or frappe._dict()
+            no_of_qty = flt(dr.total_quantity) or 1
 
             drawing = frappe.get_doc({
                 "doctype": "Drawing",
                 "sales_order": so_name,
-                "customer": so.customer,
-                "customer_name": so.customer_name,
-                "customer_no": so.customer,
-                "project": so.get("project"),
-                "cust_po_no": so.get("po_no"),
+                "customer": so_hdr.customer,
+                "customer_name": so_hdr.customer_name,
+                "customer_no": so_hdr.customer,
+                "project": so_hdr.get("project"),
+                "cust_po_no": so_hdr.get("po_no"),
                 "fg_item_code": dr.item or "",
                 "fg_item_name": item_data.get("item_name") or "",
                 "fg_description": item_data.get("description") or "",
@@ -406,16 +422,11 @@ def create_drawings_from_import(so_name):
                 "status": "Working",
             })
 
-            no_of_qty = flt(dr.total_quantity) or 1
-
-            for rm in rm_rows:
+            for rm in rm_by_cdn.get(cdn, []):
                 pig = rm.parent_item_group or ""
                 unit_wt = flt(rm.unit_weight)
                 sec_qty = flt(rm.sec_qty)
                 qty = _calc_qty(pig, flt(rm.length), flt(rm.width), flt(rm.thickness), unit_wt, sec_qty)
-                total_qty = flt(qty) * no_of_qty
-                total_sec_qty = sec_qty * no_of_qty
-
                 drawing.append("items", {
                     "item_number": rm.item_no or "",
                     "material_code": rm.material_code,
@@ -430,27 +441,14 @@ def create_drawings_from_import(so_name):
                     "unit_weight": flt(unit_wt, 6),
                     "qty": flt(qty, 3),
                     "uom": rm.uom or "",
-                    "total_sec_qty": flt(total_sec_qty, 3),
-                    "total_qty": flt(total_qty, 3),
+                    "total_sec_qty": flt(sec_qty * no_of_qty, 3),
+                    "total_qty": flt(qty * no_of_qty, 3),
                 })
 
             drawing.insert(ignore_permissions=True)
             result["drawing"] = drawing.name
             result["status"] = "success"
-
-            # Link drawing back to Table 1 row
-            frappe.db.set_value("Sales Order DUNO Item", dr.name, "drawing", drawing.name)
-
-            # Lock matching Table 2 rows
-            frappe.db.sql(
-                """
-                UPDATE `tabSales Order Drawing Raw Material`
-                SET is_locked = 1
-                WHERE parent = %s AND customer_drawing_number = %s
-                """,
-                (so_name, cdn),
-            )
-            frappe.db.commit()
+            created.append((dr.name, drawing.name, cdn))
 
         except Exception as e:
             frappe.db.rollback()
@@ -459,76 +457,127 @@ def create_drawings_from_import(so_name):
 
         results.append(result)
 
-    return results
+    # Bulk-update links + locks once for the whole batch (not per-drawing)
+    if created:
+        for duno_name, drawing_name, _cdn in created:
+            frappe.db.set_value(
+                "Sales Order DUNO Item", duno_name, "drawing", drawing_name,
+                update_modified=False,
+            )
+        cdns_created = [c[2] for c in created]
+        frappe.db.sql(
+            "UPDATE `tabSales Order Drawing Raw Material` SET is_locked = 1 "
+            "WHERE parent = %s AND customer_drawing_number IN ({p})".format(
+                p=", ".join(["%s"] * len(cdns_created))
+            ),
+            [so_name] + cdns_created,
+        )
+        frappe.db.commit()
+
+    next_start = batch_start + len(batch)
+    return {
+        "results": results,
+        "total": total,
+        "processed": next_start,
+        "next_start": next_start if next_start < total else None,
+    }
 
 
 # ---------------------------------------------------------------------------
 
 @frappe.whitelist()
-def process_drawings(so_name, step):
+def process_drawings(so_name, step, batch_start=0, batch_size=30):
     """
-    Run a single pipeline step for all qualifying Table 1 rows.
+    Run a single pipeline step in batches to avoid HTTP timeouts on 600+ drawings.
+    Uses direct SQL to avoid loading the full SO doc on every call.
+    Returns {results, total, processed, next_start}.
+    """
+    from manufyxinvenzaerp.drawing_management.drawing_utils import create_bom_from_drawing
 
-    step values:
-      "submit"         – submit Draft drawings where submit_drawing = 1
-      "final_revision" – mark submitted drawings as Final Revision where mark_final_revision = 1
-      "create_bom"     – create BOM for Final Revision drawings where create_bom = 1
-    """
-    from manufyxinvenzaerp.drawing_management.drawing_utils import (
-        mark_as_final_revision,
-        create_bom_from_drawing,
+    batch_start = int(batch_start)
+    batch_size = int(batch_size)
+
+    # Fetch qualifying DUNO rows via SQL (no SO doc load)
+    all_rows = frappe.db.sql(
+        """SELECT name, drawing, drawing_number,
+                  submit_drawing, mark_final_revision, create_bom
+           FROM `tabSales Order DUNO Item`
+           WHERE parent = %s AND drawing IS NOT NULL AND drawing != ''
+           ORDER BY idx""",
+        so_name, as_dict=True,
     )
+    total = len(all_rows)
+    batch = all_rows[batch_start: batch_start + batch_size]
 
-    so = frappe.get_doc("Sales Order", so_name)
+    if not batch:
+        return {"results": [], "total": total, "processed": batch_start, "next_start": None}
+
+    # Pre-fetch drawing metadata for the whole batch in ONE query
+    drawing_names = [r.drawing for r in batch]
+    drawing_meta = {
+        d.name: d
+        for d in frappe.db.get_all(
+            "Drawing",
+            filters={"name": ["in", drawing_names]},
+            fields=["name", "docstatus", "status"],
+        )
+    }
+
     results = []
 
-    for dr in (so.custom_duno_items or []):
-        if not dr.drawing:
-            continue
-
+    for dr in batch:
         result = {
             "drawing": dr.drawing,
             "drawing_number": dr.drawing_number or "",
             "status": "skipped",
             "detail": "",
         }
-
         try:
-            drawing_doc = frappe.get_doc("Drawing", dr.drawing)
+            meta = drawing_meta.get(dr.drawing)
+            if not meta:
+                result["status"] = "error"
+                result["error"] = "Drawing record not found"
+                results.append(result)
+                continue
 
             if step == "submit":
                 if not dr.submit_drawing:
                     result["status"] = "unchecked"
-                elif drawing_doc.docstatus != 0:
+                elif meta.docstatus != 0:
                     result["status"] = "already_done"
                 else:
-                    drawing_doc.submit()
+                    frappe.get_doc("Drawing", dr.drawing).submit()
                     result["status"] = "success"
                     result["detail"] = "submitted"
 
             elif step == "final_revision":
                 if not dr.mark_final_revision:
                     result["status"] = "unchecked"
-                elif drawing_doc.docstatus != 1:
+                elif meta.docstatus != 1:
                     result["status"] = "skipped"
                     result["detail"] = "not submitted"
-                elif drawing_doc.status == "Final Revision":
+                elif meta.status == "Final Revision":
                     result["status"] = "already_done"
                 else:
-                    mark_as_final_revision(dr.drawing)
+                    # Direct set_value — no redundant full doc load
+                    frappe.db.set_value("Drawing", dr.drawing, "status", "Final Revision")
                     result["status"] = "success"
                     result["detail"] = "marked final revision"
 
-            elif step == "create_bom":
+            elif step in ("create_bom", "create_and_submit_bom"):
                 if not dr.create_bom:
                     result["status"] = "unchecked"
-                elif drawing_doc.docstatus != 1 or drawing_doc.status != "Final Revision":
+                elif meta.docstatus != 1 or meta.status != "Final Revision":
                     result["status"] = "skipped"
                     result["detail"] = "not in Final Revision"
                 else:
                     bom_name = create_bom_from_drawing(dr.drawing)
+                    if step == "create_and_submit_bom":
+                        frappe.get_doc("BOM", bom_name).submit()
+                        result["detail"] = "bom created and submitted: {0}".format(bom_name)
+                    else:
+                        result["detail"] = "bom: {0}".format(bom_name)
                     result["status"] = "success"
-                    result["detail"] = "bom:{0}".format(bom_name)
 
             elif step == "submit_bom":
                 bom_name = frappe.db.get_value(
@@ -538,8 +587,7 @@ def process_drawings(so_name, step):
                     result["status"] = "skipped"
                     result["detail"] = "no draft BOM"
                 else:
-                    bom_doc = frappe.get_doc("BOM", bom_name)
-                    bom_doc.submit()
+                    frappe.get_doc("BOM", bom_name).submit()
                     result["status"] = "success"
                     result["detail"] = "bom submitted: {0}".format(bom_name)
 
@@ -548,13 +596,21 @@ def process_drawings(so_name, step):
 
         except Exception as e:
             frappe.db.rollback()
-            frappe.local.message_log = []  # prevent throw() messages surfacing as a popup
+            frappe.local.message_log = []
             result["status"] = "error"
             result["error"] = str(e)
 
         results.append(result)
 
-    return results
+    frappe.db.commit()
+
+    next_start = batch_start + len(batch)
+    return {
+        "results": results,
+        "total": total,
+        "processed": next_start,
+        "next_start": next_start if next_start < total else None,
+    }
 
 
 # ---------------------------------------------------------------------------

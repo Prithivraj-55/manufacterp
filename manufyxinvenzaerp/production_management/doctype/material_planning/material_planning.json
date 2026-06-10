@@ -23,6 +23,11 @@
   "weight_cross_item_mapped",
   "diff_weight_html",
   "tab_bom_items",
+  "section_bom_import",
+  "so_bom_import",
+  "column_break_bom_import",
+  "show_drawings_btn",
+  "section_bom_items_table",
   "bom_items",
   "tab_stock_analysis",
   "section_raw_materials",
@@ -123,6 +128,31 @@
    "fieldname": "tab_bom_items",
    "fieldtype": "Tab Break",
    "label": "Selected BOMs"
+  },
+  {
+   "fieldname": "section_bom_import",
+   "fieldtype": "Section Break",
+   "label": "Import BOMs from Sales Order"
+  },
+  {
+   "fieldname": "so_bom_import",
+   "fieldtype": "Link",
+   "label": "Sales Order",
+   "options": "Sales Order"
+  },
+  {
+   "fieldname": "column_break_bom_import",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "show_drawings_btn",
+   "fieldtype": "Button",
+   "label": "Show Drawings"
+  },
+  {
+   "collapsible": 0,
+   "fieldname": "section_bom_items_table",
+   "fieldtype": "Section Break"
   },
   {
    "fieldname": "bom_items",
