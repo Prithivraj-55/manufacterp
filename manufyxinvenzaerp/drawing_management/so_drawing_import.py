@@ -22,17 +22,11 @@ def _calc_qty(pig, length, width, thickness, unit_wt, sec_qty):
 
 def _get_file_path(file_url):
     file_doc = frappe.db.get_value(
-        "File",
-        {"file_url": file_url},
-        ["file_name", "is_private"],
-        as_dict=True,
+        "File", {"file_url": file_url}, "name"
     )
     if not file_doc:
         frappe.throw(_("Attached file not found. Please re-attach."))
-
-    if file_doc.is_private:
-        return frappe.get_site_path("private", "files", file_doc.file_name)
-    return frappe.get_site_path("public", "files", file_doc.file_name)
+    return frappe.get_doc("File", file_doc).get_full_path()
 
 
 def _parse_excel(file_path):
