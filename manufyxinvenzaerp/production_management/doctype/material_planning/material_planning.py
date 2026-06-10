@@ -452,11 +452,17 @@ def check_stock_availability(doc):
                     net_qty = max(0.0, flt(b["qty"]) - reserved_by_others)
                     batch_remaining[b["batch_no"]] = net_qty
 
-            matched_batches = [
-                {**b, "qty": batch_remaining[b["batch_no"]]}
-                for b in raw_matched_batches
-                if batch_remaining.get(b["batch_no"], 0) > 0
-            ]
+            # Sort largest batch first so one batch covers the requirement in most cases,
+            # keeping ARM table at 1 row per raw material item.
+            matched_batches = sorted(
+                [
+                    {**b, "qty": batch_remaining[b["batch_no"]]}
+                    for b in raw_matched_batches
+                    if batch_remaining.get(b["batch_no"], 0) > 0
+                ],
+                key=lambda b: b["qty"],
+                reverse=True,
+            )
 
             available_qty = sum(flt(b["qty"]) for b in matched_batches)
             shortage = max(0.0, required_qty - available_qty)
@@ -469,34 +475,34 @@ def check_stock_availability(doc):
 
             if matched_batches:
                 to_consume = required_qty
-                consumed_batches = []
+                primary_batch = None
                 for b in matched_batches:
                     if to_consume <= 0:
                         break
                     consumed = min(batch_remaining[b["batch_no"]], to_consume)
                     batch_remaining[b["batch_no"]] -= consumed
                     to_consume -= consumed
-                    consumed_batches.append(b)
+                    if primary_batch is None:
+                        primary_batch = b  # largest batch → single ARM row
 
-                for b in consumed_batches:
-                    available_raw_materials.append({
-                        "item_number": row.get("item_number") or "",
-                        "sales_order": row.get("sales_order") or "",
-                        "item_code": item_code,
-                        "item_name": row.get("item_name"),
-                        "batch_no": b["batch_no"],
-                        "required_qty": required_qty,
-                        "available_qty": flt(b["qty"]),
-                        "sec_qty": flt(b.get("custom_sec_qty")),
-                        "sec_uom": b.get("custom_sec_uom") or row.get("sec_uom"),
-                        "uom": row.get("uom"),
-                        "length": flt(row.get("length")),
-                        "thickness": flt(row.get("thickness")),
-                        "width": flt(row.get("width")),
-                        "warehouse": warehouse,
-                        "parent_item_group": row.get("parent_item_group"),
-                        "store_location": location or "",
-                    })
+                available_raw_materials.append({
+                    "item_number": row.get("item_number") or "",
+                    "sales_order": row.get("sales_order") or "",
+                    "item_code": item_code,
+                    "item_name": row.get("item_name"),
+                    "batch_no": primary_batch["batch_no"],
+                    "required_qty": required_qty,
+                    "available_qty": flt(primary_batch["qty"]),
+                    "sec_qty": flt(primary_batch.get("custom_sec_qty")),
+                    "sec_uom": primary_batch.get("custom_sec_uom") or row.get("sec_uom"),
+                    "uom": row.get("uom"),
+                    "length": flt(row.get("length")),
+                    "thickness": flt(row.get("thickness")),
+                    "width": flt(row.get("width")),
+                    "warehouse": warehouse,
+                    "parent_item_group": row.get("parent_item_group"),
+                    "store_location": location or "",
+                })
 
                 # Partial stock — add a shortfall row to Material Mapping so the gap
                 # is visible immediately (NOS/Kg check) without waiting for reservation.
@@ -669,42 +675,47 @@ def move_to_exact_match(doc, item_codes):
                         0.0, flt(b["qty"]) - reserved_by_others - already_allocated
                     )
 
-            free_batches = [
-                {**b, "qty": batch_remaining[b["batch_no"]]}
-                for b in raw_batches
-                if batch_remaining.get(b["batch_no"], 0) > 0
-            ]
+            # Sort largest batch first so one batch covers the requirement in most cases.
+            free_batches = sorted(
+                [
+                    {**b, "qty": batch_remaining[b["batch_no"]]}
+                    for b in raw_batches
+                    if batch_remaining.get(b["batch_no"], 0) > 0
+                ],
+                key=lambda b: b["qty"],
+                reverse=True,
+            )
 
             if free_batches:
                 to_consume = required_qty
-                consumed_batches = []
+                primary_batch = None
                 for b in free_batches:
                     if to_consume <= 0:
                         break
                     consumed = min(batch_remaining[b["batch_no"]], to_consume)
                     batch_remaining[b["batch_no"]] -= consumed
                     to_consume -= consumed
-                    consumed_batches.append(b)
+                    if primary_batch is None:
+                        primary_batch = b  # largest batch → single matched row
 
-                for b in consumed_batches:
-                    matched.append({
-                        "item_number": row.get("item_number") or "",
-                        "sales_order": row.get("sales_order") or "",
-                        "item_code": item_code,
-                        "item_name": row.get("item_name"),
-                        "batch_no": b["batch_no"],
-                        "required_qty": required_qty,
-                        "available_qty": flt(b["qty"]),
-                        "sec_qty": flt(b.get("custom_sec_qty")),
-                        "sec_uom": b.get("custom_sec_uom") or row.get("sec_uom"),
-                        "uom": row.get("uom"),
-                        "length": flt(row.get("length")),
-                        "thickness": flt(row.get("thickness")),
-                        "width": flt(row.get("width")),
-                        "warehouse": warehouse,
-                        "parent_item_group": row.get("parent_item_group"),
-                        "store_location": location or "",
-                    })
+                matched.append({
+                    "item_number": row.get("item_number") or "",
+                    "sales_order": row.get("sales_order") or "",
+                    "item_code": item_code,
+                    "item_name": row.get("item_name"),
+                    "batch_no": primary_batch["batch_no"],
+                    "required_qty": required_qty,
+                    "available_qty": flt(primary_batch["qty"]),
+                    "sec_qty": flt(primary_batch.get("custom_sec_qty")),
+                    "sec_uom": primary_batch.get("custom_sec_uom") or row.get("sec_uom"),
+                    "uom": row.get("uom"),
+                    "length": flt(row.get("length")),
+                    "thickness": flt(row.get("thickness")),
+                    "width": flt(row.get("width")),
+                    "warehouse": warehouse,
+                    "parent_item_group": row.get("parent_item_group"),
+                    "store_location": location or "",
+                })
             else:
                 failed.append(item_code)
 
