@@ -180,6 +180,7 @@ frappe.ui.form.on("Material Planning", {
 		});
 
 		let has_raw = !!(frm.doc.raw_materials || []).length;
+		let has_avail = !!(frm.doc.available_raw_materials || []).length;
 		let has_mapping = !!(frm.doc.material_mapping || []).length;
 		let has_unavail = !!(frm.doc.unavailable_items || []).length;
 
@@ -188,6 +189,12 @@ frappe.ui.form.on("Material Planning", {
 		frm.set_df_property("check_stock_btn",         "hidden", has_raw     ? 0 : 1);
 		frm.set_df_property("update_exact_match_btn",  "hidden", has_unavail ? 0 : 1);
 		frm.set_df_property("finalize_mapping_btn",    "hidden", has_mapping ? 0 : 1);
+
+		// Lock the SO picker and Show Drawings button once stock has been checked
+		// (raw materials fetched + at least one stock analysis table populated)
+		let so_locked = has_raw && (has_avail || has_mapping || has_unavail);
+		frm.set_df_property("so_bom_import",     "read_only", so_locked ? 1 : 0);
+		frm.set_df_property("show_drawings_btn", "hidden",    so_locked ? 1 : 0);
 
 		// Add icons to inline form buttons (no color override)
 		function _style_btn(fieldname, icon, label) {
@@ -492,13 +499,11 @@ frappe.ui.form.on("Material Planning", {
 			frm._update_exact_summary = null;
 
 			let arm_added = s.arm_rows_added;
-			let arm_from  = s.arm_before + 1;
-			let arm_to    = s.arm_before + arm_added;
 			let row_range = "";
 			if (arm_added === 1) {
-				row_range = __("added as row {0} in Exact Match table", [arm_from]);
+				row_range = __("{0} row added to Exact Match table", [arm_added]);
 			} else if (arm_added > 1) {
-				row_range = __("added as rows {0} to {1} in Exact Match table", [arm_from, arm_to]);
+				row_range = __("{0} rows added to Exact Match table", [arm_added]);
 			}
 
 			let rows_html = `
@@ -801,7 +806,7 @@ frappe.ui.form.on("Material Planning", {
 				// Stash summary so after_save can show the popup once the form is stable
 				frm._update_exact_summary = {
 					unavail_total:    unavail_total,
-					matched_count:    matched_codes.size,
+					matched_count:    all_items.filter(function(r) { return matched_codes.has(r.item_code); }).length,
 					arm_rows_added:   matched.length,
 					arm_before:       arm_before,
 					mapping_added:    failed_rows.length,
@@ -931,6 +936,207 @@ frappe.ui.form.on("Material Planning", {
 		_check_mr_then_confirm();
 	},
 });
+
+// ── SO Drawing picker — "Show Drawings" button ───────────────────────────────
+
+frappe.ui.form.on("Material Planning", {
+	show_drawings_btn(frm) {
+		let so = frm.doc.so_bom_import;
+		if (!so) {
+			frappe.msgprint(__("Select a Sales Order first."));
+			return;
+		}
+		frappe.call({
+			method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.get_so_drawings_for_bom_picker",
+			args: { so_name: so, mp_name: frm.doc.name || "" },
+			freeze: true,
+			freeze_message: __("Loading drawings…"),
+			callback(r) {
+				let drawings = r.message || [];
+				if (!drawings.length) {
+					frappe.msgprint(__("No submitted BOMs found for Sales Order {0}.", [so]));
+					return;
+				}
+				_show_drawings_picker_dialog(frm, so, drawings);
+			},
+		});
+	},
+});
+
+function _show_drawings_picker_dialog(frm, so_name, drawings) {
+
+	// Split into selectable (free) and already-mapped (used in another MP)
+	var free_drawings = drawings.filter(function(d) { return !d.already_used_in; });
+	var used_drawings = drawings.filter(function(d) { return !!d.already_used_in; });
+
+	// Stamp _orig_idx only on free drawings (used in Insert action)
+	free_drawings.forEach(function(d, i) { d._orig_idx = i; });
+
+	function _free_rows_html(rows) {
+		if (!rows.length) {
+			return '<div style="color:#6c757d;padding:12px 8px;">' + __("No drawings match.") + "</div>";
+		}
+		return rows.map(function(d) {
+			let cdn  = frappe.utils.escape_html(d.customer_drawing_number || "—");
+			let duno = frappe.utils.escape_html(String(d.duno_mark_no || "—"));
+			let bom  = frappe.utils.escape_html(d.bom_no || "");
+			let item = frappe.utils.escape_html(d.item_name || d.item_code || "");
+			return `<label style="display:flex;align-items:center;gap:10px;padding:6px 4px;cursor:pointer;border-bottom:1px solid #f0f0f0;user-select:none;">
+				<input type="checkbox" class="mp-dchk" data-bom="${bom}" data-orig="${d._orig_idx}"
+				       style="width:15px;height:15px;flex-shrink:0;cursor:pointer;" checked>
+				<span style="flex:0 0 260px;font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${cdn}</span>
+				<span style="flex:0 0 120px;font-size:12px;color:#495057;">${duno}</span>
+				<span style="flex:0 0 130px;font-size:11px;color:#6c757d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item}</span>
+				<span style="flex:1;font-size:11px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${bom}</span>
+			</label>`;
+		}).join("");
+	}
+
+	function _used_rows_html(rows) {
+		return rows.map(function(d) {
+			let cdn     = frappe.utils.escape_html(d.customer_drawing_number || "—");
+			let duno    = frappe.utils.escape_html(String(d.duno_mark_no || "—"));
+			let bom     = frappe.utils.escape_html(d.bom_no || "");
+			let item    = frappe.utils.escape_html(d.item_name || d.item_code || "");
+			let used_in = frappe.utils.escape_html(d.already_used_in || "");
+			return `<div style="display:flex;align-items:center;gap:10px;padding:6px 4px;border-bottom:1px solid #f0f0f0;background:#fafafa;">
+				<input type="checkbox" disabled
+				       style="width:15px;height:15px;flex-shrink:0;cursor:not-allowed;opacity:0.4;">
+				<span style="flex:0 0 260px;font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#bbb;">${cdn}</span>
+				<span style="flex:0 0 120px;font-size:12px;color:#bbb;">${duno}</span>
+				<span style="flex:0 0 130px;font-size:11px;color:#bbb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item}</span>
+				<span style="flex:1;font-size:11px;color:#ccc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${bom}</span>
+				<span style="flex:0 0 160px;font-size:11px;color:#e65100;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+				      title="${used_in}">${used_in}</span>
+			</div>`;
+		}).join("");
+	}
+
+	let has_used = used_drawings.length > 0;
+	let free_height = has_used ? "35vh" : "55vh";
+
+	let header_html = `
+		<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+			<input id="_mpd_search" type="text" placeholder="${__("Search Customer Drawing ID or DUNO/Mark No…")}"
+				style="flex:1;min-width:200px;border:1px solid #d1d8dd;border-radius:4px;padding:5px 10px;font-size:12px;">
+			<button class="btn btn-xs btn-default" id="_mpd_sel_all">${__("Select All")}</button>
+			<button class="btn btn-xs btn-default" id="_mpd_unsel_all">${__("Unselect All")}</button>
+			<span id="_mpd_count" style="font-size:12px;color:#6c757d;"></span>
+		</div>
+		<div style="display:flex;gap:10px;padding:5px 4px;background:#f4f5f7;border-radius:4px;margin-bottom:4px;font-size:11px;font-weight:600;color:#6c757d;">
+			<span style="flex:0 0 15px;"></span>
+			<span style="flex:0 0 260px;">${__("Customer Drawing ID")}</span>
+			<span style="flex:0 0 120px;">${__("DUNO / Mark No")}</span>
+			<span style="flex:0 0 130px;">${__("Item Name")}</span>
+			<span style="flex:1;">${__("BOM No")}</span>
+		</div>`;
+
+	let free_section_html = `<div id="_mpd_list"
+		style="max-height:${free_height};overflow-y:auto;border:1px solid #e9ecef;border-radius:4px;padding:4px 8px;">
+		${_free_rows_html(free_drawings)}
+	</div>`;
+
+	let used_section_html = "";
+	if (has_used) {
+		used_section_html = `
+			<div style="margin-top:14px;">
+				<div style="font-size:12px;font-weight:600;color:#e65100;padding:6px 4px 4px;display:flex;align-items:center;gap:6px;">
+					<span>&#9888;</span>
+					${__("{0} drawing(s) already mapped in another Material Planning — cannot be selected", [used_drawings.length])}
+				</div>
+				<div style="display:flex;gap:10px;padding:5px 4px;background:#fff3e0;border-radius:4px 4px 0 0;border:1px solid #ffe0b2;font-size:11px;font-weight:600;color:#6c757d;">
+					<span style="flex:0 0 15px;"></span>
+					<span style="flex:0 0 260px;">${__("Customer Drawing ID")}</span>
+					<span style="flex:0 0 120px;">${__("DUNO / Mark No")}</span>
+					<span style="flex:0 0 130px;">${__("Item Name")}</span>
+					<span style="flex:1;">${__("BOM No")}</span>
+					<span style="flex:0 0 160px;color:#e65100;">${__("Used In MP")}</span>
+				</div>
+				<div style="max-height:20vh;overflow-y:auto;border:1px solid #ffe0b2;border-top:none;border-radius:0 0 4px 4px;padding:4px 8px;">
+					${_used_rows_html(used_drawings)}
+				</div>
+			</div>`;
+	}
+
+	let d = new frappe.ui.Dialog({
+		title: __("Select Drawings — {0}", [so_name]),
+		size: "extra-large",
+		primary_action_label: __("Insert"),
+		primary_action() {
+			let selected = [];
+			d.$body.find(".mp-dchk:checked").each(function() {
+				let orig = parseInt($(this).data("orig"));
+				if (!isNaN(orig)) selected.push(free_drawings[orig]);
+			});
+
+			if (!selected.length) {
+				frappe.msgprint(__("Select at least one drawing."));
+				return;
+			}
+
+			// Skip BOMs already in the table
+			let existing = new Set((frm.doc.bom_items || []).map(r => r.bom_no));
+			let to_add  = selected.filter(s => !existing.has(s.bom_no));
+			let skipped = selected.length - to_add.length;
+
+			to_add.forEach(function(s) {
+				let child = frm.add_child("bom_items");
+				child.bom_no                  = s.bom_no;
+				child.item_code               = s.item_code  || "";
+				child.item_name               = s.item_name  || "";
+				child.drawing                 = s.drawing    || "";
+				child.duno_mark_no            = s.duno_mark_no            || "";
+				child.customer_drawing_number = s.customer_drawing_number || "";
+				child.sales_order             = s.sales_order || "";
+				child.customer                = s.customer   || "";
+				child.qty_to_manufacture      = s.qty_to_manufacture || 1;
+				child.uom                     = s.uom        || "";
+			});
+			frm.refresh_field("bom_items");
+
+			d.hide();
+			let msg = __("{0} BOM(s) added.", [to_add.length]);
+			if (skipped) msg += "  " + __("{0} already in table — skipped.", [skipped]);
+			frappe.show_alert({ message: msg, indicator: "green" }, 5);
+		},
+	});
+
+	d.$body.html(header_html + free_section_html + used_section_html);
+
+	function _update_count() {
+		let total   = d.$body.find(".mp-dchk").length;
+		let checked = d.$body.find(".mp-dchk:checked").length;
+		d.$body.find("#_mpd_count").text(checked + " / " + total + " " + __("selected"));
+	}
+
+	function _apply_filter() {
+		let q = (d.$body.find("#_mpd_search").val() || "").toLowerCase();
+		let visible = q
+			? free_drawings.filter(function(dd) {
+				return String(dd.customer_drawing_number || "").toLowerCase().includes(q)
+					|| String(dd.duno_mark_no || "").toLowerCase().includes(q)
+					|| String(dd.bom_no || "").toLowerCase().includes(q)
+					|| String(dd.item_name || "").toLowerCase().includes(q);
+			})
+			: free_drawings.slice();
+		d.$body.find("#_mpd_list").html(_free_rows_html(visible));
+		_update_count();
+	}
+
+	d.$body.on("input",  "#_mpd_search",  _apply_filter);
+	d.$body.on("change", ".mp-dchk",      _update_count);
+	d.$body.on("click",  "#_mpd_sel_all", function() {
+		d.$body.find(".mp-dchk").prop("checked", true);
+		_update_count();
+	});
+	d.$body.on("click", "#_mpd_unsel_all", function() {
+		d.$body.find(".mp-dchk").prop("checked", false);
+		_update_count();
+	});
+
+	_update_count();
+	d.show();
+}
 
 // Auto-fill BOM row details from the linked Drawing when bom_no is set
 frappe.ui.form.on("Material Planning BOM Item", {

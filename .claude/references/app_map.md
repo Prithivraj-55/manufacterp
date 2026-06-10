@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-06-06 04:32:37_
+_Generated: 2026-06-11 00:53:44_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-06-06 04:32:37_
 
 ## Python files
 
-_Total: 91_
+_Total: 93_
 
 - config/__init__.py
 - drawing_management/bom_class_override.py
@@ -54,6 +54,8 @@ _Total: 91_
 - material_request_management/__init__.py
 - material_request_management/material_request.py
 - patches/__init__.py
+- patches/v1/fix_bom_item_number_field_type.py
+- patches/v1/__init__.py
 - production_management/doctype/__init__.py
 - production_management/doctype/job_card_raw_material/__init__.py
 - production_management/doctype/job_card_raw_material/job_card_raw_material.py
@@ -233,6 +235,7 @@ _Total: 22_
   - _validate_batch_calc_qty:
   - search_bom:
   - get_bom_info:
+  - get_so_drawings_for_bom_picker:
   - get_raw_materials:
   - check_stock_availability:
   - _get_non_batch_stock:
@@ -323,10 +326,10 @@ Functions:
   - 45:mark_as_final_revision:
   - 59:get_batches_for_drawing_item:
   - 91:create_bom_from_drawing:
-  - 147:validate_bom_from_drawing:
-  - 204:create_production_plan_from_bom:
-  - 257:parse_drawing_items_csv:
-  - 371:get_so_dashboard_data:
+  - 148:validate_bom_from_drawing:
+  - 203:create_production_plan_from_bom:
+  - 256:parse_drawing_items_csv:
+  - 370:get_so_dashboard_data:
 
 ### drawing_management/sales_order.py
 Functions:
@@ -336,14 +339,14 @@ Functions:
 Functions:
   - 10:_calc_qty:
   - 23:_get_file_path:
-  - 38:_parse_excel:
-  - 129:parse_bom_excel:
-  - 324:_bulk_insert:
-  - 344:create_drawings_from_import:
-  - 474:process_drawings:
-  - 556:verify_raw_materials:
-  - 612:download_bom_template:
-  - 654:clear_drawing_import:
+  - 32:_parse_excel:
+  - 123:parse_bom_excel:
+  - 318:_bulk_insert:
+  - 338:create_drawings_from_import:
+  - 489:process_drawings:
+  - 619:verify_raw_materials:
+  - 677:download_bom_template:
+  - 719:clear_drawing_import:
 
 ### hooks.py
 
@@ -458,37 +461,37 @@ Functions:
 
 ### setup.py
 Functions:
-  - 900:after_install:
-  - 935:after_migrate:
-  - 971:setup_storage_location:
-  - 993:create_item_client_script:
-  - 1009:create_item_custom_fields:
-  - 1085:create_purchase_order_custom_fields:
-  - 1161:hide_purchase_order_weight_fields:
-  - 1175:create_purchase_order_client_script:
-  - 1191:create_purchase_receipt_custom_fields:
-  - 1270:create_batch_custom_fields:
-  - 1335:create_purchase_receipt_client_script:
-  - 1351:create_material_request_custom_fields:
-  - 1441:create_material_request_client_script:
-  - 1457:create_rfq_custom_fields:
-  - 1533:create_rfq_client_script:
-  - 1549:create_sq_custom_fields:
-  - 1628:create_sq_client_script:
-  - 1644:create_bom_custom_fields:
-  - 1723:create_so_custom_fields:
-  - 1798:create_so_client_script:
-  - 1814:create_bom_client_script:
-  - 1834:create_production_plan_custom_fields:
-  - 1970:create_production_plan_client_script:
-  - 1992:create_job_card_custom_fields:
-  - 2257:create_job_card_client_script:
-  - 2275:create_stock_entry_custom_fields:
-  - 2366:create_stock_entry_client_script:
-  - 2388:remove_sco_purchase_order_mandatory:
-  - 2399:create_sco_custom_fields:
-  - 2651:create_sco_client_script:
-  - 2667:create_soe_client_script:
+  - 1088:after_install:
+  - 1123:after_migrate:
+  - 1159:setup_storage_location:
+  - 1181:create_item_client_script:
+  - 1197:create_item_custom_fields:
+  - 1273:create_purchase_order_custom_fields:
+  - 1349:hide_purchase_order_weight_fields:
+  - 1363:create_purchase_order_client_script:
+  - 1379:create_purchase_receipt_custom_fields:
+  - 1458:create_batch_custom_fields:
+  - 1523:create_purchase_receipt_client_script:
+  - 1539:create_material_request_custom_fields:
+  - 1629:create_material_request_client_script:
+  - 1645:create_rfq_custom_fields:
+  - 1721:create_rfq_client_script:
+  - 1737:create_sq_custom_fields:
+  - 1816:create_sq_client_script:
+  - 1832:create_bom_custom_fields:
+  - 1939:create_so_custom_fields:
+  - 2016:create_so_client_script:
+  - 2032:create_bom_client_script:
+  - 2052:create_production_plan_custom_fields:
+  - 2188:create_production_plan_client_script:
+  - 2210:create_job_card_custom_fields:
+  - 2475:create_job_card_client_script:
+  - 2493:create_stock_entry_custom_fields:
+  - 2584:create_stock_entry_client_script:
+  - 2606:remove_sco_purchase_order_mandatory:
+  - 2617:create_sco_custom_fields:
+  - 2869:create_sco_client_script:
+  - 2885:create_soe_client_script:
 
 ### sq_management/supplier_quotation.py
 Functions:
@@ -607,8 +610,8 @@ Functions:
 - `drawing_management/drawing_utils.py:45` — `mark_as_final_revision`
 - `drawing_management/drawing_utils.py:59` — `get_batches_for_drawing_item`
 - `drawing_management/drawing_utils.py:91` — `create_bom_from_drawing`
-- `drawing_management/drawing_utils.py:204` — `create_production_plan_from_bom`
-- `drawing_management/drawing_utils.py:257` — `parse_drawing_items_csv`
+- `drawing_management/drawing_utils.py:203` — `create_production_plan_from_bom`
+- `drawing_management/drawing_utils.py:256` — `parse_drawing_items_csv`
 - `drawing_management/bom_class_override.py:353` — `get_routing`
 - `drawing_management/bom_class_override.py:424` — `get_bom_material_detail`
 - `drawing_management/bom_class_override.py:509` — `update_cost`
@@ -617,12 +620,12 @@ Functions:
 - `drawing_management/bom_class_override.py:1467` — `get_bom_diff`
 - `drawing_management/bom_class_override.py:1522` — `@frappe.validate_and_sanitize_search_inputs`
 - `drawing_management/bom_class_override.py:1574` — `make_variant_bom`
-- `drawing_management/so_drawing_import.py:129` — `parse_bom_excel`
-- `drawing_management/so_drawing_import.py:344` — `create_drawings_from_import`
-- `drawing_management/so_drawing_import.py:474` — `process_drawings`
-- `drawing_management/so_drawing_import.py:556` — `verify_raw_materials`
-- `drawing_management/so_drawing_import.py:612` — `download_bom_template`
-- `drawing_management/so_drawing_import.py:654` — `clear_drawing_import`
+- `drawing_management/so_drawing_import.py:123` — `parse_bom_excel`
+- `drawing_management/so_drawing_import.py:338` — `create_drawings_from_import`
+- `drawing_management/so_drawing_import.py:489` — `process_drawings`
+- `drawing_management/so_drawing_import.py:619` — `verify_raw_materials`
+- `drawing_management/so_drawing_import.py:677` — `download_bom_template`
+- `drawing_management/so_drawing_import.py:719` — `clear_drawing_import`
 - `drawing_management/doctype/drawing/drawing.py:125` — `check_existing_bom`
 - `production_plan_management/production_plan.py:115` — `get_items_for_material_requests`
 - `production_plan_management/production_plan.py:492` — `make_material_request`
@@ -637,21 +640,22 @@ Functions:
 - `production_management/production_utils.py:120` — `get_raw_materials_for_job_card`
 - `production_management/doctype/material_planning/material_planning.py:141` — `@frappe.validate_and_sanitize_search_inputs`
 - `production_management/doctype/material_planning/material_planning.py:167` — `get_bom_info`
-- `production_management/doctype/material_planning/material_planning.py:215` — `get_raw_materials`
-- `production_management/doctype/material_planning/material_planning.py:331` — `check_stock_availability`
-- `production_management/doctype/material_planning/material_planning.py:563` — `move_to_exact_match`
-- `production_management/doctype/material_planning/material_planning.py:702` — `finalize_mapping`
-- `production_management/doctype/material_planning/material_planning.py:766` — `get_batch_reservation_summary`
-- `production_management/doctype/material_planning/material_planning.py:800` — `get_batch_item`
-- `production_management/doctype/material_planning/material_planning.py:808` — `get_batch_stock_summary`
-- `production_management/doctype/material_planning/material_planning.py:879` — `reserve_batches`
-- `production_management/doctype/material_planning/material_planning.py:983` — `reserve_exact_match_batches`
-- `production_management/doctype/material_planning/material_planning.py:1099` — `unreserve_exact_match_batches`
-- `production_management/doctype/material_planning/material_planning.py:1140` — `check_mapping_batch_availability`
-- `production_management/doctype/material_planning/material_planning.py:1200` — `unreserve_batches`
-- `production_management/doctype/material_planning/material_planning.py:1241` — `_test_simulate_se_release`
-- `production_management/doctype/material_planning/material_planning.py:1260` — `make_production_plan`
-- `production_management/doctype/material_planning/material_planning.py:1317` — `make_material_request`
+- `production_management/doctype/material_planning/material_planning.py:219` — `get_so_drawings_for_bom_picker`
+- `production_management/doctype/material_planning/material_planning.py:282` — `get_raw_materials`
+- `production_management/doctype/material_planning/material_planning.py:367` — `check_stock_availability`
+- `production_management/doctype/material_planning/material_planning.py:609` — `move_to_exact_match`
+- `production_management/doctype/material_planning/material_planning.py:757` — `finalize_mapping`
+- `production_management/doctype/material_planning/material_planning.py:822` — `get_batch_reservation_summary`
+- `production_management/doctype/material_planning/material_planning.py:856` — `get_batch_item`
+- `production_management/doctype/material_planning/material_planning.py:864` — `get_batch_stock_summary`
+- `production_management/doctype/material_planning/material_planning.py:935` — `reserve_batches`
+- `production_management/doctype/material_planning/material_planning.py:1039` — `reserve_exact_match_batches`
+- `production_management/doctype/material_planning/material_planning.py:1155` — `unreserve_exact_match_batches`
+- `production_management/doctype/material_planning/material_planning.py:1196` — `check_mapping_batch_availability`
+- `production_management/doctype/material_planning/material_planning.py:1256` — `unreserve_batches`
+- `production_management/doctype/material_planning/material_planning.py:1297` — `_test_simulate_se_release`
+- `production_management/doctype/material_planning/material_planning.py:1316` — `make_production_plan`
+- `production_management/doctype/material_planning/material_planning.py:1373` — `make_material_request`
 - `purchase_receipt_management/purchase_receipt.py:18` — `get_pr_item_uom`
 - `purchase_receipt_management/purchase_receipt.py:252` — `get_mp_for_pr`
 - `purchase_receipt_management/purchase_receipt.py:271` — `allocate_pr_stock_to_mp`

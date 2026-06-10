@@ -45,7 +45,8 @@
    "fieldname": "qty_to_manufacture",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Qty to Manufacture"
+   "label": "Qty to Manufacture",
+   "read_only": 1
   },
   {
    "fieldname": "uom",
