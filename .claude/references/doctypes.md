@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-06-06 04:32:37_
+_Generated: 2026-06-11 00:20:55_
 
 ## drawing
 
@@ -145,6 +145,7 @@ _Generated: 2026-06-06 04:32:37_
 | ` _validate_batch_calc_qty` | no |
 | ` search_bom` | no |
 | ` get_bom_info` | no |
+| ` get_so_drawings_for_bom_picker` | no |
 | ` get_raw_materials` | no |
 | ` check_stock_availability` | no |
 | ` _get_non_batch_stock` | no |

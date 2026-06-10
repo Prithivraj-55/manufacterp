@@ -298,6 +298,16 @@ frappe.ui.form.on("Material Request", {
 \t\t\t\tfilters: { item_code: row.item_code }
 \t\t\t};
 \t\t});
+
+\t\t// Skip the "Enter Supplier" prompt — go straight to Purchase Order
+\t\tfrm.events.make_purchase_order = function(frm) {
+\t\t\tfrappe.model.open_mapped_doc({
+\t\t\t\tmethod: "erpnext.stock.doctype.material_request.material_request.make_purchase_order",
+\t\t\t\tfrm: frm,
+\t\t\t\targs: { default_supplier: "" },
+\t\t\t\trun_link_triggers: true,
+\t\t\t});
+\t\t};
 \t}
 });
 
@@ -675,6 +685,10 @@ function _so_render_file_buttons(frm) {
 	var has_file = !!frm.doc.custom_bom_excel_file;
 	var has_drawing_created = (frm.doc.custom_duno_items || []).some(function(r) { return !!r.drawing; });
 
+	// Lock the attach field once any drawing has been created
+	frm.set_df_property("custom_bom_excel_file", "read_only", has_drawing_created ? 1 : 0);
+	frm.refresh_field("custom_bom_excel_file");
+
 	var $row = $('<div style="display:flex;gap:8px;padding:4px 0 8px">').appendTo($w);
 
 	if (!has_file) {
@@ -689,10 +703,15 @@ function _so_render_file_buttons(frm) {
 			.appendTo($row);
 	} else {
 		// File attached — show Load Items and Clear Items
-		$('<button class="btn btn-sm btn-primary">')
+		var $load = $('<button class="btn btn-sm btn-primary">')
 			.text(__("Load Items"))
-			.on("click", function() { _so_load_excel(frm); })
 			.appendTo($row);
+		if (has_drawing_created) {
+			$load.prop("disabled", true)
+				.attr("title", __("Drawings have been created — load is disabled"));
+		} else {
+			$load.on("click", function() { _so_load_excel(frm); });
+		}
 
 		var $clear = $('<button class="btn btn-sm btn-default">')
 			.text(__("Clear Items"))
@@ -746,19 +765,56 @@ function _so_render_drawing_buttons(frm) {
 		var final_count = items.filter(function(r) { return r.mark_final_revision && subm_nf.has(r.drawing); }).length;
 		if (final_count) {
 			frm.add_custom_button(__("Mark as Final Revision"), function() {
+				if (frm.doc.docstatus !== 1) {
+					frappe.msgprint({
+						title: __("Sales Order Not Submitted"),
+						message: __("Please submit the Sales Order before marking drawings as Final Revision."),
+						indicator: "orange",
+					});
+					return;
+				}
 				_so_run_step(frm, "final_revision", __("Mark as Final Revision"), __("Marking Final Revision…"), final_count, __("Final Revision"));
 			}, __("Drawing"));
 		}
 
-		// Create BOM — only if final revision drawings with checkbox on
-		var bom_count = items.filter(function(r) { return r.create_bom && final.has(r.drawing); }).length;
+		// Create BOM options — only if final revision drawings with checkbox on
+		var bom_candidates = items.filter(function(r) { return r.create_bom && final.has(r.drawing); });
+		var bom_count = bom_candidates.length;
 		if (bom_count) {
+			var bom_drawing_names = bom_candidates.map(function(r) { return r.drawing; });
+
+			// Check upfront if all candidate drawings already have a submitted BOM.
+			// If so, show an info message instead of running the step.
+			function _run_if_not_all_done(step, title, freeze_msg) {
+				frappe.db.get_list("BOM", {
+					filters: [["custom_drawing", "in", bom_drawing_names], ["docstatus", "=", 1]],
+					fields: ["name"],
+					limit: bom_drawing_names.length + 1,
+				}).then(function(existing) {
+					if (existing.length >= bom_drawing_names.length) {
+						frappe.msgprint({
+							title: __("BOMs Already Created"),
+							message: __("All BOMs are already created and submitted — nothing to create.")
+								+ "<br><br>"
+								+ __("You can now proceed to <b>Material Planning</b> to start production planning."),
+							indicator: "blue",
+						});
+						return;
+					}
+					_so_run_step(frm, step, title, freeze_msg, bom_count, __("Create BOM"));
+				});
+			}
+
+			frm.add_custom_button(__("Create and Submit BOM"), function() {
+				_run_if_not_all_done("create_and_submit_bom", __("Create and Submit BOM"), __("Creating and Submitting BOMs…"));
+			}, __("Drawing"));
+
 			frm.add_custom_button(__("Create BOM"), function() {
-				_so_run_step(frm, "create_bom", __("Create BOM"), __("Creating BOMs…"), bom_count, __("Create BOM"));
+				_run_if_not_all_done("create_bom", __("Create BOM"), __("Creating BOMs…"));
 			}, __("Drawing"));
 		}
 
-		// Submit BOM — needs BOM docstatus check (separate async call)
+		// Submit BOM — only if draft BOMs already exist
 		frappe.db.get_list("BOM", {
 			filters: [["custom_drawing", "in", drawing_names], ["docstatus", "=", 0]],
 			fields: ["name", "custom_drawing"],
@@ -819,35 +875,11 @@ function _so_create_drawings(frm) {
 	var confirm_msg = __("{0} drawing(s) will be created.", [count]) + "<br><br>" +
 		__("To skip any drawing, uncheck <b>Create Drawing</b> in the Drawing List row.");
 	frappe.confirm(confirm_msg, function() {
-		frappe.call({
+		_so_run_batched(frm, {
 			method: "manufyxinvenzaerp.drawing_management.so_drawing_import.create_drawings_from_import",
+			title: __("Create Drawing"),
 			args: { so_name: frm.doc.name },
-			freeze: true,
-			freeze_message: __("Creating Drawings…"),
-			callback: function(r) {
-				if (!r.message) return;
-				var results = r.message;
-				var ok  = results.filter(function(x) { return x.status === "success"; });
-				var err = results.filter(function(x) { return x.status === "error"; });
-
-				var parts = [];
-				if (ok.length)  parts.push("<b>" + ok.length + " " + __("created") + "</b>");
-				if (err.length) parts.push("<span style='color:red'><b>" + err.length + " " + __("failed") + "</b></span>");
-				var msg = parts.join(" &nbsp;|&nbsp; ");
-
-				if (err.length) {
-					msg += "<br><br><b>" + __("Failed — fix and create manually:") + "</b><br>" +
-						err.map(function(e) {
-							return "<b>" + (e.drawing_number || "") + "</b> — " + e.error;
-						}).join("<br>");
-				}
-				frappe.msgprint({
-					title: __("Create Drawing Complete"),
-					message: msg,
-					indicator: err.length ? "orange" : "green"
-				});
-				frm.reload_doc();
-			}
+			count: count,
 		});
 	});
 }
@@ -858,43 +890,175 @@ function _so_run_step(frm, step, label, freeze_msg, count, checkbox_label) {
 		confirm_msg += "<br><br>" + __("To skip any drawing, uncheck <b>{0}</b> in the Drawing List row.", [checkbox_label]);
 	}
 	frappe.confirm(confirm_msg, function() {
-		frappe.call({
+		_so_run_batched(frm, {
 			method: "manufyxinvenzaerp.drawing_management.so_drawing_import.process_drawings",
+			title: label,
 			args: { so_name: frm.doc.name, step: step },
-			freeze: true,
-			freeze_message: __(freeze_msg),
+			count: count,
+		});
+	});
+}
+
+// ── Batched runner — processes in chunks of 30, shows live progress ───────────
+
+function _so_run_batched(frm, opts) {
+	var BATCH_SIZE = 30;
+	var all_results = [];
+	var batch_start = 0;
+
+	// Create dialog with a pre-wired Close button (hidden until done)
+	var d = new frappe.ui.Dialog({
+		title: opts.title,
+		size: "small",
+		primary_action_label: __("Close & Reload"),
+		primary_action: function() { d.hide(); frm.reload_doc(); }
+	});
+	// Hide Close button and X while running
+	d.get_primary_btn().hide();
+	d.$wrapper.find(".modal-header .close").hide();
+	d.$body.html(_so_progress_html(0, opts.count || 1, [], false));
+	d.show();
+
+	function _next() {
+		var args = Object.assign({}, opts.args, {
+			batch_start: batch_start,
+			batch_size: BATCH_SIZE
+		});
+		frappe.call({
+			method: opts.method,
+			args: args,
 			callback: function(r) {
-				if (!r.message) return;
-				var results = r.message;
-				var ok       = results.filter(function(x) { return x.status === "success"; });
-				var err      = results.filter(function(x) { return x.status === "error"; });
-				var unchk    = results.filter(function(x) { return x.status === "unchecked"; });
-				var already  = results.filter(function(x) { return x.status === "already_done"; });
+				var res = (r && r.message) || {};
+				var batch_results = res.results || [];
+				all_results = all_results.concat(batch_results);
+				var processed = res.processed != null ? res.processed : (batch_start + batch_results.length);
+				var total = res.total || processed;
+				var done = (res.next_start === null || res.next_start === undefined || processed >= total);
 
-				var parts = [];
-				if (ok.length)     parts.push("<b>" + ok.length + " " + __("successful") + "</b>");
-				if (err.length)    parts.push("<span style='color:red'><b>" + err.length + " " + __("failed") + "</b></span>");
-				if (unchk.length)  parts.push(unchk.length + " " + __("skipped (unchecked)"));
-				if (already.length) parts.push(already.length + " " + __("already done"));
-				var msg = parts.join(" &nbsp;|&nbsp; ");
+				d.$body.html(_so_progress_html(processed, total, all_results, done));
 
-				if (err.length) {
-					msg += "<br><br><b>" + __("Failed — fix and submit manually:") + "</b><br>" +
-						err.map(function(e) {
-							var lbl = e.drawing_number || e.drawing;
-							var link = '<a href="/app/drawing/' + encodeURIComponent(e.drawing) + '" target="_blank">' + lbl + '</a>';
-							return link + " — " + e.error;
-						}).join("<br>");
+				if (!done) {
+					batch_start = res.next_start;
+					_next();
+				} else {
+					// Show Close button and X — do NOT reload yet; let the user read the results
+					d.get_primary_btn().show();
+					d.$wrapper.find(".modal-header .close").show();
 				}
-				frappe.msgprint({
-					title: label + " " + __("Complete"),
-					message: msg,
-					indicator: err.length ? "orange" : "green"
-				});
+			},
+			error: function() {
+				d.hide();
+				frappe.msgprint(__("A server error occurred — check the error log for details."));
 				frm.reload_doc();
 			}
 		});
-	});
+	}
+	_next();
+}
+
+function _so_progress_html(processed, total, results, done) {
+	var pct  = total ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+	var ok   = results.filter(function(x) { return x.status === "success"; }).length;
+	var err  = results.filter(function(x) { return x.status === "error"; }).length;
+	var skip = results.filter(function(x) {
+		return x.status === "skipped" || x.status === "unchecked" || x.status === "already_done";
+	}).length;
+
+	var has_err = err > 0;
+	var clr_main = has_err ? "#e53e3e" : (done ? "#38a169" : "#5a67d8");
+
+	// Inject keyframe CSS once into the page
+	if (!document.getElementById("_so_pg_css")) {
+		var _s = document.createElement("style");
+		_s.id = "_so_pg_css";
+		_s.textContent = "@keyframes _so_shine{0%{background-position:-400px 0}100%{background-position:400px 0}}"
+			+ "@keyframes _so_spin{to{transform:rotate(360deg)}}";
+		document.head.appendChild(_s);
+	}
+
+	// Progress bar style — animated shimmer while running, solid gradient when done
+	var bar_style;
+	if (done) {
+		bar_style = "background:" + (has_err
+			? "linear-gradient(90deg,#fc8181,#e53e3e)"
+			: "linear-gradient(90deg,#68d391,#38a169)") + ";";
+	} else {
+		bar_style = "background-image:linear-gradient(90deg,#5a67d8 0%,#9f7aea 50%,#5a67d8 100%);"
+			+ "background-size:800px 100%;animation:_so_shine 1.8s linear infinite;";
+	}
+
+	// Status icon — spinner while running, circle-check/warn when done
+	var icon_html;
+	if (done && !has_err) {
+		icon_html = '<span style="display:inline-flex;align-items:center;justify-content:center;'
+			+ 'width:34px;height:34px;border-radius:50%;background:#c6f6d5;color:#276749;font-size:18px;font-weight:700;">&#10003;</span>';
+	} else if (done && has_err) {
+		icon_html = '<span style="display:inline-flex;align-items:center;justify-content:center;'
+			+ 'width:34px;height:34px;border-radius:50%;background:#fed7d7;color:#c53030;font-size:18px;">&#9888;</span>';
+	} else {
+		icon_html = '<span style="display:inline-flex;align-items:center;justify-content:center;'
+			+ 'width:34px;height:34px;border-radius:50%;background:#ebf4ff;">'
+			+ '<span style="width:18px;height:18px;border:3px solid #c3dafe;border-top-color:#5a67d8;'
+			+ 'border-radius:50%;animation:_so_spin 0.8s linear infinite;display:inline-block;"></span></span>';
+	}
+
+	var lbl = done
+		? (has_err ? __("Completed with errors") : __("Complete"))
+		: __("Processing…");
+
+	var html = '<div style="padding:20px 16px 14px;">';
+
+	// Header: icon + label on left, large % on right
+	html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">';
+	html += '<div style="display:flex;align-items:center;gap:12px;">' + icon_html;
+	html += '<div><div style="font-size:14px;font-weight:700;color:#1a202c;line-height:1.2;">' + lbl + '</div>';
+	html += '<div style="font-size:11px;color:#a0aec0;margin-top:2px;">' + processed + ' / ' + total + ' ' + __("processed") + '</div></div>';
+	html += '</div>';
+	html += '<span style="font-size:36px;font-weight:800;color:' + clr_main + ';line-height:1;letter-spacing:-1px;">'
+		+ pct + '<span style="font-size:16px;font-weight:500;color:#a0aec0;">%</span></span>';
+	html += '</div>';
+
+	// Progress bar track
+	html += '<div style="background:#e2e8f0;border-radius:999px;height:10px;overflow:hidden;'
+		+ 'margin-bottom:16px;box-shadow:inset 0 1px 3px rgba(0,0,0,0.08);">';
+	html += '<div style="' + bar_style + 'width:' + pct + '%;height:100%;border-radius:999px;transition:width 0.35s ease;"></div>';
+	html += '</div>';
+
+	// Stats pills
+	if (results.length) {
+		html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:' + (err ? "12" : "0") + 'px;">';
+		if (ok)
+			html += '<span style="display:inline-flex;align-items:center;gap:5px;background:#f0fff4;color:#276749;'
+				+ 'border:1px solid #9ae6b4;border-radius:999px;padding:5px 14px;font-size:12px;font-weight:600;">'
+				+ '&#10003;&nbsp;' + ok + '&nbsp;' + __("succeeded") + '</span>';
+		if (err)
+			html += '<span style="display:inline-flex;align-items:center;gap:5px;background:#fff5f5;color:#c53030;'
+				+ 'border:1px solid #fed7d7;border-radius:999px;padding:5px 14px;font-size:12px;font-weight:600;">'
+				+ '&#10007;&nbsp;' + err + '&nbsp;' + __("failed") + '</span>';
+		if (skip)
+			html += '<span style="display:inline-flex;align-items:center;gap:5px;background:#fffaf0;color:#c05621;'
+				+ 'border:1px solid #fbd38d;border-radius:999px;padding:5px 14px;font-size:12px;font-weight:600;">'
+				+ '&#8677;&nbsp;' + skip + '&nbsp;' + __("skipped") + '</span>';
+		html += '</div>';
+
+		// Error detail list
+		if (err) {
+			var errors = results.filter(function(x) { return x.status === "error"; });
+			html += '<div style="max-height:130px;overflow-y:auto;font-size:11px;background:#fff5f5;'
+				+ 'border:1px solid #fed7d7;border-radius:8px;padding:10px 12px;margin-top:4px;">';
+			errors.forEach(function(e) {
+				html += '<div style="display:flex;gap:6px;margin-bottom:5px;align-items:flex-start;">'
+					+ '<span style="color:#e53e3e;font-weight:700;flex-shrink:0;margin-top:1px;">&#10007;</span>'
+					+ '<span><b style="color:#c53030;">' + frappe.utils.escape_html(e.drawing_number || e.drawing || "") + '</b>'
+					+ '<span style="color:#742a2a;">: ' + frappe.utils.escape_html(e.error || "") + '</span></span>'
+					+ '</div>';
+			});
+			html += '</div>';
+		}
+	}
+
+	html += '</div>';
+	return html;
 }
 
 function _so_clear_import(frm) {
@@ -1813,6 +1977,7 @@ def create_so_custom_fields():
                     "label": "Drawing List",
                     "options": "Sales Order DUNO Item",
                     "insert_after": "custom_drawing_list_section",
+                    "allow_on_submit": 1,
                 },
                 {
                     "fieldname": "custom_raw_materials_section",
@@ -1840,6 +2005,7 @@ def create_so_custom_fields():
                     "label": "Raw Materials",
                     "options": "Sales Order Drawing Raw Material",
                     "insert_after": "custom_raw_materials_verified",
+                    "allow_on_submit": 1,
                 },
             ]
         },

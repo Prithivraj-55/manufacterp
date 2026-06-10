@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-06-06 04:32:37_
+_Generated: 2026-06-11 00:20:55_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -26,8 +26,8 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `create_production_plan_from_bom` | 204 |
-| `parse_drawing_items_csv` | 257 |
+| `create_production_plan_from_bom` | 203 |
+| `parse_drawing_items_csv` | 256 |
 | `mark_as_final_revision` | 45 |
 | `get_batches_for_drawing_item` | 59 |
 | `create_drawings_from_so` | 7 |
@@ -36,12 +36,12 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `parse_bom_excel` | 129 |
-| `create_drawings_from_import` | 344 |
-| `process_drawings` | 474 |
-| `verify_raw_materials` | 556 |
-| `download_bom_template` | 612 |
-| `clear_drawing_import` | 654 |
+| `parse_bom_excel` | 123 |
+| `create_drawings_from_import` | 338 |
+| `process_drawings` | 489 |
+| `verify_raw_materials` | 619 |
+| `download_bom_template` | 677 |
+| `clear_drawing_import` | 719 |
 ## item_management/item.py
 
 | Method | Line |
@@ -56,23 +56,24 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `unreserve_exact_match_batches` | 1099 |
-| `check_mapping_batch_availability` | 1140 |
-| `unreserve_batches` | 1200 |
-| `_test_simulate_se_release` | 1241 |
-| `make_production_plan` | 1260 |
-| `make_material_request` | 1317 |
+| `reserve_exact_match_batches` | 1021 |
+| `unreserve_exact_match_batches` | 1137 |
+| `check_mapping_batch_availability` | 1178 |
+| `unreserve_batches` | 1238 |
+| `_test_simulate_se_release` | 1279 |
+| `make_production_plan` | 1298 |
+| `make_material_request` | 1355 |
 | `@frappe.validate_and_sanitize_search_inputs` | 141 |
 | `get_bom_info` | 167 |
-| `get_raw_materials` | 215 |
-| `check_stock_availability` | 331 |
-| `move_to_exact_match` | 563 |
-| `finalize_mapping` | 702 |
-| `get_batch_reservation_summary` | 766 |
-| `get_batch_item` | 800 |
-| `get_batch_stock_summary` | 808 |
-| `reserve_batches` | 879 |
-| `reserve_exact_match_batches` | 983 |
+| `get_so_drawings_for_bom_picker` | 219 |
+| `get_raw_materials` | 282 |
+| `check_stock_availability` | 367 |
+| `move_to_exact_match` | 600 |
+| `finalize_mapping` | 739 |
+| `get_batch_reservation_summary` | 804 |
+| `get_batch_item` | 838 |
+| `get_batch_stock_summary` | 846 |
+| `reserve_batches` | 917 |
 ## production_management/production_utils.py
 
 | Method | Line |
@@ -115,4 +116,4 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 ## Total
 
-_55 whitelisted methods_
+_56 whitelisted methods_

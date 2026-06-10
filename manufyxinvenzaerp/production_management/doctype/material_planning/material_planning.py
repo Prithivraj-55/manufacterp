@@ -216,6 +216,69 @@ def get_bom_info(bom_no):
 
 
 @frappe.whitelist()
+def get_so_drawings_for_bom_picker(so_name, mp_name=None):
+    """
+    Return all drawings from a Sales Order that have a submitted BOM.
+    Each result includes `already_used_in` — the name of another Material Planning
+    document that already has this BOM in its bom_items table (empty if free).
+    """
+    so = frappe.get_doc("Sales Order", so_name)
+    results = []
+
+    for row in (so.custom_duno_items or []):
+        if not row.drawing:
+            continue
+
+        bom_name = frappe.db.get_value(
+            "BOM", {"custom_drawing": row.drawing, "docstatus": 1}, "name"
+        )
+        if not bom_name:
+            continue
+
+        # Reuse get_bom_info to build the same row structure as a manual selection
+        info = get_bom_info(bom_name)
+        if not info:
+            continue
+
+        info["bom_no"] = bom_name
+        # Prefer duno_mark_no and customer_drawing_number from the DUNO Item row
+        if not info.get("duno_mark_no"):
+            info["duno_mark_no"] = row.duno_mark_no or ""
+        if not info.get("customer_drawing_number"):
+            info["customer_drawing_number"] = row.drawing_number or ""
+        info["already_used_in"] = ""
+
+        results.append(info)
+
+    # Check which BOMs are already mapped in another Material Planning document
+    bom_names = [r["bom_no"] for r in results]
+    if bom_names:
+        exclude = mp_name or "__none__"
+        placeholders = ", ".join(["%s"] * len(bom_names))
+        used_rows = frappe.db.sql(
+            f"""
+            SELECT bom_no, parent
+            FROM `tabMaterial Planning BOM Item`
+            WHERE bom_no IN ({placeholders})
+              AND parent != %s
+            ORDER BY parent
+            """,
+            tuple(bom_names) + (exclude,),
+            as_dict=True,
+        )
+        # Keep only the first MP name per BOM (in case it appears in multiple)
+        bom_mp_map = {}
+        for u in used_rows:
+            if u.bom_no not in bom_mp_map:
+                bom_mp_map[u.bom_no] = u.parent
+
+        for r in results:
+            r["already_used_in"] = bom_mp_map.get(r["bom_no"], "")
+
+    return results
+
+
+@frappe.whitelist()
 def get_raw_materials(doc):
     """
     Explode each BOM in bom_items and return a flat list of raw material rows
