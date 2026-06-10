@@ -469,14 +469,16 @@ def check_stock_availability(doc):
 
             if matched_batches:
                 to_consume = required_qty
+                consumed_batches = []
                 for b in matched_batches:
                     if to_consume <= 0:
                         break
                     consumed = min(batch_remaining[b["batch_no"]], to_consume)
                     batch_remaining[b["batch_no"]] -= consumed
                     to_consume -= consumed
+                    consumed_batches.append(b)
 
-                for b in matched_batches:
+                for b in consumed_batches:
                     available_raw_materials.append({
                         "item_number": row.get("item_number") or "",
                         "sales_order": row.get("sales_order") or "",
@@ -675,14 +677,16 @@ def move_to_exact_match(doc, item_codes):
 
             if free_batches:
                 to_consume = required_qty
+                consumed_batches = []
                 for b in free_batches:
                     if to_consume <= 0:
                         break
                     consumed = min(batch_remaining[b["batch_no"]], to_consume)
                     batch_remaining[b["batch_no"]] -= consumed
                     to_consume -= consumed
+                    consumed_batches.append(b)
 
-                for b in free_batches:
+                for b in consumed_batches:
                     matched.append({
                         "item_number": row.get("item_number") or "",
                         "sales_order": row.get("sales_order") or "",
