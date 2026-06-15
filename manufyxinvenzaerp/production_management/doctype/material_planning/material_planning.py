@@ -1503,6 +1503,55 @@ def make_material_request(material_planning_name, selected_items):
     return mr.name
 
 
+@frappe.whitelist()
+def update_so_difference_kg(mp_name):
+    """Sum (batch_calc_qty - qty) per (sales_order, duno_mark_no) across ALL Material Planning
+    documents and write the result into the Difference Kg field on Sales Order DUNO Item rows.
+    Called from the 'Update Difference Kg in Sales Order' button."""
+    mp = frappe.get_doc("Material Planning", mp_name)
+
+    # Collect unique (sales_order, duno_mark_no) pairs touched by this MP
+    pairs = set()
+    for row in (mp.material_mapping or []):
+        if row.sales_order and row.duno_mark_no:
+            pairs.add((row.sales_order, row.duno_mark_no))
+
+    if not pairs:
+        frappe.throw(_("No Material Mapping rows with Sales Order and DUNO/Mark No found."))
+
+    updated = 0
+    for sales_order, duno_mark_no in pairs:
+        # Sum diff across ALL MPs for this (SO, duno) so the value is always complete
+        rows = frappe.db.get_all(
+            "Material Planning Material Mapping",
+            filters={
+                "sales_order": sales_order,
+                "duno_mark_no": duno_mark_no,
+                "batch_mapped": "Mapped",
+            },
+            fields=["batch_calc_qty", "qty"],
+        )
+        diff_kg = flt(sum(flt(r.batch_calc_qty) - flt(r.qty) for r in rows), 3)
+
+        duno_rows = frappe.db.get_all(
+            "Sales Order DUNO Item",
+            filters={"parent": sales_order, "duno_mark_no": duno_mark_no},
+            fields=["name"],
+        )
+        for duno_row in duno_rows:
+            frappe.db.set_value(
+                "Sales Order DUNO Item",
+                duno_row.name,
+                "difference_kg",
+                diff_kg,
+                update_modified=False,
+            )
+            updated += 1
+
+    frappe.db.commit()
+    return {"updated": updated}
+
+
 def unlink_material_request_on_cancel(doc, method=None):
     """Clear the Material Planning link when an MR is cancelled or deleted."""
     if doc.get("custom_material_planning"):
