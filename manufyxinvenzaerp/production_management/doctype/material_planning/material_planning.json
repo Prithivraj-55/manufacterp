@@ -22,6 +22,7 @@
   "expected_weight_material_mapping",
   "weight_cross_item_mapped",
   "diff_weight_html",
+  "update_so_diff_btn",
   "tab_bom_items",
   "section_bom_import",
   "so_bom_import",
@@ -273,6 +274,11 @@
    "fieldname": "diff_weight_html",
    "fieldtype": "HTML",
    "label": "Difference in Kg"
+  },
+  {
+   "fieldname": "update_so_diff_btn",
+   "fieldtype": "Button",
+   "label": "Update Difference Kg in Sales Order"
   }
  ],
  "links": [],

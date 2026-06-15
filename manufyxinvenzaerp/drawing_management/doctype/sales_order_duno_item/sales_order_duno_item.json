@@ -12,6 +12,7 @@
   "drawing_number",
   "total_quantity",
   "total_weight",
+  "difference_kg",
   "drawing",
   "section_break_actions",
   "create_drawing",
@@ -64,6 +65,13 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Total Weight (KG)"
+  },
+  {
+   "fieldname": "difference_kg",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Difference Kg",
+   "read_only": 1
   },
   {
    "fieldname": "drawing",

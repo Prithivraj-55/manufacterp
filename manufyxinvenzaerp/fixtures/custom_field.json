@@ -35430,6 +35430,16 @@
   "in_list_view": 0
  },
  {
+  "name": "Purchase Receipt-custom_supplier_invoice_weight",
+  "doctype": "Custom Field",
+  "dt": "Purchase Receipt",
+  "fieldname": "custom_supplier_invoice_weight",
+  "label": "Supplier Invoice Weight",
+  "fieldtype": "Float",
+  "insert_after": "custom_weighment_weight",
+  "in_list_view": 0
+ },
+ {
   "allow_in_quick_entry": 0,
   "allow_on_submit": 0,
   "bold": 0,

@@ -160,6 +160,27 @@ function _update_weight_summary(frm) {
 
 frappe.ui.form.on("Material Planning", {
 
+	update_so_diff_btn(frm) {
+		if (frm.is_dirty()) {
+			frappe.msgprint(__("Please save the document before updating the Sales Order."));
+			return;
+		}
+		frappe.call({
+			method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.update_so_difference_kg",
+			args: { mp_name: frm.doc.name },
+			freeze: true,
+			freeze_message: __("Updating Difference Kg in Sales Order…"),
+			callback(r) {
+				if (r.message) {
+					frappe.show_alert({
+						message: __("{0} Sales Order Drawing row(s) updated.", [r.message.updated]),
+						indicator: "green",
+					}, 5);
+				}
+			},
+		});
+	},
+
 	refresh(frm) {
 		// Always keep the Stock Analysis tab visible regardless of table data
 		frm.set_df_property("tab_stock_analysis", "hidden", 0); // fieldname stays, label changed to "Stock Details"
