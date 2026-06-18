@@ -989,12 +989,14 @@ def reserve_batches(material_planning_name):
         allocated_here = batch_allocated_here.get(row.batch, 0.0)
         available = max(0.0, flt(batch_stock) - flt(reserved_by_others) - allocated_here)
 
-        reserved_qty = min(to_reserve, available)
-        shortfall_qty = max(0.0, to_reserve - reserved_qty)
+        # Round reserved_qty first so shortfall is computed on the same precision
+        # as the displayed value — avoids floating-point near-zero false positives.
+        reserved_qty = flt(min(to_reserve, available), 3)
+        shortfall_qty = flt(max(0.0, flt(to_reserve, 3) - reserved_qty), 3)
 
         row.is_reserved = 1
-        row.reserved_qty = flt(reserved_qty, 3)
-        row.shortfall_qty = flt(shortfall_qty, 3)
+        row.reserved_qty = reserved_qty
+        row.shortfall_qty = shortfall_qty
         row.reserved_on = now()
         batch_allocated_here[row.batch] = allocated_here + reserved_qty
         reserved_count += 1
@@ -1005,8 +1007,8 @@ def reserve_batches(material_planning_name):
                 "item_name": row.item_name or "",
                 "batch": row.batch,
                 "required_qty": flt(to_reserve, 3),
-                "reserved_qty": flt(reserved_qty, 3),
-                "shortfall_qty": flt(shortfall_qty, 3),
+                "reserved_qty": reserved_qty,
+                "shortfall_qty": shortfall_qty,
                 "uom": row.uom or "",
                 "batch_stock": flt(batch_stock, 3),
                 "reserved_by_others": flt(reserved_by_others + allocated_here, 3),
@@ -1073,12 +1075,12 @@ def reserve_exact_match_batches(material_planning_name):
             allocated_here = batch_allocated_here.get(row.batch_no, 0.0)
             available = max(0.0, flt(batch_stock) - flt(reserved_by_others) - allocated_here)
 
-            reserved_qty = min(required_qty, available)
-            shortfall_qty = max(0.0, required_qty - reserved_qty)
+            reserved_qty = flt(min(required_qty, available), 3)
+            shortfall_qty = flt(max(0.0, flt(required_qty, 3) - reserved_qty), 3)
 
             row.is_reserved = 1
-            row.reserved_qty = flt(reserved_qty, 3)
-            row.shortfall_qty = flt(shortfall_qty, 3)
+            row.reserved_qty = reserved_qty
+            row.shortfall_qty = shortfall_qty
             row.reserved_on = now()
             batch_allocated_here[row.batch_no] = allocated_here + reserved_qty
             reserved_count += 1
@@ -1088,9 +1090,9 @@ def reserve_exact_match_batches(material_planning_name):
                     "item_code": row.item_code,
                     "item_name": row.item_name or "",
                     "batch": row.batch_no,
-                    "required_qty": required_qty,
-                    "reserved_qty": flt(reserved_qty, 3),
-                    "shortfall_qty": flt(shortfall_qty, 3),
+                    "required_qty": flt(required_qty, 3),
+                    "reserved_qty": reserved_qty,
+                    "shortfall_qty": shortfall_qty,
                     "uom": row.uom or "",
                     "batch_stock": flt(batch_stock, 3),
                     "reserved_by_others": flt(reserved_by_others + allocated_here, 3),
@@ -1105,12 +1107,12 @@ def reserve_exact_match_batches(material_planning_name):
             allocated_here = nonbatch_allocated.get(key, 0.0)
             available = max(0.0, stock - reserved_by_others - allocated_here)
 
-            reserved_qty = min(required_qty, available)
-            shortfall_qty = max(0.0, required_qty - reserved_qty)
+            reserved_qty = flt(min(required_qty, available), 3)
+            shortfall_qty = flt(max(0.0, flt(required_qty, 3) - reserved_qty), 3)
 
             row.is_reserved = 1
-            row.reserved_qty = flt(reserved_qty, 3)
-            row.shortfall_qty = flt(shortfall_qty, 3)
+            row.reserved_qty = reserved_qty
+            row.shortfall_qty = shortfall_qty
             row.reserved_on = now()
             nonbatch_allocated[key] = allocated_here + reserved_qty
             reserved_count += 1
@@ -1120,9 +1122,9 @@ def reserve_exact_match_batches(material_planning_name):
                     "item_code": row.item_code,
                     "item_name": row.item_name or "",
                     "batch": "",
-                    "required_qty": required_qty,
-                    "reserved_qty": flt(reserved_qty, 3),
-                    "shortfall_qty": flt(shortfall_qty, 3),
+                    "required_qty": flt(required_qty, 3),
+                    "reserved_qty": reserved_qty,
+                    "shortfall_qty": shortfall_qty,
                     "uom": row.uom or "",
                     "batch_stock": flt(stock, 3),
                     "reserved_by_others": flt(reserved_by_others + allocated_here, 3),
@@ -1352,6 +1354,7 @@ def make_production_plan(material_planning_name):
             "custom_drawing": row.drawing or "",
             "custom_duno_mark_no": row.duno_mark_no or 0,
             "custom_material_planning": material_planning_name,
+            "custom_customer_drawing_number": row.customer_drawing_number or "",
         })
 
     # Populate Process Planning from the first BOM's operations

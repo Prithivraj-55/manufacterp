@@ -489,6 +489,157 @@ def get_material_request_items(
 
 
 @frappe.whitelist()
+def get_pp_drawings_for_picker(search_type, search_value, pp_name=""):
+	"""
+	Returns drawing rows for the Production Plan picker popup.
+	search_type: "material_planning" or "sales_order"
+	search_value: MP name or SO name
+	pp_name: current PP (used to flag rows already in this plan)
+	"""
+	if search_type == "material_planning":
+		return _picker_rows_from_mp(search_value, pp_name)
+	elif search_type == "sales_order":
+		return _picker_rows_from_so(search_value, pp_name)
+	return []
+
+
+def _picker_rows_from_mp(mp_name, pp_name):
+	mp = frappe.get_doc("Material Planning", mp_name)
+	if mp.docstatus == 2:
+		frappe.throw(_("Material Planning {0} is cancelled.").format(mp_name))
+	if not mp.bom_items:
+		frappe.throw(_("No BOM items found on Material Planning {0}.").format(mp_name))
+
+	rows = []
+	for row in mp.bom_items:
+		cust_name = ""
+		if row.customer:
+			cust_name = frappe.db.get_value("Customer", row.customer, "customer_name") or row.customer
+		rows.append({
+			"bom_no": row.bom_no or "",
+			"item_code": row.item_code or "",
+			"item_name": row.item_name or "",
+			"drawing": row.drawing or "",
+			"duno_mark_no": row.duno_mark_no or "",
+			"customer_drawing_number": row.customer_drawing_number or "",
+			"sales_order": row.sales_order or "",
+			"customer": row.customer or "",
+			"customer_name": cust_name,
+			"qty_to_manufacture": flt(row.qty_to_manufacture) or 1,
+			"uom": row.uom or "",
+			"material_planning": mp_name,
+			"mp_complete": True,
+			"mp_docstatus": mp.docstatus,
+		})
+
+	_mark_already_in_pp(rows, pp_name)
+	return rows
+
+
+def _picker_rows_from_so(so_name, pp_name):
+	mp_bom_items = frappe.db.sql("""
+		SELECT
+			mpbi.bom_no, mpbi.item_code, mpbi.item_name, mpbi.drawing,
+			mpbi.duno_mark_no, mpbi.customer_drawing_number, mpbi.sales_order,
+			mpbi.customer, mpbi.qty_to_manufacture, mpbi.uom,
+			mpbi.parent AS material_planning
+		FROM `tabMaterial Planning BOM Item` mpbi
+		INNER JOIN `tabMaterial Planning` mp ON mp.name = mpbi.parent
+		WHERE mpbi.sales_order = %s
+		  AND mp.docstatus != 2
+		ORDER BY mpbi.parent, mpbi.idx
+	""", (so_name,), as_dict=True)
+
+	if not mp_bom_items:
+		return []
+
+	# Determine completion per MP: has stock analysis tables populated
+	mp_names = list({r.material_planning for r in mp_bom_items})
+	mp_completion = {}
+	for mp_n in mp_names:
+		has_analysis = (
+			frappe.db.count("Material Planning Available Raw Material", {"parent": mp_n}) > 0
+			or frappe.db.count("Material Planning Material Mapping", {"parent": mp_n}) > 0
+			or frappe.db.count("Material Planning Unavailable Item", {"parent": mp_n}) > 0
+		)
+		mp_docstatus = frappe.db.get_value("Material Planning", mp_n, "docstatus") or 0
+		mp_completion[mp_n] = {"complete": has_analysis, "docstatus": mp_docstatus}
+
+	rows = []
+	for r in mp_bom_items:
+		cust_name = ""
+		if r.customer:
+			cust_name = frappe.db.get_value("Customer", r.customer, "customer_name") or r.customer
+		mp_info = mp_completion.get(r.material_planning, {"complete": False, "docstatus": 0})
+		row = dict(r)
+		row["customer_name"] = cust_name
+		row["mp_complete"] = mp_info["complete"]
+		row["mp_docstatus"] = mp_info["docstatus"]
+		row["duno_mark_no"] = r.duno_mark_no or ""
+		row["customer_drawing_number"] = r.customer_drawing_number or ""
+		rows.append(row)
+
+	_mark_already_in_pp(rows, pp_name)
+	return rows
+
+
+def _mark_already_in_pp(rows, current_pp_name):
+	bom_nos = [r.get("bom_no") for r in rows if r.get("bom_no")]
+	if not bom_nos:
+		return
+
+	placeholders = ", ".join(["%s"] * len(bom_nos))
+	used_rows = frappe.db.sql(
+		"""
+		SELECT ppi.bom_no, ppi.parent
+		FROM `tabProduction Plan Item` ppi
+		INNER JOIN `tabProduction Plan` pp ON pp.name = ppi.parent
+		WHERE ppi.bom_no IN ({placeholders})
+		  AND pp.docstatus != 2
+		ORDER BY ppi.parent
+		""".format(placeholders=placeholders),
+		tuple(bom_nos),
+		as_dict=True,
+	)
+
+	bom_pp_map = {}
+	for u in used_rows:
+		bom_pp_map.setdefault(u.bom_no, []).append(u.parent)
+
+	for r in rows:
+		pp_list = bom_pp_map.get(r.get("bom_no"), [])
+		r["already_in_this_pp"] = bool(current_pp_name and current_pp_name in pp_list)
+		other_pps = [p for p in pp_list if p != current_pp_name]
+		r["already_in_pp"] = other_pps[0] if other_pps else ""
+
+
+@frappe.whitelist()
+def get_operations_from_routing(bom_no):
+    """Return ordered list of operations for a BOM (from its operations table)."""
+    if not bom_no:
+        return []
+    ops = frappe.db.sql("""
+        SELECT operation FROM `tabBOM Operation`
+        WHERE parent = %s AND operation IS NOT NULL AND operation != ''
+        ORDER BY idx
+    """, bom_no, as_dict=True)
+    return [r.operation for r in ops]
+
+
+@frappe.whitelist()
+def get_standard_routing_operations():
+    """Return ordered operations from Standard Manufacturing Routing."""
+    ops = frappe.db.sql("""
+        SELECT operation FROM `tabBOM Operation`
+        WHERE parent = 'Standard Manufacturing Routing'
+          AND parenttype = 'Routing'
+          AND operation IS NOT NULL AND operation != ''
+        ORDER BY idx
+    """, as_dict=True)
+    return [r.operation for r in ops]
+
+
+@frappe.whitelist()
 def make_material_request(doc, submit):
 	self = frappe.get_doc("Production Plan", doc)
 	material_request_list = []

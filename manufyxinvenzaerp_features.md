@@ -1,6 +1,6 @@
 # Manufyxinvenzaerp — Implemented Features
 **App:** manufyxinvenzaerp | **Platform:** Frappe v15 / ERPNext v15 | **Site:** manufact
-**Date:** 2026-05-30
+**Date:** 2026-06-16
 
 ---
 
@@ -113,6 +113,15 @@ The largest and most complex module. Drives all raw material identification, sto
 - Save-time validation: blocks if calculated qty exceeds available free stock; warns if below required qty.
 - `Reserve Without Dimensions` flag allows bypassing dimension calc and reserving the required qty directly.
 - `Finalize Mapping`: unmapped rows (no batch assigned) are moved to Unavailable Items.
+- **Weight Summary — Difference in Kg**: The Details tab shows a live HTML summary of `Σ(batch_calc_qty − qty)` for all Mapped rows, coloured green (excess) or red (short).
+
+### 4.4a Update Difference Kg in Sales Order
+- Button **"Update Difference Kg in Sales Order"** in the Weight Summary section.
+- On click, calls `update_so_difference_kg()` which:
+  - Collects unique `(sales_order, duno_mark_no)` pairs from this MP's Material Mapping rows.
+  - Queries **all** Material Planning Material Mapping rows (across all MPs) for each pair with `batch_mapped = "Mapped"`.
+  - Sums `batch_calc_qty − qty` per pair and writes the result to the `difference_kg` field on the matching `Sales Order DUNO Item` row via `db.set_value` (bypasses SO submitted restriction).
+- The `difference_kg` Float field is visible in the Sales Order Drawing List (DUNO Items) child table.
 
 ### 4.5 Stock Reservation
 - **Reserve Batches** (Material Mapping): reserves qty per batch with partial-stock awareness; tracks intra-document same-batch usage.
@@ -164,6 +173,8 @@ The largest and most complex module. Drives all raw material identification, sto
 - **Dimension Fields Auto-Copy from PO**: When PR is created from PO, dimension fields (L, W, T, Sec Qty) are copied from the PO item if not already set.
 - **Missing Fields Validation**: Warning on save; block on submit.
 - **Custom Total Weight** field on PR header.
+- **Weighment Weight** (`custom_weighment_weight`): Float field on PR header to record the actual weighment weight.
+- **Supplier Invoice Weight** (`custom_supplier_invoice_weight`): Float field on PR header to record the weight as per supplier invoice; placed after Weighment Weight.
 - **Custom UOM Link Query** on PR items.
 - **Batch Auto-Naming on Receipt**: On Batch `before_insert`, the batch ID is auto-generated as: `{Prefix}-T{Thickness}-L{Length}-W{Width}-R{ReceiptSuffix}` using the item's batch prefix and PR dimensions.
 - **Batch Auto-Naming from Stock Entry (Repack / Material Receipt)**: Similar naming with `SR{suffix}`.
@@ -281,7 +292,7 @@ Custom fields are exported as fixtures and applied across the following standard
 | Batch | Sec Qty, Sec UOM, Thickness, Length, Width, Supplier, Invoice No, Invoice Weight, Inward Date |
 | BOM / BOM Item | Drawing, DUNO/Mark No, Item Number, Material Spec, Dimensions, Sec Qty, Sec UOM, Sales Order, Parent Item Group |
 | Purchase Order / Items | Total Weight, Dimensions, Sec Qty, Parent Item Group, UOM custom link |
-| Purchase Receipt / Items | Total Weight, Dimensions, Sec Qty, Parent Item Group, Supplier fields, existing invoice fields |
+| Purchase Receipt / Items | Total Weight, Weighment Weight, Supplier Invoice Weight, Dimensions, Sec Qty, Parent Item Group, Supplier fields, existing invoice fields |
 | Material Request / Items | Material Planning link, Dimensions, Sec Qty |
 | Supplier Quotation / Items | Dimensions, Sec Qty |
 | Production Plan / Items | Drawing, DUNO/Mark No, Customer, Material Planning link; Process Planning table, Vendor/Contractor |
