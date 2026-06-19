@@ -1,0 +1,83 @@
+{
+ "actions": [],
+ "creation": "2026-06-19 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "drawing",
+  "item_code",
+  "item_name",
+  "col_break",
+  "duno_mark_no",
+  "customer_drawing_number",
+  "material_planning",
+  "total_weight_kg"
+ ],
+ "fields": [
+  {
+   "fieldname": "drawing",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Drawing",
+   "options": "Drawing",
+   "read_only": 1
+  },
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Item Code",
+   "options": "Item",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "item_code.item_name",
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Item Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "duno_mark_no",
+   "fieldtype": "Data",
+   "label": "DUNO / Mark No",
+   "read_only": 1
+  },
+  {
+   "fieldname": "customer_drawing_number",
+   "fieldtype": "Data",
+   "label": "Customer Drawing No",
+   "read_only": 1
+  },
+  {
+   "fieldname": "material_planning",
+   "fieldtype": "Link",
+   "label": "Material Planning",
+   "options": "Material Planning",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_weight_kg",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Total Weight (Kg)",
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-19 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Subcontracting Management",
+ "name": "SCO Drawing Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}

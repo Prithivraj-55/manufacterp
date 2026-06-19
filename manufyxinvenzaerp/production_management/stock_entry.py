@@ -76,6 +76,10 @@ def on_submit_stock_entry(doc, method):
 	# Release reservations for all consumed batches
 	_release_material_planning_reservations(doc)
 
+	# When materials are sent to supplier, record transferred weight on the SCO
+	if doc.stock_entry_type == "Send to Subcontractor" and doc.get("subcontracting_order"):
+		_update_sco_transferred_weight(doc.subcontracting_order)
+
 
 def _reduce_batch_sec_qty(batch_no, consumed_qty):
 	current = flt(frappe.db.get_value("Batch", batch_no, "custom_sec_qty"))
@@ -155,6 +159,10 @@ def on_cancel_stock_entry(doc, method):
 	"""When a Stock Entry is cancelled, batch stock returns — restore Material Planning reservations."""
 	_restore_material_planning_reservations(doc)
 
+	# Recalculate transferred weight on SCO if a Send to Subcontractor SE is cancelled
+	if doc.stock_entry_type == "Send to Subcontractor" and doc.get("subcontracting_order"):
+		_update_sco_transferred_weight(doc.subcontracting_order)
+
 
 def _restore_material_planning_reservations(doc):
 	"""
@@ -190,6 +198,43 @@ def _restore_material_planning_reservations(doc):
 				"reserved_on": now(),
 			},
 			update_modified=False,
+		)
+
+
+def _update_sco_transferred_weight(sco_name):
+	"""Recompute SCO.custom_transferred_weight_kg from all submitted Send-to-Subcontractor SEs.
+	Also refreshes Op-1 SOE's available_to_consume_kg if it is still in draft.
+	"""
+	supplier_warehouse = frappe.db.get_value("Subcontracting Order", sco_name, "supplier_warehouse")
+	if not supplier_warehouse:
+		return
+
+	result = frappe.db.sql(
+		"""
+		SELECT COALESCE(SUM(sed.qty), 0)
+		FROM `tabStock Entry Detail` sed
+		JOIN `tabStock Entry` se ON se.name = sed.parent
+		WHERE se.subcontracting_order = %s
+		  AND se.stock_entry_type = 'Send to Subcontractor'
+		  AND se.docstatus = 1
+		  AND sed.t_warehouse = %s
+		""",
+		(sco_name, supplier_warehouse),
+	)
+	transferred = flt(result[0][0]) if result and result[0][0] else 0
+	frappe.db.set_value(
+		"Subcontracting Order", sco_name, "custom_transferred_weight_kg", flt(transferred, 3)
+	)
+
+	# Keep Op-1 SOE in sync while still in draft
+	soe_op1 = frappe.db.get_value(
+		"Supplier Operation Entry",
+		{"subcontracting_order": sco_name, "sequence_id": 1, "docstatus": 0},
+		"name",
+	)
+	if soe_op1:
+		frappe.db.set_value(
+			"Supplier Operation Entry", soe_op1, "available_to_consume_kg", flt(transferred, 3)
 		)
 
 

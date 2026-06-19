@@ -15,8 +15,11 @@
   "supplier",
   "supplier_warehouse",
   "status",
-  "section_break_items",
-  "items"
+  "section_break_summary",
+  "available_to_consume_kg",
+  "total_consumed_kg",
+  "section_break_log",
+  "consumption_log"
  ],
  "fields": [
   {
@@ -84,20 +87,39 @@
    "default": "Open"
   },
   {
-   "fieldname": "section_break_items",
+   "fieldname": "section_break_summary",
    "fieldtype": "Section Break",
-   "label": "Operation Items"
+   "label": "Weight Summary"
   },
   {
-   "fieldname": "items",
+   "fieldname": "available_to_consume_kg",
+   "fieldtype": "Float",
+   "label": "Available to Consume (Kg)",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "total_consumed_kg",
+   "fieldtype": "Float",
+   "label": "Total Consumed (Kg)",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "section_break_log",
+   "fieldtype": "Section Break",
+   "label": "Consumption Log"
+  },
+  {
+   "fieldname": "consumption_log",
    "fieldtype": "Table",
-   "label": "Operation Items",
-   "options": "Supplier Operation Item"
+   "label": "Consumption Log",
+   "options": "SOE Consumption Log"
   }
  ],
  "is_submittable": 1,
  "links": [],
- "modified": "2026-05-06 00:00:00.000000",
+ "modified": "2026-06-19 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Subcontracting Management",
  "name": "Supplier Operation Entry",
