@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-06-11 00:53:44_
+_Generated: 2026-06-19 14:49:00_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -56,14 +56,15 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `reserve_exact_match_batches` | 1039 |
-| `unreserve_exact_match_batches` | 1155 |
-| `check_mapping_batch_availability` | 1196 |
-| `unreserve_batches` | 1256 |
-| `_test_simulate_se_release` | 1297 |
-| `make_production_plan` | 1316 |
-| `make_material_request` | 1373 |
+| `reserve_exact_match_batches` | 1041 |
+| `unreserve_exact_match_batches` | 1157 |
+| `check_mapping_batch_availability` | 1198 |
+| `unreserve_batches` | 1258 |
+| `_test_simulate_se_release` | 1299 |
+| `make_production_plan` | 1318 |
+| `make_material_request` | 1376 |
 | `@frappe.validate_and_sanitize_search_inputs` | 141 |
+| `update_so_difference_kg` | 1510 |
 | `get_bom_info` | 167 |
 | `get_so_drawings_for_bom_picker` | 219 |
 | `get_raw_materials` | 282 |
@@ -85,7 +86,10 @@ All `@frappe.whitelist()` methods. Call from JS:
 | Method | Line |
 |--------|------|
 | `get_items_for_material_requests` | 115 |
-| `make_material_request` | 492 |
+| `get_pp_drawings_for_picker` | 492 |
+| `get_operations_from_routing` | 617 |
+| `get_standard_routing_operations` | 630 |
+| `make_material_request` | 643 |
 ## purchase_order_management/purchase_order.py
 
 | Method | Line |
@@ -107,13 +111,13 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `create_supplier_operation_entries` | 173 |
-| `create_sco_from_production_plan` | 26 |
-| `create_send_to_subcontractor_entry` | 293 |
-| `create_wip_transfer_stock_entry` | 343 |
-| `create_return_stock_entry` | 401 |
-| `create_work_order_from_pp` | 98 |
+| `create_work_order_from_pp` | 119 |
+| `create_supplier_operation_entries` | 189 |
+| `create_sco_from_production_plan` | 24 |
+| `create_send_to_subcontractor_entry` | 257 |
+| `create_wip_transfer_stock_entry` | 309 |
+| `create_return_stock_entry` | 331 |
 
 ## Total
 
-_56 whitelisted methods_
+_60 whitelisted methods_

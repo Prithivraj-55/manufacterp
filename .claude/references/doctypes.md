@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-06-11 00:53:44_
+_Generated: 2026-06-19 14:49:00_
 
 ## drawing
 
@@ -168,6 +168,7 @@ _Generated: 2026-06-11 00:53:44_
 | ` __init__` | no |
 | ` make_production_plan` | no |
 | ` make_material_request` | no |
+| ` update_so_difference_kg` | no |
 | ` unlink_material_request_on_cancel` | no |
 
 ---
@@ -234,6 +235,28 @@ _Generated: 2026-06-11 00:53:44_
 | Module | production_management |
 | Path | `production_management/doctype/store_location` |
 | Controller | `production_management/doctype/store_location/store_location.py` |
+| Client script | none |
+
+---
+
+## sco_drawing_item
+
+| Key | Value |
+|-----|-------|
+| Module | subcontracting_management |
+| Path | `subcontracting_management/doctype/sco_drawing_item` |
+| Controller | `subcontracting_management/doctype/sco_drawing_item/sco_drawing_item.py` |
+| Client script | none |
+
+---
+
+## soe_consumption_log
+
+| Key | Value |
+|-----|-------|
+| Module | subcontracting_management |
+| Path | `subcontracting_management/doctype/soe_consumption_log` |
+| Controller | `subcontracting_management/doctype/soe_consumption_log/soe_consumption_log.py` |
 | Client script | none |
 
 ---
