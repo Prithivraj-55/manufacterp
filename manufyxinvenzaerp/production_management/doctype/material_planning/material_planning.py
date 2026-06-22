@@ -400,6 +400,9 @@ def check_stock_availability(doc):
 
     # Track remaining qty per batch so the same batch is not double-counted.
     batch_remaining = {}
+    # Per-batch totals (Kg and Nos) for proportional Sec Qty allocation.
+    batch_total_kg = {}
+    batch_total_sec = {}
     mp_name = doc.get("name") or ""
     shortfall_count = 0
 
@@ -436,6 +439,25 @@ def check_stock_availability(doc):
             "store_location": location or "",
         }
 
+        # Derive sec_qty from dimensions if it's 0 but all required dimensions are present.
+        # This handles cases where sec_qty was not computed during get_raw_materials (e.g.,
+        # a BOM item was missing a dimension at that time but has since been corrected).
+        if not base_row["sec_qty"]:
+            _grp = base_row.get("parent_item_group", "")
+            _len = base_row.get("length", 0)
+            _wid = base_row.get("width", 0)
+            _thk = base_row.get("thickness", 0)
+            _uwt = base_row.get("unit_weight", 0)
+            _qty = base_row.get("qty", 0)
+            if _grp == "Plates" and _len and _wid and _thk and _uwt and _qty:
+                _denom = (_len / 1000) * (_wid / 1000) * _thk * _uwt
+                if _denom:
+                    base_row["sec_qty"] = ceil(round(_qty / _denom, 9))
+            elif _grp == "Structurals" and _len and _uwt and _qty:
+                _denom = (_len / 1000) * _uwt
+                if _denom:
+                    base_row["sec_qty"] = ceil(round(_qty / _denom, 9))
+
         if has_batch:
             # ── Batch item: match by exact dimensions via SBB ──────────────
             dimensions = {
@@ -446,7 +468,11 @@ def check_stock_availability(doc):
 
             _, raw_matched_batches = get_sbb_available_qty(item_code, warehouse, dimensions, location=location)
 
+            # Capture each batch's TOTAL stock Kg and TOTAL Nos before any allocation —
+            # needed to split Sec Qty (Nos) proportionally to the Kg each row reserves.
             for b in raw_matched_batches:
+                batch_total_kg.setdefault(b["batch_no"], flt(b["qty"]))
+                batch_total_sec.setdefault(b["batch_no"], flt(b.get("custom_sec_qty")))
                 if b["batch_no"] not in batch_remaining:
                     reserved_by_others = _get_batch_reserved_by_others(b["batch_no"], mp_name)
                     net_qty = max(0.0, flt(b["qty"]) - reserved_by_others)
@@ -486,15 +512,19 @@ def check_stock_availability(doc):
                 # One ARM row per consumed batch. required_qty holds the portion
                 # this batch covers so reservation never double-counts across rows.
                 for b, consumed_qty in consumed_batches:
+                    bn = b["batch_no"]
+                    row_sec = _alloc_sec_qty(
+                        consumed_qty, batch_total_kg.get(bn), batch_total_sec.get(bn)
+                    )
                     available_raw_materials.append({
                         "item_number": row.get("item_number") or "",
                         "sales_order": row.get("sales_order") or "",
                         "item_code": item_code,
                         "item_name": row.get("item_name"),
-                        "batch_no": b["batch_no"],
+                        "batch_no": bn,
                         "required_qty": flt(consumed_qty, 3),
                         "available_qty": flt(b["qty"]),
-                        "sec_qty": flt(b.get("custom_sec_qty")),
+                        "sec_qty": row_sec,
                         "sec_uom": b.get("custom_sec_uom") or row.get("sec_uom"),
                         "uom": row.get("uom"),
                         "length": flt(row.get("length")),
@@ -590,6 +620,20 @@ def check_stock_availability(doc):
     }
 
 
+def _alloc_sec_qty(consumed_kg, batch_total_kg, batch_total_sec):
+    """Allocate Sec Qty (Nos) proportionally to the Kg actually reserved from a batch.
+
+    A batch holds batch_total_sec pieces across batch_total_kg. When a row reserves
+    only `consumed_kg`, it must get the matching fraction of the pieces — copying the
+    full batch sec to every consuming row over-counts the Nos. Because the Kg split
+    already never exceeds the batch, the proportional Nos also sum exactly to the
+    batch's total and never double-count across rows or MPs.
+    """
+    if flt(batch_total_kg) <= 0:
+        return 0.0
+    return flt(flt(batch_total_sec) * (flt(consumed_kg) / flt(batch_total_kg)), 3)
+
+
 def _get_non_batch_stock(item_code, warehouse):
     """Return current stock balance for a non-batch item in a warehouse via SLE."""
     result = frappe.db.sql(
@@ -634,6 +678,9 @@ def move_to_exact_match(doc, item_codes):
     failed = []
     still_unavailable = []
     batch_remaining = {}
+    # Per-batch totals (Kg and Nos) for proportional Sec Qty allocation.
+    batch_total_kg = {}
+    batch_total_sec = {}
 
     # Pre-deduct stock already allocated to existing available_raw_materials rows
     # in this MP so the same batch is not double-counted across operations.
@@ -669,6 +716,8 @@ def move_to_exact_match(doc, item_codes):
             )
 
             for b in raw_batches:
+                batch_total_kg.setdefault(b["batch_no"], flt(b["qty"]))
+                batch_total_sec.setdefault(b["batch_no"], flt(b.get("custom_sec_qty")))
                 if b["batch_no"] not in batch_remaining:
                     reserved_by_others = _get_batch_reserved_by_others(b["batch_no"], mp_name)
                     already_allocated  = pre_allocated.get(b["batch_no"], 0.0)
@@ -701,15 +750,19 @@ def move_to_exact_match(doc, item_codes):
                 # One matched row per consumed batch; required_qty = portion this
                 # batch covers so reservation never double-counts across rows.
                 for b, consumed_qty in consumed_batches:
+                    bn = b["batch_no"]
+                    row_sec = _alloc_sec_qty(
+                        consumed_qty, batch_total_kg.get(bn), batch_total_sec.get(bn)
+                    )
                     matched.append({
                         "item_number": row.get("item_number") or "",
                         "sales_order": row.get("sales_order") or "",
                         "item_code": item_code,
                         "item_name": row.get("item_name"),
-                        "batch_no": b["batch_no"],
+                        "batch_no": bn,
                         "required_qty": flt(consumed_qty, 3),
                         "available_qty": flt(b["qty"]),
-                        "sec_qty": flt(b.get("custom_sec_qty")),
+                        "sec_qty": row_sec,
                         "sec_uom": b.get("custom_sec_uom") or row.get("sec_uom"),
                         "uom": row.get("uom"),
                         "length": flt(row.get("length")),
@@ -1438,6 +1491,19 @@ def make_material_request(material_planning_name, selected_items):
             use_thickness   = flt(row.thickness)
             use_sec_qty     = flt(row.sec_qty)
             use_unit_weight = flt(row.unit_weight)
+
+        # Derive sec_qty from dimensions+weight if it's 0 but all other dimensions are
+        # present — handles stale unavailable_items rows saved before dimensions were complete.
+        if not use_sec_qty:
+            _qty = flt(row.qty)
+            if group == "Plates" and use_length and use_width and use_thickness and use_unit_weight and _qty:
+                _denom = (use_length / 1000) * (use_width / 1000) * use_thickness * use_unit_weight
+                if _denom:
+                    use_sec_qty = ceil(round(_qty / _denom, 9))
+            elif group == "Structurals" and use_length and use_unit_weight and _qty:
+                _denom = (use_length / 1000) * use_unit_weight
+                if _denom:
+                    use_sec_qty = ceil(round(_qty / _denom, 9))
 
         # Validate mandatory dimensions by parent item group
         if group == "Structurals":

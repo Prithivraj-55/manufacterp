@@ -2052,7 +2052,35 @@ def create_bom_client_script():
 def create_production_plan_custom_fields():
     create_custom_fields(
         {
+            "Production Plan Item": [
+                {
+                    "fieldname": "custom_customer_weight_kg",
+                    "fieldtype": "Float",
+                    "label": "Customer Provided Weight (Kg)",
+                    "insert_after": "custom_customer_drawing_number",
+                    "in_list_view": 1,
+                    "columns": 1,
+                },
+                {
+                    "fieldname": "custom_planned_rm_weight_kg",
+                    "fieldtype": "Float",
+                    "label": "Planned RM Weight (Kg)",
+                    "insert_after": "custom_customer_weight_kg",
+                    "read_only": 1,
+                    "in_list_view": 1,
+                    "columns": 1,
+                },
+            ],
             "Production Plan": [
+                {
+                    "fieldname": "custom_raw_material_warehouse",
+                    "fieldtype": "Link",
+                    "label": "Raw Material Warehouse",
+                    "options": "Warehouse",
+                    "insert_after": "po_items",
+                    "read_only": 1,
+                    "translatable": 0,
+                },
                 {
                     "fieldname": "custom_subcontracting_plan_tab",
                     "fieldtype": "Tab Break",
@@ -2103,58 +2131,80 @@ frappe.ui.form.on("Production Plan", {
 		var has_internal = ops.some(function(r) { return r.work_type === "Internal Jobcard"; });
 		var has_vendor   = !!frm.doc.custom_vendor_contractor;
 
-		// ── Subcontracting Order button (all-sub or mixed) ──────────────────
+		// When subcontractor ops exist, override the standard "Work Order / Subcontract PO"
+		// button with our custom SCO creation (bypasses PO requirement, pulls from Material Planning)
 		if (has_sub && has_vendor) {
-			frm.add_custom_button(__("Subcontracting Order"), function() {
-				frappe.call({
-					method: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_sco_from_production_plan",
-					args: { pp_name: frm.doc.name },
-					freeze: true,
-					callback: function(r) {
-						if (r.message) {
-							frappe.msgprint({
-								title: __("Subcontracting Order Created (Draft)"),
-								message: __("Set Supplier / Source / WIP Warehouses then submit: ") +
-									'<a href="/app/subcontracting-order/' + encodeURIComponent(r.message) + '">' + r.message + "</a>",
-								indicator: "green"
-							});
-							frm.reload_doc();
-						}
+			frm.remove_custom_button(__("Work Order / Subcontract PO"), __("Create"));
+			frm.add_custom_button(__("Work Order / Subcontract PO"), function() {
+				frappe.db.get_value("Subcontracting Order", {"custom_production_plan": frm.doc.name}, "name", function(r) {
+					if (r && r.name) {
+						frappe.msgprint({
+							title: __("Already Created"),
+							message: __("A Subcontracting Order already exists for this Production Plan: ") +
+								'<a href="/app/subcontracting-order/' + encodeURIComponent(r.name) + '">' + r.name + "</a>",
+							indicator: "orange"
+						});
+						return;
 					}
-				});
-			}, __("Create"));
-		}
-
-		// ── Work Order button (all-internal or mixed) ────────────────────────
-		if (has_internal) {
-			frm.add_custom_button(__("Work Order"), function() {
-				if (has_sub) {
-					// Scenario 3: mixed — create WO with only Internal Jobcard ops
 					frappe.call({
-						method: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_work_order_from_pp",
+						method: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_sco_from_production_plan",
 						args: { pp_name: frm.doc.name },
 						freeze: true,
 						callback: function(r) {
 							if (r.message) {
 								frappe.msgprint({
-									title: __("Work Order Created"),
-									message: __("Work Order (internal operations only): ") +
-										'<a href="/app/work-order/' + encodeURIComponent(r.message) + '">' + r.message + "</a>",
+									title: __("Subcontracting Order Created (Draft)"),
+									message: __("Set Supplier / Source / WIP Warehouses then submit: ") +
+										'<a href="/app/subcontracting-order/' + encodeURIComponent(r.message) + '">' + r.message + "</a>",
 									indicator: "green"
 								});
 								frm.reload_doc();
 							}
 						}
 					});
-				} else {
-					// Scenario 1: all-internal — use standard ERPNext WO creation
-					frappe.call({
-						method: "frappe.client.run_doc_method",
-						args: { dt: "Production Plan", dn: frm.doc.name, method: "make_work_order" },
-						freeze: true,
-						callback: function() { frm.reload_doc(); }
-					});
-				}
+				});
+			}, __("Create"));
+		}
+
+		// Work Order button — only for mixed plans (Internal Jobcard ops present)
+		if (has_internal) {
+			frm.add_custom_button(__("Work Order"), function() {
+				frappe.db.get_value("Work Order", {"production_plan": frm.doc.name}, "name", function(r) {
+					if (r && r.name) {
+						frappe.msgprint({
+							title: __("Already Created"),
+							message: __("A Work Order already exists for this Production Plan: ") +
+								'<a href="/app/work-order/' + encodeURIComponent(r.name) + '">' + r.name + "</a>",
+							indicator: "orange"
+						});
+						return;
+					}
+					if (has_sub) {
+						frappe.call({
+							method: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_work_order_from_pp",
+							args: { pp_name: frm.doc.name },
+							freeze: true,
+							callback: function(r) {
+								if (r.message) {
+									frappe.msgprint({
+										title: __("Work Order Created"),
+										message: __("Work Order (internal operations only): ") +
+											'<a href="/app/work-order/' + encodeURIComponent(r.message) + '">' + r.message + "</a>",
+										indicator: "green"
+									});
+									frm.reload_doc();
+								}
+							}
+						});
+					} else {
+						frappe.call({
+							method: "frappe.client.run_doc_method",
+							args: { dt: "Production Plan", dn: frm.doc.name, method: "make_work_order" },
+							freeze: true,
+							callback: function() { frm.reload_doc(); }
+						});
+					}
+				});
 			}, __("Create"));
 		}
 
@@ -2651,20 +2701,48 @@ def create_sco_custom_fields():
                     "description": "Warehouse to transfer raw materials FROM to the supplier",
                 },
                 {
-                    "fieldname": "custom_wip_warehouse",
-                    "fieldtype": "Link",
-                    "label": "WIP Transfer Warehouse",
-                    "options": "Warehouse",
-                    "insert_after": "custom_source_warehouse",
-                    "description": "Warehouse to transfer consumed material TO for internal Job Cards (Scenario 3)",
-                },
-                {
                     "fieldname": "custom_return_warehouse",
                     "fieldtype": "Link",
                     "label": "Return/Transfer Warehouse",
                     "options": "Warehouse",
-                    "insert_after": "custom_wip_warehouse",
+                    "insert_after": "custom_source_warehouse",
                     "description": "Warehouse to receive unconsumed materials back from supplier",
+                },
+                {
+                    "fieldname": "custom_section_drawings",
+                    "fieldtype": "Section Break",
+                    "label": "Drawing Details",
+                    "insert_after": "custom_return_warehouse",
+                },
+                {
+                    "fieldname": "custom_drawing_items",
+                    "fieldtype": "Table",
+                    "label": "Drawing Items",
+                    "options": "SCO Drawing Item",
+                    "read_only": 1,
+                    "insert_after": "custom_section_drawings",
+                },
+                {
+                    "fieldname": "custom_section_weights",
+                    "fieldtype": "Section Break",
+                    "label": "Weight Summary",
+                    "insert_after": "custom_drawing_items",
+                },
+                {
+                    "fieldname": "custom_total_weight_kg",
+                    "fieldtype": "Float",
+                    "label": "Total Weight (Kg)",
+                    "read_only": 1,
+                    "insert_after": "custom_section_weights",
+                    "description": "Sum of reserved batch weights from Material Planning",
+                },
+                {
+                    "fieldname": "custom_transferred_weight_kg",
+                    "fieldtype": "Float",
+                    "label": "Transferred Weight (Kg)",
+                    "read_only": 1,
+                    "insert_after": "custom_total_weight_kg",
+                    "description": "Weight actually transferred to supplier warehouse (updated on SE submit)",
                 },
             ],
         },
@@ -2676,7 +2754,7 @@ SCO_CLIENT_SCRIPT = """
 frappe.ui.form.on("Subcontracting Order", {
 \trefresh(frm) {
 \t\tif (frm.doc.docstatus === 1 && frm.doc.custom_production_plan) {
-\t\t\t// Transfer Raw Materials to Supplier Warehouse
+\t\t\t// Transfer reserved batch materials from source warehouse to supplier warehouse
 \t\t\tfrm.add_custom_button(__("Raw Materials to Supplier"), function() {
 \t\t\t\tif (!frm.doc.custom_source_warehouse) {
 \t\t\t\t\tfrappe.msgprint(__("Please set the Source Warehouse (RM) field first."));
@@ -2700,53 +2778,31 @@ frappe.ui.form.on("Subcontracting Order", {
 \t\t\t\t});
 \t\t\t}, __("Transfer"));
 
-\t\t\t// Create Supplier Operation Entries
-\t\t\tfrm.add_custom_button(__("Supplier Operation Entries"), function() {
-\t\t\t\tfrappe.call({
-\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_supplier_operation_entries",
-\t\t\t\t\targs: { sco_name: frm.doc.name },
-\t\t\t\t\tfreeze: true,
-\t\t\t\t\tcallback: function(r) {
-\t\t\t\t\t\tif (r.message && r.message.length) {
-\t\t\t\t\t\t\tfrappe.msgprint({
-\t\t\t\t\t\t\t\ttitle: __("Supplier Operation Entries Created"),
-\t\t\t\t\t\t\t\tmessage: r.message.join(", "),
-\t\t\t\t\t\t\t\tindicator: "green"
-\t\t\t\t\t\t\t});
-\t\t\t\t\t\t} else {
-\t\t\t\t\t\t\tfrappe.msgprint(__("All Supplier Operation Entries already exist."));
-\t\t\t\t\t\t}
-\t\t\t\t\t\tfrm.reload_doc();
-\t\t\t\t\t}
-\t\t\t\t});
-\t\t\t}, __("Create"));
-
-\t\t\tif (frm.doc.custom_all_ops_complete) {
-\t\t\t\t// Scenario 3: Transfer consumed material to company WIP for internal Job Cards
-\t\t\t\tfrm.add_custom_button(__("Transfer to Company WIP"), function() {
-\t\t\t\t\tif (!frm.doc.custom_wip_warehouse) {
-\t\t\t\t\t\tfrappe.msgprint(__("Please set the WIP Transfer Warehouse field first."));
-\t\t\t\t\t\treturn;
-\t\t\t\t\t}
+\t\t\t// Create one Supplier Operation Entry per subcontractor operation
+\t\t\tif (frm.doc.custom_transferred_weight_kg) {
+\t\t\t\tfrm.add_custom_button(__("Supplier Operation Entries"), function() {
 \t\t\t\t\tfrappe.call({
-\t\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_wip_transfer_stock_entry",
+\t\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_supplier_operation_entries",
 \t\t\t\t\t\targs: { sco_name: frm.doc.name },
 \t\t\t\t\t\tfreeze: true,
 \t\t\t\t\t\tcallback: function(r) {
-\t\t\t\t\t\t\tif (r.message) {
+\t\t\t\t\t\t\tif (r.message && r.message.length) {
 \t\t\t\t\t\t\t\tfrappe.msgprint({
-\t\t\t\t\t\t\t\t\ttitle: __("WIP Transfer Created"),
-\t\t\t\t\t\t\t\t\tmessage: __("Review and submit: ") +
-\t\t\t\t\t\t\t\t\t\t'<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>",
+\t\t\t\t\t\t\t\t\ttitle: __("Supplier Operation Entries Created"),
+\t\t\t\t\t\t\t\t\tmessage: r.message.join(", "),
 \t\t\t\t\t\t\t\t\tindicator: "green"
 \t\t\t\t\t\t\t\t});
-\t\t\t\t\t\t\t\tfrm.reload_doc();
+\t\t\t\t\t\t\t} else {
+\t\t\t\t\t\t\t\tfrappe.msgprint(__("All Supplier Operation Entries already exist."));
 \t\t\t\t\t\t\t}
+\t\t\t\t\t\t\tfrm.reload_doc();
 \t\t\t\t\t\t}
 \t\t\t\t\t});
-\t\t\t\t}, __("Transfer"));
+\t\t\t\t}, __("Create"));
+\t\t\t}
 
-\t\t\t\t// Scenario 2: Return unconsumed raw materials to store
+\t\t\tif (frm.doc.custom_all_ops_complete) {
+
 \t\t\t\tfrm.add_custom_button(__("Transfer Unconsumed Materials"), function() {
 \t\t\t\t\tif (!frm.doc.custom_return_warehouse) {
 \t\t\t\t\t\tfrappe.msgprint(__("Please set the Return/Transfer Warehouse field first."));
@@ -2777,89 +2833,39 @@ frappe.ui.form.on("Subcontracting Order", {
 
 
 SOE_CLIENT_SCRIPT = """
-var _soe_timers = {};
-function soe_debounce(key, fn, delay) {
-\tclearTimeout(_soe_timers[key]);
-\t_soe_timers[key] = setTimeout(fn, delay || 400);
-}
-
-frappe.ui.form.on("Supplier Operation Item", {
-\tcurrent_sec_qty(frm, cdt, cdn) {
-\t\tsoe_debounce(cdn + "_seq", function() { soe_calculate_qty(frm, cdt, cdn); });
+frappe.ui.form.on("SOE Consumption Log", {
+\tweight_kg(frm) {
+\t\t_soe_update_total(frm);
 \t},
-\tlength(frm, cdt, cdn) {
-\t\tsoe_debounce(cdn + "_len", function() { soe_calculate_qty(frm, cdt, cdn); });
+\tconsumption_log_remove(frm) {
+\t\t_soe_update_total(frm);
 \t},
-\twidth(frm, cdt, cdn) {
-\t\tsoe_debounce(cdn + "_wid", function() { soe_calculate_qty(frm, cdt, cdn); });
-\t},
-\tthickness(frm, cdt, cdn) {
-\t\tsoe_debounce(cdn + "_thk", function() { soe_calculate_qty(frm, cdt, cdn); });
-\t},
-\tmanual_qty(frm, cdt, cdn) {
-\t\tsoe_debounce(cdn + "_man", function() { soe_warn_manual_qty(frm, cdt, cdn); });
+\tconsumption_log_add(frm) {
+\t\t_soe_update_total(frm);
 \t}
 });
 
-function soe_calculate_qty(frm, cdt, cdn) {
-\tvar row = locals[cdt][cdn];
-\tvar group = row.parent_item_group;
-\tvar qty = null;
-
-\tif (group === "Structurals") {
-\t\tif (row.length && row.unit_weight && row.current_sec_qty) {
-\t\t\tqty = (row.length / 1000) * row.unit_weight * row.current_sec_qty;
-\t\t}
-\t} else if (group === "Plates") {
-\t\tif (row.length && row.width && row.thickness && row.unit_weight && row.current_sec_qty) {
-\t\t\tqty = (row.length / 1000) * (row.width / 1000) * row.thickness * row.unit_weight * row.current_sec_qty;
-\t\t}
+frappe.ui.form.on("Supplier Operation Entry", {
+\trefresh(frm) {
+\t\t_soe_update_total(frm);
 \t}
+});
 
-\tif (qty !== null) {
-\t\tfrappe.model.set_value(cdt, cdn, "current_stock_qty", flt(qty, 3));
-\t\tsoe_debounce(cdn + "_warn", function() { soe_warn_exceeded(frm, cdt, cdn, qty); });
-\t}
-}
+function _soe_update_total(frm) {
+\tvar total = 0;
+\t(frm.doc.consumption_log || []).forEach(function(r) {
+\t\ttotal += flt(r.weight_kg);
+\t});
+\ttotal = flt(total, 3);
 
-function soe_warn_exceeded(frm, cdt, cdn, current_qty) {
-\tvar row = locals[cdt][cdn];
-\tvar transferred_stock = flt(row.transferred_stock_qty);
-\tvar transferred_sec = flt(row.transferred_sec_qty);
-\tvar prev_sec = flt(row.prev_operation_sec_qty);
-\tvar curr_sec = flt(row.current_sec_qty);
-\tvar seq = frm.doc.sequence_id || 1;
+\tfrm.doc.total_consumed_kg = total;
+\tfrm.refresh_field("total_consumed_kg");
 
-\tif (transferred_stock > 0 && flt(current_qty) > transferred_stock) {
+\tvar available = flt(frm.doc.available_to_consume_kg);
+\tif (available > 0 && total > available) {
 \t\tfrappe.show_alert({
-\t\t\tmessage: __("Item \\"{0}\\": {1} Nos ({2} Kg) transferred. You entered {3} Nos ({4} Kg).", [
-\t\t\t\trow.item_code, transferred_sec, transferred_stock,
-\t\t\t\tcurr_sec, flt(current_qty, 3)
-\t\t\t]),
-\t\t\tindicator: "orange"
-\t\t}, 8);
-\t}
-
-\tif (seq > 1 && prev_sec > 0 && curr_sec > prev_sec) {
-\t\tfrappe.show_alert({
-\t\t\tmessage: __("Item \\"{0}\\": Previous operation completed {1} Nos. You entered {2} Nos.", [
-\t\t\t\trow.item_code, prev_sec, curr_sec
-\t\t\t]),
-\t\t\tindicator: "orange"
-\t\t}, 8);
-\t}
-}
-
-function soe_warn_manual_qty(frm, cdt, cdn) {
-\tvar row = locals[cdt][cdn];
-\tvar transferred = flt(row.transferred_stock_qty);
-\tvar manual = flt(row.manual_qty);
-\tif (transferred > 0 && manual > transferred) {
-\t\tfrappe.show_alert({
-\t\t\tmessage: __("Item \\"{0}\\": manual qty {1} Kg exceeds transferred qty {2} Kg.", [
-\t\t\t\trow.item_code, manual, transferred
-\t\t\t]),
-\t\t\tindicator: "orange"
+\t\t\tmessage: __("Total consumed ({0} Kg) exceeds available to consume ({1} Kg).", [total, available]),
+\t\t\tindicator: "red"
 \t\t}, 8);
 \t}
 }

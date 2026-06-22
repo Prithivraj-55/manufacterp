@@ -489,6 +489,58 @@ def get_material_request_items(
 
 
 @frappe.whitelist()
+def get_mp_planned_weights(mp_duno_pairs):
+	"""Return {"mp|duno": planned_rm_weight_kg} for each (mp, duno_mark_no) pair.
+	Keying by duno ensures each drawing in a PP gets its own per-drawing weight,
+	not the whole-MP total."""
+	if isinstance(mp_duno_pairs, str):
+		mp_duno_pairs = json.loads(mp_duno_pairs)
+	result = {}
+	for pair in mp_duno_pairs:
+		mp   = pair.get("mp") or ""
+		duno = pair.get("duno") or ""
+		key  = f"{mp}|{duno}"
+		result[key] = _calc_mp_drawing_weight(mp, duno)
+	return result
+
+
+def _calc_mp_drawing_weight(mp_name, duno_mark_no):
+	"""Planned RM weight for one drawing — sum of qty from the raw_materials sub-table.
+	Using raw_materials (always has duno_mark_no) rather than reservations tables
+	(available_raw_material has no duno_mark_no so can't be split per drawing)."""
+	if not mp_name:
+		return 0.0
+	if duno_mark_no:
+		wt = frappe.db.sql(
+			"""SELECT COALESCE(SUM(qty), 0)
+			   FROM `tabMaterial Planning Raw Material`
+			   WHERE parent = %s AND duno_mark_no = %s""",
+			(mp_name, duno_mark_no),
+		)[0][0] or 0
+		return flt(wt)
+	return _calc_mp_weight(mp_name)
+
+
+def _calc_mp_weight(mp_name):
+	"""Full-MP planned RM weight (all drawings combined)."""
+	if not mp_name:
+		return 0.0
+	mapping_wt = frappe.db.sql(
+		"""SELECT COALESCE(SUM(batch_calc_qty), 0)
+		   FROM `tabMaterial Planning Material Mapping`
+		   WHERE parent = %s AND is_reserved = 1 AND batch IS NOT NULL AND batch != ''""",
+		mp_name,
+	)[0][0] or 0
+	available_wt = frappe.db.sql(
+		"""SELECT COALESCE(SUM(reserved_qty), 0)
+		   FROM `tabMaterial Planning Available Raw Material`
+		   WHERE parent = %s AND is_reserved = 1""",
+		mp_name,
+	)[0][0] or 0
+	return flt(mapping_wt) + flt(available_wt)
+
+
+@frappe.whitelist()
 def get_pp_drawings_for_picker(search_type, search_value, pp_name=""):
 	"""
 	Returns drawing rows for the Production Plan picker popup.
@@ -510,6 +562,18 @@ def _picker_rows_from_mp(mp_name, pp_name):
 	if not mp.bom_items:
 		frappe.throw(_("No BOM items found on Material Planning {0}.").format(mp_name))
 
+	# Batch-fetch customer weights from Sales Order DUNO Items
+	so_duno_pairs = [(r.sales_order, r.duno_mark_no) for r in mp.bom_items if r.sales_order and r.duno_mark_no]
+	customer_weights = {}
+	if so_duno_pairs:
+		where_clauses = " OR ".join(["(parent = %s AND duno_mark_no = %s)"] * len(so_duno_pairs))
+		params = [x for pair in so_duno_pairs for x in pair]
+		wt_rows = frappe.db.sql(
+			f"SELECT parent, duno_mark_no, total_weight FROM `tabSales Order DUNO Item` WHERE {where_clauses}",
+			params, as_dict=True,
+		)
+		customer_weights = {(r.parent, r.duno_mark_no): flt(r.total_weight) for r in wt_rows}
+
 	rows = []
 	for row in mp.bom_items:
 		cust_name = ""
@@ -528,8 +592,10 @@ def _picker_rows_from_mp(mp_name, pp_name):
 			"qty_to_manufacture": flt(row.qty_to_manufacture) or 1,
 			"uom": row.uom or "",
 			"material_planning": mp_name,
+			"for_warehouse": mp.for_warehouse or "",
 			"mp_complete": True,
 			"mp_docstatus": mp.docstatus,
+			"customer_weight": customer_weights.get((row.sales_order or "", row.duno_mark_no or ""), 0.0),
 		})
 
 	_mark_already_in_pp(rows, pp_name)
@@ -542,9 +608,12 @@ def _picker_rows_from_so(so_name, pp_name):
 			mpbi.bom_no, mpbi.item_code, mpbi.item_name, mpbi.drawing,
 			mpbi.duno_mark_no, mpbi.customer_drawing_number, mpbi.sales_order,
 			mpbi.customer, mpbi.qty_to_manufacture, mpbi.uom,
-			mpbi.parent AS material_planning
+			mpbi.parent AS material_planning,
+			COALESCE(sodi.total_weight, 0) AS customer_weight
 		FROM `tabMaterial Planning BOM Item` mpbi
 		INNER JOIN `tabMaterial Planning` mp ON mp.name = mpbi.parent
+		LEFT JOIN `tabSales Order DUNO Item` sodi
+			ON sodi.parent = mpbi.sales_order AND sodi.duno_mark_no = mpbi.duno_mark_no
 		WHERE mpbi.sales_order = %s
 		  AND mp.docstatus != 2
 		ORDER BY mpbi.parent, mpbi.idx
@@ -562,19 +631,24 @@ def _picker_rows_from_so(so_name, pp_name):
 			or frappe.db.count("Material Planning Material Mapping", {"parent": mp_n}) > 0
 			or frappe.db.count("Material Planning Unavailable Item", {"parent": mp_n}) > 0
 		)
-		mp_docstatus = frappe.db.get_value("Material Planning", mp_n, "docstatus") or 0
-		mp_completion[mp_n] = {"complete": has_analysis, "docstatus": mp_docstatus}
+		mp_vals = frappe.db.get_value("Material Planning", mp_n, ["docstatus", "for_warehouse"], as_dict=True) or {}
+		mp_completion[mp_n] = {
+			"complete": has_analysis,
+			"docstatus": mp_vals.get("docstatus") or 0,
+			"for_warehouse": mp_vals.get("for_warehouse") or "",
+		}
 
 	rows = []
 	for r in mp_bom_items:
 		cust_name = ""
 		if r.customer:
 			cust_name = frappe.db.get_value("Customer", r.customer, "customer_name") or r.customer
-		mp_info = mp_completion.get(r.material_planning, {"complete": False, "docstatus": 0})
+		mp_info = mp_completion.get(r.material_planning, {"complete": False, "docstatus": 0, "for_warehouse": ""})
 		row = dict(r)
 		row["customer_name"] = cust_name
 		row["mp_complete"] = mp_info["complete"]
 		row["mp_docstatus"] = mp_info["docstatus"]
+		row["for_warehouse"] = mp_info["for_warehouse"]
 		row["duno_mark_no"] = r.duno_mark_no or ""
 		row["customer_drawing_number"] = r.customer_drawing_number or ""
 		rows.append(row)

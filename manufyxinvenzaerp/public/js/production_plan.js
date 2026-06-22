@@ -70,12 +70,22 @@ frappe.ui.form.on("Production Plan", {
 			"custom_get_raw_materials_for_purchase",
 		], false);
 
-		// ── "Add Drawings" button ──────────────────────────────────────────────
-		if (frm.doc.docstatus === 0) {
-			frm.add_custom_button(__("Add Drawings"), function () {
-				_show_pp_drawings_picker(frm);
-			}, __("Drawings"));
-		}
+		// ── "Add Drawings" button above po_items grid ────────────────────────
+		frappe.after_ajax(function() {
+			let items_field = frm.fields_dict["po_items"];
+			if (!items_field) return;
+			let $fw = $(items_field.$wrapper);
+			if (frm.doc.docstatus !== 0) {
+				$fw.find(".pp-add-drawings-btn-row").remove();
+				return;
+			}
+			if ($fw.find(".pp-add-drawings-btn-row").length) return;
+			let $row = $('<div class="pp-add-drawings-btn-row" style="margin-bottom:10px;padding:4px 0;">');
+			let $btn = $('<button class="btn btn-sm btn-primary">' + __("Add Drawings") + '</button>');
+			$btn.on("click", function() { _show_pp_drawings_picker(frm); });
+			$row.append($btn);
+			$fw.find(".form-grid").before($row);
+		});
 
 		// ── Auto-fill Process Planning from Standard Manufacturing Routing ─────
 		if (frm.doc.docstatus === 0
@@ -86,8 +96,12 @@ frappe.ui.form.on("Production Plan", {
 		// ── Inject "Bulk Update" button above the Process Planning grid
 		frappe.after_ajax(function() {
 			let proc_field = frm.fields_dict["custom_process_planning"];
-			if (!proc_field || frm.doc.docstatus !== 0) return;
+			if (!proc_field) return;
 			let $fw = $(proc_field.$wrapper);
+			if (frm.doc.docstatus !== 0) {
+				$fw.find(".pp-bulk-btn-row").remove();
+				return;
+			}
 			if ($fw.find(".pp-bulk-btn-row").length) return; // already injected
 
 			let $row = $('<div class="pp-bulk-btn-row" style="margin-bottom:10px;padding:4px 0;">');
@@ -669,6 +683,27 @@ function _ppd_do_insert(frm, d, all_rows) {
 		return;
 	}
 
+	// ── Warehouse consistency check ───────────────────────────────────────────
+	let new_warehouses = [...new Set(selected.map(s => s.for_warehouse || ""))];
+	if (new_warehouses.length > 1) {
+		frappe.msgprint({
+			title: __("Different Raw Material Warehouses"),
+			message: __("Different raw material warehouses cannot be selected in one Production Plan. Please select drawings from the same warehouse only."),
+			indicator: "red",
+		});
+		return;
+	}
+	let new_wh = new_warehouses[0] || "";
+	let existing_wh = frm.doc.custom_raw_material_warehouse || "";
+	if (existing_wh && new_wh && existing_wh !== new_wh) {
+		frappe.msgprint({
+			title: __("Different Raw Material Warehouses"),
+			message: __("The drawings you selected use warehouse <b>{0}</b>, but this Production Plan already has warehouse <b>{1}</b> set. Different raw material warehouses cannot be used in one Production Plan.", [new_wh, existing_wh]),
+			indicator: "red",
+		});
+		return;
+	}
+
 	// Remove Frappe's blank placeholder rows before inserting
 	let grid = frm.fields_dict.po_items && frm.fields_dict.po_items.grid;
 	if (grid) {
@@ -685,30 +720,58 @@ function _ppd_do_insert(frm, d, all_rows) {
 	let to_add  = selected.filter(s => !existing_boms.has(s.bom_no));
 	let skipped = selected.length - to_add.length;
 
-	to_add.forEach(function(s) {
-		let child = frm.add_child("po_items");
-		child.item_code                      = s.item_code || "";
-		child.item_name                      = s.item_name || "";
-		child.bom_no                         = s.bom_no || "";
-		child.planned_qty                    = flt(s.qty_to_manufacture) || 1;
-		child.stock_uom                      = s.uom || "";
-		child.sales_order                    = s.sales_order || "";
-		child.custom_customer                = s.customer || "";
-		child.custom_drawing                 = s.drawing || "";
-		child.custom_duno_mark_no            = s.duno_mark_no || "";
-		child.custom_customer_drawing_number = s.customer_drawing_number || "";
-		child.custom_material_planning       = s.material_planning || "";
-	});
-	frm.refresh_field("po_items");
+	// Fetch per-drawing planned RM weights, keyed by "mp_name|duno_mark_no"
+	let mp_duno_pairs = [...new Map(
+		to_add.map(s => {
+			let mp   = s.material_planning || "";
+			let duno = s.duno_mark_no || "";
+			return [mp + "|" + duno, { mp, duno }];
+		})
+	).values()];
 
-	d.hide();
+	function _finish_insert(weights) {
+		to_add.forEach(function(s) {
+			let wt_key = (s.material_planning || "") + "|" + (s.duno_mark_no || "");
+			let child = frm.add_child("po_items");
+			child.item_code                      = s.item_code || "";
+			child.item_name                      = s.item_name || "";
+			child.bom_no                         = s.bom_no || "";
+			child.planned_qty                    = flt(s.qty_to_manufacture) || 1;
+			child.stock_uom                      = s.uom || "";
+			child.sales_order                    = s.sales_order || "";
+			child.custom_customer                = s.customer || "";
+			child.custom_drawing                 = s.drawing || "";
+			child.custom_duno_mark_no            = s.duno_mark_no || "";
+			child.custom_customer_drawing_number = s.customer_drawing_number || "";
+			child.custom_material_planning       = s.material_planning || "";
+			child.custom_customer_weight_kg      = flt(s.customer_weight || 0, 3);
+			child.custom_planned_rm_weight_kg    = flt(weights[wt_key] || 0, 3);
+		});
+		frm.refresh_field("po_items");
 
-	let msg = __("{0} drawing(s) added to Production Plan.", [to_add.length]);
-	if (skipped) msg += "  " + __("{0} already in table — skipped.", [skipped]);
-	frappe.show_alert({ message: msg, indicator: "green" }, 5);
+		if (new_wh) {
+			frm.set_value("custom_raw_material_warehouse", new_wh);
+		}
 
-	// Auto-save after insert
-	frm.save();
+		d.hide();
+
+		let msg = __("{0} drawing(s) added to Production Plan.", [to_add.length]);
+		if (skipped) msg += "  " + __("{0} already in table — skipped.", [skipped]);
+		frappe.show_alert({ message: msg, indicator: "green" }, 5);
+
+		frm.save();
+	}
+
+	if (mp_duno_pairs.length) {
+		frappe.call({
+			method: "manufyxinvenzaerp.production_plan_management.production_plan.get_mp_planned_weights",
+			args: { mp_duno_pairs: JSON.stringify(mp_duno_pairs) },
+			callback: function(r) { _finish_insert(r.message || {}); },
+			error:    function()  { _finish_insert({}); },
+		});
+	} else {
+		_finish_insert({});
+	}
 }
 
 
