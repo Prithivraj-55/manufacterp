@@ -1,6 +1,6 @@
 # hooks — manufyxinvenzaerp
 
-_Generated: 2026-06-19 14:49:00_
+_Generated: 2026-06-23 00:48:06_
 
 ## doc_events
 
@@ -50,6 +50,8 @@ doc_events = {
 	},
 	"Supplier Operation Entry": {
 		"validate": "manufyxinvenzaerp.subcontracting_management.subcontracting.validate_supplier_operation_entry",
+		"before_submit": "manufyxinvenzaerp.subcontracting_management.subcontracting.before_submit_supplier_operation_entry",
+		"on_update": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_update_supplier_operation_entry",
 		"on_submit": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_submit_supplier_operation_entry",
 	},
 	"Production Plan": {
@@ -66,6 +68,7 @@ doc_events = {
 override_doctype_class = {
     "BOM": "manufyxinvenzaerp.drawing_management.bom_class_override.BOM",
     "Subcontracting Order": "manufyxinvenzaerp.subcontracting_management.overrides.CustomSubcontractingOrder",
+    "Stock Entry": "manufyxinvenzaerp.subcontracting_management.overrides.CustomStockEntry",
 }
 ```
 

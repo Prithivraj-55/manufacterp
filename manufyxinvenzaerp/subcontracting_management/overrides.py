@@ -1,9 +1,29 @@
 import frappe
+from frappe import _
 from frappe.utils import flt
 
+from erpnext.stock.doctype.stock_entry.stock_entry import StockEntry
 from erpnext.subcontracting.doctype.subcontracting_order.subcontracting_order import (
     SubcontractingOrder,
 )
+
+
+def _is_pp_flow_sco(sco_name):
+    """True when the linked SCO was created from a Production Plan (no supplied_items table)."""
+    return bool(sco_name) and bool(
+        frappe.db.get_value("Subcontracting Order", sco_name, "custom_production_plan")
+    )
+
+
+class CustomStockEntry(StockEntry):
+    """Stock Entry override that relaxes ERPNext's standard subcontracting checks for
+    'Send to Subcontractor' entries tied to a Production-Plan-flow Subcontracting Order,
+    which has no 'Raw Materials Supplied' table to validate against."""
+
+    def validate_subcontract_order(self):
+        if self.purpose == "Send to Subcontractor" and _is_pp_flow_sco(self.get("subcontracting_order")):
+            return
+        super().validate_subcontract_order()
 
 
 class CustomSubcontractingOrder(SubcontractingOrder):
@@ -36,6 +56,18 @@ class CustomSubcontractingOrder(SubcontractingOrder):
             return
         self.update_status()
         # Skip update_subcontracted_quantity_in_po — no PO exists.
+        # Auto-create one SOE per Subcontractor operation in the Production Plan.
+        from manufyxinvenzaerp.subcontracting_management.subcontracting import _create_soes_for_sco
+        created = _create_soes_for_sco(self)
+        if created:
+            count = len(created)
+            frappe.msgprint(
+                _("{0} Supplier Operation {1} created.").format(
+                    count, _("Entry") if count == 1 else _("Entries")
+                ),
+                indicator="green",
+                alert=True,
+            )
 
     def on_cancel(self):
         if not self._is_pp_flow():

@@ -2052,7 +2052,35 @@ def create_bom_client_script():
 def create_production_plan_custom_fields():
     create_custom_fields(
         {
+            "Production Plan Item": [
+                {
+                    "fieldname": "custom_customer_weight_kg",
+                    "fieldtype": "Float",
+                    "label": "Customer Provided Weight (Kg)",
+                    "insert_after": "custom_customer_drawing_number",
+                    "in_list_view": 1,
+                    "columns": 1,
+                },
+                {
+                    "fieldname": "custom_planned_rm_weight_kg",
+                    "fieldtype": "Float",
+                    "label": "Planned RM Weight (Kg)",
+                    "insert_after": "custom_customer_weight_kg",
+                    "read_only": 1,
+                    "in_list_view": 1,
+                    "columns": 1,
+                },
+            ],
             "Production Plan": [
+                {
+                    "fieldname": "custom_raw_material_warehouse",
+                    "fieldtype": "Link",
+                    "label": "Raw Material Warehouse",
+                    "options": "Warehouse",
+                    "insert_after": "po_items",
+                    "read_only": 1,
+                    "translatable": 0,
+                },
                 {
                     "fieldname": "custom_subcontracting_plan_tab",
                     "fieldtype": "Tab Break",
@@ -2108,21 +2136,32 @@ frappe.ui.form.on("Production Plan", {
 		if (has_sub && has_vendor) {
 			frm.remove_custom_button(__("Work Order / Subcontract PO"), __("Create"));
 			frm.add_custom_button(__("Work Order / Subcontract PO"), function() {
-				frappe.call({
-					method: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_sco_from_production_plan",
-					args: { pp_name: frm.doc.name },
-					freeze: true,
-					callback: function(r) {
-						if (r.message) {
-							frappe.msgprint({
-								title: __("Subcontracting Order Created (Draft)"),
-								message: __("Set Supplier / Source / WIP Warehouses then submit: ") +
-									'<a href="/app/subcontracting-order/' + encodeURIComponent(r.message) + '">' + r.message + "</a>",
-								indicator: "green"
-							});
-							frm.reload_doc();
-						}
+				frappe.db.get_value("Subcontracting Order", {"custom_production_plan": frm.doc.name}, "name", function(r) {
+					if (r && r.name) {
+						frappe.msgprint({
+							title: __("Already Created"),
+							message: __("A Subcontracting Order already exists for this Production Plan: ") +
+								'<a href="/app/subcontracting-order/' + encodeURIComponent(r.name) + '">' + r.name + "</a>",
+							indicator: "orange"
+						});
+						return;
 					}
+					frappe.call({
+						method: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_sco_from_production_plan",
+						args: { pp_name: frm.doc.name },
+						freeze: true,
+						callback: function(r) {
+							if (r.message) {
+								frappe.msgprint({
+									title: __("Subcontracting Order Created (Draft)"),
+									message: __("Set Supplier / Source / WIP Warehouses then submit: ") +
+										'<a href="/app/subcontracting-order/' + encodeURIComponent(r.message) + '">' + r.message + "</a>",
+									indicator: "green"
+								});
+								frm.reload_doc();
+							}
+						}
+					});
 				});
 			}, __("Create"));
 		}
@@ -2130,31 +2169,42 @@ frappe.ui.form.on("Production Plan", {
 		// Work Order button — only for mixed plans (Internal Jobcard ops present)
 		if (has_internal) {
 			frm.add_custom_button(__("Work Order"), function() {
-				if (has_sub) {
-					frappe.call({
-						method: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_work_order_from_pp",
-						args: { pp_name: frm.doc.name },
-						freeze: true,
-						callback: function(r) {
-							if (r.message) {
-								frappe.msgprint({
-									title: __("Work Order Created"),
-									message: __("Work Order (internal operations only): ") +
-										'<a href="/app/work-order/' + encodeURIComponent(r.message) + '">' + r.message + "</a>",
-									indicator: "green"
-								});
-								frm.reload_doc();
+				frappe.db.get_value("Work Order", {"production_plan": frm.doc.name}, "name", function(r) {
+					if (r && r.name) {
+						frappe.msgprint({
+							title: __("Already Created"),
+							message: __("A Work Order already exists for this Production Plan: ") +
+								'<a href="/app/work-order/' + encodeURIComponent(r.name) + '">' + r.name + "</a>",
+							indicator: "orange"
+						});
+						return;
+					}
+					if (has_sub) {
+						frappe.call({
+							method: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_work_order_from_pp",
+							args: { pp_name: frm.doc.name },
+							freeze: true,
+							callback: function(r) {
+								if (r.message) {
+									frappe.msgprint({
+										title: __("Work Order Created"),
+										message: __("Work Order (internal operations only): ") +
+											'<a href="/app/work-order/' + encodeURIComponent(r.message) + '">' + r.message + "</a>",
+										indicator: "green"
+									});
+									frm.reload_doc();
+								}
 							}
-						}
-					});
-				} else {
-					frappe.call({
-						method: "frappe.client.run_doc_method",
-						args: { dt: "Production Plan", dn: frm.doc.name, method: "make_work_order" },
-						freeze: true,
-						callback: function() { frm.reload_doc(); }
-					});
-				}
+						});
+					} else {
+						frappe.call({
+							method: "frappe.client.run_doc_method",
+							args: { dt: "Production Plan", dn: frm.doc.name, method: "make_work_order" },
+							freeze: true,
+							callback: function() { frm.reload_doc(); }
+						});
+					}
+				});
 			}, __("Create"));
 		}
 
@@ -2651,19 +2701,11 @@ def create_sco_custom_fields():
                     "description": "Warehouse to transfer raw materials FROM to the supplier",
                 },
                 {
-                    "fieldname": "custom_wip_warehouse",
-                    "fieldtype": "Link",
-                    "label": "WIP Transfer Warehouse",
-                    "options": "Warehouse",
-                    "insert_after": "custom_source_warehouse",
-                    "description": "Warehouse to transfer consumed material TO for internal Job Cards (Scenario 3)",
-                },
-                {
                     "fieldname": "custom_return_warehouse",
                     "fieldtype": "Link",
                     "label": "Return/Transfer Warehouse",
                     "options": "Warehouse",
-                    "insert_after": "custom_wip_warehouse",
+                    "insert_after": "custom_source_warehouse",
                     "description": "Warehouse to receive unconsumed materials back from supplier",
                 },
                 {
@@ -2760,28 +2802,6 @@ frappe.ui.form.on("Subcontracting Order", {
 \t\t\t}
 
 \t\t\tif (frm.doc.custom_all_ops_complete) {
-\t\t\t\tfrm.add_custom_button(__("Transfer to Company WIP"), function() {
-\t\t\t\t\tif (!frm.doc.custom_wip_warehouse) {
-\t\t\t\t\t\tfrappe.msgprint(__("Please set the WIP Transfer Warehouse field first."));
-\t\t\t\t\t\treturn;
-\t\t\t\t\t}
-\t\t\t\t\tfrappe.call({
-\t\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_wip_transfer_stock_entry",
-\t\t\t\t\t\targs: { sco_name: frm.doc.name },
-\t\t\t\t\t\tfreeze: true,
-\t\t\t\t\t\tcallback: function(r) {
-\t\t\t\t\t\t\tif (r.message) {
-\t\t\t\t\t\t\t\tfrappe.msgprint({
-\t\t\t\t\t\t\t\t\ttitle: __("WIP Transfer Created"),
-\t\t\t\t\t\t\t\t\tmessage: __("Review and submit: ") +
-\t\t\t\t\t\t\t\t\t\t'<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>",
-\t\t\t\t\t\t\t\t\tindicator: "green"
-\t\t\t\t\t\t\t\t});
-\t\t\t\t\t\t\t\tfrm.reload_doc();
-\t\t\t\t\t\t\t}
-\t\t\t\t\t\t}
-\t\t\t\t\t});
-\t\t\t\t}, __("Transfer"));
 
 \t\t\t\tfrm.add_custom_button(__("Transfer Unconsumed Materials"), function() {
 \t\t\t\t\tif (!frm.doc.custom_return_warehouse) {

@@ -12,6 +12,7 @@
   "duno_mark_no",
   "customer_drawing_number",
   "material_planning",
+  "customer_weight_kg",
   "total_weight_kg"
  ],
  "fields": [
@@ -63,10 +64,17 @@
    "read_only": 1
   },
   {
+   "fieldname": "customer_weight_kg",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Customer Provided Weight (Kg)",
+   "read_only": 1
+  },
+  {
    "fieldname": "total_weight_kg",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Total Weight (Kg)",
+   "label": "Planned RM Weight (Kg)",
    "read_only": 1
   }
  ],

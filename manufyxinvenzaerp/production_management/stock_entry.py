@@ -7,6 +7,15 @@ FORMULA_GROUPS = {"Structurals", "Plates"}
 
 def validate_stock_entry(doc, method):
 	"""Recalculate qty for formula-group items. Show popup only when qty was manually edited."""
+	# For Manufacture, fill Sec Qty (Nos) on consumed rows proportional to the Kg consumed,
+	# so the batch piece count is correctly reduced on submit. Done before totals + stock move.
+	if doc.stock_entry_type == "Manufacture":
+		_populate_manufacture_sec_qty(doc)
+
+	# Always compute header totals regardless of SE type
+	doc.custom_total_qty     = flt(sum(flt(r.qty) for r in doc.items), 3)
+	doc.custom_total_sec_qty = flt(sum(flt(r.get("custom_sec_qty") or 0) for r in doc.items), 3)
+
 	if doc.stock_entry_type not in {"Repack", "Material Receipt", "Material Issue"}:
 		return
 
@@ -30,15 +39,23 @@ def validate_stock_entry(doc, method):
 
 
 def on_submit_stock_entry(doc, method):
-	"""Reduce custom_sec_qty on batch for consumed items (Repack source rows + Material Issue)."""
+	"""Reduce custom_sec_qty on batch for consumed items
+	(Material Issue + Repack/Manufacture source rows)."""
 	if doc.stock_entry_type == "Material Issue":
 		for row in doc.items:
 			if row.batch_no and flt(row.get("custom_sec_qty")):
 				_reduce_batch_sec_qty(row.batch_no, row.custom_sec_qty)
 
-	elif doc.stock_entry_type == "Repack":
+	elif doc.stock_entry_type in ("Repack", "Manufacture"):
+		# Consumed raw-material rows have a source warehouse and are not the
+		# produced item; this excludes finished goods and scrap (received rows).
 		for row in doc.items:
-			if not row.is_finished_item and row.batch_no and flt(row.get("custom_sec_qty")):
+			if (
+				row.s_warehouse
+				and not row.is_finished_item
+				and row.batch_no
+				and flt(row.get("custom_sec_qty"))
+			):
 				_reduce_batch_sec_qty(row.batch_no, row.custom_sec_qty)
 
 	elif doc.stock_entry_type == "Material Receipt":
@@ -86,6 +103,41 @@ def _reduce_batch_sec_qty(batch_no, consumed_qty):
 	frappe.db.set_value("Batch", batch_no, "custom_sec_qty", flt(current - flt(consumed_qty), 3))
 
 
+def _batch_total_kg_all_wh(batch_no):
+	"""Total net stock (Kg) of a batch across all warehouses (submitted SBBs)."""
+	return flt(frappe.db.sql(
+		"""
+		SELECT COALESCE(SUM(sbe.qty), 0)
+		FROM `tabSerial and Batch Entry` sbe
+		JOIN `tabSerial and Batch Bundle` sbb ON sbb.name = sbe.parent
+		WHERE sbe.batch_no = %s AND sbb.docstatus = 1
+		""",
+		batch_no,
+	)[0][0])
+
+
+def _populate_manufacture_sec_qty(doc):
+	"""Set custom_sec_qty (Nos) on Manufacture consumed rows in proportion to the Kg consumed.
+
+	A consumed row removes consumed_kg from a batch that holds custom_sec_qty pieces across
+	its total stock — so the pieces consumed = total_sec * consumed_kg / total_kg. Computed at
+	validate (before stock moves) so on_submit can decrement the batch and on_cancel reverse it.
+	Existing non-zero values are respected (manual entry / re-validate).
+	"""
+	for row in doc.items:
+		if not (row.s_warehouse and not row.is_finished_item and row.batch_no):
+			continue
+		if flt(row.get("custom_sec_qty")):
+			continue
+		total_kg = _batch_total_kg_all_wh(row.batch_no)
+		if not total_kg:
+			continue
+		total_sec = flt(frappe.db.get_value("Batch", row.batch_no, "custom_sec_qty"))
+		if not total_sec:
+			continue
+		row.custom_sec_qty = flt(total_sec * (flt(row.qty) / total_kg), 3)
+
+
 def _collect_consumed_batches(doc):
 	"""
 	Collect batch_nos consumed by this SE.
@@ -119,86 +171,163 @@ def _collect_consumed_batches(doc):
 	return batches
 
 
+def _linked_material_plannings(doc):
+	"""Material Planning docs whose reservations belong to this consumption.
+
+	Traced via Work Order → Production Plan → po_items.custom_material_planning, plus any
+	direct custom_production_plan on the Stock Entry. Used to scope reservation release so a
+	shared batch reserved by *other* MPs is never wrongly un-reserved.
+	Empty set => caller falls back to legacy batch-wide (all-MP) behaviour.
+	"""
+	pp_names = set()
+	wo = doc.get("work_order")
+	if wo:
+		pp = frappe.db.get_value("Work Order", wo, "production_plan")
+		if pp:
+			pp_names.add(pp)
+	if doc.get("custom_production_plan"):
+		pp_names.add(doc.get("custom_production_plan"))
+
+	mps = set()
+	for pp in pp_names:
+		for mp in frappe.get_all(
+			"Production Plan Item", filters={"parent": pp}, pluck="custom_material_planning"
+		):
+			if mp:
+				mps.add(mp)
+	return mps
+
+
 def _release_material_planning_reservations(doc):
 	"""
-	After a Stock Entry is submitted, clear is_reserved on Material Planning Material Mapping
-	rows whose batch was consumed. Applies to Manufacture, Material Transfer, and Material Issue.
+	After a consumption Stock Entry is submitted, clear is_reserved on the Material Planning
+	rows (both Material Mapping and Available Raw Material) whose batch was consumed — so the
+	reserved qty no longer subtracts from free stock once the material is gone.
+
+	Scoped to the Material Plannings linked to this consumption (via Work Order/Production Plan)
+	so a batch shared with other MPs keeps those other reservations intact. When no link can be
+	resolved, falls back to the legacy batch-wide behaviour on the Material Mapping table.
 	"""
 	consumed_types = {"Manufacture", "Material Transfer", "Material Issue", "Repack"}
 	if doc.stock_entry_type not in consumed_types:
 		return
 
 	consumed_batches = _collect_consumed_batches(doc)
-
 	if not consumed_batches:
 		return
 
-	# Find all reserved Material Mapping rows that used one of these batches
-	reserved_rows = frappe.get_all(
-		"Material Planning Material Mapping",
-		filters={
-			"batch": ["in", list(consumed_batches)],
-			"is_reserved": 1,
-		},
-		fields=["name", "parent"],
-	)
+	linked_mps = _linked_material_plannings(doc)
+	cleared = {"is_reserved": 0, "reserved_qty": 0, "shortfall_qty": 0, "reserved_on": None}
 
-	if not reserved_rows:
+	if linked_mps:
+		# Scoped release: only this consumption's own MP reservations, on both tables.
+		for child_dt, batch_field in (
+			("Material Planning Material Mapping", "batch"),
+			("Material Planning Available Raw Material", "batch_no"),
+		):
+			rows = frappe.get_all(
+				child_dt,
+				filters={
+					batch_field: ["in", list(consumed_batches)],
+					"parent": ["in", list(linked_mps)],
+					"is_reserved": 1,
+				},
+				pluck="name",
+			)
+			for name in rows:
+				frappe.db.set_value(child_dt, name, cleared, update_modified=False)
 		return
 
-	for r in reserved_rows:
-		frappe.db.set_value(
-			"Material Planning Material Mapping",
-			r.name,
-			{"is_reserved": 0, "reserved_qty": 0, "shortfall_qty": 0, "reserved_on": None},
-			update_modified=False,
-		)
+	# Fallback (no Production Plan link): legacy batch-wide release on Material Mapping.
+	reserved_rows = frappe.get_all(
+		"Material Planning Material Mapping",
+		filters={"batch": ["in", list(consumed_batches)], "is_reserved": 1},
+		pluck="name",
+	)
+	for name in reserved_rows:
+		frappe.db.set_value("Material Planning Material Mapping", name, cleared, update_modified=False)
 
 
 def on_cancel_stock_entry(doc, method):
-	"""When a Stock Entry is cancelled, batch stock returns — restore Material Planning reservations."""
+	"""When a Stock Entry is cancelled, batch stock returns — restore Material Planning
+	reservations and the consumed Sec Qty (Nos) on the batch."""
 	_restore_material_planning_reservations(doc)
+	_restore_batch_sec_qty(doc)
 
 	# Recalculate transferred weight on SCO if a Send to Subcontractor SE is cancelled
 	if doc.stock_entry_type == "Send to Subcontractor" and doc.get("subcontracting_order"):
 		_update_sco_transferred_weight(doc.subcontracting_order)
 
 
+def _restore_batch_sec_qty(doc):
+	"""Reverse the custom_sec_qty reduction done on submit, mirroring on_submit_stock_entry."""
+	if doc.stock_entry_type == "Material Issue":
+		for row in doc.items:
+			if row.batch_no and flt(row.get("custom_sec_qty")):
+				_reduce_batch_sec_qty(row.batch_no, -flt(row.custom_sec_qty))
+
+	elif doc.stock_entry_type in ("Repack", "Manufacture"):
+		for row in doc.items:
+			if (
+				row.s_warehouse
+				and not row.is_finished_item
+				and row.batch_no
+				and flt(row.get("custom_sec_qty"))
+			):
+				_reduce_batch_sec_qty(row.batch_no, -flt(row.custom_sec_qty))
+
+
 def _restore_material_planning_reservations(doc):
 	"""
-	Re-apply is_reserved=1 on Material Mapping rows whose batch was consumed by this SE
-	(they were cleared on submit). Only restores rows that are currently unreserved and
-	still have the batch assigned.
+	Re-apply is_reserved=1 on the Material Planning rows whose batch was consumed by this SE
+	(they were cleared on submit), mirroring _release_material_planning_reservations: scoped to
+	the linked Material Plannings on both tables, or legacy batch-wide on Material Mapping when
+	no Production Plan link exists. Only currently-unreserved rows with the batch are restored.
 	"""
 	consumed_types = {"Manufacture", "Material Transfer", "Material Issue", "Repack"}
 	if doc.stock_entry_type not in consumed_types:
 		return
 
 	consumed_batches = _collect_consumed_batches(doc)
-
 	if not consumed_batches:
 		return
 
+	linked_mps = _linked_material_plannings(doc)
+
+	def _reserve(child_dt, name, qty):
+		frappe.db.set_value(
+			child_dt, name,
+			{"is_reserved": 1, "reserved_qty": flt(qty), "shortfall_qty": 0, "reserved_on": now()},
+			update_modified=False,
+		)
+
+	if linked_mps:
+		# Scoped restore on both tables (qty source differs per child table).
+		for child_dt, batch_field, qty_field in (
+			("Material Planning Material Mapping", "batch", "qty"),
+			("Material Planning Available Raw Material", "batch_no", "required_qty"),
+		):
+			rows = frappe.get_all(
+				child_dt,
+				filters={
+					batch_field: ["in", list(consumed_batches)],
+					"parent": ["in", list(linked_mps)],
+					"is_reserved": 0,
+				},
+				fields=["name", qty_field],
+			)
+			for r in rows:
+				_reserve(child_dt, r.name, r.get(qty_field))
+		return
+
+	# Fallback (no Production Plan link): legacy batch-wide restore on Material Mapping.
 	mapping_rows = frappe.get_all(
 		"Material Planning Material Mapping",
 		filters={"batch": ["in", list(consumed_batches)], "is_reserved": 0},
 		fields=["name", "qty"],
 	)
-	if not mapping_rows:
-		return
-
 	for r in mapping_rows:
-		frappe.db.set_value(
-			"Material Planning Material Mapping",
-			r.name,
-			{
-				"is_reserved": 1,
-				"reserved_qty": flt(r.qty),
-				"shortfall_qty": 0,
-				"reserved_on": now(),
-			},
-			update_modified=False,
-		)
+		_reserve("Material Planning Material Mapping", r.name, r.qty)
 
 
 def _update_sco_transferred_weight(sco_name):
