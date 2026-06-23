@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 import frappe
 from frappe import _
 from frappe.utils import flt, today
@@ -62,14 +64,36 @@ def create_sco_from_production_plan(pp_name):
     )
     uom = frappe.db.get_value("Item", fg_item, "stock_uom") or "Nos"
 
-    # Build drawing items and total weight from Material Planning reservations
+    # Build drawing items + weight summary from Material Planning reservations.
+    # Per drawing: customer-provided weight, planned RM weight, mapped (actual
+    # reserved batch) weight, and the over-mapped excess to be returned by the supplier.
     drawing_rows = []
-    total_weight = 0.0
+    total_customer = total_planned = total_mapped = total_excess = 0.0
+    _mapped_cache = {}   # mp_name -> {duno_mark_no: mapped_kg}
+    _excess_cache = {}   # mp_name -> {duno_mark_no: excess_kg}
     for pi in pp.po_items:
-        mp_name    = pi.get("custom_material_planning")
-        duno       = pi.get("custom_duno_mark_no") or ""
-        weight     = _get_mp_drawing_weight(mp_name, duno)
-        total_weight += weight
+        mp_name = pi.get("custom_material_planning")
+        duno    = pi.get("custom_duno_mark_no") or ""
+
+        if mp_name not in _mapped_cache:
+            _mapped_cache[mp_name] = _get_mp_mapped_weight_by_duno(mp_name)
+            _excess_cache[mp_name] = _get_mp_excess_by_duno(mp_name)
+
+        planned = _get_mp_drawing_weight(mp_name, duno)
+        if duno:
+            mapped = _mapped_cache[mp_name].get(duno, 0.0)
+            excess = _excess_cache[mp_name].get(duno, 0.0)
+        else:
+            # No DUNO on the PP item — take the whole Material Planning's totals.
+            mapped = _get_mp_total_weight(mp_name)
+            excess = sum(_excess_cache[mp_name].values())
+
+        customer = flt(pi.get("custom_customer_weight_kg"), 3)
+        total_customer += customer
+        total_planned  += planned
+        total_mapped   += mapped
+        total_excess   += excess
+
         drawing_rows.append({
             "drawing": pi.get("custom_drawing"),
             "item_code": pi.item_code,
@@ -77,8 +101,11 @@ def create_sco_from_production_plan(pp_name):
             "duno_mark_no": duno,
             "customer_drawing_number": pi.get("custom_customer_drawing_number"),
             "material_planning": mp_name,
-            "customer_weight_kg": flt(pi.get("custom_customer_weight_kg"), 3),
-            "total_weight_kg": flt(weight, 3),
+            "customer_weight_kg": customer,
+            "total_weight_kg": flt(planned, 3),
+            "mapped_weight_kg": flt(mapped, 3),
+            "excess_weight_kg": flt(excess, 3),
+            "qty_to_manufacture": flt(pi.get("planned_qty"), 3),
         })
 
     sco = frappe.get_doc({
@@ -99,7 +126,10 @@ def create_sco_from_production_plan(pp_name):
         }],
         "custom_production_plan": pp_name,
         "custom_work_order": wo_name or "",
-        "custom_total_weight_kg": flt(total_weight, 3),
+        "custom_customer_weight_kg": flt(total_customer, 3),
+        "custom_total_weight_kg": flt(total_planned, 3),
+        "custom_mapped_weight_kg": flt(total_mapped, 3),
+        "custom_excess_weight_kg": flt(total_excess, 3),
         "custom_source_warehouse": pp.custom_raw_material_warehouse or "",
     })
     sco.flags.ignore_validate = True
@@ -257,7 +287,11 @@ def create_send_to_subcontractor_entry(sco_name):
     se = frappe.get_doc({
         "doctype": "Stock Entry",
         "stock_entry_type": "Send to Subcontractor",
-        "subcontracting_order": sco_name,
+        # Use custom field — NOT the standard subcontracting_order — to avoid ERPNext's
+        # validate_subcontract_order (on_submit) which throws when supplied_items is empty.
+        # Our PP-flow SCO never populates supplied_items (it bypasses standard subcontracting).
+        "custom_sco_ref": sco_name,
+        "company": sco.company,
         "items": list(merged.values()),
     })
     se.insert(ignore_permissions=True)
@@ -281,19 +315,127 @@ def get_soe_summary(sco_name):
 
 @frappe.whitelist()
 def create_return_stock_entry(sco_name, target_warehouse):
-    """Transfer all remaining stock in supplier warehouse back to company warehouse."""
-    sco = frappe.get_doc("Subcontracting Order", sco_name)
-    if not sco.supplier_warehouse:
-        frappe.throw(_("Supplier Warehouse is not set on the Subcontracting Order."))
+    """Create a draft 'Material Receipt' Stock Entry that inwards the off-cut / balance
+    material listed in the SCO's Excess Material Return table.
 
-    se_items = _get_supplier_wh_current_stock(sco, target_warehouse)
+    The transferred raw material is cut and consumed into the finished good, so the leftover
+    is the same item in NEW dimensions. It is therefore received as fresh stock (new batches,
+    which inherit the entered dimensions via the Batch before_insert hook) rather than
+    transferred back. Weight (Kg) per row is recomputed from the dimensions on validate.
+    """
+    sco = frappe.get_doc("Subcontracting Order", sco_name)
+    if not target_warehouse:
+        frappe.throw(_("Please set the Return/Transfer Warehouse on the Subcontracting Order first."))
+
+    se_items = []
+    for r in (sco.get("custom_excess_return_items") or []):
+        qty = flt(r.qty, 3)
+        if not r.item_code or qty <= 0:
+            continue
+        se_items.append({
+            "item_code": r.item_code,
+            "qty": qty,
+            "uom": r.get("uom") or frappe.db.get_value("Item", r.item_code, "stock_uom") or "Kg",
+            "t_warehouse": target_warehouse,
+            "custom_parent_item_group": r.get("parent_item_group") or "",
+            "custom_unit_weight": flt(r.get("unit_weight"), 4),
+            "custom_sec_qty": flt(r.get("sec_qty"), 3),
+            "custom_sec_uom": r.get("sec_uom") or "",
+            "custom_length": flt(r.get("length"), 3),
+            "custom_width": flt(r.get("width"), 3),
+            "custom_thickness": flt(r.get("thickness"), 3),
+        })
+
     if not se_items:
-        frappe.throw(_("No stock found in supplier warehouse to return."))
+        frappe.throw(_("Add at least one off-cut item (with a calculated Weight in Kg) to the "
+                       "Excess Material Return table before receiving."))
 
     se = frappe.get_doc({
         "doctype": "Stock Entry",
-        "stock_entry_type": "Material Transfer",
+        "stock_entry_type": "Material Receipt",
+        "company": sco.company,
         "items": se_items,
+    })
+    se.insert(ignore_permissions=True)
+    return se.name
+
+
+@frappe.whitelist()
+def create_finished_goods_entry(sco_name):
+    """Create a draft 'Manufacture' Stock Entry that consumes the raw materials currently
+    in the supplier warehouse and produces the finished good into the FG warehouse.
+
+    Exposed via the 'Make Finished Goods Entry' button, which appears once raw materials
+    have been transferred to the supplier. The user reviews and submits the draft; on
+    submission the consumed RM leaves stock and the finished good is added to inventory.
+    """
+    sco = frappe.get_doc("Subcontracting Order", sco_name)
+    if sco.docstatus != 1:
+        frappe.throw(_("Subcontracting Order must be submitted first."))
+    if not sco.supplier_warehouse:
+        frappe.throw(_("Please set the Supplier Warehouse on the Subcontracting Order first."))
+    if not flt(sco.get("custom_transferred_weight_kg")):
+        frappe.throw(_("No raw material has been transferred to the supplier yet. "
+                       "Transfer raw materials before making the finished-goods entry."))
+
+    # Determine FG warehouse from SCO items or return warehouse
+    fg_warehouse = ""
+    if sco.items:
+        fg_warehouse = sco.items[0].warehouse or ""
+    if not fg_warehouse:
+        fg_warehouse = sco.get("custom_return_warehouse") or ""
+    if not fg_warehouse:
+        frappe.throw(_("No finished-good warehouse set. Set the warehouse on the "
+                       "Subcontracting Order item (or the Return/Transfer Warehouse) first."))
+
+    consumed = _get_supplier_wh_consumption_items(sco)
+    if not consumed:
+        frappe.throw(_("No raw-material stock found in the supplier warehouse to consume. "
+                       "Ensure the raw materials have been transferred to the supplier."))
+
+    # Build finished-goods rows from SCO Drawing Items (one row per drawing/DUNO).
+    # qty_to_manufacture comes from the Production Plan Item (planned_qty).
+    drawing_items = sco.get("custom_drawing_items") or []
+    if not drawing_items:
+        # Fallback: single FG row from sco.items when no drawing items exist
+        if not sco.items:
+            frappe.throw(_("No finished-good item found on the Subcontracting Order."))
+        fg = sco.items[0]
+        fg_rows = [{
+            "item_code": fg.item_code,
+            "qty": flt(fg.qty) or 1,
+            "uom": frappe.db.get_value("Item", fg.item_code, "stock_uom") or fg.get("uom") or "Nos",
+            "t_warehouse": fg_warehouse,
+            "is_finished_item": 1,
+        }]
+    else:
+        fg_rows = []
+        for d in drawing_items:
+            qty = flt(d.get("qty_to_manufacture"))
+            if not qty:
+                # Live-fetch from PP item using customer_drawing_number + duno_mark_no
+                qty = flt(_get_pp_planned_qty(
+                    sco.get("custom_production_plan"),
+                    d.get("customer_drawing_number"),
+                    d.get("duno_mark_no"),
+                ))
+            fg_rows.append({
+                "item_code": d.item_code,
+                "qty": qty or 1,
+                "uom": frappe.db.get_value("Item", d.item_code, "stock_uom") or "Nos",
+                "t_warehouse": fg_warehouse,
+                "is_finished_item": 1,
+                "description": (d.get("duno_mark_no") or d.get("customer_drawing_number") or ""),
+            })
+
+    items = list(consumed) + fg_rows
+
+    se = frappe.get_doc({
+        "doctype": "Stock Entry",
+        "stock_entry_type": "Manufacture",
+        "company": sco.company,
+        "subcontracting_order": sco_name,
+        "items": items,
     })
     se.insert(ignore_permissions=True)
     return se.name
@@ -307,6 +449,9 @@ def validate_supplier_operation_entry(doc, method):
     """Compute total_consumed_kg from log rows; block if it exceeds available."""
     total = sum(flt(r.weight_kg) for r in (doc.consumption_log or []))
     doc.total_consumed_kg = flt(total, 3)
+
+    if total > 0 and doc.status == "Open":
+        doc.status = "In Progress"
 
     available = flt(doc.available_to_consume_kg)
     if available > 0 and total > available:
@@ -511,6 +656,80 @@ def _get_mp_drawing_weight(mp_name, duno_mark_no):
     return _get_mp_total_weight(mp_name)
 
 
+def _get_mp_mapped_weight_by_duno(mp_name):
+    """Return {duno_mark_no: mapped_weight_kg} for a Material Planning document.
+
+    Mapped weight = the actual reserved batch weight that gets transferred to the
+    supplier — cross-mapped rows (Material Mapping batch_calc_qty) plus exact-match
+    rows (Available Raw Material reserved_qty). Exact-match rows carry no
+    DUNO/Mark No, so their weight is attributed across drawings in proportion to
+    each drawing's planned qty for that item (from the Raw Materials sub-table),
+    which keeps the per-drawing rows reconciling with the Material Planning total.
+    """
+    mapped = defaultdict(float)
+    if not mp_name:
+        return mapped
+
+    # Cross-mapped, reserved — already carries the DUNO/Mark No
+    for r in frappe.get_all(
+        "Material Planning Material Mapping",
+        filters={"parent": mp_name, "is_reserved": 1},
+        fields=["duno_mark_no", "batch_calc_qty"],
+    ):
+        if flt(r.batch_calc_qty) > 0:
+            mapped[r.duno_mark_no or ""] += flt(r.batch_calc_qty)
+
+    # Exact-match, reserved — no DUNO; split per item by each drawing's planned share
+    exact_rows = frappe.get_all(
+        "Material Planning Available Raw Material",
+        filters={"parent": mp_name, "is_reserved": 1},
+        fields=["item_code", "reserved_qty", "available_qty"],
+    )
+    if exact_rows:
+        item_duno_qty = defaultdict(lambda: defaultdict(float))  # item -> duno -> planned qty
+        item_total = defaultdict(float)                          # item -> total planned qty
+        for p in frappe.get_all(
+            "Material Planning Raw Material",
+            filters={"parent": mp_name},
+            fields=["item_code", "duno_mark_no", "qty"],
+        ):
+            item_duno_qty[p.item_code][p.duno_mark_no or ""] += flt(p.qty)
+            item_total[p.item_code] += flt(p.qty)
+
+        for er in exact_rows:
+            qty = flt(er.reserved_qty) or flt(er.available_qty)
+            if qty <= 0:
+                continue
+            shares = item_duno_qty.get(er.item_code)
+            total = item_total.get(er.item_code, 0)
+            if shares and total > 0:
+                for duno, planned_qty in shares.items():
+                    mapped[duno] += qty * (planned_qty / total)
+            else:
+                mapped[""] += qty  # exact item with no planned match → unattributed
+
+    return mapped
+
+
+def _get_mp_excess_by_duno(mp_name):
+    """Return {duno_mark_no: excess_kg} per drawing for a Material Planning document.
+
+    Excess = SUM(batch_calc_qty - qty) over Mapped Material Mapping rows — the same
+    'Difference in Kg' the Material Planning screen shows: weight mapped beyond what
+    was planned (cross-item over-mapping) that the supplier must return.
+    """
+    excess = defaultdict(float)
+    if not mp_name:
+        return excess
+    for r in frappe.get_all(
+        "Material Planning Material Mapping",
+        filters={"parent": mp_name, "batch_mapped": "Mapped"},
+        fields=["duno_mark_no", "batch_calc_qty", "qty"],
+    ):
+        excess[r.duno_mark_no or ""] += flt(r.batch_calc_qty) - flt(r.qty)
+    return excess
+
+
 def _get_mp_reserved_batches(mp_name, source_warehouse, supplier_warehouse):
     """Return SE item dicts for all reserved batches in a Material Planning document.
     Includes sec_qty, dimensions, and unit_weight for each SE line.
@@ -594,61 +813,73 @@ def _get_mp_reserved_batches(mp_name, source_warehouse, supplier_warehouse):
     return items
 
 
-def _get_supplier_wh_current_stock(sco, target_warehouse):
-    """Return SE item dicts for all stock currently in the supplier warehouse
-    that belongs to batches reserved for this SCO's PP items."""
-    pp_name = sco.custom_production_plan
+def _get_pp_planned_qty(pp_name, customer_drawing_number, duno_mark_no):
+    """Return planned_qty from the Production Plan Item matching the given
+    customer_drawing_number + duno_mark_no. Returns 0 when no match is found."""
     if not pp_name:
-        return []
+        return 0
+    filters = {"parent": pp_name}
+    if customer_drawing_number:
+        filters["custom_customer_drawing_number"] = customer_drawing_number
+    if duno_mark_no:
+        filters["custom_duno_mark_no"] = duno_mark_no
+    result = frappe.db.get_value("Production Plan Item", filters, "planned_qty")
+    return flt(result)
 
-    pp = frappe.get_doc("Production Plan", pp_name)
 
-    # Collect all reserved batch numbers across all MP documents linked to this PP
-    all_batches = set()
-    for pi in pp.po_items:
-        mp_name = pi.get("custom_material_planning")
-        if not mp_name:
-            continue
-        for r in frappe.get_all(
-            "Material Planning Material Mapping",
-            filters={"parent": mp_name, "is_reserved": 1},
-            fields=["batch"],
-        ):
-            if r.batch:
-                all_batches.add(r.batch)
-        for r in frappe.get_all(
-            "Material Planning Available Raw Material",
-            filters={"parent": mp_name, "is_reserved": 1},
-            fields=["batch_no"],
-        ):
-            if r.batch_no:
-                all_batches.add(r.batch_no)
+@frappe.whitelist()
+def backfill_drawing_item_qty(sco_name):
+    """Populate qty_to_manufacture on all SCO Drawing Items for an existing SCO
+    by reading planned_qty from the linked Production Plan Items.
+    Called once after the field is added; subsequent SCOs are populated on creation."""
+    sco = frappe.get_doc("Subcontracting Order", sco_name)
+    pp_name = sco.get("custom_production_plan")
+    if not pp_name:
+        frappe.throw(_("Subcontracting Order is not linked to a Production Plan."))
 
-    if not all_batches:
-        return []
+    updated = 0
+    for d in (sco.get("custom_drawing_items") or []):
+        qty = _get_pp_planned_qty(pp_name, d.get("customer_drawing_number"), d.get("duno_mark_no"))
+        if qty:
+            frappe.db.set_value("SCO Drawing Item", d.name, "qty_to_manufacture", flt(qty, 3))
+            updated += 1
 
-    se_items = []
-    for batch_no in all_batches:
-        rows = frappe.db.sql(
-            """
-            SELECT item_code, SUM(actual_qty) AS qty
-            FROM `tabStock Ledger Entry`
-            WHERE batch_no = %s AND warehouse = %s AND is_cancelled = 0
-            GROUP BY item_code
-            HAVING SUM(actual_qty) > 0
-            """,
-            (batch_no, sco.supplier_warehouse),
-            as_dict=True,
-        )
-        for r in rows:
-            se_items.append({
-                "item_code": r.item_code,
-                "batch_no": batch_no,
-                # v15: use the batch_no field directly; Frappe creates the SBB on submit.
-                "use_serial_batch_fields": 1,
-                "qty": flt(r.qty, 3),
-                "s_warehouse": sco.supplier_warehouse,
-                "t_warehouse": target_warehouse,
-            })
+    frappe.db.commit()
+    return updated
 
-    return se_items
+
+def _get_supplier_wh_consumption_items(sco):
+    """Return SE consumption rows (issued FROM the supplier warehouse, no target) for all
+    raw material transferred to the supplier for this SCO.
+
+    Pulls items directly from submitted 'Send to Subcontractor' SEs linked to this SCO
+    (via custom_sco_ref or subcontracting_order). Querying the SE Detail rows is reliable
+    in Frappe v15 because SLE rows store batch tracking in Serial and Batch Bundles rather
+    than in the batch_no column, making SLE batch_no lookups unreliable.
+    """
+    rows = frappe.db.sql(
+        """
+        SELECT sed.item_code, sed.batch_no, SUM(sed.qty) AS qty
+        FROM `tabStock Entry Detail` sed
+        JOIN `tabStock Entry` se ON se.name = sed.parent
+        WHERE (se.custom_sco_ref = %s OR se.subcontracting_order = %s)
+          AND se.stock_entry_type = 'Send to Subcontractor'
+          AND se.docstatus = 1
+        GROUP BY sed.item_code, sed.batch_no
+        HAVING SUM(sed.qty) > 0
+        """,
+        (sco.name, sco.name),
+        as_dict=True,
+    )
+    return [
+        {
+            "item_code": r.item_code,
+            "batch_no": r.batch_no,
+            # v15: use the batch_no field directly; Frappe creates the SBB on submit.
+            "use_serial_batch_fields": 1,
+            "qty": flt(r.qty, 3),
+            "uom": frappe.db.get_value("Item", r.item_code, "stock_uom") or "Kg",
+            "s_warehouse": sco.supplier_warehouse,
+        }
+        for r in rows
+    ]

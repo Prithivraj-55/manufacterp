@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-06-23 00:48:06_
+_Generated: 2026-06-24 00:47:35_
 
 ## drawing
 
@@ -247,6 +247,17 @@ _Generated: 2026-06-23 00:48:06_
 | Module | subcontracting_management |
 | Path | `subcontracting_management/doctype/sco_drawing_item` |
 | Controller | `subcontracting_management/doctype/sco_drawing_item/sco_drawing_item.py` |
+| Client script | none |
+
+---
+
+## sco_excess_material_item
+
+| Key | Value |
+|-----|-------|
+| Module | subcontracting_management |
+| Path | `subcontracting_management/doctype/sco_excess_material_item` |
+| Controller | `subcontracting_management/doctype/sco_excess_material_item/sco_excess_material_item.py` |
 | Client script | none |
 
 ---

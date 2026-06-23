@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-06-23 00:48:06_
+_Generated: 2026-06-24 00:47:35_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -112,13 +112,15 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `create_work_order_from_pp` | 122 |
-| `create_supplier_operation_entries` | 192 |
-| `create_send_to_subcontractor_entry` | 209 |
-| `create_sco_from_production_plan` | 24 |
-| `get_soe_summary` | 268 |
-| `create_return_stock_entry` | 283 |
+| `create_work_order_from_pp` | 152 |
+| `create_supplier_operation_entries` | 222 |
+| `create_send_to_subcontractor_entry` | 239 |
+| `create_sco_from_production_plan` | 26 |
+| `get_soe_summary` | 302 |
+| `create_return_stock_entry` | 317 |
+| `create_finished_goods_entry` | 364 |
+| `backfill_drawing_item_qty` | 831 |
 
 ## Total
 
-_61 whitelisted methods_
+_63 whitelisted methods_
