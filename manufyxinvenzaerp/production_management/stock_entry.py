@@ -93,9 +93,11 @@ def on_submit_stock_entry(doc, method):
 	# Release reservations for all consumed batches
 	_release_material_planning_reservations(doc)
 
-	# When materials are sent to supplier, record transferred weight on the SCO
-	if doc.stock_entry_type == "Send to Subcontractor" and doc.get("subcontracting_order"):
-		_update_sco_transferred_weight(doc.subcontracting_order)
+	# When materials are sent to supplier, record transferred weight on the SCO.
+	# We track via custom_sco_ref (not the standard subcontracting_order) to avoid
+	# ERPNext's validate_subcontract_order which throws when supplied_items is empty.
+	if doc.stock_entry_type == "Send to Subcontractor" and doc.get("custom_sco_ref"):
+		_update_sco_transferred_weight(doc.custom_sco_ref)
 
 
 def _reduce_batch_sec_qty(batch_no, consumed_qty):
@@ -255,8 +257,8 @@ def on_cancel_stock_entry(doc, method):
 	_restore_batch_sec_qty(doc)
 
 	# Recalculate transferred weight on SCO if a Send to Subcontractor SE is cancelled
-	if doc.stock_entry_type == "Send to Subcontractor" and doc.get("subcontracting_order"):
-		_update_sco_transferred_weight(doc.subcontracting_order)
+	if doc.stock_entry_type == "Send to Subcontractor" and doc.get("custom_sco_ref"):
+		_update_sco_transferred_weight(doc.custom_sco_ref)
 
 
 def _restore_batch_sec_qty(doc):
@@ -343,7 +345,7 @@ def _update_sco_transferred_weight(sco_name):
 		SELECT COALESCE(SUM(sed.qty), 0)
 		FROM `tabStock Entry Detail` sed
 		JOIN `tabStock Entry` se ON se.name = sed.parent
-		WHERE se.subcontracting_order = %s
+		WHERE se.custom_sco_ref = %s
 		  AND se.stock_entry_type = 'Send to Subcontractor'
 		  AND se.docstatus = 1
 		  AND sed.t_warehouse = %s

@@ -1113,6 +1113,7 @@ def after_install():
     remove_sco_purchase_order_mandatory()
     create_sco_custom_fields()
     create_sco_client_script()
+    create_sco_ops_client_script()
     create_soe_client_script()
     from manufyxinvenzaerp.production_management.production_utils import (
         create_operations_workstations_routing,
@@ -1148,6 +1149,7 @@ def after_migrate():
     remove_sco_purchase_order_mandatory()
     create_sco_custom_fields()
     create_sco_client_script()
+    create_sco_ops_client_script()
     create_soe_client_script()
     from manufyxinvenzaerp.production_management.production_utils import (
         create_operations_workstations_routing,
@@ -2625,6 +2627,27 @@ def create_stock_entry_custom_fields():
                     "depends_on": "eval:['Structurals','Plates'].includes(doc.custom_parent_item_group)",
                     "insert_after": "custom_existing_invoice_wt",
                 },
+                {
+                    "fieldname": "custom_is_consumable",
+                    "fieldtype": "Check",
+                    "label": "Consumable",
+                    "in_list_view": 1,
+                    "insert_after": "custom_existing_inward_date",
+                    "description": "Mark this row as a consumable (welding rods, paint, etc.). "
+                                   "Stock is deducted from the source warehouse on submission.",
+                },
+            ],
+            "Stock Entry": [
+                {
+                    "fieldname": "custom_sco_ref",
+                    "fieldtype": "Link",
+                    "label": "Subcontracting Order (PP Flow)",
+                    "options": "Subcontracting Order",
+                    "read_only": 1,
+                    "insert_after": "subcontracting_order",
+                    "description": "PP-flow SCO link — used instead of subcontracting_order "
+                                   "to avoid ERPNext supplied_items validation on send-to-subcontractor SEs.",
+                },
             ],
         },
         update=True,
@@ -2707,6 +2730,7 @@ def create_sco_custom_fields():
                     "options": "Warehouse",
                     "insert_after": "custom_source_warehouse",
                     "description": "Warehouse to receive unconsumed materials back from supplier",
+                    "allow_on_submit": 1,
                 },
                 {
                     "fieldname": "custom_section_drawings",
@@ -2729,20 +2753,97 @@ def create_sco_custom_fields():
                     "insert_after": "custom_drawing_items",
                 },
                 {
-                    "fieldname": "custom_total_weight_kg",
+                    "fieldname": "custom_customer_weight_kg",
                     "fieldtype": "Float",
-                    "label": "Total Weight (Kg)",
+                    "label": "Customer Provided Weight (Kg)",
                     "read_only": 1,
                     "insert_after": "custom_section_weights",
-                    "description": "Sum of reserved batch weights from Material Planning",
+                    "description": "Sum of customer-provided weight across all drawings",
+                },
+                {
+                    "fieldname": "custom_total_weight_kg",
+                    "fieldtype": "Float",
+                    "label": "Planned RM Weight (Kg)",
+                    "read_only": 1,
+                    "insert_after": "custom_customer_weight_kg",
+                    "description": "Sum of planned raw-material weight across all drawings",
+                },
+                {
+                    "fieldname": "custom_mapped_weight_kg",
+                    "fieldtype": "Float",
+                    "label": "Mapped Weight (Kg)",
+                    "read_only": 1,
+                    "insert_after": "custom_total_weight_kg",
+                    "description": "Reserved/mapped batch weight from Material Planning that will be transferred to the supplier",
+                },
+                {
+                    "fieldname": "custom_excess_weight_kg",
+                    "fieldtype": "Float",
+                    "label": "Excess Weight (Kg)",
+                    "read_only": 1,
+                    "insert_after": "custom_mapped_weight_kg",
+                    "description": "Over-mapped weight (mapped beyond planned) that the supplier must return",
+                },
+                {
+                    "fieldname": "custom_excess_banner_html",
+                    "fieldtype": "HTML",
+                    "label": "Excess Banner",
+                    "insert_after": "custom_excess_weight_kg",
                 },
                 {
                     "fieldname": "custom_transferred_weight_kg",
                     "fieldtype": "Float",
                     "label": "Transferred Weight (Kg)",
                     "read_only": 1,
-                    "insert_after": "custom_total_weight_kg",
+                    "insert_after": "custom_excess_banner_html",
                     "description": "Weight actually transferred to supplier warehouse (updated on SE submit)",
+                },
+                {
+                    "fieldname": "custom_tab_excess_return",
+                    "fieldtype": "Tab Break",
+                    "label": "Excess Material Return",
+                    # Anchored at the end of the form (just before the standard Connections
+                    # tab) so the Tab Break does not pull any standard fields into it.
+                    "insert_after": "letter_head",
+                },
+                {
+                    "fieldname": "custom_section_excess_return",
+                    "fieldtype": "Section Break",
+                    "label": "",
+                    "insert_after": "custom_tab_excess_return",
+                    "description": "Off-cut / balance material left after the supplier cut the transferred raw material. "
+                                   "Enter the items in their new dimensions and Sec Nos — weight (Kg) is auto-calculated. "
+                                   "Then use 'Return Excess Entry' to receive them into inventory as fresh stock.",
+                },
+                {
+                    "fieldname": "custom_excess_actions_html",
+                    "fieldtype": "HTML",
+                    "label": "",
+                    "insert_after": "custom_section_excess_return",
+                },
+                {
+                    "fieldname": "custom_excess_return_items",
+                    "fieldtype": "Table",
+                    "label": "Excess Material Items",
+                    "options": "SCO Excess Material Item",
+                    "allow_on_submit": 1,
+                    "insert_after": "custom_excess_actions_html",
+                },
+                {
+                    "fieldname": "custom_excess_return_total_kg",
+                    "fieldtype": "Float",
+                    "label": "Total Return Weight (Kg)",
+                    "read_only": 1,
+                    "allow_on_submit": 1,
+                    "insert_after": "custom_excess_return_items",
+                },
+                {
+                    "fieldname": "custom_excess_return_total_nos",
+                    "fieldtype": "Float",
+                    "label": "Total Return Sec Nos",
+                    "read_only": 1,
+                    "allow_on_submit": 1,
+                    "insert_after": "custom_excess_return_total_kg",
                 },
             ],
         },
@@ -2753,7 +2854,21 @@ def create_sco_custom_fields():
 SCO_CLIENT_SCRIPT = """
 frappe.ui.form.on("Subcontracting Order", {
 \trefresh(frm) {
+\t\t// Excess material banner — mirrors the Material Planning "Difference in Kg" notice
+\t\tlet $bw = frm.fields_dict["custom_excess_banner_html"] && frm.fields_dict["custom_excess_banner_html"].$wrapper;
+\t\tif ($bw) {
+\t\t\tlet excess = flt(frm.doc.custom_excess_weight_kg);
+\t\t\tif (excess > 0) {
+\t\t\t\t$bw.html('<div style="margin-top:8px;padding:8px 12px;background:#f1f8e9;border-left:3px solid #66bb6a;border-radius:3px;font-size:12px;color:#33691e;"><b>Excess material (+' + flt(excess, 3).toFixed(3) + ' Kg):</b> This much extra is mapped versus planned. Ensure the supplier returns the excess quantity after the job.</div>');
+\t\t\t} else if (frm.doc.custom_all_ops_complete) {
+\t\t\t\t$bw.html("");
+\t\t\t}
+\t\t}
+
 \t\tif (frm.doc.docstatus === 1 && frm.doc.custom_production_plan) {
+\t\t\t// Before transfer: send raw materials to the supplier. Once transferred, this
+\t\t\t// action turns into "Make Final Stock Entry" (see the else branch below).
+\t\t\tif (!frm.doc.custom_transferred_weight_kg) {
 \t\t\t// Transfer reserved batch materials from source warehouse to supplier warehouse
 \t\t\tfrm.add_custom_button(__("Raw Materials to Supplier"), function() {
 \t\t\t\tif (!frm.doc.custom_source_warehouse) {
@@ -2777,6 +2892,30 @@ frappe.ui.form.on("Subcontracting Order", {
 \t\t\t\t\t}
 \t\t\t\t});
 \t\t\t}, __("Transfer"));
+\t\t\t} else if (frm.doc.custom_all_ops_complete) {
+\t\t\t\t// Raw materials already supplied → produce the finished goods. Creates a
+\t\t\t\t// Manufacture stock entry that consumes the supplier-warehouse stock and
+\t\t\t\t// adds the finished good to inventory on submission.
+\t\t\t\tfrm.add_custom_button(__("Make Final Stock Entry"), function() {
+\t\t\t\t\tfrappe.call({
+\t\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_finished_goods_entry",
+\t\t\t\t\t\targs: { sco_name: frm.doc.name },
+\t\t\t\t\t\tfreeze: true,
+\t\t\t\t\t\tfreeze_message: __("Creating Final Stock Entry…"),
+\t\t\t\t\t\tcallback: function(r) {
+\t\t\t\t\t\t\tif (r.message) {
+\t\t\t\t\t\t\t\tfrappe.msgprint({
+\t\t\t\t\t\t\t\t\ttitle: __("Final Stock Entry Created"),
+\t\t\t\t\t\t\t\t\tmessage: __("Review and submit the stock entry: ") +
+\t\t\t\t\t\t\t\t\t\t'<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>",
+\t\t\t\t\t\t\t\t\tindicator: "green"
+\t\t\t\t\t\t\t\t});
+\t\t\t\t\t\t\t\tfrm.reload_doc();
+\t\t\t\t\t\t\t}
+\t\t\t\t\t\t}
+\t\t\t\t\t});
+\t\t\t\t});
+\t\t\t}
 
 \t\t\t// Create one Supplier Operation Entry per subcontractor operation
 \t\t\tif (frm.doc.custom_transferred_weight_kg) {
@@ -2792,7 +2931,7 @@ frappe.ui.form.on("Subcontracting Order", {
 \t\t\t\t\t\t\t\t\tmessage: r.message.join(", "),
 \t\t\t\t\t\t\t\t\tindicator: "green"
 \t\t\t\t\t\t\t\t});
-\t\t\t\t\t\t\t} else {
+\t\t\t\t\t\t\t} else if (frm.doc.custom_all_ops_complete) {
 \t\t\t\t\t\t\t\tfrappe.msgprint(__("All Supplier Operation Entries already exist."));
 \t\t\t\t\t\t\t}
 \t\t\t\t\t\t\tfrm.reload_doc();
@@ -2801,34 +2940,188 @@ frappe.ui.form.on("Subcontracting Order", {
 \t\t\t\t}, __("Create"));
 \t\t\t}
 
-\t\t\tif (frm.doc.custom_all_ops_complete) {
-
-\t\t\t\tfrm.add_custom_button(__("Transfer Unconsumed Materials"), function() {
-\t\t\t\t\tif (!frm.doc.custom_return_warehouse) {
-\t\t\t\t\t\tfrappe.msgprint(__("Please set the Return/Transfer Warehouse field first."));
-\t\t\t\t\t\treturn;
-\t\t\t\t\t}
-\t\t\t\t\tfrappe.call({
-\t\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_return_stock_entry",
-\t\t\t\t\t\targs: { sco_name: frm.doc.name, target_warehouse: frm.doc.custom_return_warehouse },
-\t\t\t\t\t\tfreeze: true,
-\t\t\t\t\t\tcallback: function(r) {
-\t\t\t\t\t\t\tif (r.message) {
-\t\t\t\t\t\t\t\tfrappe.msgprint({
-\t\t\t\t\t\t\t\t\ttitle: __("Stock Entry Created"),
-\t\t\t\t\t\t\t\t\tmessage: __("Transfer Stock Entry: ") +
-\t\t\t\t\t\t\t\t\t\t'<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>",
-\t\t\t\t\t\t\t\t\tindicator: "green"
-\t\t\t\t\t\t\t\t});
-\t\t\t\t\t\t\t\tfrm.reload_doc();
-\t\t\t\t\t\t\t}
-\t\t\t\t\t\t}
-\t\t\t\t\t});
-\t\t\t\t}, __("Transfer"));
-\t\t\t}
 \t\t}
+\t\t_render_excess_action_btn(frm);
+\t},
+
+\tcustom_excess_return_items_remove(frm) {
+\t\t_sco_excess_totals(frm);
 \t}
 });
+
+function _render_excess_action_btn(frm) {
+\tvar field = frm.fields_dict["custom_excess_actions_html"];
+\tif (!field) return;
+\tvar $w = field.$wrapper;
+\tif (frm.doc.docstatus !== 1) {
+\t\t$w.html("");
+\t\treturn;
+\t}
+\t$w.html(
+\t\t"<div style='margin:8px 0'>"
+\t\t+ "<button class='btn btn-sm btn-default sco-return-excess-btn'>Return Excess Entry</button>"
+\t\t+ "</div>"
+\t);
+\t$w.find(".sco-return-excess-btn").on("click", function() {
+\t\tif (!frm.doc.custom_return_warehouse) {
+\t\t\tfrappe.msgprint(__("Please set the Return/Transfer Warehouse field first."));
+\t\t\treturn;
+\t\t}
+\t\tif (frm.is_dirty()) {
+\t\t\tfrappe.msgprint(__("Please save the Excess Material Return table before receiving."));
+\t\t\treturn;
+\t\t}
+\t\tif (!(frm.doc.custom_excess_return_items || []).length) {
+\t\t\tfrappe.msgprint(__("Add the off-cut items to the Excess Material Return table first."));
+\t\t\treturn;
+\t\t}
+\t\tfrappe.call({
+\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_return_stock_entry",
+\t\t\targs: { sco_name: frm.doc.name, target_warehouse: frm.doc.custom_return_warehouse },
+\t\t\tfreeze: true,
+\t\t\tcallback: function(r) {
+\t\t\t\tif (r.message) {
+\t\t\t\t\tfrappe.msgprint({
+\t\t\t\t\t\ttitle: __("Return Excess Entry Created"),
+\t\t\t\t\t\tmessage: __("Return Stock Entry: ")
+\t\t\t\t\t\t\t+ '<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">'
+\t\t\t\t\t\t\t+ r.message + "</a>",
+\t\t\t\t\t\tindicator: "green"
+\t\t\t\t\t});
+\t\t\t\t\tfrm.reload_doc();
+\t\t\t\t}
+\t\t\t}
+\t\t});
+\t});
+}
+
+frappe.ui.form.on("SCO Excess Material Item", {
+\titem_code(frm, cdt, cdn) {
+\t\tvar row = locals[cdt][cdn];
+\t\tif (!row.item_code) return;
+\t\tfrappe.db.get_value("Item", row.item_code,
+\t\t\t["custom_parent_item_group", "custom_unit_weight", "custom_secondary_uom", "stock_uom"],
+\t\t\tfunction(v) {
+\t\t\t\tif (!v) return;
+\t\t\t\tfrappe.model.set_value(cdt, cdn, "parent_item_group", v.custom_parent_item_group || "");
+\t\t\t\tfrappe.model.set_value(cdt, cdn, "unit_weight", v.custom_unit_weight || 0);
+\t\t\t\tfrappe.model.set_value(cdt, cdn, "sec_uom", v.custom_secondary_uom || "");
+\t\t\t\tfrappe.model.set_value(cdt, cdn, "uom", v.stock_uom || "");
+\t\t\t});
+\t},
+\tlength(frm, cdt, cdn)    { _sco_excess_calc(frm, cdt, cdn); },
+\twidth(frm, cdt, cdn)     { _sco_excess_calc(frm, cdt, cdn); },
+\tthickness(frm, cdt, cdn) { _sco_excess_calc(frm, cdt, cdn); },
+\tsec_qty(frm, cdt, cdn)   { _sco_excess_calc(frm, cdt, cdn); },
+\tqty(frm)                 { _sco_excess_totals(frm); }
+});
+
+function _sco_excess_calc(frm, cdt, cdn) {
+\tvar row = locals[cdt][cdn];
+\tvar g = row.parent_item_group;
+\tvar qty = null;
+\tif (g === "Structurals") {
+\t\tif (row.length && row.unit_weight && row.sec_qty) {
+\t\t\tqty = (row.length / 1000) * row.unit_weight * row.sec_qty;
+\t\t}
+\t} else if (g === "Plates") {
+\t\tif (row.length && row.width && row.thickness && row.unit_weight && row.sec_qty) {
+\t\t\tqty = (row.length / 1000) * (row.width / 1000) * row.thickness * row.unit_weight * row.sec_qty;
+\t\t}
+\t}
+\tif (qty !== null) {
+\t\tfrappe.model.set_value(cdt, cdn, "qty", flt(qty, 3));
+\t}
+\t_sco_excess_totals(frm);
+}
+
+function _sco_excess_totals(frm) {
+\tvar tkg = 0, tnos = 0;
+\t(frm.doc.custom_excess_return_items || []).forEach(function(r) {
+\t\ttkg  += flt(r.qty);
+\t\ttnos += flt(r.sec_qty);
+\t});
+\tfrm.set_value("custom_excess_return_total_kg",  flt(tkg, 3));
+\tfrm.set_value("custom_excess_return_total_nos", flt(tnos, 3));
+}
+""".strip()
+
+
+SCO_OPS_SCRIPT_NAME = "Subcontracting Order-operations-summary"
+
+SCO_OPS_SCRIPT = """
+frappe.ui.form.on("Subcontracting Order", {
+    refresh(frm) {
+        render_soe_summary(frm);
+    }
+});
+
+function render_soe_summary(frm) {
+    var field = frm.get_field("custom_operations_html");
+    if (!field) return;
+    var $w = field.$wrapper;
+    if (!frm.doc.name || frm.is_new()) {
+        $w.html("<div class='text-muted'>Save and submit the Subcontracting Order to create operations.</div>");
+        return;
+    }
+    frappe.call({
+        method: "manufyxinvenzaerp.subcontracting_management.subcontracting.get_soe_summary",
+        args: { sco_name: frm.doc.name },
+        callback(r) {
+            var rows = r.message || [];
+            if (!rows.length) {
+                $w.html("<div style='margin-bottom:8px'><button class='btn btn-xs btn-default sco-ops-refresh'>&#8635; Refresh</button></div>"
+                    + "<div class='text-muted'>No Supplier Operation Entries created yet.</div>");
+                $w.find(".sco-ops-refresh").on("click", function() { render_soe_summary(frm); });
+                return;
+            }
+            var avail_total = 0, cons_total = 0;
+            var body = rows.map(function (d) {
+                var color = d.status === "Completed" ? "green"
+                          : (d.status === "In Progress" ? "orange" : "gray");
+                var submitted = d.docstatus === 1
+                    ? "<span class='indicator green'>Submitted</span>"
+                    : "<span class='indicator gray'>Draft</span>";
+                avail_total += flt(d.available_to_consume_kg || 0);
+                cons_total  += flt(d.total_consumed_kg || 0);
+                var diff = flt(d.available_to_consume_kg || 0) - flt(d.total_consumed_kg || 0);
+                var diff_color = diff < 0 ? "color:red" : (diff > 0 ? "color:orange" : "");
+                return "<tr>"
+                    + "<td class='text-center'>" + (d.sequence_id || "") + "</td>"
+                    + "<td><a href='/app/supplier-operation-entry/" + encodeURIComponent(d.name) + "'>"
+                        + frappe.utils.escape_html(d.operation || "") + "</a></td>"
+                    + "<td><span class='indicator " + color + "'>" + (d.status || "") + "</span></td>"
+                    + "<td class='text-right'>" + format_number(d.available_to_consume_kg || 0, null, 3) + "</td>"
+                    + "<td class='text-right'>" + format_number(d.total_consumed_kg || 0, null, 3) + "</td>"
+                    + "<td class='text-right' style='" + diff_color + "'>" + format_number(diff, null, 3) + "</td>"
+                    + "<td class='text-center'>" + submitted + "</td>"
+                    + "</tr>";
+            }).join("");
+            var html = "<div style='margin-bottom:8px'><button class='btn btn-xs btn-default sco-ops-refresh'>&#8635; Refresh</button></div>"
+                + "<table class='table table-bordered' style='margin-top:4px'>"
+                + "<thead><tr>"
+                + "<th class='text-center' style='width:60px'>Seq</th>"
+                + "<th>Operation</th>"
+                + "<th style='width:130px'>Status</th>"
+                + "<th class='text-right'>Available to Consume (Kg)</th>"
+                + "<th class='text-right'>Total Consumed (Kg)</th>"
+                + "<th class='text-right'>Difference (Kg)</th>"
+                + "<th class='text-center' style='width:110px'>Entry</th>"
+                + "</tr></thead><tbody>" + body + "</tbody>"
+                + "<tfoot><tr style='font-weight:bold'>"
+                + "<td colspan='3' class='text-right'>Total</td>"
+                + "<td class='text-right'>" + format_number(avail_total, null, 3) + "</td>"
+                + "<td class='text-right'>" + format_number(cons_total, null, 3) + "</td>"
+                + "<td class='text-right'>" + format_number(avail_total - cons_total, null, 3) + "</td>"
+                + "<td></td></tr></tfoot></table>"
+                + "<div class='text-muted' style='margin-top:6px;font-size:11px'>"
+                + "Each operation's Available to Consume updates automatically from the previous "
+                + "operation's Total Consumed when that entry is saved.</div>";
+            $w.html(html);
+            $w.find(".sco-ops-refresh").on("click", function() { render_soe_summary(frm); });
+        }
+    });
+}
 """.strip()
 
 
@@ -2861,6 +3154,10 @@ function _soe_update_total(frm) {
 \tfrm.doc.total_consumed_kg = total;
 \tfrm.refresh_field("total_consumed_kg");
 
+\tif (total > 0 && frm.doc.status === "Open") {
+\t\tfrm.set_value("status", "In Progress");
+\t}
+
 \tvar available = flt(frm.doc.available_to_consume_kg);
 \tif (available > 0 && total > available) {
 \t\tfrappe.show_alert({
@@ -2884,6 +3181,22 @@ def create_sco_client_script():
             "view": "Form",
             "enabled": 1,
             "script": SCO_CLIENT_SCRIPT,
+        }).insert(ignore_permissions=True)
+    frappe.db.commit()
+
+
+def create_sco_ops_client_script():
+    if frappe.db.exists("Client Script", SCO_OPS_SCRIPT_NAME):
+        frappe.db.set_value("Client Script", SCO_OPS_SCRIPT_NAME, "script", SCO_OPS_SCRIPT)
+        frappe.db.set_value("Client Script", SCO_OPS_SCRIPT_NAME, "enabled", 1)
+    else:
+        frappe.get_doc({
+            "doctype": "Client Script",
+            "name": SCO_OPS_SCRIPT_NAME,
+            "dt": "Subcontracting Order",
+            "view": "Form",
+            "enabled": 1,
+            "script": SCO_OPS_SCRIPT,
         }).insert(ignore_permissions=True)
     frappe.db.commit()
 

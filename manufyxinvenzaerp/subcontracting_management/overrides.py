@@ -62,11 +62,14 @@ class CustomSubcontractingOrder(SubcontractingOrder):
         if created:
             count = len(created)
             frappe.msgprint(
-                _("{0} Supplier Operation {1} created.").format(
+                _("{0} Supplier Operation {1} created. "
+                  "You can now transfer material to the supplier warehouse using the "
+                  "<b>Raw Materials to Supplier</b> button, then enter the consumption "
+                  "details for each operation in the <b>Operations</b> tab.").format(
                     count, _("Entry") if count == 1 else _("Entries")
                 ),
+                title=_("Supplier Operation Entries Created"),
                 indicator="green",
-                alert=True,
             )
 
     def on_cancel(self):
