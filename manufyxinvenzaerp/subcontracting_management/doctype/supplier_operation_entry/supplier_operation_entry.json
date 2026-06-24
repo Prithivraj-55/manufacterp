@@ -18,6 +18,8 @@
   "section_break_summary",
   "available_to_consume_kg",
   "total_consumed_kg",
+  "section_break_drawing_details",
+  "drawing_details",
   "section_break_log",
   "consumption_log"
  ],
@@ -99,16 +101,27 @@
   {
    "fieldname": "available_to_consume_kg",
    "fieldtype": "Float",
-   "label": "Available to Consume (Kg)",
+   "label": "Available to Consume (Nos)",
    "read_only": 1,
    "in_list_view": 1
   },
   {
    "fieldname": "total_consumed_kg",
    "fieldtype": "Float",
-   "label": "Total Consumed (Kg)",
+   "label": "Total Consumed (Nos)",
    "read_only": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "section_break_drawing_details",
+   "fieldtype": "Section Break",
+   "label": "Drawing Details"
+  },
+  {
+   "fieldname": "drawing_details",
+   "fieldtype": "Table",
+   "label": "Drawing Details",
+   "options": "SOE Drawing Detail"
   },
   {
    "fieldname": "section_break_log",
@@ -124,7 +137,7 @@
  ],
  "is_submittable": 1,
  "links": [],
- "modified": "2026-06-19 00:00:00.000000",
+ "modified": "2026-06-24 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Subcontracting Management",
  "name": "Supplier Operation Entry",

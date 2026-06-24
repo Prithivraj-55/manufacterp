@@ -9,11 +9,14 @@
   "sales_order",
   "item_code",
   "item_name",
+  "duno_mark_no",
+  "customer_drawing_number",
   "batch_no",
   "parent_item_group",
   "length",
   "width",
   "thickness",
+  "overall_required_qty",
   "required_qty",
   "available_qty",
   "sec_qty",
@@ -24,7 +27,8 @@
   "is_reserved",
   "reserved_qty",
   "shortfall_qty",
-  "reserved_on"
+  "reserved_on",
+  "cnc_process"
  ],
  "fields": [
   {
@@ -59,6 +63,22 @@
    "fieldname": "item_name",
    "fieldtype": "Data",
    "label": "Item Name",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "duno_mark_no",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "DUNO/Mark No",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "customer_drawing_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Cust Drawing No",
    "read_only": 1
   },
   {
@@ -102,16 +122,26 @@
   },
   {
    "columns": 1,
-   "fieldname": "required_qty",
+   "fieldname": "overall_required_qty",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Required Qty",
+   "label": "Overall Required Qty",
    "read_only": 1
   },
   {
+   "columns": 1,
+   "fieldname": "required_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Allocated Qty in Batch",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
    "fieldname": "available_qty",
    "fieldtype": "Float",
-   "label": "Available Qty",
+   "in_list_view": 1,
+   "label": "Available Qty in Batch",
    "read_only": 1
   },
   {
@@ -174,11 +204,18 @@
    "fieldtype": "Datetime",
    "label": "Reserved On",
    "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "cnc_process",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "CNC Process"
   }
  ],
  "istable": 1,
  "links": [],
- "modified": "2026-05-26 11:00:17.724539",
+ "modified": "2026-06-24 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Production Management",
  "name": "Material Planning Available Raw Material",

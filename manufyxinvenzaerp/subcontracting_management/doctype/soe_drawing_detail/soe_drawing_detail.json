@@ -1,0 +1,109 @@
+{
+ "actions": [],
+ "creation": "2026-06-24 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "drawing",
+  "customer_drawing_number",
+  "duno_mark_no",
+  "sales_order",
+  "qty_to_manufacture",
+  "col_break_weights",
+  "customer_provided_weight_kg",
+  "planned_weight_kg",
+  "transferred_weight_kg",
+  "col_break_nos",
+  "available_to_consume_nos",
+  "completed_qty_nos"
+ ],
+ "fields": [
+  {
+   "fieldname": "drawing",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Drawing",
+   "options": "Drawing",
+   "read_only": 1
+  },
+  {
+   "fieldname": "customer_drawing_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Cust Drawing No",
+   "read_only": 1
+  },
+  {
+   "fieldname": "duno_mark_no",
+   "fieldtype": "Data",
+   "label": "DUNO / Mark No",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sales_order",
+   "fieldtype": "Link",
+   "label": "Sales Order",
+   "options": "Sales Order",
+   "read_only": 1
+  },
+  {
+   "fieldname": "qty_to_manufacture",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Qty to Mfg (Nos)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_weights",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "customer_provided_weight_kg",
+   "fieldtype": "Float",
+   "label": "Customer Weight (Kg)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "planned_weight_kg",
+   "fieldtype": "Float",
+   "label": "Planned Weight (Kg)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "transferred_weight_kg",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Transferred (Kg)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_nos",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "available_to_consume_nos",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Available (Nos)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "completed_qty_nos",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Completed (Nos)",
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-24 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Subcontracting Management",
+ "name": "SOE Drawing Detail",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}

@@ -521,7 +521,10 @@ def check_stock_availability(doc):
                         "sales_order": row.get("sales_order") or "",
                         "item_code": item_code,
                         "item_name": row.get("item_name"),
+                        "duno_mark_no": row.get("duno_mark_no") or "",
+                        "customer_drawing_number": row.get("customer_drawing_number") or "",
                         "batch_no": bn,
+                        "overall_required_qty": flt(required_qty, 3),
                         "required_qty": flt(consumed_qty, 3),
                         "available_qty": flt(b["qty"]),
                         "sec_qty": row_sec,
@@ -595,7 +598,10 @@ def check_stock_availability(doc):
                     "sales_order": row.get("sales_order") or "",
                     "item_code": item_code,
                     "item_name": row.get("item_name"),
+                    "duno_mark_no": row.get("duno_mark_no") or "",
+                    "customer_drawing_number": row.get("customer_drawing_number") or "",
                     "batch_no": "",
+                    "overall_required_qty": flt(required_qty, 3),
                     "required_qty": required_qty,
                     "available_qty": available_qty,
                     "sec_qty": flt(row.get("sec_qty")),
@@ -759,7 +765,10 @@ def move_to_exact_match(doc, item_codes):
                         "sales_order": row.get("sales_order") or "",
                         "item_code": item_code,
                         "item_name": row.get("item_name"),
+                        "duno_mark_no": row.get("duno_mark_no") or "",
+                        "customer_drawing_number": row.get("customer_drawing_number") or "",
                         "batch_no": bn,
+                        "overall_required_qty": flt(required_qty, 3),
                         "required_qty": flt(consumed_qty, 3),
                         "available_qty": flt(b["qty"]),
                         "sec_qty": row_sec,
@@ -787,7 +796,10 @@ def move_to_exact_match(doc, item_codes):
                     "sales_order": row.get("sales_order") or "",
                     "item_code": item_code,
                     "item_name": row.get("item_name"),
+                    "duno_mark_no": row.get("duno_mark_no") or "",
+                    "customer_drawing_number": row.get("customer_drawing_number") or "",
                     "batch_no": "",
+                    "overall_required_qty": flt(required_qty, 3),
                     "required_qty": required_qty,
                     "available_qty": available_qty,
                     "sec_qty": flt(row.get("sec_qty")),
@@ -984,6 +996,29 @@ def _get_non_batch_reserved_by_others(item_code, warehouse, exclude_mp):
     return flt(result[0].total if result else 0)
 
 
+def _update_bom_item_weights(mp):
+    """Compute per-drawing customer_provided_weight_kg and planned_weight_kg
+    from reservations and store them on each bom_items row.
+    Called after reserve_batches / reserve_exact_match_batches succeed so
+    the SCO Drawing Detail table has accurate weights at SOE creation time.
+    """
+    from manufyxinvenzaerp.subcontracting_management.subcontracting import (
+        _get_mp_mapped_weight_by_duno,
+    )
+    mapped_by_duno = _get_mp_mapped_weight_by_duno(mp.name)
+
+    for bom_item in (mp.bom_items or []):
+        duno = bom_item.duno_mark_no or ""
+        bom_item.planned_weight_kg = flt(mapped_by_duno.get(duno, 0.0), 3)
+        if bom_item.sales_order and duno:
+            so_wt = frappe.db.get_value(
+                "Sales Order DUNO Item",
+                {"parent": bom_item.sales_order, "duno_mark_no": duno},
+                "total_weight",
+            ) or 0.0
+            bom_item.customer_provided_weight_kg = flt(so_wt, 3)
+
+
 @frappe.whitelist()
 def reserve_batches(material_planning_name):
     """
@@ -1070,6 +1105,7 @@ def reserve_batches(material_planning_name):
     if not reserved_count:
         frappe.throw(_("All rows with a batch are already reserved."))
 
+    _update_bom_item_weights(mp)
     mp.save(ignore_permissions=True)
     frappe.db.commit()
 
@@ -1186,6 +1222,7 @@ def reserve_exact_match_batches(material_planning_name):
     if not reserved_count:
         frappe.throw(_("All rows are already reserved."))
 
+    _update_bom_item_weights(mp)
     mp.save(ignore_permissions=True)
     frappe.db.commit()
 

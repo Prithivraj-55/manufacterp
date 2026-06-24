@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-06-24 00:47:35_
+_Generated: 2026-06-25 00:26:52_
 
 ## drawing
 
@@ -158,6 +158,7 @@ _Generated: 2026-06-24 00:47:35_
 | ` _get_batch_total_stock` | no |
 | ` _get_batch_reserved_by_others` | no |
 | ` _get_non_batch_reserved_by_others` | no |
+| ` _update_bom_item_weights` | no |
 | ` reserve_batches` | no |
 | ` reserve_exact_match_batches` | no |
 | ` unreserve_exact_match_batches` | no |
@@ -269,6 +270,17 @@ _Generated: 2026-06-24 00:47:35_
 | Module | subcontracting_management |
 | Path | `subcontracting_management/doctype/soe_consumption_log` |
 | Controller | `subcontracting_management/doctype/soe_consumption_log/soe_consumption_log.py` |
+| Client script | none |
+
+---
+
+## soe_drawing_detail
+
+| Key | Value |
+|-----|-------|
+| Module | subcontracting_management |
+| Path | `subcontracting_management/doctype/soe_drawing_detail` |
+| Controller | `subcontracting_management/doctype/soe_drawing_detail/soe_drawing_detail.py` |
 | Client script | none |
 
 ---

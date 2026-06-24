@@ -1115,6 +1115,7 @@ def after_install():
     create_sco_client_script()
     create_sco_ops_client_script()
     create_soe_client_script()
+    create_manufacturing_settings_custom_fields()
     from manufyxinvenzaerp.production_management.production_utils import (
         create_operations_workstations_routing,
     )
@@ -1151,6 +1152,7 @@ def after_migrate():
     create_sco_client_script()
     create_sco_ops_client_script()
     create_soe_client_script()
+    create_manufacturing_settings_custom_fields()
     from manufyxinvenzaerp.production_management.production_utils import (
         create_operations_workstations_routing,
     )
@@ -2648,6 +2650,13 @@ def create_stock_entry_custom_fields():
                     "description": "PP-flow SCO link — used instead of subcontracting_order "
                                    "to avoid ERPNext supplied_items validation on send-to-subcontractor SEs.",
                 },
+                {
+                    "fieldname": "custom_mrs_number",
+                    "fieldtype": "Data",
+                    "label": "MRS Number",
+                    "insert_after": "custom_sco_ref",
+                    "depends_on": "eval:doc.subcontracting_order",
+                },
             ],
         },
         update=True,
@@ -2730,6 +2739,24 @@ def create_sco_custom_fields():
                     "options": "Warehouse",
                     "insert_after": "custom_source_warehouse",
                     "description": "Warehouse to receive unconsumed materials back from supplier",
+                    "allow_on_submit": 1,
+                },
+                {
+                    "fieldname": "custom_cnc_warehouse",
+                    "fieldtype": "Link",
+                    "label": "CNC Warehouse",
+                    "options": "Warehouse",
+                    "insert_after": "custom_return_warehouse",
+                    "description": "Staging warehouse for CNC-process items before transfer to supplier",
+                    "allow_on_submit": 1,
+                },
+                {
+                    "fieldname": "custom_cnc_transferred_weight_kg",
+                    "fieldtype": "Float",
+                    "label": "CNC Warehouse Qty (Kg)",
+                    "read_only": 1,
+                    "insert_after": "custom_cnc_warehouse",
+                    "description": "Weight currently sitting in CNC warehouse awaiting transfer to supplier",
                     "allow_on_submit": 1,
                 },
                 {
@@ -2866,34 +2893,106 @@ frappe.ui.form.on("Subcontracting Order", {
 \t\t}
 
 \t\tif (frm.doc.docstatus === 1 && frm.doc.custom_production_plan) {
-\t\t\t// Before transfer: send raw materials to the supplier. Once transferred, this
-\t\t\t// action turns into "Make Final Stock Entry" (see the else branch below).
-\t\t\tif (!frm.doc.custom_transferred_weight_kg) {
-\t\t\t// Transfer reserved batch materials from source warehouse to supplier warehouse
-\t\t\tfrm.add_custom_button(__("Raw Materials to Supplier"), function() {
+
+\t\t\t// Option 1 — Transfer ALL pending supplier items without a selection popup.
+\t\t\tfrm.add_custom_button(__("All to Supplier Warehouse"), function() {
 \t\t\t\tif (!frm.doc.custom_source_warehouse) {
 \t\t\t\t\tfrappe.msgprint(__("Please set the Source Warehouse (RM) field first."));
 \t\t\t\t\treturn;
 \t\t\t\t}
 \t\t\t\tfrappe.call({
-\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_send_to_subcontractor_entry",
+\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.get_sco_pending_items",
 \t\t\t\t\targs: { sco_name: frm.doc.name },
 \t\t\t\t\tfreeze: true,
+\t\t\t\t\tfreeze_message: __("Checking pending items…"),
 \t\t\t\t\tcallback: function(r) {
-\t\t\t\t\t\tif (r.message) {
-\t\t\t\t\t\t\tfrappe.msgprint({
-\t\t\t\t\t\t\t\ttitle: __("Stock Entry Created"),
-\t\t\t\t\t\t\t\tmessage: __("Review and submit the stock entry: ") +
-\t\t\t\t\t\t\t\t\t'<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>",
-\t\t\t\t\t\t\t\tindicator: "green"
-\t\t\t\t\t\t\t});
-\t\t\t\t\t\t\tfrm.reload_doc();
+\t\t\t\t\t\tvar pending = (r.message || []).filter(function(d) { return !d.cnc_process; });
+\t\t\t\t\t\tif (!pending.length) {
+\t\t\t\t\t\t\tfrappe.msgprint({ title: __("No Pending Items"), message: __("All supplier materials have already been transferred."), indicator: "orange" });
+\t\t\t\t\t\t\treturn;
 \t\t\t\t\t\t}
+\t\t\t\t\t\tfrappe.confirm(
+\t\t\t\t\t\t\t__("Pending items will be transferred to supplier warehouse. Continue?"),
+\t\t\t\t\t\t\tfunction() {
+\t\t\t\t\t\t\t\tfrappe.call({
+\t\t\t\t\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_partial_transfer",
+\t\t\t\t\t\t\t\t\targs: { sco_name: frm.doc.name, selected_items_json: JSON.stringify(pending), transfer_type: "supplier" },
+\t\t\t\t\t\t\t\t\tfreeze: true,
+\t\t\t\t\t\t\t\t\tfreeze_message: __("Creating transfer entry…"),
+\t\t\t\t\t\t\t\t\tcallback: function(r2) {
+\t\t\t\t\t\t\t\t\t\tif (r2.message) {
+\t\t\t\t\t\t\t\t\t\t\tfrappe.msgprint({ title: __("Stock Entry Created"), message: __("Transfer entry: ") + '<a href="/app/stock-entry/' + encodeURIComponent(r2.message) + '">' + r2.message + "</a>", indicator: "green" });
+\t\t\t\t\t\t\t\t\t\t\tfrm.reload_doc();
+\t\t\t\t\t\t\t\t\t\t}
+\t\t\t\t\t\t\t\t\t}
+\t\t\t\t\t\t\t\t});
+\t\t\t\t\t\t\t}
+\t\t\t\t\t\t);
 \t\t\t\t\t}
 \t\t\t\t});
 \t\t\t}, __("Transfer"));
-\t\t\t} else if (frm.doc.custom_all_ops_complete) {
-\t\t\t\t// Raw materials already supplied → produce the finished goods. Creates a
+
+\t\t\t// Option 2 — Select individual CNC items (shown only if CNC warehouse is set)
+\t\t\tif (frm.doc.custom_cnc_warehouse) {
+\t\t\t\tfrm.add_custom_button(__("To CNC Warehouse"), function() {
+\t\t\t\t\tif (!frm.doc.custom_source_warehouse) {
+\t\t\t\t\t\tfrappe.msgprint(__("Please set the Source Warehouse (RM) field first."));
+\t\t\t\t\t\treturn;
+\t\t\t\t\t}
+\t\t\t\t\tfrappe.call({
+\t\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.get_sco_pending_items",
+\t\t\t\t\t\targs: { sco_name: frm.doc.name },
+\t\t\t\t\t\tfreeze: true,
+\t\t\t\t\t\tfreeze_message: __("Loading materials…"),
+\t\t\t\t\t\tcallback: function(r) { show_transfer_popup(frm, r.message || [], "cnc"); }
+\t\t\t\t\t});
+\t\t\t\t}, __("Transfer"));
+\t\t\t}
+
+\t\t\t// Option 3 — Select individual items for partial transfer to supplier warehouse
+\t\t\tfrm.add_custom_button(__("Partial to Supplier Warehouse"), function() {
+\t\t\t\tif (!frm.doc.custom_source_warehouse) {
+\t\t\t\t\tfrappe.msgprint(__("Please set the Source Warehouse (RM) field first."));
+\t\t\t\t\treturn;
+\t\t\t\t}
+\t\t\t\tfrappe.call({
+\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.get_sco_pending_items",
+\t\t\t\t\targs: { sco_name: frm.doc.name },
+\t\t\t\t\tfreeze: true,
+\t\t\t\t\tfreeze_message: __("Loading materials…"),
+\t\t\t\t\tcallback: function(r) { show_transfer_popup(frm, r.message || [], "supplier"); }
+\t\t\t\t});
+\t\t\t}, __("Transfer"));
+
+\t\t\t// CNC to Supplier: visible once CNC materials are sitting in the CNC warehouse
+\t\t\tif (frm.doc.custom_cnc_transferred_weight_kg) {
+\t\t\t\tfrm.add_custom_button(__("CNC to Supplier"), function() {
+\t\t\t\t\tif (!frm.doc.custom_cnc_warehouse) {
+\t\t\t\t\t\tfrappe.msgprint(__("No CNC Warehouse set on this Subcontracting Order."));
+\t\t\t\t\t\treturn;
+\t\t\t\t\t}
+\t\t\t\t\tfrappe.call({
+\t\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_cnc_to_supplier_entry",
+\t\t\t\t\t\targs: { sco_name: frm.doc.name },
+\t\t\t\t\t\tfreeze: true,
+\t\t\t\t\t\tfreeze_message: __("Creating CNC to Supplier Entry…"),
+\t\t\t\t\t\tcallback: function(r) {
+\t\t\t\t\t\t\tif (r.message) {
+\t\t\t\t\t\t\t\tfrappe.msgprint({
+\t\t\t\t\t\t\t\t\ttitle: __("CNC Transfer Entry Created"),
+\t\t\t\t\t\t\t\t\tmessage: __("Review and submit the stock entry: ") +
+\t\t\t\t\t\t\t\t\t\t'<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>",
+\t\t\t\t\t\t\t\t\tindicator: "green"
+\t\t\t\t\t\t\t\t});
+\t\t\t\t\t\t\t\tfrm.reload_doc();
+\t\t\t\t\t\t\t}
+\t\t\t\t\t\t}
+\t\t\t\t\t});
+\t\t\t\t}, __("Transfer"));
+\t\t\t}
+
+\t\t\tif (frm.doc.custom_all_ops_complete) {
+\t\t\t\t// Raw materials fully supplied → produce the finished goods. Creates a
 \t\t\t\t// Manufacture stock entry that consumes the supplier-warehouse stock and
 \t\t\t\t// adds the finished good to inventory on submission.
 \t\t\t\tfrm.add_custom_button(__("Make Final Stock Entry"), function() {
@@ -2948,6 +3047,93 @@ frappe.ui.form.on("Subcontracting Order", {
 \t\t_sco_excess_totals(frm);
 \t}
 });
+
+function show_transfer_popup(frm, pending_items, transfer_type) {
+\tvar items = pending_items.filter(function(d) { return transfer_type === "cnc" ? d.cnc_process : !d.cnc_process; });
+\tif (!items.length) {
+\t\tfrappe.msgprint({
+\t\t\ttitle: __("No Pending Items"),
+\t\t\tmessage: transfer_type === "cnc" ? __("No pending CNC items to transfer.") : __("No pending supplier items to transfer."),
+\t\t\tindicator: "orange"
+\t\t});
+\treturn;
+\t}
+
+\tvar title = transfer_type === "cnc" ? __("Select Materials — To CNC Warehouse") : __("Select Materials — Partial to Supplier Warehouse");
+\tvar $filter = $("<input class='form-control form-control-sm' placeholder='" + __("Filter items…") + "' style='margin-bottom:8px'>");
+\tvar $actions = $("<div style='margin-bottom:8px'>"
+\t\t+ "<button class='btn btn-xs btn-default sco-sel-all'>" + __("Select All") + "</button> "
+\t\t+ "<button class='btn btn-xs btn-default sco-desel-all'>" + __("Deselect All") + "</button>"
+\t\t+ "</div>");
+\tvar $table = $("<table class='table table-bordered table-condensed' style='margin-bottom:0'>"
+\t\t+ "<thead><tr>"
+\t\t+ "<th style='width:32px'></th>"
+\t\t+ "<th>" + __("Item Code") + "</th>"
+\t\t+ "<th>" + __("Item Name") + "</th>"
+\t\t+ "<th>" + __("Batch No") + "</th>"
+\t\t+ "<th class='text-right'>" + __("Qty (Kg)") + "</th>"
+\t\t+ "<th class='text-right'>" + __("Sec Qty (Nos)") + "</th>"
+\t\t+ "</tr></thead><tbody></tbody></table>");
+
+\tvar $tbody = $table.find("tbody");
+\titems.forEach(function(d, idx) {
+\t\t$tbody.append(
+\t\t\t"<tr data-idx='" + idx + "'>" +
+\t\t\t"<td class='text-center'><input type='checkbox' class='sco-item-chk' checked></td>" +
+\t\t\t"<td>" + frappe.utils.escape_html(d.item_code) + "</td>" +
+\t\t\t"<td>" + frappe.utils.escape_html(d.item_name || "") + "</td>" +
+\t\t\t"<td>" + frappe.utils.escape_html(d.batch_no || "") + "</td>" +
+\t\t\t"<td class='text-right'>" + format_number(flt(d.qty), null, 3) + "</td>" +
+\t\t\t"<td class='text-right'>" + format_number(flt(d.custom_sec_qty), null, 3) + "</td>" +
+\t\t\t"</tr>"
+\t\t);
+\t});
+
+\t$filter.on("input", function() {
+\t\tvar q = $(this).val().toLowerCase();
+\t\t$tbody.find("tr").each(function() {
+\t\t\t$(this).toggle($(this).text().toLowerCase().indexOf(q) >= 0);
+\t\t});
+\t});
+\t$actions.find(".sco-sel-all").on("click", function() { $tbody.find(".sco-item-chk").prop("checked", true); });
+\t$actions.find(".sco-desel-all").on("click", function() { $tbody.find(".sco-item-chk").prop("checked", false); });
+
+\tvar $content = $("<div>").append($filter, $actions, $table);
+
+\tvar dlg = new frappe.ui.Dialog({
+\t\ttitle: title,
+\t\tsize: "extra-large",
+\t\tfields: [{ fieldtype: "HTML", fieldname: "content" }],
+\t\tprimary_action_label: __("Transfer Selected"),
+\t\tprimary_action: function() {
+\t\t\tvar selected = [];
+\t\t\t$tbody.find("tr").each(function() {
+\t\t\t\tif ($(this).find(".sco-item-chk").prop("checked")) {
+\t\t\t\t\tselected.push(items[parseInt($(this).data("idx"), 10)]);
+\t\t\t\t}
+\t\t\t});
+\t\t\tif (!selected.length) {
+\t\t\t\tfrappe.msgprint(__("Please select at least one item."));
+\t\t\t\treturn;
+\t\t\t}
+\t\t\tdlg.hide();
+\t\t\tfrappe.call({
+\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_partial_transfer",
+\t\t\t\targs: { sco_name: frm.doc.name, selected_items_json: JSON.stringify(selected), transfer_type: transfer_type },
+\t\t\t\tfreeze: true,
+\t\t\t\tfreeze_message: __("Creating transfer entry…"),
+\t\t\t\tcallback: function(r) {
+\t\t\t\t\tif (r.message) {
+\t\t\t\t\t\tfrappe.msgprint({ title: __("Stock Entry Created"), message: __("Transfer entry: ") + '<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>", indicator: "green" });
+\t\t\t\t\t\tfrm.reload_doc();
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t});
+\t\t}
+\t});
+\tdlg.fields_dict.content.$wrapper.html($content);
+\tdlg.show();
+}
 
 function _render_excess_action_btn(frm) {
 \tvar field = frm.fields_dict["custom_excess_actions_html"];
@@ -3075,15 +3261,17 @@ function render_soe_summary(frm) {
                 $w.find(".sco-ops-refresh").on("click", function() { render_soe_summary(frm); });
                 return;
             }
-            var avail_total = 0, cons_total = 0;
-            var body = rows.map(function (d) {
+            var avail_total = 0, cons_total = 0, mfg_total_all = 0, comp_total_all = 0;
+            var body = rows.map(function (d, idx) {
                 var color = d.status === "Completed" ? "green"
                           : (d.status === "In Progress" ? "orange" : "gray");
                 var submitted = d.docstatus === 1
                     ? "<span class='indicator green'>Submitted</span>"
                     : "<span class='indicator gray'>Draft</span>";
-                avail_total += flt(d.available_to_consume_kg || 0);
-                cons_total  += flt(d.total_consumed_kg || 0);
+                avail_total    += flt(d.available_to_consume_kg || 0);
+                cons_total     += flt(d.total_consumed_kg || 0);
+                mfg_total_all  += flt(d.total_qty_to_mfg || 0);
+                comp_total_all += flt(d.total_completed_nos || 0);
                 var diff = flt(d.available_to_consume_kg || 0) - flt(d.total_consumed_kg || 0);
                 var diff_color = diff < 0 ? "color:red" : (diff > 0 ? "color:orange" : "");
                 return "<tr>"
@@ -3091,10 +3279,13 @@ function render_soe_summary(frm) {
                     + "<td><a href='/app/supplier-operation-entry/" + encodeURIComponent(d.name) + "'>"
                         + frappe.utils.escape_html(d.operation || "") + "</a></td>"
                     + "<td><span class='indicator " + color + "'>" + (d.status || "") + "</span></td>"
-                    + "<td class='text-right'>" + format_number(d.available_to_consume_kg || 0, null, 3) + "</td>"
-                    + "<td class='text-right'>" + format_number(d.total_consumed_kg || 0, null, 3) + "</td>"
+                    + "<td class='text-right'>" + format_number(flt(d.available_to_consume_kg || 0), null, 3) + "</td>"
+                    + "<td class='text-right'>" + format_number(flt(d.total_consumed_kg || 0), null, 3) + "</td>"
                     + "<td class='text-right' style='" + diff_color + "'>" + format_number(diff, null, 3) + "</td>"
+                    + "<td class='text-right'>" + format_number(flt(d.total_qty_to_mfg || 0), null, 3) + "</td>"
+                    + "<td class='text-right'>" + format_number(flt(d.total_completed_nos || 0), null, 3) + "</td>"
                     + "<td class='text-center'>" + submitted + "</td>"
+                    + "<td class='text-center'><button class='btn btn-xs btn-default sco-drw-btn' data-idx='" + idx + "' title='View Drawings'>&#128366;</button></td>"
                     + "</tr>";
             }).join("");
             var html = "<div style='margin-bottom:8px'><button class='btn btn-xs btn-default sco-ops-refresh'>&#8635; Refresh</button></div>"
@@ -3103,67 +3294,136 @@ function render_soe_summary(frm) {
                 + "<th class='text-center' style='width:60px'>Seq</th>"
                 + "<th>Operation</th>"
                 + "<th style='width:130px'>Status</th>"
-                + "<th class='text-right'>Available to Consume (Kg)</th>"
-                + "<th class='text-right'>Total Consumed (Kg)</th>"
-                + "<th class='text-right'>Difference (Kg)</th>"
+                + "<th class='text-right'>Available to Consume (Nos)</th>"
+                + "<th class='text-right'>Total Consumed (Nos)</th>"
+                + "<th class='text-right'>Difference (Nos)</th>"
+                + "<th class='text-right'>Overall Qty (Nos)</th>"
+                + "<th class='text-right'>Overall Completed (Nos)</th>"
                 + "<th class='text-center' style='width:110px'>Entry</th>"
+                + "<th class='text-center' style='width:70px'>Drawings</th>"
                 + "</tr></thead><tbody>" + body + "</tbody>"
                 + "<tfoot><tr style='font-weight:bold'>"
                 + "<td colspan='3' class='text-right'>Total</td>"
                 + "<td class='text-right'>" + format_number(avail_total, null, 3) + "</td>"
                 + "<td class='text-right'>" + format_number(cons_total, null, 3) + "</td>"
                 + "<td class='text-right'>" + format_number(avail_total - cons_total, null, 3) + "</td>"
-                + "<td></td></tr></tfoot></table>"
+                + "<td class='text-right'>" + format_number(mfg_total_all, null, 3) + "</td>"
+                + "<td class='text-right'>" + format_number(comp_total_all, null, 3) + "</td>"
+                + "<td colspan='2'></td></tr></tfoot></table>"
                 + "<div class='text-muted' style='margin-top:6px;font-size:11px'>"
                 + "Each operation's Available to Consume updates automatically from the previous "
                 + "operation's Total Consumed when that entry is saved.</div>";
             $w.html(html);
             $w.find(".sco-ops-refresh").on("click", function() { render_soe_summary(frm); });
+            $w.find(".sco-drw-btn").on("click", function() {
+                var idx = parseInt($(this).data("idx"), 10);
+                show_drawing_popup(rows[idx]);
+            });
         }
     });
+}
+
+function show_drawing_popup(soe) {
+    var drawings = soe.drawing_details || [];
+    var drw_rows = drawings.map(function(d) {
+        return "<tr>"
+            + "<td>" + frappe.utils.escape_html(d.drawing || "") + "</td>"
+            + "<td>" + frappe.utils.escape_html(d.customer_drawing_number || "") + "</td>"
+            + "<td class='text-right'>" + format_number(flt(d.qty_to_manufacture || 0), null, 3) + "</td>"
+            + "<td class='text-right'>" + format_number(flt(d.completed_qty_nos || 0), null, 3) + "</td>"
+            + "</tr>";
+    }).join("");
+    var content = !drawings.length
+        ? "<div class='text-muted' style='padding:12px'>No drawings attached to this operation.</div>"
+        : "<table class='table table-bordered table-condensed' style='margin:0'>"
+            + "<thead><tr>"
+            + "<th>Drawing</th><th>Cust Drawing No</th>"
+            + "<th class='text-right'>Qty to Mfg (Nos)</th>"
+            + "<th class='text-right'>Completed (Nos)</th>"
+            + "</tr></thead>"
+            + "<tbody>" + drw_rows + "</tbody>"
+            + "</table>";
+    var dlg = new frappe.ui.Dialog({
+        title: "Drawings — " + frappe.utils.escape_html(soe.operation || soe.name),
+        fields: [{ fieldtype: "HTML", fieldname: "content" }],
+    });
+    dlg.fields_dict.content.$wrapper.html(content);
+    dlg.show();
 }
 """.strip()
 
 
 SOE_CLIENT_SCRIPT = """
 frappe.ui.form.on("SOE Consumption Log", {
-\tweight_kg(frm) {
-\t\t_soe_update_total(frm);
+\tdrawing: function(frm) {
+\t\t_sync_drawing_nos(frm);
 \t},
-\tconsumption_log_remove(frm) {
-\t\t_soe_update_total(frm);
+\tqty_nos: function(frm) {
+\t\t_sync_drawing_nos(frm);
 \t},
-\tconsumption_log_add(frm) {
-\t\t_soe_update_total(frm);
+\tconsumption_log_remove: function(frm) {
+\t\t_sync_drawing_nos(frm);
+\t},
+\tconsumption_log_add: function(frm) {
+\t\t_sync_drawing_nos(frm);
 \t}
 });
 
 frappe.ui.form.on("Supplier Operation Entry", {
-\trefresh(frm) {
-\t\t_soe_update_total(frm);
+\trefresh: function(frm) {
+\t\t_sync_drawing_nos(frm);
+\t\t// Filter drawing link in log to only drawings present in this SOE
+\t\tvar valid_drawings = (frm.doc.drawing_details || []).map(function(r) {
+\t\t\treturn r.drawing;
+\t\t}).filter(Boolean);
+\t\tif (valid_drawings.length) {
+\t\t\tfrm.fields_dict.consumption_log.grid.update_docfield_property(
+\t\t\t\t"drawing", "get_query", function() {
+\t\t\t\t\treturn { filters: [["Drawing", "name", "in", valid_drawings]] };
+\t\t\t\t}
+\t\t\t);
+\t\t}
 \t}
 });
 
-function _soe_update_total(frm) {
-\tvar total = 0;
+function _sync_drawing_nos(frm) {
+\t// Sum qty_nos per drawing from the consumption log
+\tvar byDrawing = {};
 \t(frm.doc.consumption_log || []).forEach(function(r) {
-\t\ttotal += flt(r.weight_kg);
+\t\tif (r.drawing) {
+\t\t\tbyDrawing[r.drawing] = (byDrawing[r.drawing] || 0) + flt(r.qty_nos);
+\t\t}
 \t});
-\ttotal = flt(total, 3);
 
-\tfrm.doc.total_consumed_kg = total;
-\tfrm.refresh_field("total_consumed_kg");
+\t// Push completed_qty_nos into each drawing_details row
+\t(frm.doc.drawing_details || []).forEach(function(row) {
+\t\tvar completed = flt(byDrawing[row.drawing] || 0, 3);
+\t\tfrappe.model.set_value(row.doctype, row.name, "completed_qty_nos", completed);
+\t});
+\tfrm.refresh_field("drawing_details");
 
-\tif (total > 0 && frm.doc.status === "Open") {
+\t// Auto-advance status
+\tvar has_log = (frm.doc.consumption_log || []).some(function(r) { return flt(r.qty_nos) > 0; });
+\tif (has_log && frm.doc.status === "Open") {
 \t\tfrm.set_value("status", "In Progress");
 \t}
 
-\tvar available = flt(frm.doc.available_to_consume_kg);
-\tif (available > 0 && total > available) {
-\t\tfrappe.show_alert({
-\t\t\tmessage: __("Total consumed ({0} Kg) exceeds available to consume ({1} Kg).", [total, available]),
-\t\t\tindicator: "red"
-\t\t}, 8);
+\t// Op-2+: warn if any drawing exceeds available_to_consume_nos
+\tif ((frm.doc.sequence_id || 1) > 1) {
+\t\tvar detailMap = {};
+\t\t(frm.doc.drawing_details || []).forEach(function(r) {
+\t\t\tif (r.drawing) detailMap[r.drawing] = flt(r.available_to_consume_nos);
+\t\t});
+\t\tvar exceeded = Object.keys(byDrawing).filter(function(d) {
+\t\t\tvar avail = detailMap[d] || 0;
+\t\t\treturn avail > 0 && byDrawing[d] > avail;
+\t\t});
+\t\tif (exceeded.length) {
+\t\t\tfrappe.show_alert({
+\t\t\t\tmessage: __("Completed Nos for some drawings exceeds available from the previous operation."),
+\t\t\t\tindicator: "red"
+\t\t\t}, 8);
+\t\t}
 \t}
 }
 """.strip()
@@ -3215,3 +3475,26 @@ def create_soe_client_script():
             "script": SOE_CLIENT_SCRIPT,
         }).insert(ignore_permissions=True)
     frappe.db.commit()
+
+
+def create_manufacturing_settings_custom_fields():
+    create_custom_fields(
+        {
+            "Manufacturing Settings": [
+                {
+                    "fieldname": "custom_soe_log_trigger",
+                    "fieldtype": "Select",
+                    "label": "SOE Log Entry Allowed When",
+                    "options": "Fully Transferred\nPartially Transferred",
+                    "default": "Fully Transferred",
+                    "insert_after": "make_serial_no_batch_from_work_order",
+                    "description": (
+                        "Fully Transferred: consumption log entries are blocked until all planned "
+                        "weight for that drawing has been transferred to the supplier warehouse. "
+                        "Partially Transferred: log entries are always allowed."
+                    ),
+                },
+            ],
+        },
+        update=True,
+    )

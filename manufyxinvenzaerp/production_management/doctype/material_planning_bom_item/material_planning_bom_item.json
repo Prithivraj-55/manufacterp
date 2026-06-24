@@ -15,7 +15,9 @@
   "duno_mark_no",
   "customer_drawing_number",
   "sales_order",
-  "customer"
+  "customer",
+  "customer_provided_weight_kg",
+  "planned_weight_kg"
  ],
  "fields": [
   {
@@ -95,11 +97,23 @@
    "label": "Customer",
    "options": "Customer",
    "read_only": 1
+  },
+  {
+   "fieldname": "customer_provided_weight_kg",
+   "fieldtype": "Float",
+   "label": "Customer Weight (Kg)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "planned_weight_kg",
+   "fieldtype": "Float",
+   "label": "Planned Weight (Kg)",
+   "read_only": 1
   }
  ],
  "istable": 1,
  "links": [],
- "modified": "2026-05-09 00:00:00.000000",
+ "modified": "2026-06-24 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Production Management",
  "name": "Material Planning BOM Item",
