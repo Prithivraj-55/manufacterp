@@ -198,6 +198,10 @@ doc_events = {
 		"before_submit": "manufyxinvenzaerp.subcontracting_management.subcontracting.before_submit_supplier_operation_entry",
 		"on_update": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_update_supplier_operation_entry",
 		"on_submit": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_submit_supplier_operation_entry",
+		"before_delete": "manufyxinvenzaerp.subcontracting_management.subcontracting.before_delete_supplier_operation_entry",
+	},
+	"Subcontracting Order": {
+		"on_cancel": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_cancel_subcontracting_order",
 	},
 	"Production Plan": {
 		"validate": "manufyxinvenzaerp.production_plan_management.production_plan.after_save_production_plan",

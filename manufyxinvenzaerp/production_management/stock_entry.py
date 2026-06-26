@@ -93,11 +93,15 @@ def on_submit_stock_entry(doc, method):
 	# Release reservations for all consumed batches
 	_release_material_planning_reservations(doc)
 
-	# When materials are sent to supplier, record transferred weight on the SCO.
+	# When materials are sent to supplier (or routed via CNC warehouse), update SCO weight fields.
 	# We track via custom_sco_ref (not the standard subcontracting_order) to avoid
 	# ERPNext's validate_subcontract_order which throws when supplied_items is empty.
 	if doc.stock_entry_type == "Send to Subcontractor" and doc.get("custom_sco_ref"):
 		_update_sco_transferred_weight(doc.custom_sco_ref)
+
+	if doc.stock_entry_type == "Material Transfer" and doc.get("custom_sco_ref"):
+		_update_sco_transferred_weight(doc.custom_sco_ref)
+		_update_sco_cnc_weight(doc.custom_sco_ref)
 
 
 def _reduce_batch_sec_qty(batch_no, consumed_qty):
@@ -256,9 +260,13 @@ def on_cancel_stock_entry(doc, method):
 	_restore_material_planning_reservations(doc)
 	_restore_batch_sec_qty(doc)
 
-	# Recalculate transferred weight on SCO if a Send to Subcontractor SE is cancelled
+	# Recalculate transferred weight on SCO if a relevant SE is cancelled
 	if doc.stock_entry_type == "Send to Subcontractor" and doc.get("custom_sco_ref"):
 		_update_sco_transferred_weight(doc.custom_sco_ref)
+
+	if doc.stock_entry_type == "Material Transfer" and doc.get("custom_sco_ref"):
+		_update_sco_transferred_weight(doc.custom_sco_ref)
+		_update_sco_cnc_weight(doc.custom_sco_ref)
 
 
 def _restore_batch_sec_qty(doc):
@@ -333,14 +341,19 @@ def _restore_material_planning_reservations(doc):
 
 
 def _update_sco_transferred_weight(sco_name):
-	"""Recompute SCO.custom_transferred_weight_kg from all submitted Send-to-Subcontractor SEs.
+	"""Recompute SCO.custom_transferred_weight_kg:
+	  - qty from submitted 'Send to Subcontractor' SEs to the supplier warehouse, PLUS
+	  - qty from submitted 'Material Transfer' SEs that go CNC warehouse → supplier warehouse.
 	Also refreshes Op-1 SOE's available_to_consume_kg if it is still in draft.
 	"""
-	supplier_warehouse = frappe.db.get_value("Subcontracting Order", sco_name, "supplier_warehouse")
+	supplier_warehouse, cnc_warehouse = frappe.db.get_value(
+		"Subcontracting Order", sco_name, ["supplier_warehouse", "custom_cnc_warehouse"]
+	)
 	if not supplier_warehouse:
 		return
 
-	result = frappe.db.sql(
+	# Direct source → supplier transfers
+	r1 = frappe.db.sql(
 		"""
 		SELECT COALESCE(SUM(sed.qty), 0)
 		FROM `tabStock Entry Detail` sed
@@ -352,9 +365,29 @@ def _update_sco_transferred_weight(sco_name):
 		""",
 		(sco_name, supplier_warehouse),
 	)
-	transferred = flt(result[0][0]) if result and result[0][0] else 0
+	direct_qty = flt(r1[0][0]) if r1 and r1[0][0] else 0
+
+	# CNC warehouse → supplier warehouse transfers
+	cnc_to_supplier_qty = 0.0
+	if cnc_warehouse:
+		r2 = frappe.db.sql(
+			"""
+			SELECT COALESCE(SUM(sed.qty), 0)
+			FROM `tabStock Entry Detail` sed
+			JOIN `tabStock Entry` se ON se.name = sed.parent
+			WHERE se.custom_sco_ref = %s
+			  AND se.stock_entry_type = 'Material Transfer'
+			  AND se.docstatus = 1
+			  AND sed.s_warehouse = %s
+			  AND sed.t_warehouse = %s
+			""",
+			(sco_name, cnc_warehouse, supplier_warehouse),
+		)
+		cnc_to_supplier_qty = flt(r2[0][0]) if r2 and r2[0][0] else 0
+
+	transferred = flt(direct_qty + cnc_to_supplier_qty, 3)
 	frappe.db.set_value(
-		"Subcontracting Order", sco_name, "custom_transferred_weight_kg", flt(transferred, 3)
+		"Subcontracting Order", sco_name, "custom_transferred_weight_kg", transferred
 	)
 
 	# Keep Op-1 SOE in sync while still in draft
@@ -365,8 +398,55 @@ def _update_sco_transferred_weight(sco_name):
 	)
 	if soe_op1:
 		frappe.db.set_value(
-			"Supplier Operation Entry", soe_op1, "available_to_consume_kg", flt(transferred, 3)
+			"Supplier Operation Entry", soe_op1, "available_to_consume_kg", transferred
 		)
+
+
+def _update_sco_cnc_weight(sco_name):
+	"""Recompute SCO.custom_cnc_transferred_weight_kg:
+	  net qty currently in the CNC warehouse = sent to CNC minus already forwarded to supplier.
+	"""
+	cnc_warehouse, supplier_warehouse = frappe.db.get_value(
+		"Subcontracting Order", sco_name, ["custom_cnc_warehouse", "supplier_warehouse"]
+	)
+	if not cnc_warehouse:
+		return
+
+	r1 = frappe.db.sql(
+		"""
+		SELECT COALESCE(SUM(sed.qty), 0)
+		FROM `tabStock Entry Detail` sed
+		JOIN `tabStock Entry` se ON se.name = sed.parent
+		WHERE se.custom_sco_ref = %s
+		  AND se.stock_entry_type = 'Material Transfer'
+		  AND se.docstatus = 1
+		  AND sed.t_warehouse = %s
+		""",
+		(sco_name, cnc_warehouse),
+	)
+	sent_to_cnc = flt(r1[0][0]) if r1 and r1[0][0] else 0
+
+	sent_to_supplier = 0.0
+	if supplier_warehouse:
+		r2 = frappe.db.sql(
+			"""
+			SELECT COALESCE(SUM(sed.qty), 0)
+			FROM `tabStock Entry Detail` sed
+			JOIN `tabStock Entry` se ON se.name = sed.parent
+			WHERE se.custom_sco_ref = %s
+			  AND se.stock_entry_type = 'Material Transfer'
+			  AND se.docstatus = 1
+			  AND sed.s_warehouse = %s
+			  AND sed.t_warehouse = %s
+			""",
+			(sco_name, cnc_warehouse, supplier_warehouse),
+		)
+		sent_to_supplier = flt(r2[0][0]) if r2 and r2[0][0] else 0
+
+	cnc_qty = max(0.0, flt(sent_to_cnc - sent_to_supplier, 3))
+	frappe.db.set_value(
+		"Subcontracting Order", sco_name, "custom_cnc_transferred_weight_kg", cnc_qty
+	)
 
 
 def _calc_qty(row, group):
