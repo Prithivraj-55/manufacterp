@@ -1667,7 +1667,7 @@ def unlink_material_request_on_cancel(doc, method=None):
 @frappe.whitelist()
 def auto_purchase_from_mp(material_planning_name):
     """One-click MR → submit → PO → submit → PR → submit for all unavailable items.
-    Reads custom_auto_purchase_supplier and custom_auto_purchase_warehouse from the MP.
+    Reads custom_auto_purchase_supplier and for_warehouse from the MP.
     """
     from frappe.utils import today
     from erpnext.stock.doctype.material_request.material_request import (
@@ -1680,12 +1680,12 @@ def auto_purchase_from_mp(material_planning_name):
     mp = frappe.get_doc("Material Planning", material_planning_name)
 
     supplier  = mp.get("custom_auto_purchase_supplier")
-    warehouse = mp.get("custom_auto_purchase_warehouse")
+    warehouse = mp.get("for_warehouse")
 
     if not supplier:
         frappe.throw(_("Please set the Supplier for Auto Purchase on this Material Planning."))
     if not warehouse:
-        frappe.throw(_("Please set the Purchase Receipt Warehouse on this Material Planning."))
+        frappe.throw(_("Please set the Raw Materials Warehouse on this Material Planning."))
     if not mp.unavailable_items:
         frappe.throw(_("No unavailable items found. Run stock check first."))
 

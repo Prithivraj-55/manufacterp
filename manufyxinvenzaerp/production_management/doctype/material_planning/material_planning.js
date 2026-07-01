@@ -326,10 +326,10 @@ frappe.ui.form.on("Material Planning", {
 						frappe.utils.icon("ok-circle", "xs") + " " + __("Auto Purchase"),
 						function () { _run_auto_purchase(frm); }
 					);
-					// Show supplier / warehouse fields
-					frm.set_df_property("custom_auto_purchase_supplier",  "hidden", 0);
-					frm.set_df_property("custom_auto_purchase_warehouse", "hidden", 0);
-					frm.refresh_fields(["custom_auto_purchase_supplier", "custom_auto_purchase_warehouse"]);
+					// Show supplier field (warehouse reuses existing for_warehouse field)
+					frm.set_df_property("custom_auto_purchase_section",  "hidden", 0);
+					frm.set_df_property("custom_auto_purchase_supplier", "hidden", 0);
+					frm.refresh_fields(["custom_auto_purchase_section", "custom_auto_purchase_supplier"]);
 				});
 		}
 
@@ -2021,8 +2021,8 @@ function _run_auto_purchase(frm) {
 		frappe.msgprint({ title: __("Supplier Required"), message: __("Please set the Supplier field before running Auto Purchase."), indicator: "orange" });
 		return;
 	}
-	if (!frm.doc.custom_auto_purchase_warehouse) {
-		frappe.msgprint({ title: __("Warehouse Required"), message: __("Please set the Purchase Receipt Warehouse before running Auto Purchase."), indicator: "orange" });
+	if (!frm.doc.for_warehouse) {
+		frappe.msgprint({ title: __("Warehouse Required"), message: __("Please set the Raw Materials Warehouse before running Auto Purchase."), indicator: "orange" });
 		return;
 	}
 	if (!(frm.doc.unavailable_items || []).length) {
