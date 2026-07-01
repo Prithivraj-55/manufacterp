@@ -317,6 +317,15 @@ frappe.ui.form.on("Material Planning", {
 				frappe.utils.icon("buying", "xs") + " " + __("Create Material Request"),
 				function () { _show_material_request_dialog(frm); }
 			);
+
+			// Auto Purchase section — visible only when Manufyxinvenza Settings enables it
+			frappe.db.get_single_value("Manufyxinvenza Settings", "auto_purchase_from_material_planning")
+				.then(function(enabled) {
+					if (!enabled) return;
+					frm.set_df_property("custom_auto_purchase_section",  "hidden", 0);
+					frm.set_df_property("custom_auto_purchase_supplier", "hidden", 0);
+					frm.refresh_fields(["custom_auto_purchase_section", "custom_auto_purchase_supplier", "custom_auto_purchase_btn"]);
+				});
 		}
 
 		_update_weight_summary(frm);
@@ -1896,6 +1905,28 @@ function _show_table_popup(frm, fieldname) {
 	d.show();
 }
 
+// ── Available Raw Material child table events ────────────────────────────────
+frappe.ui.form.on("Material Planning Available Raw Material", {
+	form_render(frm, cdt, cdn) {
+		let row = locals[cdt][cdn];
+		// Make skip checkbox read-only for reserved rows in the expanded row view
+		let df = frappe.meta.get_docfield("Material Planning Available Raw Material", "skip_auto_suggest_batch", cdn);
+		if (df) df.read_only = row.is_reserved ? 1 : 0;
+		frm.fields_dict["available_raw_materials"].grid.refresh_row(cdn);
+	},
+
+	skip_auto_suggest_batch(frm, cdt, cdn) {
+		let row = locals[cdt][cdn];
+		if (row.is_reserved && row.skip_auto_suggest_batch) {
+			frappe.model.set_value(cdt, cdn, "skip_auto_suggest_batch", 0);
+			frappe.show_alert({
+				message: __("Cannot skip a reserved batch. Unreserve it first."),
+				indicator: "orange",
+			}, 4);
+		}
+	},
+});
+
 // Reserve / Unreserve toolbar buttons on the Available Raw Materials (Exact Match) grid
 function _add_exact_match_reservation_buttons(frm) {
 	let grid = frm.fields_dict["available_raw_materials"] && frm.fields_dict["available_raw_materials"].grid;
@@ -1998,4 +2029,69 @@ function _add_exact_match_reservation_buttons(frm) {
 			d.show();
 		}
 	);
+}
+
+
+// ── Auto Purchase (Manufyxinvenza Settings) ──────────────────────────────
+frappe.ui.form.on("Material Planning", {
+	custom_auto_purchase_btn(frm) {
+		_run_auto_purchase(frm);
+	},
+});
+
+function _run_auto_purchase(frm) {
+	if (!frm.doc.custom_auto_purchase_supplier) {
+		frappe.msgprint({ title: __("Supplier Required"), message: __("Please set the Supplier field before running Auto Purchase."), indicator: "orange" });
+		return;
+	}
+	if (!frm.doc.for_warehouse) {
+		frappe.msgprint({ title: __("Warehouse Required"), message: __("Please set the Raw Materials Warehouse before running Auto Purchase."), indicator: "orange" });
+		return;
+	}
+	if (!(frm.doc.unavailable_items || []).length) {
+		frappe.msgprint({ title: __("No Items"), message: __("No unavailable items to purchase."), indicator: "orange" });
+		return;
+	}
+	frappe.confirm(
+		__("This will automatically create and submit a Material Request, Purchase Order, and Purchase Receipt for ALL unavailable items. Continue?"),
+		function() {
+			if (frm.is_dirty()) {
+				frappe.call({
+					method: "frappe.client.save",
+					args: { doc: frm.doc },
+					freeze: true, freeze_message: __("Saving…"),
+					callback(r) {
+						if (r.message) { frappe.model.sync(r.message); frm.refresh(); }
+						_do_auto_purchase(frm);
+					},
+				});
+			} else {
+				_do_auto_purchase(frm);
+			}
+		}
+	);
+}
+
+function _do_auto_purchase(frm) {
+	frappe.call({
+		method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.auto_purchase_from_mp",
+		args: { material_planning_name: frm.doc.name },
+		freeze: true,
+		freeze_message: __("Creating MR → PO → PR…"),
+		callback(r) {
+			if (r.message) {
+				var m = r.message;
+				frappe.msgprint({
+					title: __("Auto Purchase Complete"),
+					message:
+						__("Material Request: ") + '<a href="/app/material-request/' + encodeURIComponent(m.mr) + '">' + m.mr + '</a><br>' +
+						__("Purchase Order: ")   + '<a href="/app/purchase-order/'   + encodeURIComponent(m.po) + '">' + m.po + '</a><br>' +
+						__("Purchase Receipt: ") + '<a href="/app/purchase-receipt/' + encodeURIComponent(m.pr) + '">' + m.pr + '</a>',
+					indicator: "green",
+				});
+				frm._grid_btns_added = false;
+				frm.reload_doc();
+			}
+		},
+	});
 }

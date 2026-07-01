@@ -37,7 +37,6 @@
   "reserved_qty",
   "shortfall_qty",
   "reserved_on",
-  "store_location",
   "col_break_batch_dim",
   "batch_length",
   "batch_width",
@@ -46,7 +45,8 @@
   "col_break_batch_calc",
   "batch_sec_qty",
   "batch_calc_qty",
-  "cnc_process"
+  "cnc_process",
+  "store_location"
  ],
  "fields": [
   {

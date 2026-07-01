@@ -8,12 +8,42 @@ from frappe.utils import ceil, flt, now, today
 
 class MaterialPlanning(Document):
     def validate(self):
+        self._move_skipped_arm_to_mapping()
         self.raw_materials = [r for r in (self.raw_materials or []) if r.item_code]
         self.available_raw_materials = [r for r in (self.available_raw_materials or []) if r.item_code]
         self.material_mapping = [r for r in (self.material_mapping or []) if r.item_code]
         self.unavailable_items = [r for r in (self.unavailable_items or []) if r.item_code]
         if self.material_mapping and self.for_warehouse:
             self._validate_batch_calc_qty()
+
+    def _move_skipped_arm_to_mapping(self):
+        """On save, move Available Raw Material rows with skip_auto_suggest_batch
+        into Material Mapping so the user can assign a batch manually."""
+        keep = []
+        for row in (self.available_raw_materials or []):
+            if not row.get("skip_auto_suggest_batch") or row.get("is_reserved"):
+                keep.append(row)
+                continue
+            self.append("material_mapping", {
+                "item_number":             row.item_number,
+                "sales_order":             row.sales_order,
+                "item_code":               row.item_code,
+                "item_name":               row.item_name,
+                "duno_mark_no":            row.duno_mark_no,
+                "customer_drawing_number": row.customer_drawing_number,
+                "qty":                     row.overall_required_qty or row.required_qty,
+                "uom":                     row.uom,
+                "sec_qty":                 row.sec_qty,
+                "sec_uom":                 row.sec_uom,
+                "parent_item_group":       row.parent_item_group,
+                "length":                  row.length,
+                "width":                   row.width,
+                "thickness":               row.thickness,
+                "cnc_process":             row.cnc_process,
+                "store_location":          row.store_location,
+                "batch_mapped":            "Not Mapped",
+            })
+        self.available_raw_materials = keep
 
     def _validate_batch_calc_qty(self):
         mp_name = self.name or ""
@@ -1662,3 +1692,57 @@ def unlink_material_request_on_cancel(doc, method=None):
     """Clear the Material Planning link when an MR is cancelled or deleted."""
     if doc.get("custom_material_planning"):
         frappe.db.set_value("Material Request", doc.name, "custom_material_planning", "")
+
+
+@frappe.whitelist()
+def auto_purchase_from_mp(material_planning_name):
+    """One-click MR → submit → PO → submit → PR → submit for all unavailable items.
+    Reads custom_auto_purchase_supplier and for_warehouse from the MP.
+    """
+    from frappe.utils import today
+    from erpnext.stock.doctype.material_request.material_request import (
+        make_purchase_order as _mr_to_po,
+    )
+    from erpnext.buying.doctype.purchase_order.purchase_order import (
+        make_purchase_receipt as _po_to_pr,
+    )
+
+    mp = frappe.get_doc("Material Planning", material_planning_name)
+
+    supplier  = mp.get("custom_auto_purchase_supplier")
+    warehouse = mp.get("for_warehouse")
+
+    if not supplier:
+        frappe.throw(_("Please set the Supplier for Auto Purchase on this Material Planning."))
+    if not warehouse:
+        frappe.throw(_("Please set the Raw Materials Warehouse on this Material Planning."))
+    if not mp.unavailable_items:
+        frappe.throw(_("No unavailable items found. Run stock check first."))
+
+    # Step 1 — Create Material Request (draft) for all unavailable items, then submit
+    all_item_codes = list({r.item_code for r in mp.unavailable_items})
+    mr_name = make_material_request(material_planning_name, json.dumps(all_item_codes))
+    mr = frappe.get_doc("Material Request", mr_name)
+    mr.submit()
+    frappe.db.commit()
+
+    # Step 2 — Map MR → PO (ERPNext mapper), set supplier, insert, submit
+    po = _mr_to_po(mr_name)
+    po.supplier        = supplier
+    po.schedule_date   = today()
+    po.transaction_date = today()
+    po.insert(ignore_permissions=True)
+    frappe.db.commit()
+    po.submit()
+    frappe.db.commit()
+
+    # Step 3 — Map PO → PR (ERPNext mapper), override warehouse, insert, submit
+    pr = _po_to_pr(po.name)
+    for item in pr.get("items") or []:
+        item.warehouse = warehouse
+    pr.insert(ignore_permissions=True)
+    frappe.db.commit()
+    pr.submit()
+    frappe.db.commit()
+
+    return {"mr": mr_name, "po": po.name, "pr": pr.name}

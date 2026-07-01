@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-06-25 00:26:52_
+_Generated: 2026-07-01 08:21:21_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-06-25 00:26:52_
 
 ## Python files
 
-_Total: 101_
+_Total: 104_
 
 - config/__init__.py
 - drawing_management/bom_class_override.py
@@ -50,6 +50,9 @@ _Total: 101_
 - __init__.py
 - item_management/__init__.py
 - item_management/item.py
+- manufyxinvenzaerp/doctype/__init__.py
+- manufyxinvenzaerp/doctype/manufyxinvenza_settings/__init__.py
+- manufyxinvenzaerp/doctype/manufyxinvenza_settings/manufyxinvenza_settings.py
 - manufyxinvenzaerp/__init__.py
 - material_request_management/__init__.py
 - material_request_management/material_request.py
@@ -145,7 +148,7 @@ _Total: 9_
 
 ## JSON files
 
-_Total: 26_
+_Total: 27_
 
 - drawing_management/doctype/drawing/drawing.json
 - drawing_management/doctype/drawing_item/drawing_item.json
@@ -155,6 +158,7 @@ _Total: 26_
 - drawing_management/doctype/sales_order_duno_item/sales_order_duno_item.json
 - fixtures/custom_field.json
 - fixtures/property_setter.json
+- manufyxinvenzaerp/doctype/manufyxinvenza_settings/manufyxinvenza_settings.json
 - production_management/doctype/job_card_raw_material/job_card_raw_material.json
 - production_management/doctype/material_planning_available_raw_material/material_planning_available_raw_material.json
 - production_management/doctype/material_planning_bom_item/material_planning_bom_item.json
@@ -218,6 +222,11 @@ _Total: 26_
 - Controller: `drawing_management/doctype/sales_order_duno_item/sales_order_duno_item.py`
 - Client script: none
 
+### manufyxinvenza_settings
+- Path: `manufyxinvenzaerp/doctype/manufyxinvenza_settings`
+- Controller: `manufyxinvenzaerp/doctype/manufyxinvenza_settings/manufyxinvenza_settings.py`
+- Client script: none
+
 ### job_card_raw_material
 - Path: `production_management/doctype/job_card_raw_material`
 - Controller: `production_management/doctype/job_card_raw_material/job_card_raw_material.py`
@@ -274,6 +283,7 @@ _Total: 26_
   - make_material_request:
   - update_so_difference_kg:
   - unlink_material_request_on_cancel:
+  - auto_purchase_from_mp:
 
 ### material_planning_raw_material
 - Path: `production_management/doctype/material_planning_raw_material`
@@ -428,18 +438,20 @@ Functions:
 Functions:
   - 8:validate_stock_entry:
   - 41:on_submit_stock_entry:
-  - 107:_reduce_batch_sec_qty:
-  - 112:_batch_total_kg_all_wh:
-  - 125:_populate_manufacture_sec_qty:
-  - 147:_collect_consumed_batches:
-  - 180:_linked_material_plannings:
-  - 207:_release_material_planning_reservations:
-  - 257:on_cancel_stock_entry:
-  - 272:_restore_batch_sec_qty:
-  - 290:_restore_material_planning_reservations:
-  - 343:_update_sco_transferred_weight:
-  - 405:_update_sco_cnc_weight:
-  - 452:_calc_qty:
+  - 113:_reduce_batch_sec_qty:
+  - 118:_batch_total_kg_all_wh:
+  - 131:_populate_manufacture_sec_qty:
+  - 153:_collect_consumed_batches:
+  - 186:_linked_material_plannings:
+  - 213:_release_material_planning_reservations:
+  - 263:on_cancel_stock_entry:
+  - 283:_restore_batch_sec_qty:
+  - 301:_restore_material_planning_reservations:
+  - 354:_update_sco_transferred_weight:
+  - 416:_update_sco_cnc_weight:
+  - 463:_update_wo_transferred_weight:
+  - 502:_update_wo_cnc_weight:
+  - 547:_calc_qty:
 
 ### production_management/test_release.py
 
@@ -511,39 +523,45 @@ Functions:
 
 ### setup.py
 Functions:
-  - 1088:after_install:
-  - 1125:after_migrate:
-  - 1163:setup_storage_location:
-  - 1185:create_item_client_script:
-  - 1201:create_item_custom_fields:
-  - 1277:create_purchase_order_custom_fields:
-  - 1353:hide_purchase_order_weight_fields:
-  - 1367:create_purchase_order_client_script:
-  - 1383:create_purchase_receipt_custom_fields:
-  - 1462:create_batch_custom_fields:
-  - 1527:create_purchase_receipt_client_script:
-  - 1543:create_material_request_custom_fields:
-  - 1633:create_material_request_client_script:
-  - 1649:create_rfq_custom_fields:
-  - 1725:create_rfq_client_script:
-  - 1741:create_sq_custom_fields:
-  - 1820:create_sq_client_script:
-  - 1836:create_bom_custom_fields:
-  - 1943:create_so_custom_fields:
-  - 2020:create_so_client_script:
-  - 2036:create_bom_client_script:
-  - 2056:create_production_plan_custom_fields:
-  - 2242:create_production_plan_client_script:
-  - 2264:create_job_card_custom_fields:
-  - 2529:create_job_card_client_script:
-  - 2547:create_stock_entry_custom_fields:
-  - 2666:create_stock_entry_client_script:
-  - 2688:remove_sco_purchase_order_mandatory:
-  - 2699:create_sco_custom_fields:
-  - 3432:create_sco_client_script:
-  - 3448:create_sco_ops_client_script:
-  - 3464:create_soe_client_script:
-  - 3480:create_manufacturing_settings_custom_fields:
+  - 1091:after_install:
+  - 1134:after_migrate:
+  - 1178:setup_storage_location:
+  - 1200:create_item_client_script:
+  - 1216:create_item_custom_fields:
+  - 1292:create_purchase_order_custom_fields:
+  - 1368:hide_purchase_order_weight_fields:
+  - 1382:create_purchase_order_client_script:
+  - 1398:create_purchase_receipt_custom_fields:
+  - 1477:create_batch_custom_fields:
+  - 1542:create_purchase_receipt_client_script:
+  - 1558:create_material_request_custom_fields:
+  - 1648:create_material_request_client_script:
+  - 1664:create_rfq_custom_fields:
+  - 1740:create_rfq_client_script:
+  - 1756:create_sq_custom_fields:
+  - 1835:create_sq_client_script:
+  - 1851:create_bom_custom_fields:
+  - 1958:create_so_custom_fields:
+  - 2035:create_so_client_script:
+  - 2051:create_bom_client_script:
+  - 2071:create_production_plan_custom_fields:
+  - 2295:create_production_plan_client_script:
+  - 2317:create_job_card_custom_fields:
+  - 2582:create_job_card_client_script:
+  - 2600:create_stock_entry_custom_fields:
+  - 2729:create_stock_entry_client_script:
+  - 2751:remove_sco_purchase_order_mandatory:
+  - 2762:create_sco_custom_fields:
+  - 3531:create_sco_client_script:
+  - 3547:create_sco_ops_client_script:
+  - 3563:create_soe_client_script:
+  - 3579:create_manufacturing_settings_custom_fields:
+  - 3606:create_work_order_custom_fields:
+  - 3776:create_job_card_drawing_fields:
+  - 4247:create_wo_client_script:
+  - 4264:create_wo_ops_client_script:
+  - 4281:create_jc_drawing_client_script:
+  - 4302:create_material_planning_auto_purchase_fields:
 
 ### sq_management/supplier_quotation.py
 Functions:
@@ -564,33 +582,48 @@ Functions:
   - 12:get_sco_dashboard_data:
   - 26:create_sco_from_production_plan:
   - 152:create_work_order_from_pp:
-  - 222:create_supplier_operation_entries:
-  - 239:create_send_to_subcontractor_entry:
-  - 335:get_sco_pending_items:
-  - 445:create_partial_transfer:
-  - 506:create_cnc_to_supplier_entry:
-  - 609:get_soe_summary:
-  - 647:create_return_stock_entry:
-  - 694:create_finished_goods_entry:
-  - 778:validate_supplier_operation_entry:
-  - 859:before_submit_supplier_operation_entry:
-  - 893:_propagate_available_to_next:
-  - 915:_propagate_drawing_nos_to_next:
-  - 952:_update_sco_drawing_item_completion:
-  - 976:on_update_supplier_operation_entry:
-  - 983:on_submit_supplier_operation_entry:
-  - 1006:before_delete_supplier_operation_entry:
-  - 1028:on_cancel_subcontracting_order:
-  - 1049:_build_soe_drawing_rows:
-  - 1086:_create_soes_for_sco:
-  - 1149:_get_mp_total_weight:
-  - 1177:_get_mp_drawing_weight:
-  - 1194:_get_mp_mapped_weight_by_duno:
-  - 1249:_get_mp_excess_by_duno:
-  - 1268:_get_mp_reserved_batches:
-  - 1353:_get_pp_planned_qty:
-  - 1368:backfill_drawing_item_qty:
-  - 1388:_get_supplier_wh_consumption_items:
+  - 278:create_supplier_operation_entries:
+  - 295:create_send_to_subcontractor_entry:
+  - 391:get_sco_pending_items:
+  - 501:create_partial_transfer:
+  - 562:create_cnc_to_supplier_entry:
+  - 665:get_soe_summary:
+  - 711:create_return_stock_entry:
+  - 769:create_finished_goods_entry:
+  - 853:validate_supplier_operation_entry:
+  - 966:before_submit_supplier_operation_entry:
+  - 1000:_propagate_available_to_next:
+  - 1022:_propagate_drawing_nos_to_next:
+  - 1062:_update_sco_drawing_item_completion:
+  - 1086:on_update_supplier_operation_entry:
+  - 1093:on_submit_supplier_operation_entry:
+  - 1116:before_delete_supplier_operation_entry:
+  - 1138:on_cancel_subcontracting_order:
+  - 1159:_build_soe_drawing_rows:
+  - 1196:_create_soes_for_sco:
+  - 1259:_get_mp_total_weight:
+  - 1287:_get_mp_drawing_weight:
+  - 1304:_get_mp_mapped_weight_by_duno:
+  - 1359:_get_mp_excess_by_duno:
+  - 1378:_get_mp_reserved_batches:
+  - 1472:_get_pp_planned_qty:
+  - 1487:backfill_drawing_item_qty:
+  - 1507:_get_supplier_wh_consumption_items:
+  - 1551:get_wo_pending_items:
+  - 1656:create_partial_wo_transfer:
+  - 1712:create_cnc_to_wip_entry:
+  - 1811:create_return_stock_entry_for_wo:
+  - 1863:get_jc_summary:
+  - 1908:on_submit_work_order:
+  - 1916:on_cancel_work_order:
+  - 1925:validate_job_card_drawing_entry:
+  - 2029:before_submit_job_card_drawing_entry:
+  - 2066:_propagate_drawing_nos_to_next_jc:
+  - 2106:_update_wo_drawing_item_completion:
+  - 2131:on_update_job_card_drawing_entry:
+  - 2139:on_submit_job_card_drawing_entry:
+  - 2165:_build_jc_drawing_rows:
+  - 2196:_populate_jcs_for_wo:
 
 ### tests/create_full_test_entry.py
 Functions:
@@ -708,15 +741,20 @@ Functions:
 - `material_request_management/material_request.py:16` — `get_mr_item_uom`
 - `subcontracting_management/subcontracting.py:26` — `create_sco_from_production_plan`
 - `subcontracting_management/subcontracting.py:152` — `create_work_order_from_pp`
-- `subcontracting_management/subcontracting.py:222` — `create_supplier_operation_entries`
-- `subcontracting_management/subcontracting.py:239` — `create_send_to_subcontractor_entry`
-- `subcontracting_management/subcontracting.py:335` — `get_sco_pending_items`
-- `subcontracting_management/subcontracting.py:445` — `create_partial_transfer`
-- `subcontracting_management/subcontracting.py:506` — `create_cnc_to_supplier_entry`
-- `subcontracting_management/subcontracting.py:609` — `get_soe_summary`
-- `subcontracting_management/subcontracting.py:647` — `create_return_stock_entry`
-- `subcontracting_management/subcontracting.py:694` — `create_finished_goods_entry`
-- `subcontracting_management/subcontracting.py:1368` — `backfill_drawing_item_qty`
+- `subcontracting_management/subcontracting.py:278` — `create_supplier_operation_entries`
+- `subcontracting_management/subcontracting.py:295` — `create_send_to_subcontractor_entry`
+- `subcontracting_management/subcontracting.py:391` — `get_sco_pending_items`
+- `subcontracting_management/subcontracting.py:501` — `create_partial_transfer`
+- `subcontracting_management/subcontracting.py:562` — `create_cnc_to_supplier_entry`
+- `subcontracting_management/subcontracting.py:665` — `get_soe_summary`
+- `subcontracting_management/subcontracting.py:711` — `create_return_stock_entry`
+- `subcontracting_management/subcontracting.py:769` — `create_finished_goods_entry`
+- `subcontracting_management/subcontracting.py:1487` — `backfill_drawing_item_qty`
+- `subcontracting_management/subcontracting.py:1551` — `get_wo_pending_items`
+- `subcontracting_management/subcontracting.py:1656` — `create_partial_wo_transfer`
+- `subcontracting_management/subcontracting.py:1712` — `create_cnc_to_wip_entry`
+- `subcontracting_management/subcontracting.py:1811` — `create_return_stock_entry_for_wo`
+- `subcontracting_management/subcontracting.py:1863` — `get_jc_summary`
 - `production_management/production_utils.py:95` — `get_routing_operations_for_bom`
 - `production_management/production_utils.py:120` — `get_raw_materials_for_job_card`
 - `production_management/doctype/material_planning/material_planning.py:141` — `@frappe.validate_and_sanitize_search_inputs`
@@ -738,6 +776,7 @@ Functions:
 - `production_management/doctype/material_planning/material_planning.py:1408` — `make_production_plan`
 - `production_management/doctype/material_planning/material_planning.py:1466` — `make_material_request`
 - `production_management/doctype/material_planning/material_planning.py:1613` — `update_so_difference_kg`
+- `production_management/doctype/material_planning/material_planning.py:1668` — `auto_purchase_from_mp`
 - `purchase_receipt_management/purchase_receipt.py:18` — `get_pr_item_uom`
 - `purchase_receipt_management/purchase_receipt.py:252` — `get_mp_for_pr`
 - `purchase_receipt_management/purchase_receipt.py:271` — `allocate_pr_stock_to_mp`
@@ -778,8 +817,18 @@ doc_events = {
 		"validate": "manufyxinvenzaerp.sq_management.supplier_quotation.validate_supplier_quotation",
 		"before_submit": "manufyxinvenzaerp.sq_management.supplier_quotation.before_submit_supplier_quotation",
 	},
+	"Work Order": {
+		"on_submit": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_submit_work_order",
+		"on_cancel": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_cancel_work_order",
+	},
 	"Job Card": {
-		"validate": "manufyxinvenzaerp.production_management.job_card.validate_job_card",
+		"validate": [
+			"manufyxinvenzaerp.production_management.job_card.validate_job_card",
+			"manufyxinvenzaerp.subcontracting_management.subcontracting.validate_job_card_drawing_entry",
+		],
+		"before_submit": "manufyxinvenzaerp.subcontracting_management.subcontracting.before_submit_job_card_drawing_entry",
+		"on_update": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_update_job_card_drawing_entry",
+		"on_submit": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_submit_job_card_drawing_entry",
 	},
 	"Stock Entry": {
 		"validate": "manufyxinvenzaerp.production_management.stock_entry.validate_stock_entry",

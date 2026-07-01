@@ -16,7 +16,8 @@
   "sec_qty",
   "sec_uom",
   "qty",
-  "uom"
+  "uom",
+  "stock_entry_created"
  ],
  "fields": [
   {
@@ -100,6 +101,14 @@
    "fieldtype": "Link",
    "label": "UOM",
    "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "stock_entry_created",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Stock Entry Created",
    "read_only": 1
   }
  ],

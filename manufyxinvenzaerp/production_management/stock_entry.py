@@ -103,6 +103,12 @@ def on_submit_stock_entry(doc, method):
 		_update_sco_transferred_weight(doc.custom_sco_ref)
 		_update_sco_cnc_weight(doc.custom_sco_ref)
 
+	# SHARED_SCO_JC: WO transfer tracking mirrors SCO tracking above.
+	# custom_wo_ref is set on Material Transfer SEs created by our WO transfer buttons.
+	if doc.stock_entry_type == "Material Transfer" and doc.get("custom_wo_ref"):
+		_update_wo_transferred_weight(doc.custom_wo_ref)
+		_update_wo_cnc_weight(doc.custom_wo_ref)
+
 
 def _reduce_batch_sec_qty(batch_no, consumed_qty):
 	current = flt(frappe.db.get_value("Batch", batch_no, "custom_sec_qty"))
@@ -267,6 +273,11 @@ def on_cancel_stock_entry(doc, method):
 	if doc.stock_entry_type == "Material Transfer" and doc.get("custom_sco_ref"):
 		_update_sco_transferred_weight(doc.custom_sco_ref)
 		_update_sco_cnc_weight(doc.custom_sco_ref)
+
+	# SHARED_SCO_JC: WO cancel mirrors SCO cancel above.
+	if doc.stock_entry_type == "Material Transfer" and doc.get("custom_wo_ref"):
+		_update_wo_transferred_weight(doc.custom_wo_ref)
+		_update_wo_cnc_weight(doc.custom_wo_ref)
 
 
 def _restore_batch_sec_qty(doc):
@@ -447,6 +458,90 @@ def _update_sco_cnc_weight(sco_name):
 	frappe.db.set_value(
 		"Subcontracting Order", sco_name, "custom_cnc_transferred_weight_kg", cnc_qty
 	)
+
+
+def _update_wo_transferred_weight(wo_name):
+	"""Recompute WO.custom_transferred_weight_kg and sync Op-1 JC available_to_consume_kg.
+	Counts: source → WIP transfers PLUS CNC → WIP transfers (both via custom_wo_ref SEs).
+	# SHARED_SCO_JC: mirrors _update_sco_transferred_weight
+	"""
+	wip_warehouse = frappe.db.get_value("Work Order", wo_name, "wip_warehouse")
+	cnc_warehouse = frappe.db.get_value("Work Order", wo_name, "custom_cnc_warehouse")
+	if not wip_warehouse:
+		return
+
+	# Source → WIP (any Material Transfer with custom_wo_ref going TO wip_warehouse,
+	# excluding CNC→WIP which is counted separately to avoid double-counting)
+	r1 = frappe.db.sql(
+		"""
+		SELECT COALESCE(SUM(sed.qty), 0)
+		FROM `tabStock Entry Detail` sed
+		JOIN `tabStock Entry` se ON se.name = sed.parent
+		WHERE se.custom_wo_ref = %s
+		  AND se.stock_entry_type = 'Material Transfer'
+		  AND se.docstatus = 1
+		  AND sed.t_warehouse = %s
+		""",
+		(wo_name, wip_warehouse),
+	)
+	direct_qty = flt(r1[0][0]) if r1 and r1[0][0] else 0
+
+	transferred = flt(direct_qty, 3)
+	frappe.db.set_value("Work Order", wo_name, "custom_transferred_weight_kg", transferred)
+
+	# Sync Op-1 JC custom_available_to_consume_kg while still in draft
+	jc_op1 = frappe.db.get_value(
+		"Job Card",
+		{"work_order": wo_name, "sequence_id": 1, "docstatus": 0},
+		"name",
+	)
+	if jc_op1:
+		frappe.db.set_value("Job Card", jc_op1, "custom_available_to_consume_kg", transferred)
+
+
+def _update_wo_cnc_weight(wo_name):
+	"""Recompute WO.custom_cnc_transferred_weight_kg:
+	net qty currently in CNC warehouse = sent to CNC minus already forwarded to WIP.
+	# SHARED_SCO_JC: mirrors _update_sco_cnc_weight
+	"""
+	cnc_warehouse = frappe.db.get_value("Work Order", wo_name, "custom_cnc_warehouse")
+	wip_warehouse  = frappe.db.get_value("Work Order", wo_name, "wip_warehouse")
+	if not cnc_warehouse:
+		return
+
+	r1 = frappe.db.sql(
+		"""
+		SELECT COALESCE(SUM(sed.qty), 0)
+		FROM `tabStock Entry Detail` sed
+		JOIN `tabStock Entry` se ON se.name = sed.parent
+		WHERE se.custom_wo_ref = %s
+		  AND se.stock_entry_type = 'Material Transfer'
+		  AND se.docstatus = 1
+		  AND sed.t_warehouse = %s
+		""",
+		(wo_name, cnc_warehouse),
+	)
+	sent_to_cnc = flt(r1[0][0]) if r1 and r1[0][0] else 0
+
+	sent_to_wip = 0.0
+	if wip_warehouse:
+		r2 = frappe.db.sql(
+			"""
+			SELECT COALESCE(SUM(sed.qty), 0)
+			FROM `tabStock Entry Detail` sed
+			JOIN `tabStock Entry` se ON se.name = sed.parent
+			WHERE se.custom_wo_ref = %s
+			  AND se.stock_entry_type = 'Material Transfer'
+			  AND se.docstatus = 1
+			  AND sed.s_warehouse = %s
+			  AND sed.t_warehouse = %s
+			""",
+			(wo_name, cnc_warehouse, wip_warehouse),
+		)
+		sent_to_wip = flt(r2[0][0]) if r2 and r2[0][0] else 0
+
+	cnc_qty = max(0.0, flt(sent_to_cnc - sent_to_wip, 3))
+	frappe.db.set_value("Work Order", wo_name, "custom_cnc_transferred_weight_kg", cnc_qty)
 
 
 def _calc_qty(row, group):
