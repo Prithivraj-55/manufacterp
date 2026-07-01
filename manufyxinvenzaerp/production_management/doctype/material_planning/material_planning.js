@@ -318,18 +318,13 @@ frappe.ui.form.on("Material Planning", {
 				function () { _show_material_request_dialog(frm); }
 			);
 
-			// Auto Purchase button — visible only when Manufyxinvenza Settings enables it
+			// Auto Purchase section — visible only when Manufyxinvenza Settings enables it
 			frappe.db.get_single_value("Manufyxinvenza Settings", "auto_purchase_from_material_planning")
 				.then(function(enabled) {
 					if (!enabled) return;
-					frm.fields_dict["unavailable_items"].grid.add_custom_button(
-						frappe.utils.icon("ok-circle", "xs") + " " + __("Auto Purchase"),
-						function () { _run_auto_purchase(frm); }
-					);
-					// Show supplier field (warehouse reuses existing for_warehouse field)
 					frm.set_df_property("custom_auto_purchase_section",  "hidden", 0);
 					frm.set_df_property("custom_auto_purchase_supplier", "hidden", 0);
-					frm.refresh_fields(["custom_auto_purchase_section", "custom_auto_purchase_supplier"]);
+					frm.refresh_fields(["custom_auto_purchase_section", "custom_auto_purchase_supplier", "custom_auto_purchase_btn"]);
 				});
 		}
 
@@ -2016,6 +2011,12 @@ function _add_exact_match_reservation_buttons(frm) {
 
 
 // ── Auto Purchase (Manufyxinvenza Settings) ──────────────────────────────
+frappe.ui.form.on("Material Planning", {
+	custom_auto_purchase_btn(frm) {
+		_run_auto_purchase(frm);
+	},
+});
+
 function _run_auto_purchase(frm) {
 	if (!frm.doc.custom_auto_purchase_supplier) {
 		frappe.msgprint({ title: __("Supplier Required"), message: __("Please set the Supplier field before running Auto Purchase."), indicator: "orange" });

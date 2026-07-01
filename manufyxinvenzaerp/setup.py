@@ -4300,7 +4300,7 @@ def create_jc_drawing_client_script():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def create_material_planning_auto_purchase_fields():
-    """Add supplier and warehouse fields used by the Auto Purchase feature."""
+    """Add supplier, warning, and button fields used by the Auto Purchase feature."""
     create_custom_fields(
         {
             "Material Planning": [
@@ -4312,13 +4312,33 @@ def create_material_planning_auto_purchase_fields():
                     "hidden": 1,
                 },
                 {
+                    "fieldname": "custom_auto_purchase_warning",
+                    "fieldtype": "HTML",
+                    "options": (
+                        '<div style="margin:6px 0 10px;padding:8px 14px;'
+                        'background:#fff3cd;border-left:4px solid #e6a817;'
+                        'border-radius:3px;font-size:12px;color:#7d4e00;">'
+                        "<strong>&#9888; Testing Only</strong> &mdash; "
+                        "Auto Purchase feature is only for testing purposes. "
+                        "Not recommended to use in live or production environments."
+                        "</div>"
+                    ),
+                    "insert_after": "custom_auto_purchase_section",
+                },
+                {
                     "fieldname": "custom_auto_purchase_supplier",
                     "fieldtype": "Link",
                     "label": "Supplier (Auto Purchase)",
                     "options": "Supplier",
-                    "insert_after": "custom_auto_purchase_section",
+                    "insert_after": "custom_auto_purchase_warning",
                     "hidden": 1,
                     "description": "Supplier for the auto-created Purchase Order.",
+                },
+                {
+                    "fieldname": "custom_auto_purchase_btn",
+                    "fieldtype": "Button",
+                    "label": "Auto Purchase",
+                    "insert_after": "custom_auto_purchase_supplier",
                 },
             ],
         },
