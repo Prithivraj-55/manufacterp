@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-06-25 00:26:52_
+_Generated: 2026-07-01 08:21:21_
 
 ## drawing
 
@@ -80,6 +80,17 @@ _Generated: 2026-06-25 00:26:52_
 | Module | drawing_management |
 | Path | `drawing_management/doctype/sales_order_duno_item` |
 | Controller | `drawing_management/doctype/sales_order_duno_item/sales_order_duno_item.py` |
+| Client script | none |
+
+---
+
+## manufyxinvenza_settings
+
+| Key | Value |
+|-----|-------|
+| Module | manufyxinvenzaerp |
+| Path | `manufyxinvenzaerp/doctype/manufyxinvenza_settings` |
+| Controller | `manufyxinvenzaerp/doctype/manufyxinvenza_settings/manufyxinvenza_settings.py` |
 | Client script | none |
 
 ---
@@ -172,6 +183,7 @@ _Generated: 2026-06-25 00:26:52_
 | ` make_material_request` | no |
 | ` update_so_difference_kg` | no |
 | ` unlink_material_request_on_cancel` | no |
+| ` auto_purchase_from_mp` | no |
 
 ---
 

@@ -317,6 +317,20 @@ frappe.ui.form.on("Material Planning", {
 				frappe.utils.icon("buying", "xs") + " " + __("Create Material Request"),
 				function () { _show_material_request_dialog(frm); }
 			);
+
+			// Auto Purchase button — visible only when Manufyxinvenza Settings enables it
+			frappe.db.get_single_value("Manufyxinvenza Settings", "auto_purchase_from_material_planning")
+				.then(function(enabled) {
+					if (!enabled) return;
+					frm.fields_dict["unavailable_items"].grid.add_custom_button(
+						frappe.utils.icon("ok-circle", "xs") + " " + __("Auto Purchase"),
+						function () { _run_auto_purchase(frm); }
+					);
+					// Show supplier / warehouse fields
+					frm.set_df_property("custom_auto_purchase_supplier",  "hidden", 0);
+					frm.set_df_property("custom_auto_purchase_warehouse", "hidden", 0);
+					frm.refresh_fields(["custom_auto_purchase_supplier", "custom_auto_purchase_warehouse"]);
+				});
 		}
 
 		_update_weight_summary(frm);
@@ -1998,4 +2012,63 @@ function _add_exact_match_reservation_buttons(frm) {
 			d.show();
 		}
 	);
+}
+
+
+// ── Auto Purchase (Manufyxinvenza Settings) ──────────────────────────────
+function _run_auto_purchase(frm) {
+	if (!frm.doc.custom_auto_purchase_supplier) {
+		frappe.msgprint({ title: __("Supplier Required"), message: __("Please set the Supplier field before running Auto Purchase."), indicator: "orange" });
+		return;
+	}
+	if (!frm.doc.custom_auto_purchase_warehouse) {
+		frappe.msgprint({ title: __("Warehouse Required"), message: __("Please set the Purchase Receipt Warehouse before running Auto Purchase."), indicator: "orange" });
+		return;
+	}
+	if (!(frm.doc.unavailable_items || []).length) {
+		frappe.msgprint({ title: __("No Items"), message: __("No unavailable items to purchase."), indicator: "orange" });
+		return;
+	}
+	frappe.confirm(
+		__("This will automatically create and submit a Material Request, Purchase Order, and Purchase Receipt for ALL unavailable items. Continue?"),
+		function() {
+			if (frm.is_dirty()) {
+				frappe.call({
+					method: "frappe.client.save",
+					args: { doc: frm.doc },
+					freeze: true, freeze_message: __("Saving…"),
+					callback(r) {
+						if (r.message) { frappe.model.sync(r.message); frm.refresh(); }
+						_do_auto_purchase(frm);
+					},
+				});
+			} else {
+				_do_auto_purchase(frm);
+			}
+		}
+	);
+}
+
+function _do_auto_purchase(frm) {
+	frappe.call({
+		method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.auto_purchase_from_mp",
+		args: { material_planning_name: frm.doc.name },
+		freeze: true,
+		freeze_message: __("Creating MR → PO → PR…"),
+		callback(r) {
+			if (r.message) {
+				var m = r.message;
+				frappe.msgprint({
+					title: __("Auto Purchase Complete"),
+					message:
+						__("Material Request: ") + '<a href="/app/material-request/' + encodeURIComponent(m.mr) + '">' + m.mr + '</a><br>' +
+						__("Purchase Order: ")   + '<a href="/app/purchase-order/'   + encodeURIComponent(m.po) + '">' + m.po + '</a><br>' +
+						__("Purchase Receipt: ") + '<a href="/app/purchase-receipt/' + encodeURIComponent(m.pr) + '">' + m.pr + '</a>',
+					indicator: "green",
+				});
+				frm._grid_btns_added = false;
+				frm.reload_doc();
+			}
+		},
+	});
 }

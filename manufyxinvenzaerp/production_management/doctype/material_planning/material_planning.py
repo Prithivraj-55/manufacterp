@@ -1662,3 +1662,57 @@ def unlink_material_request_on_cancel(doc, method=None):
     """Clear the Material Planning link when an MR is cancelled or deleted."""
     if doc.get("custom_material_planning"):
         frappe.db.set_value("Material Request", doc.name, "custom_material_planning", "")
+
+
+@frappe.whitelist()
+def auto_purchase_from_mp(material_planning_name):
+    """One-click MR → submit → PO → submit → PR → submit for all unavailable items.
+    Reads custom_auto_purchase_supplier and custom_auto_purchase_warehouse from the MP.
+    """
+    from frappe.utils import today
+    from erpnext.stock.doctype.material_request.material_request import (
+        make_purchase_order as _mr_to_po,
+    )
+    from erpnext.buying.doctype.purchase_order.purchase_order import (
+        make_purchase_receipt as _po_to_pr,
+    )
+
+    mp = frappe.get_doc("Material Planning", material_planning_name)
+
+    supplier  = mp.get("custom_auto_purchase_supplier")
+    warehouse = mp.get("custom_auto_purchase_warehouse")
+
+    if not supplier:
+        frappe.throw(_("Please set the Supplier for Auto Purchase on this Material Planning."))
+    if not warehouse:
+        frappe.throw(_("Please set the Purchase Receipt Warehouse on this Material Planning."))
+    if not mp.unavailable_items:
+        frappe.throw(_("No unavailable items found. Run stock check first."))
+
+    # Step 1 — Create Material Request (draft) for all unavailable items, then submit
+    all_item_codes = list({r.item_code for r in mp.unavailable_items})
+    mr_name = make_material_request(material_planning_name, json.dumps(all_item_codes))
+    mr = frappe.get_doc("Material Request", mr_name)
+    mr.submit()
+    frappe.db.commit()
+
+    # Step 2 — Map MR → PO (ERPNext mapper), set supplier, insert, submit
+    po = _mr_to_po(mr_name)
+    po.supplier        = supplier
+    po.schedule_date   = today()
+    po.transaction_date = today()
+    po.insert(ignore_permissions=True)
+    frappe.db.commit()
+    po.submit()
+    frappe.db.commit()
+
+    # Step 3 — Map PO → PR (ERPNext mapper), override warehouse, insert, submit
+    pr = _po_to_pr(po.name)
+    for item in pr.get("items") or []:
+        item.warehouse = warehouse
+    pr.insert(ignore_permissions=True)
+    frappe.db.commit()
+    pr.submit()
+    frappe.db.commit()
+
+    return {"mr": mr_name, "po": po.name, "pr": pr.name}

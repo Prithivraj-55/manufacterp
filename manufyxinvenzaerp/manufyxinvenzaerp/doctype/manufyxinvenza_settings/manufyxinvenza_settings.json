@@ -1,0 +1,45 @@
+{
+ "actions": [],
+ "creation": "2026-07-01 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "auto_purchase_section",
+  "auto_purchase_from_material_planning"
+ ],
+ "fields": [
+  {
+   "fieldname": "auto_purchase_section",
+   "fieldtype": "Section Break",
+   "label": "Auto Purchase"
+  },
+  {
+   "fieldname": "auto_purchase_from_material_planning",
+   "fieldtype": "Check",
+   "label": "Auto Purchase from Material Planning",
+   "description": "When enabled, shows an Auto Purchase button on Material Planning to automatically create MR → PO → PR in one click for all unavailable items."
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-07-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Manufyxinvenzaerp",
+ "name": "Manufyxinvenza Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Manufacturing Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

@@ -184,8 +184,18 @@ doc_events = {
 		"validate": "manufyxinvenzaerp.sq_management.supplier_quotation.validate_supplier_quotation",
 		"before_submit": "manufyxinvenzaerp.sq_management.supplier_quotation.before_submit_supplier_quotation",
 	},
+	"Work Order": {
+		"on_submit": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_submit_work_order",
+		"on_cancel": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_cancel_work_order",
+	},
 	"Job Card": {
-		"validate": "manufyxinvenzaerp.production_management.job_card.validate_job_card",
+		"validate": [
+			"manufyxinvenzaerp.production_management.job_card.validate_job_card",
+			"manufyxinvenzaerp.subcontracting_management.subcontracting.validate_job_card_drawing_entry",
+		],
+		"before_submit": "manufyxinvenzaerp.subcontracting_management.subcontracting.before_submit_job_card_drawing_entry",
+		"on_update": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_update_job_card_drawing_entry",
+		"on_submit": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_submit_job_card_drawing_entry",
 	},
 	"Stock Entry": {
 		"validate": "manufyxinvenzaerp.production_management.stock_entry.validate_stock_entry",

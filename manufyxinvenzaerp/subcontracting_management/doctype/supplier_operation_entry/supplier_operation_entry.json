@@ -16,6 +16,8 @@
   "supplier_warehouse",
   "status",
   "section_break_summary",
+  "total_available_nos",
+  "total_completed_nos",
   "available_to_consume_kg",
   "total_consumed_kg",
   "section_break_drawing_details",
@@ -101,16 +103,28 @@
   {
    "fieldname": "available_to_consume_kg",
    "fieldtype": "Float",
-   "label": "Available to Consume (Nos)",
+   "label": "Available to Consume (Kg)",
    "read_only": 1,
-   "in_list_view": 1
+   "hidden": 1
   },
   {
    "fieldname": "total_consumed_kg",
    "fieldtype": "Float",
-   "label": "Total Consumed (Nos)",
+   "label": "Total Consumed (Kg)",
    "read_only": 1,
-   "in_list_view": 1
+   "hidden": 1
+  },
+  {
+   "fieldname": "total_available_nos",
+   "fieldtype": "Float",
+   "label": "Available to Consume (Nos)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_completed_nos",
+   "fieldtype": "Float",
+   "label": "Total Consumed (Nos)",
+   "read_only": 1
   },
   {
    "fieldname": "section_break_drawing_details",

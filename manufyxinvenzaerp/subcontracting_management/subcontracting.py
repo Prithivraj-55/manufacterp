@@ -150,17 +150,15 @@ def create_sco_from_production_plan(pp_name):
 
 @frappe.whitelist()
 def create_work_order_from_pp(pp_name):
-    """Create a Work Order containing ONLY the Internal Jobcard operations from the
-    Production Plan's Process Planning table. Used for Scenario 3 (hybrid flow)."""
+    """Create a Work Order for Internal Jobcard operations from a submitted Production Plan.
+    Populates custom_drawing_items and weight summary fields (mirrors create_sco_from_production_plan).
+    # SHARED_SCO_JC: mirrors create_sco_from_production_plan
+    """
     pp = frappe.get_doc("Production Plan", pp_name)
 
-    internal_ops = [
-        r for r in (pp.custom_process_planning or [])
-        if r.work_type == "Internal Jobcard"
-    ]
+    internal_ops = [r for r in (pp.custom_process_planning or []) if r.work_type == "Internal Jobcard"]
     if not internal_ops:
         frappe.throw(_("No Internal Jobcard operations found in the Process Planning table."))
-
     if not pp.po_items:
         frappe.throw(_("No items found in the Production Plan."))
 
@@ -169,17 +167,59 @@ def create_work_order_from_pp(pp_name):
     if not bom_no:
         frappe.throw(_("No BOM set on the Production Plan item."))
 
-    internal_op_names = {r.operation_name for r in internal_ops}
-
     company = (
         frappe.defaults.get_user_default("Company")
         or frappe.db.get_single_value("Global Defaults", "default_company")
     )
 
+    # Build drawing items + weight summary from Material Planning (same logic as create_sco_from_production_plan).
+    # SHARED_SCO_JC: identical loop to create_sco_from_production_plan
+    drawing_rows = []
+    total_customer = total_planned = total_mapped = total_excess = 0.0
+    _mapped_cache = {}
+    _excess_cache = {}
+    for pi in pp.po_items:
+        mp_name = pi.get("custom_material_planning")
+        duno    = pi.get("custom_duno_mark_no") or ""
+
+        if mp_name not in _mapped_cache:
+            _mapped_cache[mp_name] = _get_mp_mapped_weight_by_duno(mp_name)
+            _excess_cache[mp_name] = _get_mp_excess_by_duno(mp_name)
+
+        planned = _get_mp_drawing_weight(mp_name, duno)
+        if duno:
+            mapped = _mapped_cache[mp_name].get(duno, 0.0)
+            excess = _excess_cache[mp_name].get(duno, 0.0)
+        else:
+            mapped = _get_mp_total_weight(mp_name)
+            excess = sum(_excess_cache[mp_name].values())
+
+        customer = flt(pi.get("custom_customer_weight_kg"), 3)
+        total_customer += customer
+        total_planned  += planned
+        total_mapped   += mapped
+        total_excess   += excess
+
+        drawing_rows.append({
+            "drawing": pi.get("custom_drawing"),
+            "item_code": pi.item_code,
+            "item_name": pi.get("item_name") or frappe.db.get_value("Item", pi.item_code, "item_name") or pi.item_code,
+            "duno_mark_no": duno,
+            "customer_drawing_number": pi.get("custom_customer_drawing_number"),
+            "material_planning": mp_name,
+            "customer_weight_kg": customer,
+            "total_weight_kg": flt(planned, 3),
+            "mapped_weight_kg": flt(mapped, 3),
+            "excess_weight_kg": flt(excess, 3),
+            "qty_to_manufacture": flt(pi.get("planned_qty"), 3),
+        })
+
+    # Collect only Internal Jobcard operations from routing.
+    internal_op_names = {r.operation_name for r in internal_ops}
     routing = frappe.db.get_value("BOM", bom_no, "routing")
     filtered_ops = []
     if routing:
-        bom_ops = frappe.get_all(
+        filtered_ops = frappe.get_all(
             "BOM Operation",
             filters={
                 "parent": routing,
@@ -189,7 +229,6 @@ def create_work_order_from_pp(pp_name):
             fields=["operation", "workstation", "time_in_mins", "sequence_id"],
             order_by="sequence_id asc",
         )
-        filtered_ops = bom_ops
 
     wo = frappe.new_doc("Work Order")
     wo.update({
@@ -200,6 +239,11 @@ def create_work_order_from_pp(pp_name):
         "production_plan": pp_name,
         "fg_warehouse": pp_item.warehouse or "",
         "use_multi_level_bom": 0,
+        "custom_source_warehouse": pp.get("custom_raw_material_warehouse") or "",
+        "custom_customer_weight_kg": flt(total_customer, 3),
+        "custom_total_weight_kg":    flt(total_planned, 3),
+        "custom_mapped_weight_kg":   flt(total_mapped, 3),
+        "custom_excess_weight_kg":   flt(total_excess, 3),
     })
     wo.set_required_items()
     wo.operations = []
@@ -215,6 +259,18 @@ def create_work_order_from_pp(pp_name):
     wo.flags.ignore_mandatory = True
     wo.flags.ignore_validate = True
     wo.insert(ignore_permissions=True)
+
+    # Insert drawing item rows (same pattern as create_sco_from_production_plan).
+    # SHARED_SCO_JC: mirrors SCO drawing_item insertion
+    for row_data in drawing_rows:
+        row_data.update({
+            "doctype": "SCO Drawing Item",
+            "parent": wo.name,
+            "parenttype": "Work Order",
+            "parentfield": "custom_drawing_items",
+        })
+        frappe.get_doc(row_data).insert(ignore_permissions=True)
+
     return wo.name
 
 
@@ -626,7 +682,8 @@ def get_soe_summary(sco_name):
         "SOE Drawing Detail",
         filters={"parent": ["in", [d.name for d in soes]]},
         fields=["parent", "drawing", "customer_drawing_number", "duno_mark_no",
-                "qty_to_manufacture", "completed_qty_nos"],
+                "qty_to_manufacture", "completed_qty_nos",
+                "available_to_consume_nos", "transferred_weight_kg"],
         order_by="idx asc",
     )
 
@@ -639,6 +696,13 @@ def get_soe_summary(sco_name):
         soe["drawing_details"] = details
         soe["total_qty_to_mfg"] = sum(flt(d.qty_to_manufacture) for d in details)
         soe["total_completed_nos"] = sum(flt(d.completed_qty_nos) for d in details)
+        seq = soe.get("sequence_id") or 1
+        if seq == 1:
+            soe["avail_nos"] = sum(flt(d.transferred_weight_kg) for d in details)
+            soe["diff_nos"] = flt(soe["total_qty_to_mfg"]) - flt(soe["total_completed_nos"])
+        else:
+            soe["avail_nos"] = sum(flt(d.available_to_consume_nos) for d in details)
+            soe["diff_nos"] = flt(soe["avail_nos"]) - flt(soe["total_completed_nos"])
 
     return soes
 
@@ -655,13 +719,17 @@ def create_return_stock_entry(sco_name, target_warehouse):
     """
     sco = frappe.get_doc("Subcontracting Order", sco_name)
     if not target_warehouse:
-        frappe.throw(_("Please set the Return/Transfer Warehouse on the Subcontracting Order first."))
+        frappe.throw(_("Please set the Finished Goods/Return Warehouse on the Subcontracting Order first."))
 
     se_items = []
+    new_row_names = []
     for r in (sco.get("custom_excess_return_items") or []):
+        if r.get("stock_entry_created"):
+            continue  # already has an SE — skip
         qty = flt(r.qty, 3)
         if not r.item_code or qty <= 0:
             continue
+        new_row_names.append(r.name)
         se_items.append({
             "item_code": r.item_code,
             "qty": qty,
@@ -677,8 +745,8 @@ def create_return_stock_entry(sco_name, target_warehouse):
         })
 
     if not se_items:
-        frappe.throw(_("Add at least one off-cut item (with a calculated Weight in Kg) to the "
-                       "Excess Material Return table before receiving."))
+        frappe.throw(_("No new off-cut items to process. All rows already have a Stock Entry created, "
+                       "or no rows with Weight (Kg) > 0 exist."))
 
     se = frappe.get_doc({
         "doctype": "Stock Entry",
@@ -687,6 +755,13 @@ def create_return_stock_entry(sco_name, target_warehouse):
         "items": se_items,
     })
     se.insert(ignore_permissions=True)
+
+    # Lock the processed rows so they cannot be re-submitted
+    for r in sco.get("custom_excess_return_items"):
+        if r.name in new_row_names:
+            r.stock_entry_created = 1
+    sco.save(ignore_permissions=True)
+
     return se.name
 
 
@@ -716,7 +791,7 @@ def create_finished_goods_entry(sco_name):
         fg_warehouse = sco.get("custom_return_warehouse") or ""
     if not fg_warehouse:
         frappe.throw(_("No finished-good warehouse set. Set the warehouse on the "
-                       "Subcontracting Order item (or the Return/Transfer Warehouse) first."))
+                       "Subcontracting Order item (or the Finished Goods/Return Warehouse) first."))
 
     consumed = _get_supplier_wh_consumption_items(sco)
     if not consumed:
@@ -802,6 +877,33 @@ def validate_supplier_operation_entry(doc, method):
     for row in (doc.drawing_details or []):
         row.completed_qty_nos = flt(log_nos_by_drawing.get(row.drawing or "", 0.0), 3)
 
+    # --- 2a. Op-1: auto-set available_to_consume_nos = qty_to_manufacture when material
+    #         has been transferred for that drawing (transferred_weight_kg > 0) ---
+    if seq == 1:
+        for row in (doc.drawing_details or []):
+            if flt(row.transferred_weight_kg) > 0:
+                row.available_to_consume_nos = flt(row.qty_to_manufacture, 3)
+
+    # --- 2c. Update SOE-level Nos summary fields ---
+    doc.total_available_nos = flt(
+        sum(flt(r.available_to_consume_nos) for r in (doc.drawing_details or [])), 3
+    )
+    doc.total_completed_nos = flt(
+        sum(flt(r.completed_qty_nos) for r in (doc.drawing_details or [])), 3
+    )
+
+    # --- 2b. Validate completed_qty_nos does not exceed qty_to_manufacture ---
+    for row in (doc.drawing_details or []):
+        qty_to_mfg = flt(row.qty_to_manufacture)
+        completed = flt(row.completed_qty_nos)
+        if qty_to_mfg > 0 and completed > qty_to_mfg:
+            frappe.throw(
+                _("Drawing {0}: Completed ({1} Nos) exceeds Qty to Manufacture ({2} Nos). "
+                  "Reduce the logged quantity.")
+                .format(row.customer_drawing_number or row.drawing, completed, qty_to_mfg),
+                title=_("Completed Qty Exceeds Limit"),
+            )
+
     # --- 3. Status ---
     if log_nos_by_drawing and doc.status == "Open":
         doc.status = "In Progress"
@@ -842,18 +944,23 @@ def validate_supplier_operation_entry(doc, method):
         detail_map = {r.drawing: r for r in (doc.drawing_details or []) if r.drawing}
         for drawing, nos in log_nos_by_drawing.items():
             row = detail_map.get(drawing)
-            if row and flt(row.available_to_consume_nos) > 0:
-                if nos > flt(row.available_to_consume_nos):
-                    frappe.throw(
-                        _("Drawing {0}: entered {1} Nos but only {2} Nos are available "
-                          "from the previous operation.")
-                        .format(
-                            row.customer_drawing_number or drawing,
-                            flt(nos, 3),
-                            flt(row.available_to_consume_nos, 3),
-                        ),
-                        title=_("Exceeds Available Qty"),
-                    )
+            available = flt(row.available_to_consume_nos) if row else 0.0
+            label = (row.customer_drawing_number if row else None) or drawing
+            if available <= 0:
+                frappe.throw(
+                    _("Drawing {0}: the previous operation has not completed any quantity "
+                      "for this drawing. Consumption cannot be logged until the previous "
+                      "operation is completed.")
+                    .format(label),
+                    title=_("Previous Operation Not Completed"),
+                )
+            if nos > available:
+                frappe.throw(
+                    _("Drawing {0}: entered {1} Nos but only {2} Nos are available "
+                      "from the previous operation.")
+                    .format(label, flt(nos, 3), flt(available, 3)),
+                    title=_("Exceeds Available Qty"),
+                )
 
 
 def before_submit_supplier_operation_entry(doc, method):
@@ -945,6 +1052,9 @@ def _propagate_drawing_nos_to_next(doc):
             changed = True
 
     if changed:
+        next_doc.total_available_nos = flt(
+            sum(flt(r.available_to_consume_nos) for r in (next_doc.drawing_details or [])), 3
+        )
         next_doc.flags.ignore_validate = True
         next_doc.save(ignore_permissions=True)
 
@@ -1290,31 +1400,40 @@ def _get_mp_reserved_batches(mp_name, source_warehouse, supplier_warehouse):
         "Material Planning Material Mapping",
         filters={"parent": mp_name, "is_reserved": 1},
         fields=[
-            "item_code", "batch", "batch_calc_qty", "batch_sec_qty",
+            "item_code", "planned_item", "batch", "batch_calc_qty", "batch_sec_qty",
             "batch_length", "batch_width", "batch_thickness", "batch_unit_weight",
             "batch_parent_item_group", "parent_item_group", "sec_uom", "cnc_process",
+            "reserve_without_dimensions", "reserved_qty",
         ],
     )
     for r in rows:
-        if r.batch and flt(r.batch_calc_qty) > 0:
-            items.append({
-                "item_code": r.item_code,
-                "batch_no": r.batch,
-                # v15: use the batch_no field directly; Frappe creates the SBB on submit.
-                "use_serial_batch_fields": 1,
-                "qty": flt(r.batch_calc_qty, 3),
-                "uom": _stock_uom(r.item_code),
-                "s_warehouse": source_warehouse,
-                "t_warehouse": supplier_warehouse,
-                "custom_sec_qty": flt(r.batch_sec_qty, 3),
-                "custom_sec_uom": r.sec_uom or "",
-                "custom_length": flt(r.batch_length, 3),
-                "custom_width": flt(r.batch_width, 3),
-                "custom_thickness": flt(r.batch_thickness, 3),
-                "custom_unit_weight": flt(r.batch_unit_weight, 4),
-                "custom_parent_item_group": r.batch_parent_item_group or r.parent_item_group or "",
-                "cnc_process": 1 if r.cnc_process else 0,
-            })
+        if not r.batch:
+            continue
+        # reserve_without_dimensions rows skip dimensional calc — use reserved_qty directly
+        qty = flt(r.reserved_qty) if r.reserve_without_dimensions else flt(r.batch_calc_qty)
+        if qty <= 0:
+            continue
+        # When the batch belongs to a different item (cross-item mapping), planned_item
+        # holds the batch's actual item — use it so ERPNext batch validation passes.
+        se_item_code = r.planned_item or r.item_code
+        items.append({
+            "item_code": se_item_code,
+            "batch_no": r.batch,
+            # v15: use the batch_no field directly; Frappe creates the SBB on submit.
+            "use_serial_batch_fields": 1,
+            "qty": flt(qty, 3),
+            "uom": _stock_uom(se_item_code),
+            "s_warehouse": source_warehouse,
+            "t_warehouse": supplier_warehouse,
+            "custom_sec_qty": flt(r.batch_sec_qty, 3),
+            "custom_sec_uom": r.sec_uom or "",
+            "custom_length": flt(r.batch_length, 3),
+            "custom_width": flt(r.batch_width, 3),
+            "custom_thickness": flt(r.batch_thickness, 3),
+            "custom_unit_weight": flt(r.batch_unit_weight, 4),
+            "custom_parent_item_group": r.batch_parent_item_group or r.parent_item_group or "",
+            "cnc_process": 1 if r.cnc_process else 0,
+        })
 
     # From available_raw_material: exact-match reserved rows
     rows2 = frappe.get_all(
@@ -1420,3 +1539,706 @@ def _get_supplier_wh_consumption_items(sco):
         }
         for r in rows
     ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Work Order / Job Card mirror (SHARED_SCO_JC)
+# All functions below are direct mirrors of the SCO/SOE equivalents above.
+# Comment marker: SHARED_SCO_JC — grep this to find all paired functions.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@frappe.whitelist()
+def get_wo_pending_items(wo_name):
+    """Return raw-material items not yet transferred for this WO.
+    Mirrors get_sco_pending_items; uses custom_wo_ref on SE, wip_warehouse as target.
+    # SHARED_SCO_JC: mirrors get_sco_pending_items
+    """
+    wo = frappe.get_doc("Work Order", wo_name)
+    if not wo.production_plan:
+        frappe.throw(_("Work Order is not linked to a Production Plan."))
+    if not wo.get("custom_source_warehouse"):
+        frappe.throw(_("Please set the Source Warehouse (RM) on the Work Order first."))
+
+    source_warehouse = wo.custom_source_warehouse
+    wip_warehouse    = wo.wip_warehouse or ""
+    cnc_warehouse    = wo.get("custom_cnc_warehouse") or ""
+
+    raw_items = []
+    seen_mps  = set()
+    pp = frappe.get_doc("Production Plan", wo.production_plan)
+    for pi in pp.po_items:
+        mp_name = pi.get("custom_material_planning")
+        if not mp_name or mp_name in seen_mps:
+            continue
+        seen_mps.add(mp_name)
+        raw_items.extend(_get_mp_reserved_batches(mp_name, source_warehouse, wip_warehouse))
+
+    if not raw_items:
+        return []
+
+    totals = {}
+    for item in raw_items:
+        is_cnc = bool(item.get("cnc_process")) and bool(cnc_warehouse)
+        key = (item["item_code"], item.get("batch_no") or "", is_cnc)
+        if key in totals:
+            totals[key]["qty"]            = flt(totals[key]["qty"] + item["qty"], 3)
+            totals[key]["custom_sec_qty"] = flt(totals[key]["custom_sec_qty"] + item.get("custom_sec_qty", 0), 3)
+        else:
+            totals[key] = dict(item)
+            totals[key]["cnc_process"] = 1 if is_cnc else 0
+
+    # Already transferred to WIP (Material Transfer SEs with custom_wo_ref)
+    wip_done = {}
+    if wip_warehouse:
+        for r in frappe.db.sql("""
+            SELECT sed.item_code, sed.batch_no,
+                   SUM(sed.qty) AS qty,
+                   SUM(IFNULL(sed.custom_sec_qty, 0)) AS sec_qty
+            FROM `tabStock Entry Detail` sed
+            JOIN `tabStock Entry` se ON se.name = sed.parent
+            WHERE se.custom_wo_ref = %s
+              AND se.stock_entry_type = 'Material Transfer'
+              AND se.docstatus != 2
+              AND sed.t_warehouse = %s
+              AND sed.s_warehouse != %s
+            GROUP BY sed.item_code, sed.batch_no
+        """, (wo_name, wip_warehouse, wip_warehouse), as_dict=True):
+            wip_done[(r.item_code, r.batch_no or "")] = flt(r.qty)
+
+    # Already transferred to CNC (Material Transfer SEs with custom_wo_ref)
+    cnc_done = {}
+    if cnc_warehouse:
+        for r in frappe.db.sql("""
+            SELECT sed.item_code, sed.batch_no,
+                   SUM(sed.qty) AS qty,
+                   SUM(IFNULL(sed.custom_sec_qty, 0)) AS sec_qty
+            FROM `tabStock Entry Detail` sed
+            JOIN `tabStock Entry` se ON se.name = sed.parent
+            WHERE se.custom_wo_ref = %s
+              AND se.stock_entry_type = 'Material Transfer'
+              AND se.docstatus != 2
+              AND sed.t_warehouse = %s
+            GROUP BY sed.item_code, sed.batch_no
+        """, (wo_name, cnc_warehouse), as_dict=True):
+            cnc_done[(r.item_code, r.batch_no or "")] = flt(r.qty)
+
+    result = []
+    for (item_code, batch_no, is_cnc), item in totals.items():
+        done_qty    = (cnc_done if is_cnc else wip_done).get((item_code, batch_no), 0)
+        pending_qty = flt(item["qty"] - done_qty, 3)
+        if pending_qty <= 0:
+            continue
+        total_qty = flt(item["qty"])
+        ratio = pending_qty / total_qty if total_qty else 0
+        result.append({
+            "item_code":               item_code,
+            "item_name":               frappe.db.get_value("Item", item_code, "item_name") or item_code,
+            "batch_no":                batch_no,
+            "qty":                     pending_qty,
+            "uom":                     item.get("uom") or "Kg",
+            "custom_sec_qty":          flt(flt(item.get("custom_sec_qty", 0)) * ratio, 3),
+            "custom_sec_uom":          item.get("custom_sec_uom") or "",
+            "s_warehouse":             source_warehouse,
+            "t_warehouse":             cnc_warehouse if is_cnc else wip_warehouse,
+            "cnc_process":             1 if is_cnc else 0,
+            "use_serial_batch_fields": 1,
+            "custom_length":           flt(item.get("custom_length", 0), 3),
+            "custom_width":            flt(item.get("custom_width", 0), 3),
+            "custom_thickness":        flt(item.get("custom_thickness", 0), 3),
+            "custom_unit_weight":      flt(item.get("custom_unit_weight", 0), 4),
+            "custom_parent_item_group": item.get("custom_parent_item_group") or "",
+        })
+
+    return result
+
+
+@frappe.whitelist()
+def create_partial_wo_transfer(wo_name, selected_items_json, transfer_type):
+    """Create a draft Material Transfer Stock Entry for caller-selected items.
+    transfer_type: "wip" → to wip_warehouse   "cnc" → to custom_cnc_warehouse
+    # SHARED_SCO_JC: mirrors create_partial_transfer
+    """
+    import json as _json
+    selected = _json.loads(selected_items_json) if isinstance(selected_items_json, str) else selected_items_json
+    if not selected:
+        frappe.throw(_("No items selected for transfer."))
+
+    wo = frappe.get_doc("Work Order", wo_name)
+    if wo.docstatus != 1:
+        frappe.throw(_("Work Order must be submitted first."))
+    if not wo.get("custom_source_warehouse"):
+        frappe.throw(_("Please set the Source Warehouse (RM) on the Work Order first."))
+
+    if transfer_type == "cnc":
+        t_warehouse = wo.get("custom_cnc_warehouse")
+        if not t_warehouse:
+            frappe.throw(_("No CNC Warehouse set on this Work Order."))
+    else:
+        t_warehouse = wo.wip_warehouse
+        if not t_warehouse:
+            frappe.throw(_("Please set the WIP Warehouse on the Work Order first."))
+
+    se_items = []
+    for item in selected:
+        se_items.append({
+            "item_code":               item["item_code"],
+            "batch_no":                item.get("batch_no") or "",
+            "use_serial_batch_fields": 1,
+            "qty":                     flt(item["qty"]),
+            "uom":                     item.get("uom") or "Kg",
+            "s_warehouse":             wo.custom_source_warehouse,
+            "t_warehouse":             t_warehouse,
+            "custom_sec_qty":          flt(item.get("custom_sec_qty") or 0),
+            "custom_sec_uom":          item.get("custom_sec_uom") or "",
+            "custom_length":           flt(item.get("custom_length") or 0),
+            "custom_width":            flt(item.get("custom_width") or 0),
+            "custom_thickness":        flt(item.get("custom_thickness") or 0),
+            "custom_unit_weight":      flt(item.get("custom_unit_weight") or 0),
+            "custom_parent_item_group": item.get("custom_parent_item_group") or "",
+        })
+
+    se = frappe.get_doc({
+        "doctype":           "Stock Entry",
+        "stock_entry_type":  "Material Transfer",
+        "custom_wo_ref":     wo_name,
+        "company":           wo.company,
+        "items":             se_items,
+    })
+    se.insert(ignore_permissions=True)
+    return se.name
+
+
+@frappe.whitelist()
+def create_cnc_to_wip_entry(wo_name):
+    """Transfer materials from CNC warehouse to WIP warehouse.
+    # SHARED_SCO_JC: mirrors create_cnc_to_supplier_entry
+    """
+    wo = frappe.get_doc("Work Order", wo_name)
+    if wo.docstatus != 1:
+        frappe.throw(_("Work Order must be submitted first."))
+
+    cnc_warehouse = wo.get("custom_cnc_warehouse")
+    if not cnc_warehouse:
+        frappe.throw(_("No CNC Warehouse set on the Work Order."))
+    wip_warehouse = wo.wip_warehouse
+    if not wip_warehouse:
+        frappe.throw(_("Please set the WIP Warehouse on the Work Order first."))
+
+    # Items sent from source → CNC (submitted SEs only)
+    sent_rows = frappe.db.sql(
+        """
+        SELECT sed.item_code, sed.batch_no,
+               SUM(sed.qty) AS qty,
+               MAX(sed.uom) AS uom,
+               MAX(sed.custom_sec_qty) AS custom_sec_qty,
+               MAX(sed.custom_sec_uom) AS custom_sec_uom,
+               MAX(sed.custom_length) AS custom_length,
+               MAX(sed.custom_width) AS custom_width,
+               MAX(sed.custom_thickness) AS custom_thickness,
+               MAX(sed.custom_unit_weight) AS custom_unit_weight,
+               MAX(sed.custom_parent_item_group) AS custom_parent_item_group
+        FROM `tabStock Entry Detail` sed
+        JOIN `tabStock Entry` se ON se.name = sed.parent
+        WHERE se.custom_wo_ref = %s
+          AND se.stock_entry_type = 'Material Transfer'
+          AND se.docstatus = 1
+          AND sed.t_warehouse = %s
+        GROUP BY sed.item_code, sed.batch_no
+        HAVING SUM(sed.qty) > 0
+        """,
+        (wo_name, cnc_warehouse),
+        as_dict=True,
+    )
+    if not sent_rows:
+        frappe.throw(_("No CNC materials found. Ensure the CNC stock entry has been submitted."))
+
+    # Already forwarded CNC → WIP
+    fwd_rows = frappe.db.sql(
+        """
+        SELECT sed.item_code, sed.batch_no, SUM(sed.qty) AS qty
+        FROM `tabStock Entry Detail` sed
+        JOIN `tabStock Entry` se ON se.name = sed.parent
+        WHERE se.custom_wo_ref = %s
+          AND se.stock_entry_type = 'Material Transfer'
+          AND se.docstatus = 1
+          AND sed.s_warehouse = %s
+          AND sed.t_warehouse = %s
+        GROUP BY sed.item_code, sed.batch_no
+        """,
+        (wo_name, cnc_warehouse, wip_warehouse),
+        as_dict=True,
+    )
+    already = {(r.item_code, r.batch_no or ""): flt(r.qty) for r in fwd_rows}
+
+    se_items = []
+    for r in sent_rows:
+        key     = (r.item_code, r.batch_no or "")
+        net_qty = flt(r.qty, 3) - already.get(key, 0)
+        if net_qty <= 0:
+            continue
+        se_items.append({
+            "item_code":               r.item_code,
+            "batch_no":                r.batch_no,
+            "use_serial_batch_fields": 1,
+            "qty":                     flt(net_qty, 3),
+            "uom":                     r.uom or frappe.db.get_value("Item", r.item_code, "stock_uom") or "Kg",
+            "s_warehouse":             cnc_warehouse,
+            "t_warehouse":             wip_warehouse,
+            "custom_sec_qty":          flt(r.custom_sec_qty, 3),
+            "custom_sec_uom":          r.custom_sec_uom or "",
+            "custom_length":           flt(r.custom_length, 3),
+            "custom_width":            flt(r.custom_width, 3),
+            "custom_thickness":        flt(r.custom_thickness, 3),
+            "custom_unit_weight":      flt(r.custom_unit_weight, 4),
+            "custom_parent_item_group": r.custom_parent_item_group or "",
+        })
+
+    if not se_items:
+        frappe.throw(_("All CNC materials have already been transferred to the WIP warehouse."))
+
+    se = frappe.get_doc({
+        "doctype":          "Stock Entry",
+        "stock_entry_type": "Material Transfer",
+        "custom_wo_ref":    wo_name,
+        "company":          wo.company,
+        "items":            se_items,
+    })
+    se.insert(ignore_permissions=True)
+    return se.name
+
+
+@frappe.whitelist()
+def create_return_stock_entry_for_wo(wo_name, target_warehouse):
+    """Receive excess / off-cut material back to the return warehouse for a Work Order.
+    # SHARED_SCO_JC: mirrors create_return_stock_entry
+    """
+    wo = frappe.get_doc("Work Order", wo_name)
+    if not target_warehouse:
+        frappe.throw(_("Please set the Finished Goods/Return Warehouse on the Work Order first."))
+
+    se_items      = []
+    new_row_names = []
+    for r in (wo.get("custom_excess_return_items") or []):
+        if r.get("stock_entry_created"):
+            continue
+        qty = flt(r.qty, 3)
+        if not r.item_code or qty <= 0:
+            continue
+        new_row_names.append(r.name)
+        se_items.append({
+            "item_code":               r.item_code,
+            "qty":                     qty,
+            "uom":                     r.get("uom") or frappe.db.get_value("Item", r.item_code, "stock_uom") or "Kg",
+            "t_warehouse":             target_warehouse,
+            "custom_parent_item_group": r.get("parent_item_group") or "",
+            "custom_unit_weight":      flt(r.get("unit_weight"), 4),
+            "custom_sec_qty":          flt(r.get("sec_qty"), 3),
+            "custom_sec_uom":          r.get("sec_uom") or "",
+            "custom_length":           flt(r.get("length"), 3),
+            "custom_width":            flt(r.get("width"), 3),
+            "custom_thickness":        flt(r.get("thickness"), 3),
+        })
+
+    if not se_items:
+        frappe.throw(_("No new off-cut items to process. All rows already have a Stock Entry created, "
+                       "or no rows with Weight (Kg) > 0 exist."))
+
+    se = frappe.get_doc({
+        "doctype":          "Stock Entry",
+        "stock_entry_type": "Material Receipt",
+        "company":          wo.company,
+        "items":            se_items,
+    })
+    se.insert(ignore_permissions=True)
+
+    for r in wo.get("custom_excess_return_items"):
+        if r.name in new_row_names:
+            r.stock_entry_created = 1
+    wo.save(ignore_permissions=True)
+
+    return se.name
+
+
+@frappe.whitelist()
+def get_jc_summary(wo_name):
+    """Operation-wise summary for a WO's Job Cards (for the operations HTML widget).
+    # SHARED_SCO_JC: mirrors get_soe_summary
+    """
+    jcs = frappe.get_all(
+        "Job Card",
+        filters={"work_order": wo_name, "docstatus": ["!=", 2]},
+        fields=["name", "sequence_id", "operation", "status", "docstatus",
+                "custom_available_to_consume_kg", "custom_total_consumed_kg"],
+        order_by="sequence_id asc",
+    )
+    if not jcs:
+        return jcs
+
+    drawing_rows = frappe.get_all(
+        "SOE Drawing Detail",
+        filters={"parent": ["in", [d.name for d in jcs]], "parentfield": "custom_drawing_details"},
+        fields=["parent", "drawing", "customer_drawing_number", "duno_mark_no",
+                "qty_to_manufacture", "completed_qty_nos",
+                "available_to_consume_nos", "transferred_weight_kg"],
+        order_by="idx asc",
+    )
+
+    details_map = {}
+    for dr in drawing_rows:
+        details_map.setdefault(dr.parent, []).append(dr)
+
+    for jc in jcs:
+        details             = details_map.get(jc.name, [])
+        jc["drawing_details"]    = details
+        jc["total_qty_to_mfg"]  = sum(flt(d.qty_to_manufacture) for d in details)
+        jc["total_completed_nos"] = sum(flt(d.completed_qty_nos) for d in details)
+        seq = jc.get("sequence_id") or 1
+        if seq == 1:
+            jc["avail_nos"] = sum(flt(d.transferred_weight_kg) for d in details)
+            jc["diff_nos"]  = flt(jc["total_qty_to_mfg"]) - flt(jc["total_completed_nos"])
+        else:
+            jc["avail_nos"] = sum(flt(d.available_to_consume_nos) for d in details)
+            jc["diff_nos"]  = flt(jc["avail_nos"]) - flt(jc["total_completed_nos"])
+
+    return jcs
+
+
+# ─── WO doc event hooks ───────────────────────────────────────────────────────
+
+def on_submit_work_order(doc, method):
+    """Populate custom_drawing_details on the auto-created Job Cards.
+    ERPNext creates JCs on WO submit; we add our drawing tracking fields.
+    # SHARED_SCO_JC: mirrors CustomSubcontractingOrder.on_submit (overrides.py)
+    """
+    _populate_jcs_for_wo(doc)
+
+
+def on_cancel_work_order(doc, method):
+    """ERPNext handles JC cancellation automatically; no extra cleanup needed.
+    # SHARED_SCO_JC: mirrors on_cancel_subcontracting_order (simplified)
+    """
+    pass
+
+
+# ─── Job Card doc event hooks ─────────────────────────────────────────────────
+
+def validate_job_card_drawing_entry(doc, method):
+    """Per-drawing Nos tracking + validation on Job Card.
+    Early-returns when the JC has no custom_drawing_details (non-drawing-flow JCs are unaffected).
+    # SHARED_SCO_JC: mirrors validate_supplier_operation_entry
+    """
+    if not doc.get("custom_drawing_details"):
+        return
+
+    seq = doc.sequence_id or 1
+
+    # --- 1. Sum qty_nos per drawing from custom_consumption_log ---
+    log_nos_by_drawing = defaultdict(float)
+    for r in (doc.custom_consumption_log or []):
+        if r.drawing and flt(r.qty_nos) > 0:
+            log_nos_by_drawing[r.drawing] += flt(r.qty_nos)
+
+    # --- 2. Push completed_qty_nos into custom_drawing_details rows ---
+    for row in (doc.custom_drawing_details or []):
+        row.completed_qty_nos = flt(log_nos_by_drawing.get(row.drawing or "", 0.0), 3)
+
+    # --- 2a. Op-1: auto-set available_to_consume_nos = qty_to_manufacture when material transferred ---
+    if seq == 1:
+        for row in (doc.custom_drawing_details or []):
+            if flt(row.transferred_weight_kg) > 0:
+                row.available_to_consume_nos = flt(row.qty_to_manufacture, 3)
+
+    # --- 2c. Update JC-level Nos summary fields ---
+    doc.custom_total_available_nos = flt(
+        sum(flt(r.available_to_consume_nos) for r in (doc.custom_drawing_details or [])), 3
+    )
+    doc.custom_total_completed_nos = flt(
+        sum(flt(r.completed_qty_nos) for r in (doc.custom_drawing_details or [])), 3
+    )
+
+    # --- 2b. Validate completed_qty_nos does not exceed qty_to_manufacture ---
+    for row in (doc.custom_drawing_details or []):
+        qty_to_mfg = flt(row.qty_to_manufacture)
+        completed  = flt(row.completed_qty_nos)
+        if qty_to_mfg > 0 and completed > qty_to_mfg:
+            frappe.throw(
+                _("Drawing {0}: Completed ({1} Nos) exceeds Qty to Manufacture ({2} Nos). "
+                  "Reduce the logged quantity.")
+                .format(row.customer_drawing_number or row.drawing, completed, qty_to_mfg),
+                title=_("Completed Qty Exceeds Limit"),
+            )
+
+    # --- 3. Status auto-advance ---
+    if log_nos_by_drawing and doc.status == "Open":
+        doc.status = "Work In Progress"
+
+    # --- 4. Op-1: check log trigger setting ---
+    if seq == 1 and log_nos_by_drawing:
+        trigger = (
+            frappe.db.get_single_value("Manufacturing Settings", "custom_soe_log_trigger")
+            or "Fully Transferred"
+        )
+        if trigger == "Fully Transferred":
+            detail_map = {r.drawing: r for r in (doc.custom_drawing_details or []) if r.drawing}
+            for drawing, nos in log_nos_by_drawing.items():
+                row = detail_map.get(drawing)
+                if row and flt(row.transferred_weight_kg) <= 0:
+                    frappe.throw(
+                        _("Drawing {0}: no material has been transferred yet. "
+                          "Transfer raw materials first, or change 'SOE Log Entry Allowed When' in "
+                          "Manufacturing Settings to allow partial entries.")
+                        .format(row.customer_drawing_number or drawing),
+                        title=_("Material Not Yet Transferred"),
+                    )
+
+    # --- 5. Op-1: Kg over-consume guard ---
+    if seq == 1:
+        total_kg = sum(flt(r.weight_kg) for r in (doc.custom_consumption_log or []))
+        doc.custom_total_consumed_kg = flt(total_kg, 3)
+        available_kg = flt(doc.custom_available_to_consume_kg)
+        if available_kg > 0 and total_kg > available_kg:
+            frappe.throw(
+                _("You have entered {0} Kg, but only {1} Kg is available to consume.")
+                .format(flt(total_kg, 3), flt(available_kg, 3)),
+                title=_("Exceeds Available to Consume"),
+            )
+
+    # --- 6. Op-2+: validate qty_nos per drawing against available_to_consume_nos ---
+    if seq > 1:
+        detail_map = {r.drawing: r for r in (doc.custom_drawing_details or []) if r.drawing}
+        for drawing, nos in log_nos_by_drawing.items():
+            row       = detail_map.get(drawing)
+            available = flt(row.available_to_consume_nos) if row else 0.0
+            label     = (row.customer_drawing_number if row else None) or drawing
+            if available <= 0:
+                frappe.throw(
+                    _("Drawing {0}: the previous operation has not completed any quantity. "
+                      "Consumption cannot be logged until the previous operation is completed.")
+                    .format(label),
+                    title=_("Previous Operation Not Completed"),
+                )
+            if nos > available:
+                frappe.throw(
+                    _("Drawing {0}: entered {1} Nos but only {2} Nos are available "
+                      "from the previous operation.")
+                    .format(label, flt(nos, 3), flt(available, 3)),
+                    title=_("Exceeds Available Qty"),
+                )
+
+
+def before_submit_job_card_drawing_entry(doc, method):
+    """Enforce sequential, status-gated submission for drawing-flow Job Cards.
+    # SHARED_SCO_JC: mirrors before_submit_supplier_operation_entry
+    """
+    if not doc.get("custom_drawing_details"):
+        return  # Non-drawing-flow JCs are not restricted
+
+    if (doc.status or "") != "Completed":
+        frappe.throw(
+            _("Set Status to <b>Completed</b> before submitting this Job Card."),
+            title=_("Operation Not Completed"),
+        )
+
+    seq = doc.sequence_id or 0
+    if seq > 1:
+        pending = frappe.get_all(
+            "Job Card",
+            filters={
+                "work_order":  doc.work_order,
+                "sequence_id": ["<", seq],
+                "docstatus":   0,
+                "name":        ["!=", doc.name],
+            },
+            fields=["sequence_id", "operation"],
+            order_by="sequence_id asc",
+        )
+        if pending:
+            first = pending[0]
+            frappe.throw(
+                _("Operation sequence {0} (<b>{1}</b>) is not completed yet. "
+                  "Operations must be completed and submitted in sequence — "
+                  "finish it before submitting sequence {2}.")
+                .format(first.sequence_id, first.operation, seq),
+                title=_("Complete Previous Operation First"),
+            )
+
+
+def _propagate_drawing_nos_to_next_jc(doc):
+    """Push per-drawing completed_qty_nos to the next draft JC in the WO.
+    # SHARED_SCO_JC: mirrors _propagate_drawing_nos_to_next
+    """
+    next_jc_name = frappe.db.get_value(
+        "Job Card",
+        {
+            "work_order":  doc.work_order,
+            "sequence_id": (doc.sequence_id or 0) + 1,
+            "docstatus":   0,
+        },
+        "name",
+    )
+    if not next_jc_name:
+        return
+
+    drawing_nos = {
+        r.drawing: flt(r.completed_qty_nos, 3)
+        for r in (doc.custom_drawing_details or [])
+        if r.drawing
+    }
+    if not drawing_nos:
+        return
+
+    next_doc = frappe.get_doc("Job Card", next_jc_name)
+    changed  = False
+    for row in (next_doc.custom_drawing_details or []):
+        new_val = drawing_nos.get(row.drawing or "", 0.0)
+        if flt(row.available_to_consume_nos, 3) != flt(new_val, 3):
+            row.available_to_consume_nos = flt(new_val, 3)
+            changed = True
+
+    if changed:
+        next_doc.custom_total_available_nos = flt(
+            sum(flt(r.available_to_consume_nos) for r in (next_doc.custom_drawing_details or [])), 3
+        )
+        next_doc.flags.ignore_validate = True
+        next_doc.save(ignore_permissions=True)
+
+
+def _update_wo_drawing_item_completion(doc):
+    """Update WO Drawing Items' completed_qty_nos from the submitted JC's drawing_details.
+    # SHARED_SCO_JC: mirrors _update_sco_drawing_item_completion
+    """
+    drawing_nos = {
+        r.drawing: flt(r.completed_qty_nos, 3)
+        for r in (doc.custom_drawing_details or [])
+        if r.drawing
+    }
+    if not drawing_nos:
+        return
+
+    for row in frappe.get_all(
+        "SCO Drawing Item",
+        filters={"parent": doc.work_order, "parenttype": "Work Order"},
+        fields=["name", "drawing"],
+    ):
+        if row.drawing in drawing_nos:
+            frappe.db.set_value(
+                "SCO Drawing Item", row.name,
+                "completed_qty_nos", drawing_nos[row.drawing],
+                update_modified=False,
+            )
+
+
+def on_update_job_card_drawing_entry(doc, method):
+    """Live propagation on save: push per-drawing Nos to next JC.
+    # SHARED_SCO_JC: mirrors on_update_supplier_operation_entry
+    """
+    if doc.docstatus == 0 and doc.get("custom_drawing_details"):
+        _propagate_drawing_nos_to_next_jc(doc)
+
+
+def on_submit_job_card_drawing_entry(doc, method):
+    """On submit: propagate Nos to next JC; update WO drawing completion;
+    mark WO all_ops_complete if this is the last operation.
+    # SHARED_SCO_JC: mirrors on_submit_supplier_operation_entry
+    """
+    if not doc.get("custom_drawing_details"):
+        return
+
+    _propagate_drawing_nos_to_next_jc(doc)
+    _update_wo_drawing_item_completion(doc)
+
+    # Check if all JCs for this WO are submitted
+    remaining = frappe.db.count(
+        "Job Card",
+        filters={
+            "work_order":  doc.work_order,
+            "sequence_id": [">", doc.sequence_id or 0],
+            "docstatus":   ["!=", 2],
+        },
+    )
+    if remaining == 0:
+        frappe.db.set_value("Work Order", doc.work_order, "custom_all_ops_complete", 1)
+
+
+# ─── Private helpers (WO/JC) ─────────────────────────────────────────────────
+
+def _build_jc_drawing_rows(wo, seq_idx):
+    """Build custom_drawing_details rows for a new JC from the WO's drawing items.
+    # SHARED_SCO_JC: mirrors _build_soe_drawing_rows
+    """
+    rows = []
+    for d in (wo.get("custom_drawing_items") or []):
+        row = {
+            "drawing":               d.drawing,
+            "customer_drawing_number": d.customer_drawing_number or "",
+            "duno_mark_no":          d.duno_mark_no or "",
+            "sales_order":           d.get("sales_order") or "",
+            "qty_to_manufacture":    flt(d.qty_to_manufacture, 3),
+            "available_to_consume_nos": 0.0,
+            "completed_qty_nos":     0.0,
+        }
+        if seq_idx == 1:
+            row.update({
+                "customer_provided_weight_kg": flt(d.customer_weight_kg, 3),
+                "planned_weight_kg":           flt(d.total_weight_kg, 3),
+                "transferred_weight_kg":        flt(d.mapped_weight_kg, 3),
+            })
+        else:
+            row.update({
+                "customer_provided_weight_kg": 0.0,
+                "planned_weight_kg":           0.0,
+                "transferred_weight_kg":        0.0,
+            })
+        rows.append(row)
+    return rows
+
+
+def _populate_jcs_for_wo(wo):
+    """Populate custom_drawing_details on the Job Cards ERPNext created on WO submit.
+    Idempotent — skips JCs that already have drawing detail rows.
+    # SHARED_SCO_JC: mirrors _create_soes_for_sco
+    """
+    if not wo.get("custom_drawing_items"):
+        return  # This WO was not created via the PP drawing flow — skip
+
+    # Build operation → sequence_id map from WO operations
+    wo_op_seq = {}
+    for op in frappe.get_all(
+        "Work Order Operation",
+        filters={"parent": wo.name},
+        fields=["operation", "sequence_id"],
+    ):
+        wo_op_seq[op.operation] = flt(op.sequence_id) or 0
+
+    jcs = frappe.get_all(
+        "Job Card",
+        filters={"work_order": wo.name, "docstatus": 0},
+        fields=["name", "operation", "sequence_id"],
+    )
+    if not jcs:
+        return
+
+    jcs_sorted = sorted(jcs, key=lambda x: (wo_op_seq.get(x.operation, 0), x.name))
+    transferred_weight = flt(wo.get("custom_transferred_weight_kg") or 0)
+
+    for seq_idx, jc_info in enumerate(jcs_sorted, start=1):
+        jc_doc = frappe.get_doc("Job Card", jc_info.name)
+
+        # Idempotent check
+        if frappe.db.exists(
+            "SOE Drawing Detail",
+            {"parent": jc_info.name, "parentfield": "custom_drawing_details"},
+        ):
+            continue
+
+        drawing_rows = _build_jc_drawing_rows(wo, seq_idx)
+        for row in drawing_rows:
+            jc_doc.append("custom_drawing_details", row)
+
+        if seq_idx == 1:
+            jc_doc.custom_available_to_consume_kg = flt(transferred_weight, 3)
+
+        jc_doc.custom_total_available_nos  = 0.0
+        jc_doc.custom_total_completed_nos  = 0.0
+        jc_doc.flags.ignore_validate = True
+        jc_doc.save(ignore_permissions=True)

@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-06-25 00:26:52_
+_Generated: 2026-07-01 08:21:21_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -66,6 +66,7 @@ All `@frappe.whitelist()` methods. Call from JS:
 | `@frappe.validate_and_sanitize_search_inputs` | 141 |
 | `make_material_request` | 1466 |
 | `update_so_difference_kg` | 1613 |
+| `auto_purchase_from_mp` | 1668 |
 | `get_bom_info` | 167 |
 | `get_so_drawings_for_bom_picker` | 219 |
 | `get_raw_materials` | 282 |
@@ -112,18 +113,23 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `backfill_drawing_item_qty` | 1368 |
+| `backfill_drawing_item_qty` | 1487 |
 | `create_work_order_from_pp` | 152 |
-| `create_supplier_operation_entries` | 222 |
-| `create_send_to_subcontractor_entry` | 239 |
+| `get_wo_pending_items` | 1551 |
+| `create_partial_wo_transfer` | 1656 |
+| `create_cnc_to_wip_entry` | 1712 |
+| `create_return_stock_entry_for_wo` | 1811 |
+| `get_jc_summary` | 1863 |
 | `create_sco_from_production_plan` | 26 |
-| `get_sco_pending_items` | 335 |
-| `create_partial_transfer` | 445 |
-| `create_cnc_to_supplier_entry` | 506 |
-| `get_soe_summary` | 609 |
-| `create_return_stock_entry` | 647 |
-| `create_finished_goods_entry` | 694 |
+| `create_supplier_operation_entries` | 278 |
+| `create_send_to_subcontractor_entry` | 295 |
+| `get_sco_pending_items` | 391 |
+| `create_partial_transfer` | 501 |
+| `create_cnc_to_supplier_entry` | 562 |
+| `get_soe_summary` | 665 |
+| `create_return_stock_entry` | 711 |
+| `create_finished_goods_entry` | 769 |
 
 ## Total
 
-_66 whitelisted methods_
+_72 whitelisted methods_
