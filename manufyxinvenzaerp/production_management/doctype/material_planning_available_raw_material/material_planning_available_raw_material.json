@@ -28,7 +28,8 @@
   "reserved_qty",
   "shortfall_qty",
   "reserved_on",
-  "cnc_process"
+  "cnc_process",
+  "skip_auto_suggest_batch"
  ],
  "fields": [
   {
@@ -211,6 +212,14 @@
    "fieldtype": "Check",
    "in_list_view": 1,
    "label": "CNC Process"
+  },
+  {
+   "default": "0",
+   "fieldname": "skip_auto_suggest_batch",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Skip Auto Suggest Batch",
+   "description": "Move this row to Material Mapping for manual batch selection on save."
   }
  ],
  "istable": 1,

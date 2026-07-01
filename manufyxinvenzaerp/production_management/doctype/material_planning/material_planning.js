@@ -1905,6 +1905,28 @@ function _show_table_popup(frm, fieldname) {
 	d.show();
 }
 
+// ── Available Raw Material child table events ────────────────────────────────
+frappe.ui.form.on("Material Planning Available Raw Material", {
+	form_render(frm, cdt, cdn) {
+		let row = locals[cdt][cdn];
+		// Make skip checkbox read-only for reserved rows in the expanded row view
+		let df = frappe.meta.get_docfield("Material Planning Available Raw Material", "skip_auto_suggest_batch", cdn);
+		if (df) df.read_only = row.is_reserved ? 1 : 0;
+		frm.fields_dict["available_raw_materials"].grid.refresh_row(cdn);
+	},
+
+	skip_auto_suggest_batch(frm, cdt, cdn) {
+		let row = locals[cdt][cdn];
+		if (row.is_reserved && row.skip_auto_suggest_batch) {
+			frappe.model.set_value(cdt, cdn, "skip_auto_suggest_batch", 0);
+			frappe.show_alert({
+				message: __("Cannot skip a reserved batch. Unreserve it first."),
+				indicator: "orange",
+			}, 4);
+		}
+	},
+});
+
 // Reserve / Unreserve toolbar buttons on the Available Raw Materials (Exact Match) grid
 function _add_exact_match_reservation_buttons(frm) {
 	let grid = frm.fields_dict["available_raw_materials"] && frm.fields_dict["available_raw_materials"].grid;

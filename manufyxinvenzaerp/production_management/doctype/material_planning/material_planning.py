@@ -8,12 +8,42 @@ from frappe.utils import ceil, flt, now, today
 
 class MaterialPlanning(Document):
     def validate(self):
+        self._move_skipped_arm_to_mapping()
         self.raw_materials = [r for r in (self.raw_materials or []) if r.item_code]
         self.available_raw_materials = [r for r in (self.available_raw_materials or []) if r.item_code]
         self.material_mapping = [r for r in (self.material_mapping or []) if r.item_code]
         self.unavailable_items = [r for r in (self.unavailable_items or []) if r.item_code]
         if self.material_mapping and self.for_warehouse:
             self._validate_batch_calc_qty()
+
+    def _move_skipped_arm_to_mapping(self):
+        """On save, move Available Raw Material rows with skip_auto_suggest_batch
+        into Material Mapping so the user can assign a batch manually."""
+        keep = []
+        for row in (self.available_raw_materials or []):
+            if not row.get("skip_auto_suggest_batch") or row.get("is_reserved"):
+                keep.append(row)
+                continue
+            self.append("material_mapping", {
+                "item_number":             row.item_number,
+                "sales_order":             row.sales_order,
+                "item_code":               row.item_code,
+                "item_name":               row.item_name,
+                "duno_mark_no":            row.duno_mark_no,
+                "customer_drawing_number": row.customer_drawing_number,
+                "qty":                     row.overall_required_qty or row.required_qty,
+                "uom":                     row.uom,
+                "sec_qty":                 row.sec_qty,
+                "sec_uom":                 row.sec_uom,
+                "parent_item_group":       row.parent_item_group,
+                "length":                  row.length,
+                "width":                   row.width,
+                "thickness":               row.thickness,
+                "cnc_process":             row.cnc_process,
+                "store_location":          row.store_location,
+                "batch_mapped":            "Not Mapped",
+            })
+        self.available_raw_materials = keep
 
     def _validate_batch_calc_qty(self):
         mp_name = self.name or ""
