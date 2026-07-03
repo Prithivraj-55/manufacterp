@@ -412,6 +412,11 @@ def _update_sco_transferred_weight(sco_name):
 			"Supplier Operation Entry", soe_op1, "available_to_consume_kg", transferred
 		)
 
+	from manufyxinvenzaerp.subcontracting_management.subcontracting import (
+		_refresh_sco_drawing_transferred_weights,
+	)
+	_refresh_sco_drawing_transferred_weights(frappe.get_doc("Subcontracting Order", sco_name))
+
 
 def _update_sco_cnc_weight(sco_name):
 	"""Recompute SCO.custom_cnc_transferred_weight_kg:
@@ -497,6 +502,11 @@ def _update_wo_transferred_weight(wo_name):
 	)
 	if jc_op1:
 		frappe.db.set_value("Job Card", jc_op1, "custom_available_to_consume_kg", transferred)
+
+	from manufyxinvenzaerp.subcontracting_management.subcontracting import (
+		_refresh_wo_drawing_transferred_weights,
+	)
+	_refresh_wo_drawing_transferred_weights(frappe.get_doc("Work Order", wo_name))
 
 
 def _update_wo_cnc_weight(wo_name):

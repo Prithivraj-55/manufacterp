@@ -1159,8 +1159,10 @@ def on_cancel_subcontracting_order(doc, method):
 def _build_soe_drawing_rows(sco, seq_idx):
     """Build drawing_details rows for a new SOE from the SCO's drawing items.
 
-    Op-1 (seq_idx == 1): populates all Kg weight fields from the SCO Drawing Items
-    (customer_weight_kg, total_weight_kg = planned, mapped_weight_kg = transferred).
+    Op-1 (seq_idx == 1): populates the planned Kg fields from the SCO Drawing Items
+    (customer_weight_kg, total_weight_kg = planned). transferred_weight_kg starts at
+    0 — it is not yet backed by any Stock Entry — and is kept live afterwards by
+    _refresh_sco_drawing_transferred_weights() on every transfer SE submit/cancel.
     Op-2+ : only copies drawing identity + qty_to_manufacture; Kg fields are blank
     (not meaningful after the first transfer operation); available_to_consume_nos is
     filled later by _propagate_drawing_nos_to_next when Op-1 saves/submits.
@@ -1176,18 +1178,17 @@ def _build_soe_drawing_rows(sco, seq_idx):
             "qty_to_manufacture": flt(d.qty_to_manufacture, 3),
             "available_to_consume_nos": 0.0,
             "completed_qty_nos": 0.0,
+            "transferred_weight_kg": 0.0,
         }
         if seq_idx == 1:
             row.update({
                 "customer_provided_weight_kg": flt(d.customer_weight_kg, 3),
                 "planned_weight_kg": flt(d.total_weight_kg, 3),
-                "transferred_weight_kg": flt(d.mapped_weight_kg, 3),
             })
         else:
             row.update({
                 "customer_provided_weight_kg": 0.0,
                 "planned_weight_kg": 0.0,
-                "transferred_weight_kg": 0.0,
             })
         rows.append(row)
     return rows
@@ -1282,6 +1283,155 @@ def _get_mp_total_weight(mp_name):
     )[0][0] or 0
 
     return flt(mapping_weight) + flt(available_weight)
+
+
+def _get_mp_actual_transferred_weight(mp_name, source_warehouse, target_warehouses):
+    """Sum of ACTUALLY-transferred (submitted Stock Entry) weight for a Material
+    Planning document's reserved batches — as opposed to _get_mp_total_weight,
+    which is the reserved/mapped weight regardless of whether it has moved yet.
+
+    Capped per item+batch at the reserved qty, so a batch used elsewhere can't
+    inflate this MP's figure. target_warehouses may be a warehouse or list of
+    warehouses (e.g. WIP + CNC) the material may have moved into.
+    """
+    if not mp_name or not source_warehouse:
+        return 0.0
+    if isinstance(target_warehouses, str):
+        target_warehouses = [target_warehouses]
+    target_warehouses = [w for w in (target_warehouses or []) if w]
+    if not target_warehouses:
+        return 0.0
+
+    reserved = _get_mp_reserved_batches(mp_name, source_warehouse, None)
+    if not reserved:
+        return 0.0
+
+    placeholders = ", ".join(["%s"] * len(target_warehouses))
+    moved = {}
+    for r in frappe.db.sql(
+        f"""
+        SELECT sed.item_code, sed.batch_no, SUM(sed.qty) AS qty
+        FROM `tabStock Entry Detail` sed
+        JOIN `tabStock Entry` se ON se.name = sed.parent
+        WHERE se.stock_entry_type IN ('Material Transfer', 'Send to Subcontractor')
+          AND se.docstatus = 1
+          AND sed.s_warehouse = %s
+          AND sed.t_warehouse IN ({placeholders})
+        GROUP BY sed.item_code, sed.batch_no
+        """,
+        [source_warehouse] + target_warehouses,
+        as_dict=True,
+    ):
+        moved[(r.item_code, r.batch_no or "")] = flt(r.qty)
+
+    total = 0.0
+    for item in reserved:
+        key = (item["item_code"], item.get("batch_no") or "")
+        total += min(flt(item["qty"]), moved.get(key, 0.0))
+    return flt(total, 3)
+
+
+def _refresh_wo_drawing_transferred_weights(wo):
+    """Update Op-1 JC's custom_drawing_details.transferred_weight_kg rows to reflect
+    ACTUAL Stock Entry transfers so far, instead of the Material Planning reservation
+    (mapped_weight_kg) that used to be copied in verbatim at JC-creation time.
+
+    Several drawings can share one Material Planning document (item-level reservation
+    split proportionally across drawings) — so each drawing's live figure is its
+    existing mapped-weight share, scaled by how much of THAT Material Planning's
+    total mapped weight has actually moved.
+    # SHARED_SCO_JC: mirrors _refresh_sco_drawing_transferred_weights
+    """
+    source_warehouse = wo.get("custom_source_warehouse")
+    targets = [w for w in [wo.wip_warehouse, wo.get("custom_cnc_warehouse")] if w]
+    if not source_warehouse or not targets:
+        return
+
+    jc_op1 = frappe.db.get_value(
+        "Job Card",
+        {"work_order": wo.name, "sequence_id": 1, "docstatus": ["!=", 2]},
+        "name",
+    )
+    if not jc_op1:
+        return
+
+    jc_doc = frappe.get_doc("Job Card", jc_op1)
+    if not jc_doc.get("custom_drawing_details"):
+        return
+
+    wo_rows = {d.drawing: d for d in (wo.get("custom_drawing_items") or [])}
+    mp_actual_cache = {}
+    mp_total_cache = {}
+    changed = False
+    for row in jc_doc.custom_drawing_details:
+        wo_row = wo_rows.get(row.drawing)
+        mp_name = wo_row.get("material_planning") if wo_row else None
+        new_val = 0.0
+        if mp_name and wo_row and flt(wo_row.mapped_weight_kg):
+            if mp_name not in mp_total_cache:
+                mp_total_cache[mp_name] = _get_mp_total_weight(mp_name)
+            if mp_name not in mp_actual_cache:
+                mp_actual_cache[mp_name] = _get_mp_actual_transferred_weight(
+                    mp_name, source_warehouse, targets
+                )
+            mp_total = mp_total_cache[mp_name]
+            ratio = (mp_actual_cache[mp_name] / mp_total) if mp_total else 0.0
+            new_val = flt(flt(wo_row.mapped_weight_kg) * min(ratio, 1.0), 3)
+        if flt(row.transferred_weight_kg) != new_val:
+            row.transferred_weight_kg = new_val
+            changed = True
+
+    if changed:
+        jc_doc.flags.ignore_validate = True
+        jc_doc.save(ignore_permissions=True)
+
+
+def _refresh_sco_drawing_transferred_weights(sco):
+    """SOE equivalent of _refresh_wo_drawing_transferred_weights.
+    # SHARED_SCO_JC: mirrors _refresh_wo_drawing_transferred_weights
+    """
+    source_warehouse = sco.get("custom_source_warehouse")
+    targets = [w for w in [sco.get("supplier_warehouse"), sco.get("custom_cnc_warehouse")] if w]
+    if not source_warehouse or not targets:
+        return
+
+    soe_op1 = frappe.db.get_value(
+        "Supplier Operation Entry",
+        {"subcontracting_order": sco.name, "sequence_id": 1, "docstatus": ["!=", 2]},
+        "name",
+    )
+    if not soe_op1:
+        return
+
+    soe_doc = frappe.get_doc("Supplier Operation Entry", soe_op1)
+    if not soe_doc.get("drawing_details"):
+        return
+
+    sco_rows = {d.drawing: d for d in (sco.get("custom_drawing_items") or [])}
+    mp_actual_cache = {}
+    mp_total_cache = {}
+    changed = False
+    for row in soe_doc.drawing_details:
+        sco_row = sco_rows.get(row.drawing)
+        mp_name = sco_row.get("material_planning") if sco_row else None
+        new_val = 0.0
+        if mp_name and sco_row and flt(sco_row.mapped_weight_kg):
+            if mp_name not in mp_total_cache:
+                mp_total_cache[mp_name] = _get_mp_total_weight(mp_name)
+            if mp_name not in mp_actual_cache:
+                mp_actual_cache[mp_name] = _get_mp_actual_transferred_weight(
+                    mp_name, source_warehouse, targets
+                )
+            mp_total = mp_total_cache[mp_name]
+            ratio = (mp_actual_cache[mp_name] / mp_total) if mp_total else 0.0
+            new_val = flt(flt(sco_row.mapped_weight_kg) * min(ratio, 1.0), 3)
+        if flt(row.transferred_weight_kg) != new_val:
+            row.transferred_weight_kg = new_val
+            changed = True
+
+    if changed:
+        soe_doc.flags.ignore_validate = True
+        soe_doc.save(ignore_permissions=True)
 
 
 def _get_mp_drawing_weight(mp_name, duno_mark_no):
@@ -2164,6 +2314,9 @@ def on_submit_job_card_drawing_entry(doc, method):
 
 def _build_jc_drawing_rows(wo, seq_idx):
     """Build custom_drawing_details rows for a new JC from the WO's drawing items.
+    transferred_weight_kg starts at 0 — it is not yet backed by any Stock Entry —
+    and is kept live afterwards by _refresh_wo_drawing_transferred_weights() on
+    every transfer SE submit/cancel.
     # SHARED_SCO_JC: mirrors _build_soe_drawing_rows
     """
     rows = []
@@ -2176,18 +2329,17 @@ def _build_jc_drawing_rows(wo, seq_idx):
             "qty_to_manufacture":    flt(d.qty_to_manufacture, 3),
             "available_to_consume_nos": 0.0,
             "completed_qty_nos":     0.0,
+            "transferred_weight_kg": 0.0,
         }
         if seq_idx == 1:
             row.update({
                 "customer_provided_weight_kg": flt(d.customer_weight_kg, 3),
                 "planned_weight_kg":           flt(d.total_weight_kg, 3),
-                "transferred_weight_kg":        flt(d.mapped_weight_kg, 3),
             })
         else:
             row.update({
                 "customer_provided_weight_kg": 0.0,
                 "planned_weight_kg":           0.0,
-                "transferred_weight_kg":        0.0,
             })
         rows.append(row)
     return rows

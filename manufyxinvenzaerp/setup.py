@@ -1119,9 +1119,11 @@ def after_install():
     create_sco_ops_client_script()
     create_soe_client_script()
     create_work_order_custom_fields()
+    layout_work_order_fields()
     create_wo_client_script()
     create_wo_ops_client_script()
     create_job_card_drawing_fields()
+    layout_job_card_fields()
     create_jc_drawing_client_script()
     create_material_planning_auto_purchase_fields()
     create_manufacturing_settings_custom_fields()
@@ -1162,9 +1164,11 @@ def after_migrate():
     create_sco_ops_client_script()
     create_soe_client_script()
     create_work_order_custom_fields()
+    layout_work_order_fields()
     create_wo_client_script()
     create_wo_ops_client_script()
     create_job_card_drawing_fields()
+    layout_job_card_fields()
     create_jc_drawing_client_script()
     create_material_planning_auto_purchase_fields()
     create_manufacturing_settings_custom_fields()
@@ -3711,6 +3715,11 @@ def create_work_order_custom_fields():
                     "description": "Weight actually transferred to WIP warehouse (updated on SE submit)",
                 },
                 {
+                    "fieldname": "custom_weight_summary_column_break",
+                    "fieldtype": "Column Break",
+                    "insert_after": "custom_transferred_weight_kg",
+                },
+                {
                     "fieldname": "custom_tab_excess_return",
                     "fieldtype": "Tab Break",
                     "label": "Excess Material Return",
@@ -3771,6 +3780,104 @@ def create_work_order_custom_fields():
         },
         update=True,
     )
+
+
+def layout_work_order_fields():
+    """Hide/un-mandate noisy core fields and consolidate the custom drawing/
+    weight/warehouse fields into the "Production Item" tab so the Work Order
+    form reads as: item info -> warehouses -> drawing items -> weight summary,
+    with the core Required Items grid, serial/batch section, and a handful of
+    always-irrelevant fields (Stock UOM, Material Request, 4 flow checkboxes)
+    hidden out of the way.
+    """
+    for args in [
+        {"fieldname": "production_item", "property": "reqd", "value": 0},
+        {"fieldname": "bom_no", "property": "reqd", "value": 0},
+        {"fieldname": "qty", "property": "reqd", "value": 0},
+        {"fieldname": "source_warehouse", "property": "reqd", "value": 0},
+        {"fieldname": "source_warehouse", "property": "hidden", "value": 1},
+        {"fieldname": "production_item", "property": "hidden", "value": 1},
+        {"fieldname": "item_name", "property": "hidden", "value": 1},
+        {"fieldname": "bom_no", "property": "hidden", "value": 1},
+        {"fieldname": "sales_order", "property": "hidden", "value": 1},
+        {"fieldname": "qty", "property": "hidden", "value": 1},
+        {"fieldname": "required_items", "property": "hidden", "value": 1},
+        {"fieldname": "required_items_section", "property": "hidden", "value": 1},
+        {"fieldname": "allow_alternative_item", "property": "hidden", "value": 1},
+        {"fieldname": "use_multi_level_bom", "property": "hidden", "value": 1},
+        {"fieldname": "skip_transfer", "property": "hidden", "value": 1},
+        {"fieldname": "update_consumed_material_cost_in_project", "property": "hidden", "value": 1},
+        {"fieldname": "serial_no_and_batch_for_finished_good_section", "property": "hidden", "value": 1},
+        {"fieldname": "has_serial_no", "property": "hidden", "value": 1},
+        {"fieldname": "has_batch_no", "property": "hidden", "value": 1},
+        {"fieldname": "batch_size", "property": "hidden", "value": 1},
+        {"fieldname": "stock_uom", "property": "hidden", "value": 1},
+        {"fieldname": "material_request", "property": "hidden", "value": 1},
+        {"fieldname": "materials_and_operations_tab", "property": "hidden", "value": 1},
+    ]:
+        frappe.make_property_setter(
+            {
+                "doctype": "Work Order",
+                "fieldname": args["fieldname"],
+                "property": args["property"],
+                "value": args["value"],
+                "property_type": "Check",
+            }
+        )
+
+    field_order = [
+        # Tab: Production Item
+        "item", "naming_series", "status", "production_item", "item_name", "image",
+        "bom_no", "sales_order", "column_break1", "qty",
+        "material_transferred_for_manufacturing", "produced_qty", "disassembled_qty",
+        "process_loss_qty", "project",
+        "section_break_ndpq", "required_items",
+        "warehouses", "source_warehouse", "wip_warehouse", "custom_all_ops_complete",
+        "custom_source_warehouse", "custom_cnc_warehouse", "custom_cnc_transferred_weight_kg",
+        "column_break_12", "fg_warehouse", "scrap_warehouse",
+        "custom_section_drawings", "custom_drawing_items",
+        "custom_section_weights", "custom_customer_weight_kg", "custom_total_weight_kg",
+        "custom_mapped_weight_kg", "custom_excess_weight_kg", "custom_excess_banner_html",
+        "custom_transferred_weight_kg",
+        # Weight Summary column 2 — mirrors SCO's Company / Date / Required By
+        "custom_weight_summary_column_break", "company", "planned_start_date",
+        "expected_delivery_date",
+        # Tab: Configuration
+        "work_order_configuration", "settings_section", "allow_alternative_item",
+        "use_multi_level_bom", "column_break_17", "skip_transfer", "from_wip_warehouse",
+        "update_consumed_material_cost_in_project",
+        "serial_no_and_batch_for_finished_good_section", "has_serial_no", "has_batch_no",
+        "column_break_18", "batch_size", "required_items_section",
+        # Tab: Excess Material Return (custom)
+        "custom_tab_excess_return", "custom_section_excess_return", "custom_excess_actions_html",
+        "custom_excess_return_items", "custom_excess_return_total_kg", "custom_excess_return_total_nos",
+        # Tab: Operations summary (custom)
+        "custom_operations_tab", "custom_operations_html",
+        # Tab: Operations (core) — hidden; kept in the order list so field_order
+        # stays a complete permutation of every Work Order field
+        "materials_and_operations_tab", "operations_section", "transfer_material_against",
+        "operations", "time", "planned_end_date",
+        "column_break_13", "actual_start_date", "actual_end_date", "lead_time", "section_break_22",
+        "planned_operating_cost", "actual_operating_cost", "additional_operating_cost",
+        "column_break_24", "corrective_operation_cost", "total_operating_cost",
+        # Tab: More Info
+        "more_info", "description", "stock_uom", "column_break2", "material_request",
+        "material_request_item", "sales_order_item", "production_plan", "production_plan_item",
+        "production_plan_sub_assembly_item", "product_bundle_item", "amended_from",
+        # Tab: Connections
+        "connections_tab",
+    ]
+    frappe.make_property_setter(
+        {
+            "doctype": "Work Order",
+            "doctype_or_field": "DocType",
+            "fieldname": None,
+            "property": "field_order",
+            "value": frappe.as_json(field_order),
+            "property_type": "Data",
+        }
+    )
+    frappe.db.commit()
 
 
 def create_job_card_drawing_fields():
@@ -3841,11 +3948,87 @@ def create_job_card_drawing_fields():
     )
 
 
+def layout_job_card_fields():
+    """Hide noisy core Job Card fields/tabs that duplicate the custom drawing/
+    consumption tracking, and surface Sequence Id as a quick filter/list column.
+    """
+    for args in [
+        {"fieldname": "bom_no", "property": "hidden", "value": 1},
+        {"fieldname": "for_quantity", "property": "hidden", "value": 1},
+        {"fieldname": "production_item", "property": "hidden", "value": 1},
+        {"fieldname": "employee", "property": "hidden", "value": 1},
+        {"fieldname": "timing_detail", "property": "hidden", "value": 1},
+        {"fieldname": "scrap_items_section", "property": "hidden", "value": 1},
+        {"fieldname": "scrap_items", "property": "hidden", "value": 1},
+        {"fieldname": "custom_raw_material_consumption_tab", "property": "hidden", "value": 1},
+        {"fieldname": "custom_raw_material_consumption", "property": "hidden", "value": 1},
+        {"fieldname": "serial_and_batch_bundle", "property": "hidden", "value": 1},
+        {"fieldname": "item_name", "property": "hidden", "value": 1},
+        {"fieldname": "transferred_qty", "property": "hidden", "value": 1},
+        {"fieldname": "requested_qty", "property": "hidden", "value": 1},
+        {"fieldname": "sequence_id", "property": "in_list_view", "value": 1},
+        {"fieldname": "sequence_id", "property": "in_standard_filter", "value": 1},
+        {"fieldname": "work_order", "property": "in_standard_filter", "value": 1},
+    ]:
+        frappe.make_property_setter(
+            {
+                "doctype": "Job Card",
+                "fieldname": args["fieldname"],
+                "property": args["property"],
+                "value": args["value"],
+                "property_type": "Check",
+            }
+        )
+
+    # Move Sequence Id out of "More Information" and into the default "Details"
+    # tab (right after Qty To Manufacture), keeping every other field in place.
+    field_order = [
+        "naming_series", "work_order", "bom_no", "production_item", "employee",
+        "column_break_4", "posting_date", "company", "for_quantity", "sequence_id",
+        "custom_section_drawing_details", "custom_drawing_details",
+        "custom_consumption_log_section", "custom_consumption_log",
+        "custom_available_to_consume_kg", "custom_total_consumed_kg",
+        "custom_total_available_nos", "custom_total_completed_nos", "total_completed_qty",
+        "process_loss_qty", "scheduled_time_section", "expected_start_date", "time_required",
+        "column_break_jkir", "expected_end_date", "section_break_05am", "scheduled_time_logs",
+        "timing_detail", "time_logs", "section_break_13", "actual_start_date",
+        "total_time_in_mins", "column_break_15", "actual_end_date", "production_section",
+        "operation", "wip_warehouse", "column_break_12", "workstation_type", "workstation",
+        "quality_inspection_section", "quality_inspection_template", "column_break_fcmp",
+        "quality_inspection", "section_break_21", "sub_operations", "section_break_8", "items",
+        "scrap_items_section", "scrap_items", "corrective_operation_section", "for_job_card",
+        "is_corrective_job_card", "column_break_33", "hour_rate", "for_operation",
+        "more_information", "project", "item_name", "transferred_qty", "requested_qty",
+        "status", "column_break_20", "operation_row_number", "operation_id", "remarks",
+        "serial_and_batch_bundle", "batch_no", "serial_no", "barcode", "job_started",
+        "started_time", "current_time", "amended_from", "custom_raw_material_consumption_tab",
+        "custom_raw_material_consumption", "connections_tab", "inventory_dimension",
+        "storage_location",
+    ]
+    frappe.make_property_setter(
+        {
+            "doctype": "Job Card",
+            "doctype_or_field": "DocType",
+            "fieldname": None,
+            "property": "field_order",
+            "value": frappe.as_json(field_order),
+            "property_type": "Data",
+        }
+    )
+    frappe.db.commit()
+
+
 # ─── WO client script (mirrors SCO_CLIENT_SCRIPT) ─────────────────────────
 
 WO_CLIENT_SCRIPT = """
 frappe.ui.form.on("Work Order", {
 \trefresh(frm) {
+\t\t// Hide core "Create Pick List" / "Start" / "Create Job Card" buttons — the
+\t\t// custom drawing/weight/transfer buttons above replace this flow.
+\t\tfrm.remove_custom_button(__("Create Pick List"));
+\t\tfrm.remove_custom_button(__("Start"));
+\t\tfrm.remove_custom_button(__("Create Job Card"));
+
 \t\t// Excess material banner — mirrors SCO banner
 \t\tlet $bw = frm.fields_dict["custom_excess_banner_html"] && frm.fields_dict["custom_excess_banner_html"].$wrapper;
 \t\tif ($bw) {

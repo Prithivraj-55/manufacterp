@@ -69,7 +69,10 @@ def _setup_batch_from_purchase_receipt(doc):
     pr_items = frappe.db.get_all(
         "Purchase Receipt Item",
         filters={"parent": doc.reference_name, "item_code": doc.item},
-        fields=["custom_thickness", "custom_length", "custom_width", "custom_sec_qty", "custom_sec_uom"],
+        fields=[
+            "custom_thickness", "custom_length", "custom_width", "custom_sec_qty",
+            "custom_sec_uom", "custom_parent_item_group",
+        ],
         order_by="idx asc",
     )
     if not pr_items:
@@ -104,6 +107,24 @@ def _setup_batch_from_purchase_receipt(doc):
     doc.custom_width = pr_item.custom_width
     doc.custom_sec_qty = pr_item.custom_sec_qty
     doc.custom_sec_uom = pr_item.custom_sec_uom
+
+    # Guard: Structurals/Plates batches are always Nos-tracked. A batch silently
+    # created with Sec Qty 0 breaks Kg -> Nos allocation in Material Planning
+    # (_alloc_sec_qty) with no visible error until someone notices downstream.
+    # before_submit_purchase_receipt already requires Sec Qty > 0 on the PR line
+    # itself, so landing here means the row_index match above (best-effort — there
+    # is no direct back-reference from an auto-created batch to its source PR row)
+    # picked up the wrong line, most likely because several rows share identical
+    # dimensions. Fail loudly here rather than silently persist a corrupt batch.
+    if pr_item.custom_parent_item_group in ("Structurals", "Plates") and not flt(pr_item.custom_sec_qty):
+        frappe.throw(
+            _(
+                "Cannot create batch {0} for item {1}: Sec Qty (Nos) resolved to 0 while "
+                "matching Purchase Receipt {2}. This usually means two or more rows for this "
+                "item share identical Length/Width/Thickness — give them distinct dimensions "
+                "(or split the receipt) so each batch can be matched to the correct row."
+            ).format(batch_id, doc.item, doc.reference_name)
+        )
 
 
 def _setup_batch_from_stock_entry(doc):
