@@ -790,6 +790,31 @@ def after_save_production_plan(doc, method):
 		_recalculate_sec_qty(row)
 
 
+def validate_process_planning_contiguity(doc, method):
+	"""custom_process_planning must be Subcontractor rows first, then Internal Jobcard
+	rows — no interleaving, and every row must have a work_type set. A subcontractor
+	can't hand off to internal ops and then get material back mid-stream."""
+	seen_internal = False
+	for row in (doc.custom_process_planning or []):
+		if not row.work_type:
+			frappe.throw(
+				_("Row {0} ({1}): set Work Type (Subcontractor / Internal Jobcard).")
+				.format(row.idx, row.operation_name),
+				title=_("Work Type Required"),
+			)
+		if row.work_type == "Internal Jobcard":
+			seen_internal = True
+		elif row.work_type == "Subcontractor" and seen_internal:
+			frappe.throw(
+				_("Row {0} ({1}): all Subcontractor operations must come before Internal "
+				  "Jobcard operations — group all Subcontractor rows first, then all "
+				  "Internal Jobcard rows. Alternating (Subcontractor → Internal Jobcard → "
+				  "Subcontractor) is not allowed.")
+				.format(row.idx, row.operation_name),
+				title=_("Invalid Operation Sequence"),
+			)
+
+
 def unlink_production_plan_on_trash(doc, method):
 	linked = frappe.get_all(
 		"Material Planning",

@@ -214,7 +214,10 @@ doc_events = {
 		"on_cancel": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_cancel_subcontracting_order",
 	},
 	"Production Plan": {
-		"validate": "manufyxinvenzaerp.production_plan_management.production_plan.after_save_production_plan",
+		"validate": [
+			"manufyxinvenzaerp.production_plan_management.production_plan.after_save_production_plan",
+			"manufyxinvenzaerp.production_plan_management.production_plan.validate_process_planning_contiguity",
+		],
 		"on_trash": "manufyxinvenzaerp.production_plan_management.production_plan.unlink_production_plan_on_trash",
 		"on_cancel": "manufyxinvenzaerp.production_plan_management.production_plan.unlink_production_plan_on_trash",
 	},

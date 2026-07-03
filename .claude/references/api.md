@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-07-01 08:21:21_
+_Generated: 2026-07-04 00:33:54_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -56,26 +56,26 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `reserve_batches` | 1023 |
-| `reserve_exact_match_batches` | 1130 |
-| `unreserve_exact_match_batches` | 1247 |
-| `check_mapping_batch_availability` | 1288 |
-| `unreserve_batches` | 1348 |
-| `_test_simulate_se_release` | 1389 |
-| `make_production_plan` | 1408 |
-| `@frappe.validate_and_sanitize_search_inputs` | 141 |
-| `make_material_request` | 1466 |
-| `update_so_difference_kg` | 1613 |
-| `auto_purchase_from_mp` | 1668 |
-| `get_bom_info` | 167 |
-| `get_so_drawings_for_bom_picker` | 219 |
-| `get_raw_materials` | 282 |
-| `check_stock_availability` | 367 |
-| `move_to_exact_match` | 659 |
-| `finalize_mapping` | 822 |
-| `get_batch_reservation_summary` | 887 |
-| `get_batch_item` | 921 |
-| `get_batch_stock_summary` | 929 |
+| `reserve_batches` | 1053 |
+| `reserve_exact_match_batches` | 1160 |
+| `unreserve_exact_match_batches` | 1277 |
+| `check_mapping_batch_availability` | 1318 |
+| `unreserve_batches` | 1378 |
+| `_test_simulate_se_release` | 1419 |
+| `make_production_plan` | 1438 |
+| `make_material_request` | 1496 |
+| `update_so_difference_kg` | 1643 |
+| `auto_purchase_from_mp` | 1698 |
+| `@frappe.validate_and_sanitize_search_inputs` | 171 |
+| `get_bom_info` | 197 |
+| `get_so_drawings_for_bom_picker` | 249 |
+| `get_raw_materials` | 312 |
+| `check_stock_availability` | 397 |
+| `move_to_exact_match` | 689 |
+| `finalize_mapping` | 852 |
+| `get_batch_reservation_summary` | 917 |
+| `get_batch_item` | 951 |
+| `get_batch_stock_summary` | 959 |
 ## production_management/production_utils.py
 
 | Method | Line |
@@ -102,8 +102,8 @@ All `@frappe.whitelist()` methods. Call from JS:
 | Method | Line |
 |--------|------|
 | `get_pr_item_uom` | 18 |
-| `get_mp_for_pr` | 252 |
-| `allocate_pr_stock_to_mp` | 271 |
+| `get_mp_for_pr` | 273 |
+| `allocate_pr_stock_to_mp` | 292 |
 ## sq_management/supplier_quotation.py
 
 | Method | Line |
@@ -113,22 +113,22 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `backfill_drawing_item_qty` | 1487 |
 | `create_work_order_from_pp` | 152 |
-| `get_wo_pending_items` | 1551 |
-| `create_partial_wo_transfer` | 1656 |
-| `create_cnc_to_wip_entry` | 1712 |
-| `create_return_stock_entry_for_wo` | 1811 |
-| `get_jc_summary` | 1863 |
+| `backfill_drawing_item_qty` | 1691 |
+| `get_wo_pending_items` | 1755 |
+| `create_partial_wo_transfer` | 1860 |
+| `create_cnc_to_wip_entry` | 1916 |
+| `create_return_stock_entry_for_wo` | 2015 |
+| `get_jc_summary` | 2067 |
 | `create_sco_from_production_plan` | 26 |
-| `create_supplier_operation_entries` | 278 |
-| `create_send_to_subcontractor_entry` | 295 |
-| `get_sco_pending_items` | 391 |
-| `create_partial_transfer` | 501 |
-| `create_cnc_to_supplier_entry` | 562 |
-| `get_soe_summary` | 665 |
-| `create_return_stock_entry` | 711 |
-| `create_finished_goods_entry` | 769 |
+| `create_supplier_operation_entries` | 287 |
+| `create_send_to_subcontractor_entry` | 304 |
+| `get_sco_pending_items` | 400 |
+| `create_partial_transfer` | 510 |
+| `create_cnc_to_supplier_entry` | 571 |
+| `get_soe_summary` | 674 |
+| `create_return_stock_entry` | 720 |
+| `create_finished_goods_entry` | 778 |
 
 ## Total
 

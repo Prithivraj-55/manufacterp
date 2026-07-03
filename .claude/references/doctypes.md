@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-07-01 08:21:21_
+_Generated: 2026-07-04 00:33:54_
 
 ## drawing
 
@@ -153,6 +153,7 @@ _Generated: 2026-07-01 08:21:21_
 | Method | Whitelisted |
 |--------|-------------|
 | ` validate` | no |
+| ` _move_skipped_arm_to_mapping` | no |
 | ` _validate_batch_calc_qty` | no |
 | ` search_bom` | no |
 | ` get_bom_info` | no |

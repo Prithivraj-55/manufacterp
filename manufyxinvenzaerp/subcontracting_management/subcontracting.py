@@ -245,14 +245,23 @@ def create_work_order_from_pp(pp_name):
         "custom_mapped_weight_kg":   flt(total_mapped, 3),
         "custom_excess_weight_kg":   flt(total_excess, 3),
     })
+    # Order by the Process Planning table's own row order (not the BOM's routing
+    # sequence_id) so it stays consistent with how _create_soes_for_sco orders the
+    # SCO side, then renumber locally 1..N — mirrors _create_soes_for_sco's
+    # enumerate(sub_ops, start=1). A mixed plan's Internal ops may start at BOM
+    # sequence_id 4+, but the WO's own chain (and ERPNext core's own submit
+    # validation, which requires row 1 to be sequence_id 1) needs it to start at 1.
+    internal_op_idx = {r.operation_name: r.idx for r in internal_ops}
+    filtered_ops.sort(key=lambda op: internal_op_idx.get(op.operation, 0))
+
     wo.set_required_items()
     wo.operations = []
-    for op in filtered_ops:
+    for local_seq, op in enumerate(filtered_ops, start=1):
         wo.append("operations", {
             "operation": op.operation,
             "workstation": op.workstation,
             "time_in_mins": flt(op.time_in_mins) or 60,
-            "sequence_id": op.sequence_id,
+            "sequence_id": local_seq,
             "status": "Pending",
         })
 
@@ -1090,6 +1099,46 @@ def on_update_supplier_operation_entry(doc, method):
         _propagate_drawing_nos_to_next(doc)
 
 
+def _push_sco_completion_to_wo(pp_name, last_soe):
+    """Cross-chain counterpart of _propagate_available_to_next / _propagate_drawing_nos_to_next:
+    when the SCO's final operation completes, hand its finished qty/weight off to the sibling
+    Work Order's first Internal-Jobcard Job Card(s) (mixed-plan chain — some ops Subcontractor,
+    the rest Internal Jobcard). No-op if there's no sibling WO yet, or no still-draft Op-1
+    Job Card to push into (it will be handled by _populate_jcs_for_wo's reverse-order path
+    instead, once that WO/JC is created).
+    # SHARED_SCO_JC: cross-chain — no SOE-side mirror, this only runs on the SCO side
+    """
+    wo_name = frappe.db.get_value(
+        "Work Order", {"production_plan": pp_name, "docstatus": ["!=", 2]}, "name"
+    )
+    if not wo_name:
+        return
+
+    nos_by_drawing = {
+        r.drawing: flt(r.completed_qty_nos, 3)
+        for r in (last_soe.drawing_details or []) if r.drawing
+    }
+
+    # Loop (not get_value) — a WO can in principle have more than one sequence_id=1 JC
+    # if ERPNext's own batch-size splitting ever kicks in; push to all of them.
+    for jc_name in frappe.get_all(
+        "Job Card",
+        filters={"work_order": wo_name, "sequence_id": 1, "docstatus": 0},
+        pluck="name",
+    ):
+        jc_doc = frappe.get_doc("Job Card", jc_name)
+        if not jc_doc.get("custom_drawing_details"):
+            continue
+        jc_doc.custom_available_to_consume_kg = flt(last_soe.total_consumed_kg, 3)
+        for row in jc_doc.custom_drawing_details:
+            row.available_to_consume_nos = flt(nos_by_drawing.get(row.drawing or "", 0.0), 3)
+        jc_doc.custom_total_available_nos = flt(
+            sum(flt(r.available_to_consume_nos) for r in jc_doc.custom_drawing_details), 3
+        )
+        jc_doc.flags.ignore_validate = True
+        jc_doc.save(ignore_permissions=True)
+
+
 def on_submit_supplier_operation_entry(doc, method):
     """On submit: propagate Kg + Nos to next operation; update SCO drawing completion;
     mark SCO all_ops_complete if this is the last operation.
@@ -1111,6 +1160,11 @@ def on_submit_supplier_operation_entry(doc, method):
         frappe.db.set_value(
             "Subcontracting Order", doc.subcontracting_order, "custom_all_ops_complete", 1
         )
+        pp_name = frappe.db.get_value(
+            "Subcontracting Order", doc.subcontracting_order, "custom_production_plan"
+        )
+        if pp_name:
+            _push_sco_completion_to_wo(pp_name, doc)
 
 
 def before_delete_supplier_operation_entry(doc, method):
@@ -2093,10 +2147,20 @@ def validate_job_card_drawing_entry(doc, method):
         row.completed_qty_nos = flt(log_nos_by_drawing.get(row.drawing or "", 0.0), 3)
 
     # --- 2a. Op-1: auto-set available_to_consume_nos = qty_to_manufacture when material transferred ---
+    # Skipped for a chained JC (mixed-plan WO fed by a sibling SCO's completed ops) —
+    # there, availability must stay exactly at whatever _push_sco_completion_to_wo /
+    # _populate_jcs_for_wo's reverse path pushed (may be a partial amount), not
+    # auto-inflated to the full planned qty.
     if seq == 1:
-        for row in (doc.custom_drawing_details or []):
-            if flt(row.transferred_weight_kg) > 0:
-                row.available_to_consume_nos = flt(row.qty_to_manufacture, 3)
+        wo_pp = frappe.db.get_value("Work Order", doc.work_order, "production_plan")
+        is_chained = wo_pp and frappe.db.exists(
+            "Process Planning",
+            {"parent": wo_pp, "parenttype": "Production Plan", "work_type": "Subcontractor"},
+        )
+        if not is_chained:
+            for row in (doc.custom_drawing_details or []):
+                if flt(row.transferred_weight_kg) > 0:
+                    row.available_to_consume_nos = flt(row.qty_to_manufacture, 3)
 
     # --- 2c. Update JC-level Nos summary fields ---
     doc.custom_total_available_nos = flt(
@@ -2372,6 +2436,32 @@ def _populate_jcs_for_wo(wo):
 
     jcs_sorted = sorted(jcs, key=lambda x: (wo_op_seq.get(x.operation, 0), x.name))
     transferred_weight = flt(wo.get("custom_transferred_weight_kg") or 0)
+    nos_by_drawing_from_sco = {}
+
+    # Mixed-plan chain, reverse ordering: if a sibling SCO already finished its
+    # subcontract portion before this WO's Job Cards were created, seed Op-1 from
+    # ITS completion instead of this WO's own (irrelevant, likely-zero) raw-material
+    # transfer. The forward ordering (SCO finishes AFTER these JCs already exist) is
+    # handled live by _push_sco_completion_to_wo on the SCO's last SOE submit.
+    sco_row = frappe.db.get_value(
+        "Subcontracting Order",
+        {"custom_production_plan": wo.production_plan, "docstatus": ["!=", 2]},
+        ["name", "custom_all_ops_complete"],
+        as_dict=True,
+    )
+    if sco_row and sco_row.custom_all_ops_complete:
+        last_soe_name = frappe.db.get_value(
+            "Supplier Operation Entry",
+            {"subcontracting_order": sco_row.name, "docstatus": 1},
+            "name", order_by="sequence_id desc",
+        )
+        if last_soe_name:
+            last_soe = frappe.get_doc("Supplier Operation Entry", last_soe_name)
+            transferred_weight = flt(last_soe.total_consumed_kg, 3)
+            nos_by_drawing_from_sco = {
+                r.drawing: flt(r.completed_qty_nos, 3)
+                for r in (last_soe.drawing_details or []) if r.drawing
+            }
 
     for seq_idx, jc_info in enumerate(jcs_sorted, start=1):
         jc_doc = frappe.get_doc("Job Card", jc_info.name)
@@ -2389,8 +2479,15 @@ def _populate_jcs_for_wo(wo):
 
         if seq_idx == 1:
             jc_doc.custom_available_to_consume_kg = flt(transferred_weight, 3)
+            if nos_by_drawing_from_sco:
+                for row in jc_doc.custom_drawing_details:
+                    row.available_to_consume_nos = flt(
+                        nos_by_drawing_from_sco.get(row.drawing or "", 0.0), 3
+                    )
 
-        jc_doc.custom_total_available_nos  = 0.0
+        jc_doc.custom_total_available_nos  = flt(
+            sum(flt(r.available_to_consume_nos) for r in jc_doc.custom_drawing_details), 3
+        )
         jc_doc.custom_total_completed_nos  = 0.0
         jc_doc.flags.ignore_validate = True
         jc_doc.save(ignore_permissions=True)
