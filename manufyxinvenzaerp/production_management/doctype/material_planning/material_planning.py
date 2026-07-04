@@ -16,7 +16,30 @@ class MaterialPlanning(Document):
         self._apply_rwd_group_allocations()
         if self.material_mapping and self.for_warehouse:
             self._validate_batch_calc_qty()
+        if self.unavailable_items:
+            self._validate_alternate_item_qty()
+        self._update_weight_summary()
         _update_bom_item_weights(self)
+
+    def _update_weight_summary(self):
+        """Keep the header weight-summary fields in sync with the child tables
+        on every server-side save — these 4 fields were previously ONLY ever
+        recomputed client-side (material_planning.js _update_weight_summary),
+        so any server-side mutation (whitelisted methods, scripts) left them
+        stale, and the form showed 'Not Saved' the moment the client
+        recalculated a different value on the next load."""
+        total_raw = sum(
+            flt(r.qty) for r in (self.raw_materials or [])
+            if r.parent_item_group in ("Structurals", "Plates")
+        )
+        total_exact = sum(flt(r.required_qty) for r in (self.available_raw_materials or []))
+        expected_mapping = sum(flt(r.qty) for r in (self.material_mapping or []))
+        cross_mapped = sum(flt(r.batch_calc_qty) for r in (self.material_mapping or []))
+
+        self.total_weight_plates_structurals = flt(total_raw, 3)
+        self.weight_exact_raw_material = flt(total_exact, 3)
+        self.expected_weight_material_mapping = flt(expected_mapping, 3)
+        self.weight_cross_item_mapped = flt(cross_mapped, 3)
 
     def _apply_rwd_group_allocations(self):
         """Keep batch_sec_qty/batch_calc_qty correct for every 'Reserve stock
@@ -165,29 +188,43 @@ class MaterialPlanning(Document):
             required_qty = flt(row.qty)
             if batch_calc_qty < required_qty:
                 alternate = row.planned_item or row.batch
-                message = _(
-                    "Row {0}: <b>{1}</b> needs <b>{2} Kg</b>, "
-                    "but alternate item <b>{3}</b> mapped only for <b>{4} Kg</b>."
-                ).format(row.idx, row.item_code, flt(required_qty, 3), alternate, flt(batch_calc_qty, 3))
+                points = [
+                    _("<b>{0}</b> needs <b>{1} Kg</b>, but alternate item <b>{2}</b> mapped only for <b>{3} Kg</b>.")
+                    .format(row.item_code, flt(required_qty, 3), alternate, flt(batch_calc_qty, 3))
+                ]
 
                 if group in ("Structurals", "Plates") and flt(row.sec_qty):
                     usable_nos, usable_kg, shortfall_nos, shortfall_kg, excess_kg = _calc_usable_nos_split(
                         row.qty, row.sec_qty, batch_calc_qty
                     )
                     if usable_nos > 0:
-                        message += "<br>" + _(
-                            "Covers <b>{0} Nos</b> ({1} Kg) — the batch will be used for {0} Nos; "
-                            "the remaining <b>{2} Kg</b> is excess (added to Difference in Kg). "
-                            "Pending <b>{3} Nos</b> ({4} Kg) will move to Unavailable Items / "
-                            "Material Request when you click <b>Move to Unavailable Items</b>."
-                        ).format(usable_nos, usable_kg, excess_kg, shortfall_nos, shortfall_kg)
+                        points.append(
+                            _("Covers <b>{0} Nos</b> ({1} Kg) — the batch will be used for {0} Nos.")
+                            .format(usable_nos, usable_kg)
+                        )
+                        points.append(
+                            _("Remaining <b>{0} Kg</b> is excess (added to Difference in Kg).")
+                            .format(excess_kg)
+                        )
+                        points.append(
+                            _("Pending <b>{0} Nos</b> ({1} Kg) will move to Unavailable Items / "
+                              "Material Request when you click <b>Move to Unavailable Items</b>.")
+                            .format(shortfall_nos, shortfall_kg)
+                        )
                     else:
-                        message += "<br>" + _(
-                            "Covers <b>0 Nos</b> — this mapping is not usable. "
-                            "The full <b>{0} Nos</b> ({1} Kg) needs to be purchased; "
-                            "click <b>Move to Unavailable Items</b> to send it to Material Request."
-                        ).format(int(flt(row.sec_qty)), flt(required_qty, 3))
+                        points.append(_("Covers <b>0 Nos</b> — this mapping is not usable."))
+                        points.append(
+                            _("The full <b>{0} Nos</b> ({1} Kg) needs to be purchased; "
+                              "click <b>Move to Unavailable Items</b> to send it to Material Request.")
+                            .format(int(flt(row.sec_qty)), flt(required_qty, 3))
+                        )
 
+                message = (
+                    _("Row {0}:").format(row.idx)
+                    + "<ul style='margin:4px 0 0 -18px;'>"
+                    + "".join("<li>{0}</li>".format(p) for p in points)
+                    + "</ul>"
+                )
                 shortfall_warnings.append(message)
 
             if batch_calc_qty > available:
@@ -215,6 +252,39 @@ class MaterialPlanning(Document):
                 indicator="orange",
             )
 
+    def _validate_alternate_item_qty(self):
+        """Unavailable Items row with an Alternate Item entered: the alternate's
+        computed Kg (alternate_quantity, from its dimensions/Sec Qty) must cover
+        the original Required Qty (qty), or the row won't have enough material
+        to allocate/reserve once it's picked up in Material Mapping."""
+        warnings = []
+        for row in (self.unavailable_items or []):
+            if not row.alternate_item:
+                continue
+            required_qty = flt(row.qty)
+            alternate_qty = flt(row.alternate_quantity)
+            if alternate_qty < required_qty:
+                shortfall = flt(required_qty - alternate_qty, 3)
+                points = [
+                    _("<b>{0}</b> needs <b>{1} Kg</b>, but alternate item <b>{2}</b> is mapped for only <b>{3} Kg</b>.")
+                    .format(row.item_code, flt(required_qty, 3), row.alternate_item, flt(alternate_qty, 3)),
+                    _("Shortfall of <b>{0} Kg</b> — plan/purchase material accordingly, otherwise this "
+                      "will not be enough to allocate and reserve during Material Mapping.")
+                    .format(shortfall),
+                ]
+                warnings.append(
+                    _("Row {0}:").format(row.idx)
+                    + "<ul style='margin:4px 0 0 -18px;'>"
+                    + "".join("<li>{0}</li>".format(p) for p in points)
+                    + "</ul>"
+                )
+
+        if warnings:
+            frappe.msgprint(
+                "<br>".join(warnings),
+                title=_("Alternate Item Quantity Shortfall"),
+                indicator="orange",
+            )
 
 
 @frappe.whitelist()
@@ -997,7 +1067,10 @@ def finalize_mapping(doc):
             "width": flt(row.get("width")),
             "thickness": flt(row.get("thickness")),
             "unit_weight": flt(row.get("unit_weight")),
-            "alternate_item": row.get("alternate_item") or "",
+            # Material Mapping calls this field "planned_item"; Unavailable
+            # Items calls the same concept "alternate_item" — translate when
+            # a no-batch row moves back so the alternate isn't lost.
+            "alternate_item": row.get("alternate_item") or row.get("planned_item") or "",
         }
 
         batch = row.get("batch")

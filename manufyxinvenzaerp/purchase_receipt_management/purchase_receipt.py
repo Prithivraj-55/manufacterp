@@ -2,6 +2,10 @@ import re
 import frappe
 from frappe import _
 from frappe.utils import flt, now
+from manufyxinvenzaerp.production_management.doctype.material_planning.material_planning import (
+    _get_batch_reserved_by_others,
+    _get_batch_total_stock,
+)
 
 STRUCTURALS_REQUIRED = ["custom_length", "custom_unit_weight", "custom_sec_qty"]
 PLATES_REQUIRED = ["custom_length", "custom_width", "custom_thickness", "custom_unit_weight", "custom_sec_qty"]
@@ -264,6 +268,20 @@ def _check_missing_fields(row, throw):
 
 # ── Material Planning auto-allocation ────────────────────────────────────────
 
+def _resolve_pr_batch_no(pr_item):
+    """Purchase Receipt Items in this instance don't reliably carry batch_no
+    directly (items are set to auto-create a new batch on receipt, and this
+    environment leaves batch_no blank on the row) — the actual batch lives on
+    the row's Serial and Batch Bundle. Resolve it from there, falling back to
+    batch_no for any PR created the traditional way."""
+    if pr_item.batch_no:
+        return pr_item.batch_no
+    bundle = pr_item.get("serial_and_batch_bundle")
+    if not bundle:
+        return ""
+    return frappe.db.get_value("Serial and Batch Entry", {"parent": bundle}, "batch_no") or ""
+
+
 @frappe.whitelist()
 def get_mp_for_pr(pr_name):
     """Trace PR → PO → MR → Material Planning. Returns list of MP names linked to this PR."""
@@ -289,6 +307,10 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
     Allocate batches received on a PR into the linked Material Planning.
     - Original item purchased  → Available Raw Materials (Exact Match)
     - Alternate item purchased → Material Mapping (Partial Stock)
+
+    The matched Unavailable Items row is removed once fully covered; if the PR
+    received less than the row's required qty, the row is kept with its qty
+    (and proportional Sec Qty) reduced to just the remaining shortfall.
     """
     pr = frappe.get_doc("Purchase Receipt", pr_name)
     mp = frappe.get_doc("Material Planning", mp_name)
@@ -306,12 +328,27 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
         by_original.setdefault((row.item_code, duno), []).append(row)
         by_original_any.setdefault(row.item_code, []).append(row)
 
-    # Existing allocations — avoid duplicates
-    existing_exact   = {(r.item_code, r.batch_no)           for r in (mp.available_raw_materials or [])}
-    existing_mapping = {(r.item_code, r.batch or "")        for r in (mp.material_mapping       or [])}
+    # Existing allocations — avoid duplicates. Keyed by (item_code, batch_no,
+    # duno_mark_no): batch_no alone isn't enough — many items in this instance
+    # have batch_no blank/shared, and without the DUNO in the key every
+    # shortfall row past the first for a given item_code would look like a
+    # duplicate of the one already added and get silently skipped.
+    existing_exact   = {(r.item_code, r.batch_no, r.duno_mark_no or "")    for r in (mp.available_raw_materials or [])}
+    existing_mapping = {(r.item_code, r.batch or "", r.duno_mark_no or "") for r in (mp.material_mapping       or [])}
 
     added_exact   = 0
     added_mapping = 0
+    fulfilled_row_names  = set()
+    remaining_qty_by_row = {}  # row.name -> qty still short after this PR's receipts
+    QTY_EPSILON = 0.001  # matches the 3-decimal rounding used throughout this table
+
+    def _consume(mp_row, received_qty):
+        remaining = flt(remaining_qty_by_row.get(mp_row.name, flt(mp_row.qty)) - received_qty, 3)
+        if remaining <= QTY_EPSILON:
+            fulfilled_row_names.add(mp_row.name)
+            remaining_qty_by_row.pop(mp_row.name, None)
+        else:
+            remaining_qty_by_row[mp_row.name] = remaining
 
     for pr_item in pr.items:
         if not pr_item.purchase_order_item:
@@ -331,7 +368,7 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
             continue
 
         item_code = pr_item.item_code
-        batch_no  = pr_item.batch_no or ""
+        batch_no  = _resolve_pr_batch_no(pr_item)
         pr_duno   = pr_item.get("custom_duno_mark_no") or ""
 
         # When the PR item knows its DUNO, only allocate against that exact drawing's
@@ -347,9 +384,20 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
             matched_original  = by_original_any.get(item_code, [])
 
         if matched_alternate:
-            # Alternate item purchased → Material Mapping
+            # Alternate item purchased → Material Mapping, fully populated as
+            # if the user had picked this batch by hand (batch dimensions,
+            # Sec Qty/Calc Qty, Status), not left blank for a later manual fix.
+            alt_item_data = frappe.db.get_value(
+                "Item", item_code,
+                ["custom_parent_item_group", "custom_unit_weight"],
+                as_dict=True,
+            ) or {}
+            batch_total_qty    = _get_batch_total_stock(batch_no, mp.for_warehouse) if batch_no else 0.0
+            batch_reserved_qty = _get_batch_reserved_by_others(batch_no, mp_name) if batch_no else 0.0
+
             for mp_row in matched_alternate:
-                key = (mp_row.item_code, batch_no)
+                _consume(mp_row, flt(pr_item.qty))
+                key = (mp_row.item_code, batch_no, mp_row.duno_mark_no or "")
                 if key in existing_mapping:
                     continue
                 existing_mapping.add(key)
@@ -364,15 +412,27 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
                     "customer_drawing_number": mp_row.customer_drawing_number,
                     "qty":                    mp_row.qty,
                     "uom":                    mp_row.uom,
-                    "sec_qty":                flt(pr_item.custom_sec_qty) or mp_row.sec_qty,
+                    "sec_qty":                mp_row.sec_qty,
                     "sec_uom":                mp_row.sec_uom,
                     "parent_item_group":      mp_row.parent_item_group,
-                    "length":                 flt(pr_item.custom_length)    or mp_row.length,
-                    "width":                  flt(pr_item.custom_width)     or mp_row.width,
-                    "thickness":              flt(pr_item.custom_thickness) or mp_row.thickness,
+                    "length":                 mp_row.length,
+                    "width":                  mp_row.width,
+                    "thickness":              mp_row.thickness,
                     "unit_weight":            mp_row.unit_weight,
                     "batch":                  batch_no,
                     "planned_item":           item_code,
+                    "batch_mapped":           "Mapped" if batch_no else "Not Mapped",
+                    "batch_parent_item_group": alt_item_data.get("custom_parent_item_group") or "",
+                    "batch_length":           flt(pr_item.custom_length),
+                    "batch_width":            flt(pr_item.custom_width),
+                    "batch_thickness":        flt(pr_item.custom_thickness),
+                    "batch_unit_weight":      flt(alt_item_data.get("custom_unit_weight")),
+                    "batch_sec_qty":          flt(pr_item.custom_sec_qty),
+                    "batch_calc_qty":         flt(pr_item.qty),
+                    "batch_total_qty":        flt(batch_total_qty, 3),
+                    "batch_reserved_qty":     flt(batch_reserved_qty, 3),
+                    "batch_free_qty":         flt(max(0.0, batch_total_qty - batch_reserved_qty), 3),
+                    "purchase_receipt":       pr_name,
                 })
                 added_mapping += 1
 
@@ -384,7 +444,8 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
                 as_dict=True,
             ) or {}
             for mp_row in matched_original:
-                key = (item_code, batch_no)
+                _consume(mp_row, flt(pr_item.qty))
+                key = (item_code, batch_no, mp_row.duno_mark_no or "")
                 if key in existing_exact:
                     continue
                 existing_exact.add(key)
@@ -400,19 +461,42 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
                     "length":                 flt(pr_item.custom_length)    or mp_row.length,
                     "width":                  flt(pr_item.custom_width)     or mp_row.width,
                     "thickness":              flt(pr_item.custom_thickness) or mp_row.thickness,
-                    "required_qty":           mp_row.qty,
-                    "available_qty":          pr_item.qty,
+                    "overall_required_qty":   flt(mp_row.qty, 3),
+                    "required_qty":           flt(min(flt(pr_item.qty), flt(mp_row.qty)), 3),
+                    "available_qty":          flt(pr_item.qty, 3),
                     "sec_qty":                flt(pr_item.custom_sec_qty)   or mp_row.sec_qty,
                     "sec_uom":                item_data.get("custom_secondary_uom") or mp_row.sec_uom,
                     "uom":                    item_data.get("stock_uom")    or mp_row.uom,
                     "warehouse":              pr_item.warehouse or mp.for_warehouse,
+                    "purchase_receipt":       pr_name,
                 })
                 added_exact += 1
 
-    if added_exact or added_mapping:
+    # Reconcile Unavailable Items: drop rows now fully covered, shrink rows the
+    # PR only partially covered down to the remaining shortfall.
+    if fulfilled_row_names or remaining_qty_by_row:
+        kept = []
+        for row in (mp.unavailable_items or []):
+            if row.name in fulfilled_row_names:
+                continue
+            new_qty = remaining_qty_by_row.get(row.name)
+            if new_qty is not None:
+                old_qty = flt(row.qty)
+                ratio = (new_qty / old_qty) if old_qty else 0.0
+                row.qty = new_qty
+                row.sec_qty = flt(flt(row.sec_qty) * ratio, 3)
+            kept.append(row)
+        mp.unavailable_items = kept
+
+    if added_exact or added_mapping or fulfilled_row_names or remaining_qty_by_row:
         mp.save(ignore_permissions=True)
 
-    return {"added_exact": added_exact, "added_mapping": added_mapping}
+    return {
+        "added_exact": added_exact,
+        "added_mapping": added_mapping,
+        "fulfilled": len(fulfilled_row_names),
+        "partial": len(remaining_qty_by_row),
+    }
 
 
 def on_submit_purchase_receipt(doc, method):

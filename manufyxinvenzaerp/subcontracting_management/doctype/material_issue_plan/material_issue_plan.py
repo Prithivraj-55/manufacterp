@@ -56,11 +56,16 @@ def populate_from_production_plan(mip_name):
             {"production_plan": mip.production_plan, "docstatus": ["!=", 2]},
         ) or ""
 
-    # Default MIP's own warehouse fields from the linked WO the first time, so
-    # existing work orders don't need re-entering warehouses already set there.
-    # (SCO no longer carries these fields at all — moved here permanently — so
-    # there is nothing left to default from on that side; the user sets them
-    # directly on the Material Issue Plan instead.)
+    # Source Warehouse defaults straight from the Production Plan's own Raw
+    # Material Warehouse — the primary source now that this is asked for
+    # explicitly, not just inferred from a Work Order.
+    if not mip.source_warehouse:
+        mip.source_warehouse = pp.custom_raw_material_warehouse or ""
+
+    # CNC/Excess-return warehouses (and Source as a fallback) still default from
+    # a linked WO the first time, so existing work orders don't need re-entering
+    # warehouses already set there. (SCO carries no warehouse fields of its own —
+    # moved here permanently — so there is nothing to default from on that side.)
     if mip.work_order and not (mip.source_warehouse and mip.cnc_warehouse and mip.excess_return_warehouse):
         wo = frappe.db.get_value(
             "Work Order", mip.work_order,
@@ -70,6 +75,15 @@ def populate_from_production_plan(mip_name):
             mip.source_warehouse = mip.source_warehouse or wo.get("custom_source_warehouse")
             mip.cnc_warehouse = mip.cnc_warehouse or wo.get("custom_cnc_warehouse")
             mip.excess_return_warehouse = mip.excess_return_warehouse or wo.get("fg_warehouse")
+
+    # Supplier Warehouse — read-only display of where material is transferring
+    # TO, resolved from the linked SCO's standard field. Purely informational;
+    # the actual transfer destination is always re-resolved fresh at transfer
+    # time via get_target_context/_resolve_warehouses.
+    if mip.subcontracting_order:
+        mip.supplier_warehouse = frappe.db.get_value(
+            "Subcontracting Order", mip.subcontracting_order, "supplier_warehouse"
+        ) or ""
 
     mip.set("drawing_items", [])
     for row in (pp.po_items or []):
@@ -195,6 +209,11 @@ def refresh_weight_summary(mip_name):
 
     mip = frappe.get_doc("Material Issue Plan", mip_name)
     source_warehouse, target_warehouses = _resolve_warehouses(mip)
+
+    if mip.subcontracting_order:
+        mip.supplier_warehouse = frappe.db.get_value(
+            "Subcontracting Order", mip.subcontracting_order, "supplier_warehouse"
+        ) or ""
 
     mapped_by_mp = {}
     excess_by_mp = {}

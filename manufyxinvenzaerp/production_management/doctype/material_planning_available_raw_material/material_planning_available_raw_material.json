@@ -23,6 +23,7 @@
   "sec_uom",
   "uom",
   "warehouse",
+  "purchase_receipt",
   "col_break_status",
   "is_reserved",
   "reserved_qty",
@@ -173,6 +174,15 @@
    "fieldtype": "Link",
    "label": "Warehouse",
    "options": "Warehouse",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "purchase_receipt",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Purchase Receipt",
+   "options": "Purchase Receipt",
    "read_only": 1
   },
   {
