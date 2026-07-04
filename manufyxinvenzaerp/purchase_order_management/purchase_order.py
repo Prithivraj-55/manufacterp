@@ -10,6 +10,7 @@ FIELD_LABELS = {
     "custom_unit_weight": "Unit Weight",
     "custom_sec_qty": "Sec Qty",
 }
+REFERENCE_FIELDS = ["custom_drawing", "custom_duno_mark_no", "custom_customer_drawing_number", "custom_sales_order"]
 
 
 @frappe.whitelist()
@@ -31,12 +32,26 @@ def get_po_item_uom(doctype, txt, searchfield, start, page_len, filters):
 
 def validate_purchase_order(doc, method):
     for row in doc.items:
+        _copy_from_mr_item(row)
         _recalculate_qty(row)
         _check_missing_fields(row, throw=False)
     doc.custom_total_weight = sum(
         row.qty for row in doc.items
         if row.custom_parent_item_group in ("Structurals", "Plates")
     )
+
+
+def _copy_from_mr_item(row):
+    """Copy drawing/DUNO/sales order references from the linked MR Item when a PO is created from a Material Request."""
+    if not row.material_request_item:
+        return
+    if any(row.get(f) for f in REFERENCE_FIELDS):
+        return
+    mr_item = frappe.db.get_value("Material Request Item", row.material_request_item, REFERENCE_FIELDS, as_dict=True)
+    if not mr_item:
+        return
+    for field in REFERENCE_FIELDS:
+        row.set(field, mr_item.get(field))
 
 
 def before_submit_purchase_order(doc, method):

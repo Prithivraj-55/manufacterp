@@ -17,7 +17,8 @@
   "sales_order",
   "customer",
   "customer_provided_weight_kg",
-  "planned_weight_kg"
+  "planned_weight_kg",
+  "excess_weight_kg"
  ],
  "fields": [
   {
@@ -109,11 +110,18 @@
    "fieldtype": "Float",
    "label": "Planned Weight (Kg)",
    "read_only": 1
+  },
+  {
+   "description": "Weight mapped beyond what was planned for this drawing (cross-item over-mapping / whole-Sec-Qty rounding) — the supplier must return this on excess-material transfer.",
+   "fieldname": "excess_weight_kg",
+   "fieldtype": "Float",
+   "label": "Excess Weight (Kg)",
+   "read_only": 1
   }
  ],
  "istable": 1,
  "links": [],
- "modified": "2026-06-24 00:00:00.000000",
+ "modified": "2026-07-05 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Production Management",
  "name": "Material Planning BOM Item",

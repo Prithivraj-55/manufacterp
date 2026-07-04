@@ -164,6 +164,7 @@ doc_events = {
 	"Purchase Receipt": {
 		"validate": "manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.validate_purchase_receipt",
 		"before_submit": "manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.before_submit_purchase_receipt",
+		"on_submit": "manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.on_submit_purchase_receipt",
 	},
 	"Batch": {
 		"before_insert": "manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.before_insert_batch",
@@ -214,7 +215,10 @@ doc_events = {
 		"on_cancel": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_cancel_subcontracting_order",
 	},
 	"Production Plan": {
-		"validate": "manufyxinvenzaerp.production_plan_management.production_plan.after_save_production_plan",
+		"validate": [
+			"manufyxinvenzaerp.production_plan_management.production_plan.after_save_production_plan",
+			"manufyxinvenzaerp.production_plan_management.production_plan.validate_process_planning_contiguity",
+		],
 		"on_trash": "manufyxinvenzaerp.production_plan_management.production_plan.unlink_production_plan_on_trash",
 		"on_cancel": "manufyxinvenzaerp.production_plan_management.production_plan.unlink_production_plan_on_trash",
 	},

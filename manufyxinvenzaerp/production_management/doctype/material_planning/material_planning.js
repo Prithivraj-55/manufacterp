@@ -207,6 +207,7 @@ frappe.ui.form.on("Material Planning", {
 
 		// Button visibility
 		frm.set_df_property("get_raw_materials_btn",  "hidden", 0);
+		frm.set_df_property("verify_raw_materials_btn", "hidden", has_raw ? 0 : 1);
 		frm.set_df_property("check_stock_btn",         "hidden", has_raw     ? 0 : 1);
 		frm.set_df_property("update_exact_match_btn",  "hidden", has_unavail ? 0 : 1);
 		frm.set_df_property("finalize_mapping_btn",    "hidden", has_mapping ? 0 : 1);
@@ -225,6 +226,7 @@ frappe.ui.form.on("Material Planning", {
 		}
 		setTimeout(function () {
 			_style_btn("get_raw_materials_btn",  "refresh", "Get Raw Materials");
+			_style_btn("verify_raw_materials_btn", "check", "Verify Raw Materials");
 			_style_btn("check_stock_btn",        "search",  "Check Stock Availability");
 			_style_btn("update_exact_match_btn", "tick",    "Update & Map Exact Matches");
 			_style_btn("finalize_mapping_btn",   "move",    "Move to Unavailable Items");
@@ -513,7 +515,8 @@ frappe.ui.form.on("Material Planning", {
 							<td style="padding:8px 12px;font-weight:700;text-align:center;color:${s.unavail ? "red" : "green"};">${s.unavail}</td>
 						</tr>
 					</tbody>
-				</table>`;
+				</table>
+				${_split_details_html(s.split_details)}`;
 
 			frappe.msgprint({
 				title: __("Move to Unavailable Items — Summary"),
@@ -594,6 +597,73 @@ frappe.ui.form.on("Material Planning", {
 		});
 	},
 });
+
+// Cross-check Sec Qty (Nos) vs Qty (Kg) on raw_materials — shared by the
+// automatic run after "Get Raw Materials" and the standalone "Verify Raw
+// Materials" button next to it.
+function _run_verify_raw_materials(frm, opts) {
+	opts = opts || {};
+	frappe.call({
+		method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.verify_raw_materials",
+		args: { doc: frm.doc },
+		freeze: !opts.silent_freeze,
+		freeze_message: __("Verifying Nos vs Qty…"),
+		callback(r) {
+			if (!r.message) return;
+			let { checked, issues } = r.message;
+
+			if (!issues.length) {
+				let msg = opts.success_message || __("All {0} row(s) verified — Nos and Qty match.", [checked]);
+				frappe.show_alert({ message: msg, indicator: "green" }, 5);
+				return;
+			}
+
+			let rows_html = issues.map(function(row) {
+				let formula_cell = row.formula_ok
+					? `<span style="color:#888;">—</span>`
+					: `<span style="color:#c0392b;font-weight:600;">${__("Expected")} ${row.checked_field === "sec_qty" ? "Sec Qty" : "Qty"} = ${row.formula_expected}</span>`;
+				let so_cell = row.so_expected_sec_qty === null
+					? `<span style="color:#888;">—</span>`
+					: (row.so_ok
+						? `<span style="color:#2e7d32;">${__("OK")}</span>`
+						: `<span style="color:#c0392b;font-weight:600;">${__("SO requires Sec Qty")} = ${row.so_expected_sec_qty}</span>`);
+				return `<tr>
+					<td style="padding:5px 10px;border-bottom:1px solid #f0f0f0;">${row.idx}</td>
+					<td style="padding:5px 10px;border-bottom:1px solid #f0f0f0;">${frappe.utils.escape_html(row.item_number)}</td>
+					<td style="padding:5px 10px;border-bottom:1px solid #f0f0f0;">${frappe.utils.escape_html(row.item_code || "")}</td>
+					<td style="padding:5px 10px;border-bottom:1px solid #f0f0f0;">${frappe.utils.escape_html(row.customer_drawing_number)}</td>
+					<td style="padding:5px 10px;border-bottom:1px solid #f0f0f0;">${row.sec_qty}</td>
+					<td style="padding:5px 10px;border-bottom:1px solid #f0f0f0;">${row.qty}</td>
+					<td style="padding:5px 10px;border-bottom:1px solid #f0f0f0;">${formula_cell}</td>
+					<td style="padding:5px 10px;border-bottom:1px solid #f0f0f0;">${so_cell}</td>
+				</tr>`;
+			}).join("");
+
+			let html = `<div style="overflow:auto;max-height:60vh;">
+				<table style="font-size:12px;border-collapse:collapse;width:100%;">
+					<thead><tr style="background:#f4f5f7;">
+						<th style="padding:6px 10px;text-align:left;">${__("Row")}</th>
+						<th style="padding:6px 10px;text-align:left;">${__("Item No")}</th>
+						<th style="padding:6px 10px;text-align:left;">${__("Material Code")}</th>
+						<th style="padding:6px 10px;text-align:left;">${__("Drawing")}</th>
+						<th style="padding:6px 10px;text-align:left;">${__("Sec Qty (Nos)")}</th>
+						<th style="padding:6px 10px;text-align:left;">${__("Qty (Kg)")}</th>
+						<th style="padding:6px 10px;text-align:left;">${__("Formula Check")}</th>
+						<th style="padding:6px 10px;text-align:left;">${__("Sales Order Check")}</th>
+					</tr></thead>
+					<tbody>${rows_html}</tbody>
+				</table>
+			</div>`;
+
+			let d = new frappe.ui.Dialog({
+				title: __("{0} of {1} row(s) need attention", [issues.length, checked]),
+				size: "extra-large",
+			});
+			d.$body.html(html);
+			d.show();
+		},
+	});
+}
 
 frappe.ui.form.on("Material Planning", {
 	check_stock_btn(frm) {
@@ -703,6 +773,14 @@ frappe.ui.form.on("Material Planning", {
 		frappe.confirm(msg, _run);
 	},
 
+	verify_raw_materials_btn(frm) {
+		if (!(frm.doc.raw_materials || []).length) {
+			frappe.msgprint(__("No raw materials to verify. Click 'Get Raw Materials' first."));
+			return;
+		}
+		_run_verify_raw_materials(frm, {});
+	},
+
 	finalize_mapping_btn(frm) {
 		if (frm.is_dirty()) {
 			frappe.msgprint(__("There is unsaved changes, save it to move items to unavailable item table."));
@@ -712,7 +790,16 @@ frappe.ui.form.on("Material Planning", {
 			frappe.msgprint(__("No items in Material Mapping to finalize."));
 			return;
 		}
-		let unmapped = (frm.doc.material_mapping || []).filter(r => !r.batch);
+		// A row also qualifies for finalizing when it HAS a batch but under-covers
+		// the requirement (Structurals/Plates only, not already reserved) — that
+		// partial mapping's shortfall still needs to move to purchase.
+		let unmapped = (frm.doc.material_mapping || []).filter(function(r) {
+			if (!r.batch) return true;
+			let group = r.batch_parent_item_group || r.parent_item_group || "";
+			return !r.is_reserved && flt(r.sec_qty)
+				&& (r.parent_item_group === "Structurals" || r.parent_item_group === "Plates")
+				&& flt(r.batch_calc_qty) < flt(r.qty);
+		});
 		if (!unmapped.length) {
 			frappe.msgprint(__("No items to move to purchase table, all are mapped."));
 			return;
@@ -734,10 +821,14 @@ frappe.ui.form.on("Material Planning", {
 				});
 				frm.refresh_field("material_mapping");
 
-				// Merge newly-unmapped rows with existing unavailable items (de-duplicate by item_code+bom_no)
+				// Merge newly-unmapped rows with existing unavailable items
+				// (de-duplicate by item_code+bom_no+duno_mark_no — omitting
+				// duno_mark_no here would wrongly collapse the same item's
+				// shortfalls from two different drawings into one row)
 				let existing = (frm.doc.unavailable_items || []).filter(r => r.item_code);
-				let existing_keys = new Set(existing.map(r => `${r.item_code}|${r.bom_no || ""}`));
-				let new_rows = (result.unavailable_items || []).filter(r => !existing_keys.has(`${r.item_code}|${r.bom_no || ""}`));
+				let dedup_key = r => `${r.item_code}|${r.bom_no || ""}|${r.duno_mark_no || ""}`;
+				let existing_keys = new Set(existing.map(dedup_key));
+				let new_rows = (result.unavailable_items || []).filter(r => !existing_keys.has(dedup_key(r)));
 				frm.clear_table("unavailable_items");
 				existing.concat(new_rows).forEach(function(row) {
 					let child = frm.add_child("unavailable_items");
@@ -755,7 +846,10 @@ frappe.ui.form.on("Material Planning", {
 
 				_update_weight_summary(frm);
 
-				frm._finalize_mapping_summary = { mapped, reserved, not_reserved, unavail };
+				frm._finalize_mapping_summary = {
+					mapped, reserved, not_reserved, unavail,
+					split_details: result.split_details || [],
+				};
 				frm.save();
 			},
 		});
@@ -908,10 +1002,10 @@ frappe.ui.form.on("Material Planning", {
 
 					_update_weight_summary(frm);
 
-					frappe.show_alert({
-						message: __("{0} raw material row(s) loaded.", [r.message.length]),
-						indicator: "green",
-					}, 5);
+					_run_verify_raw_materials(frm, {
+						silent_freeze: true,
+						success_message: __("{0} raw material row(s) loaded — Nos and Qty verified OK.", [r.message.length]),
+					});
 					frm.save();
 				},
 			});
@@ -1475,6 +1569,64 @@ function _recalc_batch_qty(frm, cdt, cdn) {
 	frappe.model.set_value(cdt, cdn, "batch_calc_qty", flt(qty, 3));
 }
 
+function _kg_per_nos(group, L, W, T, UW) {
+	L = flt(L); W = flt(W); T = flt(T); UW = flt(UW);
+	if (group === "Structurals" && L && UW) return (L / 1000) * UW;
+	if (group === "Plates" && L && W && T && UW) return (L / 1000) * (W / 1000) * T * UW;
+	if (group === "Nuts and Bolts" && UW) return UW;
+	return 0;
+}
+
+// Preview how much Kg must actually be reserved for rows under "Reserve stock
+// without dimensions" + "Allocate based on Sec Nos". Stock can only be
+// physically transferred in whole Sec Qty (Nos) pieces, so every row sharing
+// the SAME batch is grouped, their required Kg summed, rounded UP to the
+// nearest whole piece as a GROUP, then split back across the rows
+// proportional to each row's own required-Kg share — mirrors the server-side
+// _calc_group_rwd_allocations (rounding per row independently would
+// over-reserve an extra sheet per row instead of one extra sheet per group).
+// Recalculates every row in the group, not just the one that changed, since
+// the group total depends on all of them.
+function _calc_rwd_preview(frm, cdt, cdn) {
+	let row = locals[cdt][cdn];
+	if (!row.reserve_without_dimensions || !row.batch) return;
+
+	if (!row.allocate_based_on_sec_qty) {
+		frappe.model.set_value(cdt, cdn, "batch_sec_qty", 0);
+		frappe.model.set_value(cdt, cdn, "batch_calc_qty", 0);
+		return;
+	}
+
+	let group_rows = (frm.doc.material_mapping || []).filter(function(r) {
+		return r.batch === row.batch && !r.is_reserved
+			&& r.reserve_without_dimensions && r.allocate_based_on_sec_qty
+			&& (r.batch_parent_item_group === "Structurals" || r.batch_parent_item_group === "Plates");
+	});
+	if (!group_rows.length) return;
+
+	let kg_per_nos = _kg_per_nos(row.batch_parent_item_group, row.batch_length, row.batch_width, row.batch_thickness, row.batch_unit_weight);
+	let group_required = group_rows.reduce(function(sum, r) { return sum + flt(r.qty); }, 0);
+
+	if (!kg_per_nos || !group_required) {
+		group_rows.forEach(function(r) {
+			frappe.model.set_value(r.doctype, r.name, "batch_sec_qty", 0);
+			frappe.model.set_value(r.doctype, r.name, "batch_calc_qty", flt(r.qty, 3));
+		});
+		return;
+	}
+
+	let sec_qty_needed = Math.ceil(flt(group_required / kg_per_nos, 9));
+	let group_kg_to_reserve = flt(sec_qty_needed * kg_per_nos, 3);
+
+	group_rows.forEach(function(r) {
+		let share = flt(r.qty) / group_required;
+		let row_kg = flt(share * group_kg_to_reserve, 3);
+		let row_sec = flt(row_kg / kg_per_nos, 3);
+		frappe.model.set_value(r.doctype, r.name, "batch_sec_qty", row_sec);
+		frappe.model.set_value(r.doctype, r.name, "batch_calc_qty", row_kg);
+	});
+}
+
 // Fetch and populate batch stock summary (total / reserved / free) for a mapping row
 function _fetch_batch_stock_summary(frm, cdt, cdn) {
 	let row = locals[cdt][cdn];
@@ -1599,6 +1751,25 @@ frappe.ui.form.on("Material Planning Material Mapping", {
 		_recalc_batch_qty(frm, cdt, cdn);
 		_update_weight_summary(frm);
 	},
+
+	reserve_without_dimensions(frm, cdt, cdn) {
+		let row = locals[cdt][cdn];
+		if (row.reserve_without_dimensions) {
+			frappe.model.set_value(cdt, cdn, "allocate_based_on_sec_qty", 1);
+			// set_value above won't re-fire its own handler if the value was
+			// already 1 (e.g. row default) — calculate directly too.
+			_calc_rwd_preview(frm, cdt, cdn);
+		} else {
+			frappe.model.set_value(cdt, cdn, "batch_sec_qty", 0);
+			frappe.model.set_value(cdt, cdn, "batch_calc_qty", 0);
+		}
+		frm.fields_dict["material_mapping"].grid.refresh_row(cdn);
+	},
+
+	allocate_based_on_sec_qty(frm, cdt, cdn) {
+		_calc_rwd_preview(frm, cdt, cdn);
+		frm.fields_dict["material_mapping"].grid.refresh_row(cdn);
+	},
 });
 
 // Shared helper: build the partial-reservation warning table HTML
@@ -1632,6 +1803,38 @@ function _partial_reservation_html(partial) {
 		</table>`;
 }
 
+// Breakdown table for rows split by finalize_mapping() — an under-covering
+// alternate mapping shrunk to what it can actually fulfil, with the rest
+// moved to Unavailable Items / purchase.
+function _split_details_html(split_details) {
+	if (!split_details || !split_details.length) return "";
+	let lines = split_details.map(function(d) {
+		let covers_cell = d.dropped
+			? `<span style="color:red;font-weight:bold">0 Nos — not usable</span>`
+			: `<span style="color:green;font-weight:bold">${d.usable_nos} Nos (${d.usable_kg} Kg)</span>`;
+		let excess_cell = d.dropped
+			? "—"
+			: (flt(d.excess_kg) > 0 ? `<span style="color:#e65100;font-weight:bold">+${d.excess_kg} Kg</span>` : "0 Kg");
+		return `<tr>
+			<td>${d.idx}</td>
+			<td>${d.item_code}</td>
+			<td>${d.duno_mark_no || ""}</td>
+			<td>${d.alternate}</td>
+			<td>${covers_cell}</td>
+			<td>${excess_cell}</td>
+			<td style="color:red;font-weight:bold">${d.shortfall_nos} Nos (${d.shortfall_kg} Kg)</td>
+		</tr>`;
+	}).join("");
+	return `<p style="margin-top:12px;">${__("Partially-mapped rows — split between what the alternate batch can fulfil and what still needs purchase:")}</p>
+		<table class="table table-bordered table-condensed" style="font-size:12px">
+			<thead><tr>
+				<th>${__("Row")}</th><th>${__("Item")}</th><th>${__("DUNO/Mark No")}</th><th>${__("Alternate")}</th>
+				<th>${__("Covers")}</th><th>${__("Excess (→ Diff in Kg)")}</th><th>${__("Moved to Purchase")}</th>
+			</tr></thead>
+			<tbody>${lines}</tbody>
+		</table>`;
+}
+
 // Reserve / Unreserve toolbar buttons on the Material Mapping grid
 function _add_reservation_buttons(frm) {
 	let grid = frm.fields_dict["material_mapping"] && frm.fields_dict["material_mapping"].grid;
@@ -1646,10 +1849,11 @@ function _add_reservation_buttons(frm) {
 				return;
 			}
 
-			// Validate: all dimensional batch rows must have Sec Qty entered
+			// Validate: all dimensional batch rows must have Sec Qty entered —
+			// unless the row is flagged to reserve stock without dimensions.
 			let missing_sec = (frm.doc.material_mapping || []).filter(function(r) {
 				let group = r.batch_parent_item_group || "";
-				return r.batch && !r.is_reserved
+				return r.batch && !r.is_reserved && !r.reserve_without_dimensions
 					&& (group === "Structurals" || group === "Plates")
 					&& !flt(r.batch_sec_qty);
 			});
@@ -1813,6 +2017,8 @@ const _TABLE_VIEW_CONFIG = {
 			{ fieldname: "batch",             label: "Batch" },
 			{ fieldname: "batch_mapped",      label: "Status" },
 			{ fieldname: "batch_length",      label: "Batch Length" },
+			{ fieldname: "reserve_without_dimensions", label: "Reserve w/o Dimensions" },
+			{ fieldname: "allocate_based_on_sec_qty",  label: "Allocate by Sec Nos" },
 			{ fieldname: "batch_sec_qty",     label: "Batch Sec Qty" },
 			{ fieldname: "batch_calc_qty",    label: "Calc Qty (Kg)" },
 			{ fieldname: "is_reserved",       label: "Reserved" },

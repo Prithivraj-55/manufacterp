@@ -1,0 +1,297 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-07-04 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "tab_details",
+  "naming_series",
+  "status",
+  "posting_date",
+  "column_break_top",
+  "company",
+  "production_plan",
+  "section_source_doc",
+  "subcontracting_order",
+  "column_break_source_doc",
+  "work_order",
+  "section_warehouses",
+  "source_warehouse",
+  "cnc_warehouse",
+  "column_break_warehouses",
+  "excess_return_warehouse",
+  "section_weight_summary",
+  "total_planned_weight_kg",
+  "allocated_weight_kg",
+  "column_break_weight",
+  "transferred_weight_kg",
+  "excess_weight_kg",
+  "tab_drawings",
+  "drawing_items",
+  "tab_raw_materials",
+  "refresh_raw_materials_btn",
+  "raw_materials",
+  "tab_excess_return",
+  "excess_return_items",
+  "excess_return_total_kg",
+  "column_break_excess_return",
+  "excess_return_total_nos"
+ ],
+ "fields": [
+  {
+   "fieldname": "tab_details",
+   "fieldtype": "Tab Break",
+   "label": "Details"
+  },
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "no_copy": 1,
+   "options": "MIP-.YYYY.-",
+   "print_hide": 1,
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "default": "Open",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Open\nIn Progress\nCompleted",
+   "read_only": 1
+  },
+  {
+   "default": "Today",
+   "fieldname": "posting_date",
+   "fieldtype": "Date",
+   "label": "Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_top",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "production_plan",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Production Plan",
+   "options": "Production Plan",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_source_doc",
+   "fieldtype": "Section Break",
+   "label": "Issued Against"
+  },
+  {
+   "description": "The subcontracting order this material issue plan feeds. Filtered to orders raised against the selected Production Plan.",
+   "fieldname": "subcontracting_order",
+   "fieldtype": "Link",
+   "label": "Subcontracting Order",
+   "options": "Subcontracting Order",
+   "unique": 1
+  },
+  {
+   "fieldname": "column_break_source_doc",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "work_order",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Work Order",
+   "options": "Work Order",
+   "unique": 1
+  },
+  {
+   "fieldname": "section_warehouses",
+   "fieldtype": "Section Break",
+   "label": "Warehouses"
+  },
+  {
+   "description": "Warehouse to transfer raw materials FROM.",
+   "fieldname": "source_warehouse",
+   "fieldtype": "Link",
+   "label": "Source Warehouse (RM)",
+   "options": "Warehouse"
+  },
+  {
+   "description": "Staging warehouse for CNC-process items before transfer to supplier/WIP.",
+   "fieldname": "cnc_warehouse",
+   "fieldtype": "Link",
+   "label": "CNC Warehouse",
+   "options": "Warehouse"
+  },
+  {
+   "fieldname": "column_break_warehouses",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Warehouse to receive unconsumed/off-cut material back.",
+   "fieldname": "excess_return_warehouse",
+   "fieldtype": "Link",
+   "label": "Excess/Return Warehouse",
+   "options": "Warehouse"
+  },
+  {
+   "fieldname": "section_weight_summary",
+   "fieldtype": "Section Break",
+   "label": "Weight Summary"
+  },
+  {
+   "description": "Total planned raw-material weight across all drawings on this plan.",
+   "fieldname": "total_planned_weight_kg",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Total Planned Weight (Kg)",
+   "read_only": 1
+  },
+  {
+   "description": "Reserved/mapped batch weight from Material Planning ready to be issued.",
+   "fieldname": "allocated_weight_kg",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Allocated Weight (Kg)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_weight",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Weight actually transferred out so far.",
+   "fieldname": "transferred_weight_kg",
+   "fieldtype": "Float",
+   "label": "Transferred Weight (Kg)",
+   "read_only": 1
+  },
+  {
+   "description": "Over-mapped weight (allocated beyond planned) — the difference expected back as excess/off-cut.",
+   "fieldname": "excess_weight_kg",
+   "fieldtype": "Float",
+   "label": "Excess Weight (Kg)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tab_drawings",
+   "fieldtype": "Tab Break",
+   "label": "Drawings"
+  },
+  {
+   "fieldname": "drawing_items",
+   "fieldtype": "Table",
+   "label": "Drawing Items",
+   "options": "SCO Drawing Item",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tab_raw_materials",
+   "fieldtype": "Tab Break",
+   "label": "Raw Materials"
+  },
+  {
+   "fieldname": "refresh_raw_materials_btn",
+   "fieldtype": "Button",
+   "label": "Refresh Raw Materials"
+  },
+  {
+   "fieldname": "raw_materials",
+   "fieldtype": "Table",
+   "label": "Raw Materials",
+   "options": "Material Issue Plan Raw Material",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tab_excess_return",
+   "fieldtype": "Tab Break",
+   "label": "Excess Material Return"
+  },
+  {
+   "description": "Off-cut / balance material left after cutting the transferred raw material. Enter the items in their new dimensions and Sec Nos — weight (Kg) is auto-calculated.",
+   "fieldname": "excess_return_items",
+   "fieldtype": "Table",
+   "label": "Excess Material Items",
+   "options": "SCO Excess Material Item"
+  },
+  {
+   "fieldname": "excess_return_total_kg",
+   "fieldtype": "Float",
+   "label": "Total Return Weight (Kg)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_excess_return",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "excess_return_total_nos",
+   "fieldtype": "Float",
+   "label": "Total Return Sec Nos",
+   "read_only": 1
+  }
+ ],
+ "is_submittable": 0,
+ "links": [],
+ "modified": "2026-07-04 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Subcontracting Management",
+ "name": "Material Issue Plan",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Manufacturing Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Manufacturing User",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [
+  {"color": "Blue", "style": "Primary", "title": "Open"},
+  {"color": "Orange", "style": "Warning", "title": "In Progress"},
+  {"color": "Green", "style": "Success", "title": "Completed"}
+ ],
+ "state_fieldname": "status",
+ "track_changes": 1
+}

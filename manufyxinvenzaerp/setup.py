@@ -553,6 +553,7 @@ frappe.ui.form.on("Sales Order", {
 		_so_render_file_buttons(frm);
 		_so_render_rm_verify_btn(frm);
 		_so_render_drawing_buttons(frm);
+		_so_render_duno_view_all_btn(frm);
 	},
 	custom_bom_excel_file(frm) {
 		_so_render_file_buttons(frm);
@@ -620,16 +621,24 @@ function _so_render_rm_verify_btn(frm) {
 	$w.empty();
 	if (frm.doc.__islocal || frm.doc.docstatus === 2) return;
 
-	var has_unlocked = (frm.doc.custom_so_raw_materials || []).some(function(r) { return !r.is_locked; });
-	if (!has_unlocked) return;
-
-	var verified = !!frm.doc.custom_raw_materials_verified;
 	var $row = $('<div style="display:flex;align-items:center;gap:10px;padding:4px 0 8px">').appendTo($w);
 
+	var has_unlocked = (frm.doc.custom_so_raw_materials || []).some(function(r) { return !r.is_locked; });
+	var verified = !!frm.doc.custom_raw_materials_verified;
+
+	if (has_unlocked) {
+		$('<button class="btn btn-sm btn-default">')
+			.text(__("Verify Raw Materials"))
+			.on("click", function() { _so_verify_rm(frm); })
+			.appendTo($row);
+	}
+
 	$('<button class="btn btn-sm btn-default">')
-		.text(__("Verify Raw Materials"))
-		.on("click", function() { _so_verify_rm(frm); })
+		.html(frappe.utils.icon("eye", "sm") + "&nbsp;" + __("View All"))
+		.on("click", function() { _so_show_table_popup(frm, "custom_so_raw_materials"); })
 		.appendTo($row);
+
+	if (!has_unlocked) return;
 
 	if (verified) {
 		$('<span style="color:green;font-weight:bold;font-size:13px;">').html("&#10003; " + __("Verified")).appendTo($row);
@@ -830,6 +839,19 @@ function _so_render_drawing_buttons(frm) {
 			}
 		});
 	});
+}
+
+// ── View All button above the Drawing List grid ───────────────────────────
+
+function _so_render_duno_view_all_btn(frm) {
+	var grid = frm.fields_dict["custom_duno_items"] && frm.fields_dict["custom_duno_items"].grid;
+	if (!grid) return;
+	var $top = grid.wrapper.find(".grid-custom-buttons");
+	$top.empty();
+	$('<button class="btn btn-default btn-sm">')
+		.html(frappe.utils.icon("eye", "xs") + " " + __("View All"))
+		.on("click", function() { _so_show_table_popup(frm, "custom_duno_items"); })
+		.appendTo($top);
 }
 
 // ── Action implementations ─────────────────────────────────────────────────
@@ -1085,6 +1107,124 @@ function _so_clear_import(frm) {
 		});
 	});
 }
+
+// ── Column definitions for each table's View All popup ────────────────────
+
+const _SO_TABLE_VIEW_CONFIG = {
+	custom_duno_items: {
+		title: "Drawing List",
+		filters: [
+			{ fieldname: "duno_mark_no",   label: "Filter DUNO/Mark No…" },
+			{ fieldname: "drawing_number", label: "Filter Cust Drawing Number…" },
+		],
+		cols: [
+			{ fieldname: "assembly_group",      label: "Assembly Group" },
+			{ fieldname: "item",                label: "FG Item" },
+			{ fieldname: "item_name",           label: "Item Name" },
+			{ fieldname: "duno_mark_no",        label: "DUNO/Mark No" },
+			{ fieldname: "drawing_number",      label: "Cust Drawing Number" },
+			{ fieldname: "total_quantity",      label: "Total Quantity" },
+			{ fieldname: "total_weight",        label: "Customer Provided Weight (Kg)" },
+			{ fieldname: "difference_kg",       label: "Difference Kg" },
+			{ fieldname: "drawing",             label: "Drawing" },
+			{ fieldname: "create_drawing",      label: "Create Drawing" },
+			{ fieldname: "submit_drawing",      label: "Submit" },
+			{ fieldname: "mark_final_revision", label: "Final Revision" },
+			{ fieldname: "create_bom",          label: "Create BOM" },
+		],
+	},
+	custom_so_raw_materials: {
+		title: "Raw Materials",
+		filters: [
+			{ fieldname: "customer_drawing_number", label: "Filter Drawing No…" },
+			{ fieldname: "material_code",           label: "Filter Material Code…" },
+		],
+		cols: [
+			{ fieldname: "customer_drawing_number", label: "Drawing No" },
+			{ fieldname: "item_no",                 label: "Item No" },
+			{ fieldname: "material_code",           label: "Material Code" },
+			{ fieldname: "material_name",           label: "Material Name" },
+			{ fieldname: "item_group",               label: "Item Group" },
+			{ fieldname: "parent_item_group",         label: "Parent Item Group" },
+			{ fieldname: "grade",                   label: "Grade" },
+			{ fieldname: "thickness",               label: "Thickness" },
+			{ fieldname: "width",                   label: "Width" },
+			{ fieldname: "length",                  label: "Length" },
+			{ fieldname: "sec_qty",                 label: "Reqd Sec Qty" },
+			{ fieldname: "sec_uom",                 label: "Sec UOM" },
+			{ fieldname: "total_sec_qty",            label: "Total Sec Qty" },
+			{ fieldname: "unit_weight",              label: "Unit Weight" },
+			{ fieldname: "qty",                     label: "Weight (Primary UOM)" },
+			{ fieldname: "uom",                     label: "UOM" },
+			{ fieldname: "total_weight",             label: "Total Weight" },
+			{ fieldname: "is_locked",               label: "Locked" },
+		],
+	},
+};
+
+// Generic View All popup — read-only, all configured columns, scrollable
+function _so_show_table_popup(frm, fieldname) {
+	var cfg = _SO_TABLE_VIEW_CONFIG[fieldname];
+	if (!cfg) return;
+	var rows = frm.doc[fieldname] || [];
+	if (!rows.length) {
+		frappe.msgprint(__("No data to display."));
+		return;
+	}
+
+	var th_style = 'white-space:nowrap;padding:6px 10px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;';
+	var thead = '<tr>' + cfg.cols.map(function(c) {
+		return '<th style="' + th_style + '">' + __(c.label) + '</th>';
+	}).join('') + '</tr>';
+
+	function _render_tbody(filtered_rows) {
+		return filtered_rows.map(function(row, idx) {
+			var cells = cfg.cols.map(function(c) {
+				var val = row[c.fieldname];
+				if (val === null || val === undefined) val = '';
+				return '<td style="padding:5px 10px;white-space:nowrap;border-bottom:1px solid #f0f0f0;">'
+					+ frappe.utils.escape_html(String(val)) + '</td>';
+			}).join('');
+			var bg = idx % 2 !== 0 ? 'background:#fafbfc;' : '';
+			return '<tr style="' + bg + '">' + cells + '</tr>';
+		}).join('');
+	}
+
+	var filter_bar = '<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">'
+		+ cfg.filters.map(function(f, i) {
+			return '<input id="_so_vw_f' + i + '" type="text" placeholder="' + __(f.label) + '"'
+				+ ' style="border:1px solid #d1d8dd;border-radius:4px;padding:4px 8px;font-size:12px;width:200px;">';
+		}).join('')
+		+ '<span id="_so_vw_count" style="font-size:12px;color:#6c757d;"></span></div>';
+
+	var table_html = '<div style="overflow:auto;max-height:65vh;">'
+		+ '<table style="font-size:12px;border-collapse:collapse;width:100%;" id="_so_vw_table">'
+		+ '<thead style="position:sticky;top:0;z-index:1;">' + thead + '</thead>'
+		+ '<tbody id="_so_vw_tbody">' + _render_tbody(rows) + '</tbody>'
+		+ '</table></div>';
+
+	var d = new frappe.ui.Dialog({
+		title: __(cfg.title + " — {0} item(s)", [rows.length]),
+		size: "extra-large",
+	});
+	d.$body.html(filter_bar + table_html);
+
+	function _apply_filter() {
+		var queries = cfg.filters.map(function(f, i) {
+			return { fieldname: f.fieldname, q: (d.$body.find("#_so_vw_f" + i).val() || "").toLowerCase() };
+		});
+		var filtered = rows.filter(function(r) {
+			return queries.every(function(qf) {
+				return !qf.q || String(r[qf.fieldname] || "").toLowerCase().includes(qf.q);
+			});
+		});
+		d.$body.find("#_so_vw_tbody").html(_render_tbody(filtered));
+		d.$body.find("#_so_vw_count").text(filtered.length + " / " + rows.length + " " + __("rows"));
+	}
+	cfg.filters.forEach(function(f, i) { d.$body.find("#_so_vw_f" + i).on("input", _apply_filter); });
+	_apply_filter();
+	d.show();
+}
 """.strip()
 
 
@@ -1119,9 +1259,11 @@ def after_install():
     create_sco_ops_client_script()
     create_soe_client_script()
     create_work_order_custom_fields()
+    layout_work_order_fields()
     create_wo_client_script()
     create_wo_ops_client_script()
     create_job_card_drawing_fields()
+    layout_job_card_fields()
     create_jc_drawing_client_script()
     create_material_planning_auto_purchase_fields()
     create_manufacturing_settings_custom_fields()
@@ -1162,9 +1304,11 @@ def after_migrate():
     create_sco_ops_client_script()
     create_soe_client_script()
     create_work_order_custom_fields()
+    layout_work_order_fields()
     create_wo_client_script()
     create_wo_ops_client_script()
     create_job_card_drawing_fields()
+    layout_job_card_fields()
     create_jc_drawing_client_script()
     create_material_planning_auto_purchase_fields()
     create_manufacturing_settings_custom_fields()
@@ -1360,6 +1504,36 @@ def create_purchase_order_custom_fields():
                 "insert_after": "custom_length",
                 "in_list_view": 1,
             },
+            {
+                "fieldname": "custom_drawing",
+                "label": "Drawing",
+                "fieldtype": "Link",
+                "options": "Drawing",
+                "insert_after": "custom_width",
+                "in_list_view": 0,
+            },
+            {
+                "fieldname": "custom_duno_mark_no",
+                "label": "DUNO/Mark No",
+                "fieldtype": "Data",
+                "insert_after": "custom_drawing",
+                "in_list_view": 0,
+            },
+            {
+                "fieldname": "custom_customer_drawing_number",
+                "label": "Customer Drawing Number",
+                "fieldtype": "Data",
+                "insert_after": "custom_duno_mark_no",
+                "in_list_view": 0,
+            },
+            {
+                "fieldname": "custom_sales_order",
+                "label": "Sales Order",
+                "fieldtype": "Link",
+                "options": "Sales Order",
+                "insert_after": "custom_customer_drawing_number",
+                "in_list_view": 0,
+            },
         ],
     }
     create_custom_fields(custom_fields, update=True)
@@ -1468,6 +1642,36 @@ def create_purchase_receipt_custom_fields():
                 "depends_on": "eval:doc.custom_parent_item_group === 'Plates'",
                 "insert_after": "custom_length",
                 "in_list_view": 1,
+            },
+            {
+                "fieldname": "custom_drawing",
+                "label": "Drawing",
+                "fieldtype": "Link",
+                "options": "Drawing",
+                "insert_after": "custom_width",
+                "in_list_view": 0,
+            },
+            {
+                "fieldname": "custom_duno_mark_no",
+                "label": "DUNO/Mark No",
+                "fieldtype": "Data",
+                "insert_after": "custom_drawing",
+                "in_list_view": 0,
+            },
+            {
+                "fieldname": "custom_customer_drawing_number",
+                "label": "Customer Drawing Number",
+                "fieldtype": "Data",
+                "insert_after": "custom_duno_mark_no",
+                "in_list_view": 0,
+            },
+            {
+                "fieldname": "custom_sales_order",
+                "label": "Sales Order",
+                "fieldtype": "Link",
+                "options": "Sales Order",
+                "insert_after": "custom_customer_drawing_number",
+                "in_list_view": 0,
             },
         ],
     }
@@ -1639,6 +1843,36 @@ def create_material_request_custom_fields():
                 "depends_on": "eval:doc.custom_parent_item_group === 'Plates'",
                 "insert_after": "custom_length",
                 "in_list_view": 1,
+            },
+            {
+                "fieldname": "custom_drawing",
+                "label": "Drawing",
+                "fieldtype": "Link",
+                "options": "Drawing",
+                "insert_after": "custom_width",
+                "in_list_view": 0,
+            },
+            {
+                "fieldname": "custom_duno_mark_no",
+                "label": "DUNO/Mark No",
+                "fieldtype": "Data",
+                "insert_after": "custom_drawing",
+                "in_list_view": 0,
+            },
+            {
+                "fieldname": "custom_customer_drawing_number",
+                "label": "Customer Drawing Number",
+                "fieldtype": "Data",
+                "insert_after": "custom_duno_mark_no",
+                "in_list_view": 0,
+            },
+            {
+                "fieldname": "custom_sales_order",
+                "label": "Sales Order",
+                "fieldtype": "Link",
+                "options": "Sales Order",
+                "insert_after": "custom_customer_drawing_number",
+                "in_list_view": 0,
             },
         ],
     }
@@ -2714,10 +2948,21 @@ def create_stock_entry_custom_fields():
                                    "triggering ERPNext's own work_order SE validation logic.",
                 },
                 {
+                    "fieldname": "custom_mip_ref",
+                    "fieldtype": "Link",
+                    "label": "Material Issue Plan",
+                    "options": "Material Issue Plan",
+                    "read_only": 1,
+                    "insert_after": "custom_wo_ref",
+                    "description": "Set on transfer/CNC/excess-return entries created from a "
+                                   "Material Issue Plan, alongside custom_sco_ref/custom_wo_ref "
+                                   "so existing weight rollups keep working unchanged.",
+                },
+                {
                     "fieldname": "custom_mrs_number",
                     "fieldtype": "Data",
                     "label": "MRS Number",
-                    "insert_after": "custom_wo_ref",
+                    "insert_after": "custom_mip_ref",
                     "depends_on": "eval:doc.subcontracting_order",
                 },
             ],
@@ -2787,38 +3032,29 @@ def create_sco_custom_fields():
                     "insert_after": "custom_work_order",
                 },
                 {
-                    "fieldname": "custom_source_warehouse",
+                    "fieldname": "custom_supervisor",
                     "fieldtype": "Link",
-                    "label": "Source Warehouse (RM)",
-                    "options": "Warehouse",
-                    "reqd": 1,
+                    "label": "Supervisor Name",
+                    "options": "Employee",
                     "insert_after": "custom_all_ops_complete",
-                    "description": "Warehouse to transfer raw materials FROM to the supplier",
                 },
                 {
-                    "fieldname": "custom_return_warehouse",
-                    "fieldtype": "Link",
-                    "label": "Finished Goods/Return Warehouse",
-                    "options": "Warehouse",
-                    "insert_after": "custom_source_warehouse",
-                    "description": "Warehouse to receive unconsumed materials back from supplier",
-                    "allow_on_submit": 1,
+                    "fieldname": "custom_supervisor_mobile",
+                    "fieldtype": "Data",
+                    "label": "Mobile",
+                    "fetch_from": "custom_supervisor.cell_number",
+                    "read_only": 1,
+                    "insert_after": "custom_supervisor",
                 },
                 {
-                    "fieldname": "custom_cnc_warehouse",
-                    "fieldtype": "Link",
-                    "label": "CNC Warehouse",
-                    "options": "Warehouse",
-                    "insert_after": "custom_return_warehouse",
-                    "description": "Staging warehouse for CNC-process items before transfer to supplier",
-                    "allow_on_submit": 1,
-                },
-                {
+                    # Warehouse fields moved to Material Issue Plan; the actual
+                    # value used to compute this now comes from there (see
+                    # subcontracting.py: _get_sco_transfer_warehouses).
                     "fieldname": "custom_cnc_transferred_weight_kg",
                     "fieldtype": "Float",
                     "label": "CNC Warehouse Qty (Kg)",
                     "read_only": 1,
-                    "insert_after": "custom_cnc_warehouse",
+                    "insert_after": "custom_supervisor_mobile",
                     "description": "Weight currently sitting in CNC warehouse awaiting transfer to supplier",
                     "allow_on_submit": 1,
                 },
@@ -2826,7 +3062,7 @@ def create_sco_custom_fields():
                     "fieldname": "custom_section_drawings",
                     "fieldtype": "Section Break",
                     "label": "Drawing Details",
-                    "insert_after": "custom_return_warehouse",
+                    "insert_after": "custom_cnc_transferred_weight_kg",
                 },
                 {
                     "fieldname": "custom_drawing_items",
@@ -2889,53 +3125,6 @@ def create_sco_custom_fields():
                     "description": "Weight actually transferred to supplier warehouse (updated on SE submit)",
                 },
                 {
-                    "fieldname": "custom_tab_excess_return",
-                    "fieldtype": "Tab Break",
-                    "label": "Excess Material Return",
-                    # Anchored at the end of the form (just before the standard Connections
-                    # tab) so the Tab Break does not pull any standard fields into it.
-                    "insert_after": "letter_head",
-                },
-                {
-                    "fieldname": "custom_section_excess_return",
-                    "fieldtype": "Section Break",
-                    "label": "",
-                    "insert_after": "custom_tab_excess_return",
-                    "description": "Off-cut / balance material left after the supplier cut the transferred raw material. "
-                                   "Enter the items in their new dimensions and Sec Nos — weight (Kg) is auto-calculated. "
-                                   "Then use 'Return Excess Entry' to receive them into inventory as fresh stock.",
-                },
-                {
-                    "fieldname": "custom_excess_actions_html",
-                    "fieldtype": "HTML",
-                    "label": "",
-                    "insert_after": "custom_section_excess_return",
-                },
-                {
-                    "fieldname": "custom_excess_return_items",
-                    "fieldtype": "Table",
-                    "label": "Excess Material Items",
-                    "options": "SCO Excess Material Item",
-                    "allow_on_submit": 1,
-                    "insert_after": "custom_excess_actions_html",
-                },
-                {
-                    "fieldname": "custom_excess_return_total_kg",
-                    "fieldtype": "Float",
-                    "label": "Total Return Weight (Kg)",
-                    "read_only": 1,
-                    "allow_on_submit": 1,
-                    "insert_after": "custom_excess_return_items",
-                },
-                {
-                    "fieldname": "custom_excess_return_total_nos",
-                    "fieldtype": "Float",
-                    "label": "Total Return Sec Nos",
-                    "read_only": 1,
-                    "allow_on_submit": 1,
-                    "insert_after": "custom_excess_return_total_kg",
-                },
-                {
                     "fieldname": "custom_operations_tab",
                     "fieldtype": "Tab Break",
                     "label": "Operations",
@@ -2969,102 +3158,19 @@ frappe.ui.form.on("Subcontracting Order", {
 
 \t\tif (frm.doc.docstatus === 1 && frm.doc.custom_production_plan) {
 
-\t\t\t// Option 1 — Transfer ALL pending supplier items without a selection popup.
-\t\t\tfrm.add_custom_button(__("All to Supplier Warehouse"), function() {
-\t\t\t\tif (!frm.doc.custom_source_warehouse) {
-\t\t\t\t\tfrappe.msgprint(__("Please set the Source Warehouse (RM) field first."));
-\t\t\t\t\treturn;
-\t\t\t\t}
+\t\t\tfrm.add_custom_button(__("Material Issue Plan"), function() {
 \t\t\t\tfrappe.call({
-\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.get_sco_pending_items",
+\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.create_from_subcontracting_order",
 \t\t\t\t\targs: { sco_name: frm.doc.name },
 \t\t\t\t\tfreeze: true,
-\t\t\t\t\tfreeze_message: __("Checking pending items…"),
+\t\t\t\t\tfreeze_message: __("Creating Material Issue Plan…"),
 \t\t\t\t\tcallback: function(r) {
-\t\t\t\t\t\tvar pending = (r.message || []).filter(function(d) { return !d.cnc_process; });
-\t\t\t\t\t\tif (!pending.length) {
-\t\t\t\t\t\t\tfrappe.msgprint({ title: __("No Pending Items"), message: __("All supplier materials have already been transferred."), indicator: "orange" });
-\t\t\t\t\t\t\treturn;
+\t\t\t\t\t\tif (r.message) {
+\t\t\t\t\t\t\tfrappe.set_route("Form", "Material Issue Plan", r.message);
 \t\t\t\t\t\t}
-\t\t\t\t\t\tfrappe.confirm(
-\t\t\t\t\t\t\t__("Pending items will be transferred to supplier warehouse. Continue?"),
-\t\t\t\t\t\t\tfunction() {
-\t\t\t\t\t\t\t\tfrappe.call({
-\t\t\t\t\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_partial_transfer",
-\t\t\t\t\t\t\t\t\targs: { sco_name: frm.doc.name, selected_items_json: JSON.stringify(pending), transfer_type: "supplier" },
-\t\t\t\t\t\t\t\t\tfreeze: true,
-\t\t\t\t\t\t\t\t\tfreeze_message: __("Creating transfer entry…"),
-\t\t\t\t\t\t\t\t\tcallback: function(r2) {
-\t\t\t\t\t\t\t\t\t\tif (r2.message) {
-\t\t\t\t\t\t\t\t\t\t\tfrappe.msgprint({ title: __("Stock Entry Created"), message: __("Transfer entry: ") + '<a href="/app/stock-entry/' + encodeURIComponent(r2.message) + '">' + r2.message + "</a>", indicator: "green" });
-\t\t\t\t\t\t\t\t\t\t\tfrm.reload_doc();
-\t\t\t\t\t\t\t\t\t\t}
-\t\t\t\t\t\t\t\t\t}
-\t\t\t\t\t\t\t\t});
-\t\t\t\t\t\t\t}
-\t\t\t\t\t\t);
 \t\t\t\t\t}
 \t\t\t\t});
-\t\t\t}, __("Transfer"));
-
-\t\t\t// Option 2 — Select individual CNC items (shown only if CNC warehouse is set)
-\t\t\tif (frm.doc.custom_cnc_warehouse) {
-\t\t\t\tfrm.add_custom_button(__("To CNC Warehouse"), function() {
-\t\t\t\t\tif (!frm.doc.custom_source_warehouse) {
-\t\t\t\t\t\tfrappe.msgprint(__("Please set the Source Warehouse (RM) field first."));
-\t\t\t\t\t\treturn;
-\t\t\t\t\t}
-\t\t\t\t\tfrappe.call({
-\t\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.get_sco_pending_items",
-\t\t\t\t\t\targs: { sco_name: frm.doc.name },
-\t\t\t\t\t\tfreeze: true,
-\t\t\t\t\t\tfreeze_message: __("Loading materials…"),
-\t\t\t\t\t\tcallback: function(r) { show_transfer_popup(frm, r.message || [], "cnc"); }
-\t\t\t\t\t});
-\t\t\t\t}, __("Transfer"));
-\t\t\t}
-
-\t\t\t// Option 3 — Select individual items for partial transfer to supplier warehouse
-\t\t\tfrm.add_custom_button(__("Partial to Supplier Warehouse"), function() {
-\t\t\t\tif (!frm.doc.custom_source_warehouse) {
-\t\t\t\t\tfrappe.msgprint(__("Please set the Source Warehouse (RM) field first."));
-\t\t\t\t\treturn;
-\t\t\t\t}
-\t\t\t\tfrappe.call({
-\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.get_sco_pending_items",
-\t\t\t\t\targs: { sco_name: frm.doc.name },
-\t\t\t\t\tfreeze: true,
-\t\t\t\t\tfreeze_message: __("Loading materials…"),
-\t\t\t\t\tcallback: function(r) { show_transfer_popup(frm, r.message || [], "supplier"); }
-\t\t\t\t});
-\t\t\t}, __("Transfer"));
-
-\t\t\t// CNC to Supplier: visible once CNC materials are sitting in the CNC warehouse
-\t\t\tif (frm.doc.custom_cnc_transferred_weight_kg) {
-\t\t\t\tfrm.add_custom_button(__("CNC to Supplier"), function() {
-\t\t\t\t\tif (!frm.doc.custom_cnc_warehouse) {
-\t\t\t\t\t\tfrappe.msgprint(__("No CNC Warehouse set on this Subcontracting Order."));
-\t\t\t\t\t\treturn;
-\t\t\t\t\t}
-\t\t\t\t\tfrappe.call({
-\t\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_cnc_to_supplier_entry",
-\t\t\t\t\t\targs: { sco_name: frm.doc.name },
-\t\t\t\t\t\tfreeze: true,
-\t\t\t\t\t\tfreeze_message: __("Creating CNC to Supplier Entry…"),
-\t\t\t\t\t\tcallback: function(r) {
-\t\t\t\t\t\t\tif (r.message) {
-\t\t\t\t\t\t\t\tfrappe.msgprint({
-\t\t\t\t\t\t\t\t\ttitle: __("CNC Transfer Entry Created"),
-\t\t\t\t\t\t\t\t\tmessage: __("Review and submit the stock entry: ") +
-\t\t\t\t\t\t\t\t\t\t'<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>",
-\t\t\t\t\t\t\t\t\tindicator: "green"
-\t\t\t\t\t\t\t\t});
-\t\t\t\t\t\t\t\tfrm.reload_doc();
-\t\t\t\t\t\t\t}
-\t\t\t\t\t\t}
-\t\t\t\t\t});
-\t\t\t\t}, __("Transfer"));
-\t\t\t}
+\t\t\t}, __("Create"));
 
 \t\t\tif (frm.doc.custom_all_ops_complete) {
 \t\t\t\t// Raw materials fully supplied → produce the finished goods. Creates a
@@ -3115,222 +3221,9 @@ frappe.ui.form.on("Subcontracting Order", {
 \t\t\t}
 
 \t\t}
-\t\t_render_excess_action_btn(frm);
 \t},
-
-\tcustom_excess_return_items_remove(frm) {
-\t\t_sco_excess_totals(frm);
-\t}
 });
 
-function show_transfer_popup(frm, pending_items, transfer_type) {
-\tvar items = pending_items.filter(function(d) { return transfer_type === "cnc" ? d.cnc_process : !d.cnc_process; });
-\tif (!items.length) {
-\t\tfrappe.msgprint({
-\t\t\ttitle: __("No Pending Items"),
-\t\t\tmessage: transfer_type === "cnc" ? __("No pending CNC items to transfer.") : __("No pending supplier items to transfer."),
-\t\t\tindicator: "orange"
-\t\t});
-\treturn;
-\t}
-
-\tvar title = transfer_type === "cnc" ? __("Select Materials — To CNC Warehouse") : __("Select Materials — Partial to Supplier Warehouse");
-\tvar $filter = $("<input class='form-control form-control-sm' placeholder='" + __("Filter items…") + "' style='margin-bottom:8px'>");
-\tvar $actions = $("<div style='margin-bottom:8px'>"
-\t\t+ "<button class='btn btn-xs btn-default sco-sel-all'>" + __("Select All") + "</button> "
-\t\t+ "<button class='btn btn-xs btn-default sco-desel-all'>" + __("Deselect All") + "</button>"
-\t\t+ "</div>");
-\tvar $table = $("<table class='table table-bordered table-condensed' style='margin-bottom:0'>"
-\t\t+ "<thead><tr>"
-\t\t+ "<th style='width:32px'></th>"
-\t\t+ "<th>" + __("Item Code") + "</th>"
-\t\t+ "<th>" + __("Item Name") + "</th>"
-\t\t+ "<th>" + __("Batch No") + "</th>"
-\t\t+ "<th class='text-right'>" + __("Qty (Kg)") + "</th>"
-\t\t+ "<th class='text-right'>" + __("Sec Qty (Nos)") + "</th>"
-\t\t+ "</tr></thead><tbody></tbody></table>");
-
-\tvar $tbody = $table.find("tbody");
-\titems.forEach(function(d, idx) {
-\t\t$tbody.append(
-\t\t\t"<tr data-idx='" + idx + "'>" +
-\t\t\t"<td class='text-center'><input type='checkbox' class='sco-item-chk' checked></td>" +
-\t\t\t"<td>" + frappe.utils.escape_html(d.item_code) + "</td>" +
-\t\t\t"<td>" + frappe.utils.escape_html(d.item_name || "") + "</td>" +
-\t\t\t"<td>" + frappe.utils.escape_html(d.batch_no || "") + "</td>" +
-\t\t\t"<td class='text-right'>" + format_number(flt(d.qty), null, 3) + "</td>" +
-\t\t\t"<td class='text-right'>" + format_number(flt(d.custom_sec_qty), null, 3) + "</td>" +
-\t\t\t"</tr>"
-\t\t);
-\t});
-
-\t$filter.on("input", function() {
-\t\tvar q = $(this).val().toLowerCase();
-\t\t$tbody.find("tr").each(function() {
-\t\t\t$(this).toggle($(this).text().toLowerCase().indexOf(q) >= 0);
-\t\t});
-\t});
-\t$actions.find(".sco-sel-all").on("click", function() { $tbody.find(".sco-item-chk").prop("checked", true); });
-\t$actions.find(".sco-desel-all").on("click", function() { $tbody.find(".sco-item-chk").prop("checked", false); });
-
-\tvar $content = $("<div>").append($filter, $actions, $table);
-
-\tvar dlg = new frappe.ui.Dialog({
-\t\ttitle: title,
-\t\tsize: "extra-large",
-\t\tfields: [{ fieldtype: "HTML", fieldname: "content" }],
-\t\tprimary_action_label: __("Transfer Selected"),
-\t\tprimary_action: function() {
-\t\t\tvar selected = [];
-\t\t\t$tbody.find("tr").each(function() {
-\t\t\t\tif ($(this).find(".sco-item-chk").prop("checked")) {
-\t\t\t\t\tselected.push(items[parseInt($(this).data("idx"), 10)]);
-\t\t\t\t}
-\t\t\t});
-\t\t\tif (!selected.length) {
-\t\t\t\tfrappe.msgprint(__("Please select at least one item."));
-\t\t\t\treturn;
-\t\t\t}
-\t\t\tdlg.hide();
-\t\t\tfrappe.call({
-\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_partial_transfer",
-\t\t\t\targs: { sco_name: frm.doc.name, selected_items_json: JSON.stringify(selected), transfer_type: transfer_type },
-\t\t\t\tfreeze: true,
-\t\t\t\tfreeze_message: __("Creating transfer entry…"),
-\t\t\t\tcallback: function(r) {
-\t\t\t\t\tif (r.message) {
-\t\t\t\t\t\tfrappe.msgprint({ title: __("Stock Entry Created"), message: __("Transfer entry: ") + '<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>", indicator: "green" });
-\t\t\t\t\t\tfrm.reload_doc();
-\t\t\t\t\t}
-\t\t\t\t}
-\t\t\t});
-\t\t}
-\t});
-\tdlg.fields_dict.content.$wrapper.html($content);
-\tdlg.show();
-}
-
-function _render_excess_action_btn(frm) {
-\tvar field = frm.fields_dict["custom_excess_actions_html"];
-\tif (!field) return;
-\tvar $w = field.$wrapper;
-\tif (frm.doc.docstatus !== 1) {
-\t\t$w.html("");
-\t\treturn;
-\t}
-\t$w.html(
-\t\t"<div style='margin:8px 0'>"
-\t\t+ "<button class='btn btn-sm btn-default sco-return-excess-btn'>Return Excess Entry</button>"
-\t\t+ "</div>"
-\t);
-\t$w.find(".sco-return-excess-btn").on("click", function() {
-\t\tif (!frm.doc.custom_return_warehouse) {
-\t\t\tfrappe.msgprint(__("Please set the Finished Goods/Return Warehouse field first."));
-\t\t\treturn;
-\t\t}
-\t\tif (frm.is_dirty()) {
-\t\t\tfrappe.msgprint(__("Please save the Excess Material Return table before receiving."));
-\t\t\treturn;
-\t\t}
-\t\tif (!(frm.doc.custom_excess_return_items || []).length) {
-\t\t\tfrappe.msgprint(__("Add the off-cut items to the Excess Material Return table first."));
-\t\t\treturn;
-\t\t}
-\t\tfrappe.call({
-\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_return_stock_entry",
-\t\t\targs: { sco_name: frm.doc.name, target_warehouse: frm.doc.custom_return_warehouse },
-\t\t\tfreeze: true,
-\t\t\tcallback: function(r) {
-\t\t\t\tif (r.message) {
-\t\t\t\t\tfrappe.msgprint({
-\t\t\t\t\t\ttitle: __("Return Excess Entry Created"),
-\t\t\t\t\t\tmessage: __("Return Stock Entry: ")
-\t\t\t\t\t\t\t+ '<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">'
-\t\t\t\t\t\t\t+ r.message + "</a>",
-\t\t\t\t\t\tindicator: "green"
-\t\t\t\t\t});
-\t\t\t\t\tfrm.reload_doc();
-\t\t\t\t}
-\t\t\t}
-\t\t});
-\t});
-}
-
-frappe.ui.form.on("SCO Excess Material Item", {
-\tform_render(frm, cdt, cdn) {
-\t\tvar row = locals[cdt][cdn];
-\t\tif (!row.stock_entry_created) return;
-\t\tvar grid_row = frm.fields_dict.custom_excess_return_items.grid.get_row(cdn);
-\t\tif (!grid_row) return;
-\t\t["item_code","length","width","thickness","sec_qty","qty"].forEach(function(f) {
-\t\t\tvar fld = grid_row.get_field(f);
-\t\t\tif (fld) { fld.df.read_only = 1; fld.refresh(); }
-\t\t});
-\t},
-\titem_code(frm, cdt, cdn) {
-\t\tvar row = locals[cdt][cdn];
-\t\tif (row.stock_entry_created) {
-\t\t\tfrappe.msgprint(__("This row is locked — Stock Entry already created."));
-\t\t\treturn;
-\t\t}
-\t\tif (!row.item_code) return;
-\t\tfrappe.db.get_value("Item", row.item_code,
-\t\t\t["custom_parent_item_group", "custom_unit_weight", "custom_secondary_uom", "stock_uom"],
-\t\t\tfunction(v) {
-\t\t\t\tif (!v) return;
-\t\t\t\tfrappe.model.set_value(cdt, cdn, "parent_item_group", v.custom_parent_item_group || "");
-\t\t\t\tfrappe.model.set_value(cdt, cdn, "unit_weight", v.custom_unit_weight || 0);
-\t\t\t\tfrappe.model.set_value(cdt, cdn, "sec_uom", v.custom_secondary_uom || "");
-\t\t\t\tfrappe.model.set_value(cdt, cdn, "uom", v.stock_uom || "");
-\t\t\t});
-\t},
-\tlength(frm, cdt, cdn) {
-\t\tif (locals[cdt][cdn].stock_entry_created) return;
-\t\t_sco_excess_calc(frm, cdt, cdn);
-\t},
-\twidth(frm, cdt, cdn) {
-\t\tif (locals[cdt][cdn].stock_entry_created) return;
-\t\t_sco_excess_calc(frm, cdt, cdn);
-\t},
-\tthickness(frm, cdt, cdn) {
-\t\tif (locals[cdt][cdn].stock_entry_created) return;
-\t\t_sco_excess_calc(frm, cdt, cdn);
-\t},
-\tsec_qty(frm, cdt, cdn) {
-\t\tif (locals[cdt][cdn].stock_entry_created) return;
-\t\t_sco_excess_calc(frm, cdt, cdn);
-\t},
-\tqty(frm)                 { _sco_excess_totals(frm); }
-});
-
-function _sco_excess_calc(frm, cdt, cdn) {
-\tvar row = locals[cdt][cdn];
-\tvar g = row.parent_item_group;
-\tvar qty = null;
-\tif (g === "Structurals") {
-\t\tif (row.length && row.unit_weight && row.sec_qty) {
-\t\t\tqty = (row.length / 1000) * row.unit_weight * row.sec_qty;
-\t\t}
-\t} else if (g === "Plates") {
-\t\tif (row.length && row.width && row.thickness && row.unit_weight && row.sec_qty) {
-\t\t\tqty = (row.length / 1000) * (row.width / 1000) * row.thickness * row.unit_weight * row.sec_qty;
-\t\t}
-\t}
-\tif (qty !== null) {
-\t\tfrappe.model.set_value(cdt, cdn, "qty", flt(qty, 3));
-\t}
-\t_sco_excess_totals(frm);
-}
-
-function _sco_excess_totals(frm) {
-\tvar tkg = 0, tnos = 0;
-\t(frm.doc.custom_excess_return_items || []).forEach(function(r) {
-\t\ttkg  += flt(r.qty);
-\t\ttnos += flt(r.sec_qty);
-\t});
-\tfrm.set_value("custom_excess_return_total_kg",  flt(tkg, 3));
-\tfrm.set_value("custom_excess_return_total_nos", flt(tnos, 3));
-}
 """.strip()
 
 
@@ -3711,6 +3604,11 @@ def create_work_order_custom_fields():
                     "description": "Weight actually transferred to WIP warehouse (updated on SE submit)",
                 },
                 {
+                    "fieldname": "custom_weight_summary_column_break",
+                    "fieldtype": "Column Break",
+                    "insert_after": "custom_transferred_weight_kg",
+                },
+                {
                     "fieldname": "custom_tab_excess_return",
                     "fieldtype": "Tab Break",
                     "label": "Excess Material Return",
@@ -3771,6 +3669,104 @@ def create_work_order_custom_fields():
         },
         update=True,
     )
+
+
+def layout_work_order_fields():
+    """Hide/un-mandate noisy core fields and consolidate the custom drawing/
+    weight/warehouse fields into the "Production Item" tab so the Work Order
+    form reads as: item info -> warehouses -> drawing items -> weight summary,
+    with the core Required Items grid, serial/batch section, and a handful of
+    always-irrelevant fields (Stock UOM, Material Request, 4 flow checkboxes)
+    hidden out of the way.
+    """
+    for args in [
+        {"fieldname": "production_item", "property": "reqd", "value": 0},
+        {"fieldname": "bom_no", "property": "reqd", "value": 0},
+        {"fieldname": "qty", "property": "reqd", "value": 0},
+        {"fieldname": "source_warehouse", "property": "reqd", "value": 0},
+        {"fieldname": "source_warehouse", "property": "hidden", "value": 1},
+        {"fieldname": "production_item", "property": "hidden", "value": 1},
+        {"fieldname": "item_name", "property": "hidden", "value": 1},
+        {"fieldname": "bom_no", "property": "hidden", "value": 1},
+        {"fieldname": "sales_order", "property": "hidden", "value": 1},
+        {"fieldname": "qty", "property": "hidden", "value": 1},
+        {"fieldname": "required_items", "property": "hidden", "value": 1},
+        {"fieldname": "required_items_section", "property": "hidden", "value": 1},
+        {"fieldname": "allow_alternative_item", "property": "hidden", "value": 1},
+        {"fieldname": "use_multi_level_bom", "property": "hidden", "value": 1},
+        {"fieldname": "skip_transfer", "property": "hidden", "value": 1},
+        {"fieldname": "update_consumed_material_cost_in_project", "property": "hidden", "value": 1},
+        {"fieldname": "serial_no_and_batch_for_finished_good_section", "property": "hidden", "value": 1},
+        {"fieldname": "has_serial_no", "property": "hidden", "value": 1},
+        {"fieldname": "has_batch_no", "property": "hidden", "value": 1},
+        {"fieldname": "batch_size", "property": "hidden", "value": 1},
+        {"fieldname": "stock_uom", "property": "hidden", "value": 1},
+        {"fieldname": "material_request", "property": "hidden", "value": 1},
+        {"fieldname": "materials_and_operations_tab", "property": "hidden", "value": 1},
+    ]:
+        frappe.make_property_setter(
+            {
+                "doctype": "Work Order",
+                "fieldname": args["fieldname"],
+                "property": args["property"],
+                "value": args["value"],
+                "property_type": "Check",
+            }
+        )
+
+    field_order = [
+        # Tab: Production Item
+        "item", "naming_series", "status", "production_item", "item_name", "image",
+        "bom_no", "sales_order", "column_break1", "qty",
+        "material_transferred_for_manufacturing", "produced_qty", "disassembled_qty",
+        "process_loss_qty", "project",
+        "section_break_ndpq", "required_items",
+        "warehouses", "source_warehouse", "wip_warehouse", "custom_all_ops_complete",
+        "custom_source_warehouse", "custom_cnc_warehouse", "custom_cnc_transferred_weight_kg",
+        "column_break_12", "fg_warehouse", "scrap_warehouse",
+        "custom_section_drawings", "custom_drawing_items",
+        "custom_section_weights", "custom_customer_weight_kg", "custom_total_weight_kg",
+        "custom_mapped_weight_kg", "custom_excess_weight_kg", "custom_excess_banner_html",
+        "custom_transferred_weight_kg",
+        # Weight Summary column 2 — mirrors SCO's Company / Date / Required By
+        "custom_weight_summary_column_break", "company", "planned_start_date",
+        "expected_delivery_date",
+        # Tab: Configuration
+        "work_order_configuration", "settings_section", "allow_alternative_item",
+        "use_multi_level_bom", "column_break_17", "skip_transfer", "from_wip_warehouse",
+        "update_consumed_material_cost_in_project",
+        "serial_no_and_batch_for_finished_good_section", "has_serial_no", "has_batch_no",
+        "column_break_18", "batch_size", "required_items_section",
+        # Tab: Excess Material Return (custom)
+        "custom_tab_excess_return", "custom_section_excess_return", "custom_excess_actions_html",
+        "custom_excess_return_items", "custom_excess_return_total_kg", "custom_excess_return_total_nos",
+        # Tab: Operations summary (custom)
+        "custom_operations_tab", "custom_operations_html",
+        # Tab: Operations (core) — hidden; kept in the order list so field_order
+        # stays a complete permutation of every Work Order field
+        "materials_and_operations_tab", "operations_section", "transfer_material_against",
+        "operations", "time", "planned_end_date",
+        "column_break_13", "actual_start_date", "actual_end_date", "lead_time", "section_break_22",
+        "planned_operating_cost", "actual_operating_cost", "additional_operating_cost",
+        "column_break_24", "corrective_operation_cost", "total_operating_cost",
+        # Tab: More Info
+        "more_info", "description", "stock_uom", "column_break2", "material_request",
+        "material_request_item", "sales_order_item", "production_plan", "production_plan_item",
+        "production_plan_sub_assembly_item", "product_bundle_item", "amended_from",
+        # Tab: Connections
+        "connections_tab",
+    ]
+    frappe.make_property_setter(
+        {
+            "doctype": "Work Order",
+            "doctype_or_field": "DocType",
+            "fieldname": None,
+            "property": "field_order",
+            "value": frappe.as_json(field_order),
+            "property_type": "Data",
+        }
+    )
+    frappe.db.commit()
 
 
 def create_job_card_drawing_fields():
@@ -3841,11 +3837,87 @@ def create_job_card_drawing_fields():
     )
 
 
+def layout_job_card_fields():
+    """Hide noisy core Job Card fields/tabs that duplicate the custom drawing/
+    consumption tracking, and surface Sequence Id as a quick filter/list column.
+    """
+    for args in [
+        {"fieldname": "bom_no", "property": "hidden", "value": 1},
+        {"fieldname": "for_quantity", "property": "hidden", "value": 1},
+        {"fieldname": "production_item", "property": "hidden", "value": 1},
+        {"fieldname": "employee", "property": "hidden", "value": 1},
+        {"fieldname": "timing_detail", "property": "hidden", "value": 1},
+        {"fieldname": "scrap_items_section", "property": "hidden", "value": 1},
+        {"fieldname": "scrap_items", "property": "hidden", "value": 1},
+        {"fieldname": "custom_raw_material_consumption_tab", "property": "hidden", "value": 1},
+        {"fieldname": "custom_raw_material_consumption", "property": "hidden", "value": 1},
+        {"fieldname": "serial_and_batch_bundle", "property": "hidden", "value": 1},
+        {"fieldname": "item_name", "property": "hidden", "value": 1},
+        {"fieldname": "transferred_qty", "property": "hidden", "value": 1},
+        {"fieldname": "requested_qty", "property": "hidden", "value": 1},
+        {"fieldname": "sequence_id", "property": "in_list_view", "value": 1},
+        {"fieldname": "sequence_id", "property": "in_standard_filter", "value": 1},
+        {"fieldname": "work_order", "property": "in_standard_filter", "value": 1},
+    ]:
+        frappe.make_property_setter(
+            {
+                "doctype": "Job Card",
+                "fieldname": args["fieldname"],
+                "property": args["property"],
+                "value": args["value"],
+                "property_type": "Check",
+            }
+        )
+
+    # Move Sequence Id out of "More Information" and into the default "Details"
+    # tab (right after Qty To Manufacture), keeping every other field in place.
+    field_order = [
+        "naming_series", "work_order", "bom_no", "production_item", "employee",
+        "column_break_4", "posting_date", "company", "for_quantity", "sequence_id",
+        "custom_section_drawing_details", "custom_drawing_details",
+        "custom_consumption_log_section", "custom_consumption_log",
+        "custom_available_to_consume_kg", "custom_total_consumed_kg",
+        "custom_total_available_nos", "custom_total_completed_nos", "total_completed_qty",
+        "process_loss_qty", "scheduled_time_section", "expected_start_date", "time_required",
+        "column_break_jkir", "expected_end_date", "section_break_05am", "scheduled_time_logs",
+        "timing_detail", "time_logs", "section_break_13", "actual_start_date",
+        "total_time_in_mins", "column_break_15", "actual_end_date", "production_section",
+        "operation", "wip_warehouse", "column_break_12", "workstation_type", "workstation",
+        "quality_inspection_section", "quality_inspection_template", "column_break_fcmp",
+        "quality_inspection", "section_break_21", "sub_operations", "section_break_8", "items",
+        "scrap_items_section", "scrap_items", "corrective_operation_section", "for_job_card",
+        "is_corrective_job_card", "column_break_33", "hour_rate", "for_operation",
+        "more_information", "project", "item_name", "transferred_qty", "requested_qty",
+        "status", "column_break_20", "operation_row_number", "operation_id", "remarks",
+        "serial_and_batch_bundle", "batch_no", "serial_no", "barcode", "job_started",
+        "started_time", "current_time", "amended_from", "custom_raw_material_consumption_tab",
+        "custom_raw_material_consumption", "connections_tab", "inventory_dimension",
+        "storage_location",
+    ]
+    frappe.make_property_setter(
+        {
+            "doctype": "Job Card",
+            "doctype_or_field": "DocType",
+            "fieldname": None,
+            "property": "field_order",
+            "value": frappe.as_json(field_order),
+            "property_type": "Data",
+        }
+    )
+    frappe.db.commit()
+
+
 # ─── WO client script (mirrors SCO_CLIENT_SCRIPT) ─────────────────────────
 
 WO_CLIENT_SCRIPT = """
 frappe.ui.form.on("Work Order", {
 \trefresh(frm) {
+\t\t// Hide core "Create Pick List" / "Start" / "Create Job Card" buttons — the
+\t\t// custom drawing/weight/transfer buttons above replace this flow.
+\t\tfrm.remove_custom_button(__("Create Pick List"));
+\t\tfrm.remove_custom_button(__("Start"));
+\t\tfrm.remove_custom_button(__("Create Job Card"));
+
 \t\t// Excess material banner — mirrors SCO banner
 \t\tlet $bw = frm.fields_dict["custom_excess_banner_html"] && frm.fields_dict["custom_excess_banner_html"].$wrapper;
 \t\tif ($bw) {
@@ -4049,7 +4121,13 @@ frappe.ui.form.on("SCO Excess Material Item", {
 \twidth(frm, cdt, cdn)     { if (!locals[cdt][cdn].stock_entry_created) _wo_excess_calc(frm, cdt, cdn); },
 \tthickness(frm, cdt, cdn) { if (!locals[cdt][cdn].stock_entry_created) _wo_excess_calc(frm, cdt, cdn); },
 \tsec_qty(frm, cdt, cdn)   { if (!locals[cdt][cdn].stock_entry_created) _wo_excess_calc(frm, cdt, cdn); },
-\tqty(frm) { _wo_excess_totals(frm); }
+\tqty(frm, cdt, cdn) {
+\t\tvar row = locals[cdt][cdn];
+\t\tif (!row.stock_entry_created && row.parent_item_group === "Nuts and Bolts" && row.unit_weight) {
+\t\t\tfrappe.model.set_value(cdt, cdn, "sec_qty", flt(row.unit_weight * flt(row.qty), 3));
+\t\t}
+\t\t_wo_excess_totals(frm);
+\t}
 });
 
 function _wo_excess_calc(frm, cdt, cdn) {

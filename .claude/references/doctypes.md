@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-07-01 08:21:21_
+_Generated: 2026-07-05 02:31:12_
 
 ## drawing
 
@@ -153,16 +153,22 @@ _Generated: 2026-07-01 08:21:21_
 | Method | Whitelisted |
 |--------|-------------|
 | ` validate` | no |
+| ` _apply_rwd_group_allocations` | no |
+| ` _move_skipped_arm_to_mapping` | no |
 | ` _validate_batch_calc_qty` | no |
 | ` search_bom` | no |
 | ` get_bom_info` | no |
 | ` get_so_drawings_for_bom_picker` | no |
+| ` _nos_from_weight` | no |
+| ` _reconcile_sec_qty_with_sales_order` | no |
 | ` get_raw_materials` | no |
 | ` check_stock_availability` | no |
 | ` _alloc_sec_qty` | no |
 | ` _get_non_batch_stock` | no |
 | ` move_to_exact_match` | no |
 | ` finalize_mapping` | no |
+| ` _verify_nos_vs_qty` | no |
+| ` verify_raw_materials` | no |
 | ` get_batch_reservation_summary` | no |
 | ` get_batch_item` | no |
 | ` get_batch_stock_summary` | no |
@@ -170,11 +176,17 @@ _Generated: 2026-07-01 08:21:21_
 | ` _get_batch_reserved_by_others` | no |
 | ` _get_non_batch_reserved_by_others` | no |
 | ` _update_bom_item_weights` | no |
+| ` _calc_kg_per_nos` | no |
+| ` _calc_usable_nos_split` | no |
+| ` _row_get` | no |
+| ` _calc_group_rwd_allocations` | no |
 | ` reserve_batches` | no |
 | ` reserve_exact_match_batches` | no |
 | ` unreserve_exact_match_batches` | no |
 | ` check_mapping_batch_availability` | no |
 | ` unreserve_batches` | no |
+| ` reassign_batch` | no |
+| ` _apply_batch_to_mapping_row` | no |
 | ` _test_simulate_se_release` | no |
 | ` __init__` | no |
 | ` get` | no |
@@ -249,6 +261,40 @@ _Generated: 2026-07-01 08:21:21_
 | Module | production_management |
 | Path | `production_management/doctype/store_location` |
 | Controller | `production_management/doctype/store_location/store_location.py` |
+| Client script | none |
+
+---
+
+## material_issue_plan
+
+| Key | Value |
+|-----|-------|
+| Module | subcontracting_management |
+| Path | `subcontracting_management/doctype/material_issue_plan` |
+| Controller | `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py` |
+| Client script | `subcontracting_management/doctype/material_issue_plan/material_issue_plan.js` |
+
+### Methods
+
+| Method | Whitelisted |
+|--------|-------------|
+| ` after_insert` | no |
+| ` create_from_subcontracting_order` | no |
+| ` populate_from_production_plan` | no |
+| ` refresh_mip_raw_materials` | no |
+| ` refresh_weight_summary` | no |
+| ` get_target_context` | no |
+| ` _resolve_warehouses` | no |
+
+---
+
+## material_issue_plan_raw_material
+
+| Key | Value |
+|-----|-------|
+| Module | subcontracting_management |
+| Path | `subcontracting_management/doctype/material_issue_plan_raw_material` |
+| Controller | `subcontracting_management/doctype/material_issue_plan_raw_material/material_issue_plan_raw_material.py` |
 | Client script | none |
 
 ---

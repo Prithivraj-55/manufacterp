@@ -80,7 +80,29 @@ class CustomSubcontractingOrder(SubcontractingOrder):
         self._cancel_and_delete_soes()
 
     def _cancel_and_delete_soes(self):
-        """Cancel submitted SOEs then delete all SOEs linked to this SCO."""
+        """Cancel submitted SOEs then delete all SOEs linked to this SCO.
+        Blocks first if the mixed-plan handoff to a sibling Work Order's first Job
+        Card has already been consumed — cancelling would silently invalidate
+        quantity the internal team already logged against. Mirrors the codebase's
+        existing block-rather-than-rollback style (see before_delete_supplier_operation_entry).
+        """
+        if self.get("custom_all_ops_complete"):
+            wo_name = frappe.db.get_value(
+                "Work Order",
+                {"production_plan": self.get("custom_production_plan"), "docstatus": ["!=", 2]},
+                "name",
+            )
+            if wo_name and frappe.db.exists(
+                "Job Card",
+                {"work_order": wo_name, "sequence_id": 1, "custom_total_consumed_kg": [">", 0]},
+            ):
+                frappe.throw(
+                    _("The Work Order's first Job Card has already logged consumption based on "
+                      "this Subcontracting Order's completed quantity. Reverse that Job Card's "
+                      "consumption before cancelling this Subcontracting Order."),
+                    title=_("Cannot Cancel — Handoff Already Consumed"),
+                )
+
         soes = frappe.get_all(
             "Supplier Operation Entry",
             filters={"subcontracting_order": self.name},

@@ -1,3 +1,9 @@
+## About This Fork
+This is an active customization fork maintained by **Prithivraj Thangadurai** 
+(ERPNext Techno-Functional Consultant). Features and modules documented below 
+were designed, developed, and tested using AI-assisted development (Claude Code), 
+with manual code review and validation before each commit.
+
 # manufyxinvenzaerp
 
 A production-grade custom Frappe/ERPNext application (v15) built for manufacturing operations. It extends ERPNext's core procurement, production, and subcontracting workflows with custom doctypes, deep hook integrations, and a batch/secondary-quantity tracking system.
