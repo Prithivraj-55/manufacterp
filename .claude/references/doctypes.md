@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-07-04 00:33:54_
+_Generated: 2026-07-04 20:41:32_
 
 ## drawing
 
@@ -176,6 +176,8 @@ _Generated: 2026-07-04 00:33:54_
 | ` unreserve_exact_match_batches` | no |
 | ` check_mapping_batch_availability` | no |
 | ` unreserve_batches` | no |
+| ` reassign_batch` | no |
+| ` _apply_batch_to_mapping_row` | no |
 | ` _test_simulate_se_release` | no |
 | ` __init__` | no |
 | ` get` | no |
@@ -250,6 +252,40 @@ _Generated: 2026-07-04 00:33:54_
 | Module | production_management |
 | Path | `production_management/doctype/store_location` |
 | Controller | `production_management/doctype/store_location/store_location.py` |
+| Client script | none |
+
+---
+
+## material_issue_plan
+
+| Key | Value |
+|-----|-------|
+| Module | subcontracting_management |
+| Path | `subcontracting_management/doctype/material_issue_plan` |
+| Controller | `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py` |
+| Client script | `subcontracting_management/doctype/material_issue_plan/material_issue_plan.js` |
+
+### Methods
+
+| Method | Whitelisted |
+|--------|-------------|
+| ` after_insert` | no |
+| ` create_from_subcontracting_order` | no |
+| ` populate_from_production_plan` | no |
+| ` refresh_mip_raw_materials` | no |
+| ` refresh_weight_summary` | no |
+| ` get_target_context` | no |
+| ` _resolve_warehouses` | no |
+
+---
+
+## material_issue_plan_raw_material
+
+| Key | Value |
+|-----|-------|
+| Module | subcontracting_management |
+| Path | `subcontracting_management/doctype/material_issue_plan_raw_material` |
+| Controller | `subcontracting_management/doctype/material_issue_plan_raw_material/material_issue_plan_raw_material.py` |
 | Client script | none |
 
 ---

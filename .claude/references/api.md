@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-07-04 00:33:54_
+_Generated: 2026-07-04 20:41:32_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -56,26 +56,27 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `reserve_batches` | 1053 |
-| `reserve_exact_match_batches` | 1160 |
-| `unreserve_exact_match_batches` | 1277 |
-| `check_mapping_batch_availability` | 1318 |
-| `unreserve_batches` | 1378 |
-| `_test_simulate_se_release` | 1419 |
-| `make_production_plan` | 1438 |
-| `make_material_request` | 1496 |
-| `update_so_difference_kg` | 1643 |
-| `auto_purchase_from_mp` | 1698 |
+| `reserve_batches` | 1057 |
+| `reserve_exact_match_batches` | 1164 |
+| `unreserve_exact_match_batches` | 1281 |
+| `check_mapping_batch_availability` | 1322 |
+| `unreserve_batches` | 1382 |
+| `reassign_batch` | 1423 |
+| `_test_simulate_se_release` | 1570 |
+| `make_production_plan` | 1589 |
+| `make_material_request` | 1647 |
 | `@frappe.validate_and_sanitize_search_inputs` | 171 |
+| `update_so_difference_kg` | 1798 |
+| `auto_purchase_from_mp` | 1853 |
 | `get_bom_info` | 197 |
 | `get_so_drawings_for_bom_picker` | 249 |
 | `get_raw_materials` | 312 |
-| `check_stock_availability` | 397 |
-| `move_to_exact_match` | 689 |
-| `finalize_mapping` | 852 |
-| `get_batch_reservation_summary` | 917 |
-| `get_batch_item` | 951 |
-| `get_batch_stock_summary` | 959 |
+| `check_stock_availability` | 399 |
+| `move_to_exact_match` | 692 |
+| `finalize_mapping` | 855 |
+| `get_batch_reservation_summary` | 921 |
+| `get_batch_item` | 955 |
+| `get_batch_stock_summary` | 963 |
 ## production_management/production_utils.py
 
 | Method | Line |
@@ -96,40 +97,57 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `get_po_item_uom` | 16 |
+| `get_po_item_uom` | 17 |
 ## purchase_receipt_management/purchase_receipt.py
 
 | Method | Line |
 |--------|------|
-| `get_pr_item_uom` | 18 |
-| `get_mp_for_pr` | 273 |
-| `allocate_pr_stock_to_mp` | 292 |
+| `get_pr_item_uom` | 19 |
+| `get_mp_for_pr` | 268 |
+| `allocate_pr_stock_to_mp` | 287 |
 ## sq_management/supplier_quotation.py
 
 | Method | Line |
 |--------|------|
 | `get_sq_item_uom` | 27 |
+## subcontracting_management/doctype/material_issue_plan/material_issue_plan.py
+
+| Method | Line |
+|--------|------|
+| `create_from_subcontracting_order` | 17 |
+| `refresh_weight_summary` | 185 |
+| `populate_from_production_plan` | 36 |
+| `refresh_mip_raw_materials` | 96 |
+## subcontracting_management/material_issue_plan_transfer.py
+
+| Method | Line |
+|--------|------|
+| `create_mip_transfer_entry` | 144 |
+| `create_mip_partial_transfer` | 183 |
+| `create_mip_cnc_forward_entry` | 238 |
+| `create_mip_excess_return_entry` | 328 |
+| `get_mip_pending_items` | 45 |
 ## subcontracting_management/subcontracting.py
 
 | Method | Line |
 |--------|------|
-| `create_work_order_from_pp` | 152 |
-| `backfill_drawing_item_qty` | 1691 |
-| `get_wo_pending_items` | 1755 |
-| `create_partial_wo_transfer` | 1860 |
-| `create_cnc_to_wip_entry` | 1916 |
-| `create_return_stock_entry_for_wo` | 2015 |
-| `get_jc_summary` | 2067 |
+| `create_work_order_from_pp` | 151 |
+| `backfill_drawing_item_qty` | 1705 |
+| `get_wo_pending_items` | 1769 |
+| `create_partial_wo_transfer` | 1874 |
+| `create_cnc_to_wip_entry` | 1930 |
+| `create_return_stock_entry_for_wo` | 2029 |
+| `get_jc_summary` | 2081 |
 | `create_sco_from_production_plan` | 26 |
-| `create_supplier_operation_entries` | 287 |
-| `create_send_to_subcontractor_entry` | 304 |
-| `get_sco_pending_items` | 400 |
-| `create_partial_transfer` | 510 |
-| `create_cnc_to_supplier_entry` | 571 |
-| `get_soe_summary` | 674 |
-| `create_return_stock_entry` | 720 |
-| `create_finished_goods_entry` | 778 |
+| `create_supplier_operation_entries` | 286 |
+| `create_send_to_subcontractor_entry` | 303 |
+| `get_sco_pending_items` | 399 |
+| `create_partial_transfer` | 509 |
+| `create_cnc_to_supplier_entry` | 570 |
+| `get_soe_summary` | 673 |
+| `create_return_stock_entry` | 719 |
+| `create_finished_goods_entry` | 777 |
 
 ## Total
 
-_72 whitelisted methods_
+_82 whitelisted methods_
