@@ -1475,6 +1475,64 @@ function _recalc_batch_qty(frm, cdt, cdn) {
 	frappe.model.set_value(cdt, cdn, "batch_calc_qty", flt(qty, 3));
 }
 
+function _kg_per_nos(group, L, W, T, UW) {
+	L = flt(L); W = flt(W); T = flt(T); UW = flt(UW);
+	if (group === "Structurals" && L && UW) return (L / 1000) * UW;
+	if (group === "Plates" && L && W && T && UW) return (L / 1000) * (W / 1000) * T * UW;
+	if (group === "Nuts and Bolts" && UW) return UW;
+	return 0;
+}
+
+// Preview how much Kg must actually be reserved for rows under "Reserve stock
+// without dimensions" + "Allocate based on Sec Nos". Stock can only be
+// physically transferred in whole Sec Qty (Nos) pieces, so every row sharing
+// the SAME batch is grouped, their required Kg summed, rounded UP to the
+// nearest whole piece as a GROUP, then split back across the rows
+// proportional to each row's own required-Kg share — mirrors the server-side
+// _calc_group_rwd_allocations (rounding per row independently would
+// over-reserve an extra sheet per row instead of one extra sheet per group).
+// Recalculates every row in the group, not just the one that changed, since
+// the group total depends on all of them.
+function _calc_rwd_preview(frm, cdt, cdn) {
+	let row = locals[cdt][cdn];
+	if (!row.reserve_without_dimensions || !row.batch) return;
+
+	if (!row.allocate_based_on_sec_qty) {
+		frappe.model.set_value(cdt, cdn, "batch_sec_qty", 0);
+		frappe.model.set_value(cdt, cdn, "batch_calc_qty", 0);
+		return;
+	}
+
+	let group_rows = (frm.doc.material_mapping || []).filter(function(r) {
+		return r.batch === row.batch && !r.is_reserved
+			&& r.reserve_without_dimensions && r.allocate_based_on_sec_qty
+			&& (r.batch_parent_item_group === "Structurals" || r.batch_parent_item_group === "Plates");
+	});
+	if (!group_rows.length) return;
+
+	let kg_per_nos = _kg_per_nos(row.batch_parent_item_group, row.batch_length, row.batch_width, row.batch_thickness, row.batch_unit_weight);
+	let group_required = group_rows.reduce(function(sum, r) { return sum + flt(r.qty); }, 0);
+
+	if (!kg_per_nos || !group_required) {
+		group_rows.forEach(function(r) {
+			frappe.model.set_value(r.doctype, r.name, "batch_sec_qty", 0);
+			frappe.model.set_value(r.doctype, r.name, "batch_calc_qty", flt(r.qty, 3));
+		});
+		return;
+	}
+
+	let sec_qty_needed = Math.ceil(flt(group_required / kg_per_nos, 9));
+	let group_kg_to_reserve = flt(sec_qty_needed * kg_per_nos, 3);
+
+	group_rows.forEach(function(r) {
+		let share = flt(r.qty) / group_required;
+		let row_kg = flt(share * group_kg_to_reserve, 3);
+		let row_sec = flt(row_kg / kg_per_nos, 3);
+		frappe.model.set_value(r.doctype, r.name, "batch_sec_qty", row_sec);
+		frappe.model.set_value(r.doctype, r.name, "batch_calc_qty", row_kg);
+	});
+}
+
 // Fetch and populate batch stock summary (total / reserved / free) for a mapping row
 function _fetch_batch_stock_summary(frm, cdt, cdn) {
 	let row = locals[cdt][cdn];
@@ -1599,6 +1657,25 @@ frappe.ui.form.on("Material Planning Material Mapping", {
 		_recalc_batch_qty(frm, cdt, cdn);
 		_update_weight_summary(frm);
 	},
+
+	reserve_without_dimensions(frm, cdt, cdn) {
+		let row = locals[cdt][cdn];
+		if (row.reserve_without_dimensions) {
+			frappe.model.set_value(cdt, cdn, "allocate_based_on_sec_qty", 1);
+			// set_value above won't re-fire its own handler if the value was
+			// already 1 (e.g. row default) — calculate directly too.
+			_calc_rwd_preview(frm, cdt, cdn);
+		} else {
+			frappe.model.set_value(cdt, cdn, "batch_sec_qty", 0);
+			frappe.model.set_value(cdt, cdn, "batch_calc_qty", 0);
+		}
+		frm.fields_dict["material_mapping"].grid.refresh_row(cdn);
+	},
+
+	allocate_based_on_sec_qty(frm, cdt, cdn) {
+		_calc_rwd_preview(frm, cdt, cdn);
+		frm.fields_dict["material_mapping"].grid.refresh_row(cdn);
+	},
 });
 
 // Shared helper: build the partial-reservation warning table HTML
@@ -1646,10 +1723,11 @@ function _add_reservation_buttons(frm) {
 				return;
 			}
 
-			// Validate: all dimensional batch rows must have Sec Qty entered
+			// Validate: all dimensional batch rows must have Sec Qty entered —
+			// unless the row is flagged to reserve stock without dimensions.
 			let missing_sec = (frm.doc.material_mapping || []).filter(function(r) {
 				let group = r.batch_parent_item_group || "";
-				return r.batch && !r.is_reserved
+				return r.batch && !r.is_reserved && !r.reserve_without_dimensions
 					&& (group === "Structurals" || group === "Plates")
 					&& !flt(r.batch_sec_qty);
 			});
@@ -1813,6 +1891,8 @@ const _TABLE_VIEW_CONFIG = {
 			{ fieldname: "batch",             label: "Batch" },
 			{ fieldname: "batch_mapped",      label: "Status" },
 			{ fieldname: "batch_length",      label: "Batch Length" },
+			{ fieldname: "reserve_without_dimensions", label: "Reserve w/o Dimensions" },
+			{ fieldname: "allocate_based_on_sec_qty",  label: "Allocate by Sec Nos" },
 			{ fieldname: "batch_sec_qty",     label: "Batch Sec Qty" },
 			{ fieldname: "batch_calc_qty",    label: "Calc Qty (Kg)" },
 			{ fieldname: "is_reserved",       label: "Reserved" },

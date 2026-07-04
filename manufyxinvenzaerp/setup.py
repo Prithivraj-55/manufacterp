@@ -553,6 +553,7 @@ frappe.ui.form.on("Sales Order", {
 		_so_render_file_buttons(frm);
 		_so_render_rm_verify_btn(frm);
 		_so_render_drawing_buttons(frm);
+		_so_render_duno_view_all_btn(frm);
 	},
 	custom_bom_excel_file(frm) {
 		_so_render_file_buttons(frm);
@@ -620,16 +621,24 @@ function _so_render_rm_verify_btn(frm) {
 	$w.empty();
 	if (frm.doc.__islocal || frm.doc.docstatus === 2) return;
 
-	var has_unlocked = (frm.doc.custom_so_raw_materials || []).some(function(r) { return !r.is_locked; });
-	if (!has_unlocked) return;
-
-	var verified = !!frm.doc.custom_raw_materials_verified;
 	var $row = $('<div style="display:flex;align-items:center;gap:10px;padding:4px 0 8px">').appendTo($w);
 
+	var has_unlocked = (frm.doc.custom_so_raw_materials || []).some(function(r) { return !r.is_locked; });
+	var verified = !!frm.doc.custom_raw_materials_verified;
+
+	if (has_unlocked) {
+		$('<button class="btn btn-sm btn-default">')
+			.text(__("Verify Raw Materials"))
+			.on("click", function() { _so_verify_rm(frm); })
+			.appendTo($row);
+	}
+
 	$('<button class="btn btn-sm btn-default">')
-		.text(__("Verify Raw Materials"))
-		.on("click", function() { _so_verify_rm(frm); })
+		.html(frappe.utils.icon("eye", "sm") + "&nbsp;" + __("View All"))
+		.on("click", function() { _so_show_table_popup(frm, "custom_so_raw_materials"); })
 		.appendTo($row);
+
+	if (!has_unlocked) return;
 
 	if (verified) {
 		$('<span style="color:green;font-weight:bold;font-size:13px;">').html("&#10003; " + __("Verified")).appendTo($row);
@@ -830,6 +839,19 @@ function _so_render_drawing_buttons(frm) {
 			}
 		});
 	});
+}
+
+// ── View All button above the Drawing List grid ───────────────────────────
+
+function _so_render_duno_view_all_btn(frm) {
+	var grid = frm.fields_dict["custom_duno_items"] && frm.fields_dict["custom_duno_items"].grid;
+	if (!grid) return;
+	var $top = grid.wrapper.find(".grid-custom-buttons");
+	$top.empty();
+	$('<button class="btn btn-default btn-sm">')
+		.html(frappe.utils.icon("eye", "xs") + " " + __("View All"))
+		.on("click", function() { _so_show_table_popup(frm, "custom_duno_items"); })
+		.appendTo($top);
 }
 
 // ── Action implementations ─────────────────────────────────────────────────
@@ -1084,6 +1106,124 @@ function _so_clear_import(frm) {
 			}
 		});
 	});
+}
+
+// ── Column definitions for each table's View All popup ────────────────────
+
+const _SO_TABLE_VIEW_CONFIG = {
+	custom_duno_items: {
+		title: "Drawing List",
+		filters: [
+			{ fieldname: "duno_mark_no",   label: "Filter DUNO/Mark No…" },
+			{ fieldname: "drawing_number", label: "Filter Cust Drawing Number…" },
+		],
+		cols: [
+			{ fieldname: "assembly_group",      label: "Assembly Group" },
+			{ fieldname: "item",                label: "FG Item" },
+			{ fieldname: "item_name",           label: "Item Name" },
+			{ fieldname: "duno_mark_no",        label: "DUNO/Mark No" },
+			{ fieldname: "drawing_number",      label: "Cust Drawing Number" },
+			{ fieldname: "total_quantity",      label: "Total Quantity" },
+			{ fieldname: "total_weight",        label: "Customer Provided Weight (Kg)" },
+			{ fieldname: "difference_kg",       label: "Difference Kg" },
+			{ fieldname: "drawing",             label: "Drawing" },
+			{ fieldname: "create_drawing",      label: "Create Drawing" },
+			{ fieldname: "submit_drawing",      label: "Submit" },
+			{ fieldname: "mark_final_revision", label: "Final Revision" },
+			{ fieldname: "create_bom",          label: "Create BOM" },
+		],
+	},
+	custom_so_raw_materials: {
+		title: "Raw Materials",
+		filters: [
+			{ fieldname: "customer_drawing_number", label: "Filter Drawing No…" },
+			{ fieldname: "material_code",           label: "Filter Material Code…" },
+		],
+		cols: [
+			{ fieldname: "customer_drawing_number", label: "Drawing No" },
+			{ fieldname: "item_no",                 label: "Item No" },
+			{ fieldname: "material_code",           label: "Material Code" },
+			{ fieldname: "material_name",           label: "Material Name" },
+			{ fieldname: "item_group",               label: "Item Group" },
+			{ fieldname: "parent_item_group",         label: "Parent Item Group" },
+			{ fieldname: "grade",                   label: "Grade" },
+			{ fieldname: "thickness",               label: "Thickness" },
+			{ fieldname: "width",                   label: "Width" },
+			{ fieldname: "length",                  label: "Length" },
+			{ fieldname: "sec_qty",                 label: "Reqd Sec Qty" },
+			{ fieldname: "sec_uom",                 label: "Sec UOM" },
+			{ fieldname: "total_sec_qty",            label: "Total Sec Qty" },
+			{ fieldname: "unit_weight",              label: "Unit Weight" },
+			{ fieldname: "qty",                     label: "Weight (Primary UOM)" },
+			{ fieldname: "uom",                     label: "UOM" },
+			{ fieldname: "total_weight",             label: "Total Weight" },
+			{ fieldname: "is_locked",               label: "Locked" },
+		],
+	},
+};
+
+// Generic View All popup — read-only, all configured columns, scrollable
+function _so_show_table_popup(frm, fieldname) {
+	var cfg = _SO_TABLE_VIEW_CONFIG[fieldname];
+	if (!cfg) return;
+	var rows = frm.doc[fieldname] || [];
+	if (!rows.length) {
+		frappe.msgprint(__("No data to display."));
+		return;
+	}
+
+	var th_style = 'white-space:nowrap;padding:6px 10px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;';
+	var thead = '<tr>' + cfg.cols.map(function(c) {
+		return '<th style="' + th_style + '">' + __(c.label) + '</th>';
+	}).join('') + '</tr>';
+
+	function _render_tbody(filtered_rows) {
+		return filtered_rows.map(function(row, idx) {
+			var cells = cfg.cols.map(function(c) {
+				var val = row[c.fieldname];
+				if (val === null || val === undefined) val = '';
+				return '<td style="padding:5px 10px;white-space:nowrap;border-bottom:1px solid #f0f0f0;">'
+					+ frappe.utils.escape_html(String(val)) + '</td>';
+			}).join('');
+			var bg = idx % 2 !== 0 ? 'background:#fafbfc;' : '';
+			return '<tr style="' + bg + '">' + cells + '</tr>';
+		}).join('');
+	}
+
+	var filter_bar = '<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">'
+		+ cfg.filters.map(function(f, i) {
+			return '<input id="_so_vw_f' + i + '" type="text" placeholder="' + __(f.label) + '"'
+				+ ' style="border:1px solid #d1d8dd;border-radius:4px;padding:4px 8px;font-size:12px;width:200px;">';
+		}).join('')
+		+ '<span id="_so_vw_count" style="font-size:12px;color:#6c757d;"></span></div>';
+
+	var table_html = '<div style="overflow:auto;max-height:65vh;">'
+		+ '<table style="font-size:12px;border-collapse:collapse;width:100%;" id="_so_vw_table">'
+		+ '<thead style="position:sticky;top:0;z-index:1;">' + thead + '</thead>'
+		+ '<tbody id="_so_vw_tbody">' + _render_tbody(rows) + '</tbody>'
+		+ '</table></div>';
+
+	var d = new frappe.ui.Dialog({
+		title: __(cfg.title + " — {0} item(s)", [rows.length]),
+		size: "extra-large",
+	});
+	d.$body.html(filter_bar + table_html);
+
+	function _apply_filter() {
+		var queries = cfg.filters.map(function(f, i) {
+			return { fieldname: f.fieldname, q: (d.$body.find("#_so_vw_f" + i).val() || "").toLowerCase() };
+		});
+		var filtered = rows.filter(function(r) {
+			return queries.every(function(qf) {
+				return !qf.q || String(r[qf.fieldname] || "").toLowerCase().includes(qf.q);
+			});
+		});
+		d.$body.find("#_so_vw_tbody").html(_render_tbody(filtered));
+		d.$body.find("#_so_vw_count").text(filtered.length + " / " + rows.length + " " + __("rows"));
+	}
+	cfg.filters.forEach(function(f, i) { d.$body.find("#_so_vw_f" + i).on("input", _apply_filter); });
+	_apply_filter();
+	d.show();
 }
 """.strip()
 
