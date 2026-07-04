@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-07-04 20:41:32_
+_Generated: 2026-07-05 02:04:32_
 
 ## drawing
 
@@ -153,17 +153,22 @@ _Generated: 2026-07-04 20:41:32_
 | Method | Whitelisted |
 |--------|-------------|
 | ` validate` | no |
+| ` _apply_rwd_group_allocations` | no |
 | ` _move_skipped_arm_to_mapping` | no |
 | ` _validate_batch_calc_qty` | no |
 | ` search_bom` | no |
 | ` get_bom_info` | no |
 | ` get_so_drawings_for_bom_picker` | no |
+| ` _nos_from_weight` | no |
+| ` _reconcile_sec_qty_with_sales_order` | no |
 | ` get_raw_materials` | no |
 | ` check_stock_availability` | no |
 | ` _alloc_sec_qty` | no |
 | ` _get_non_batch_stock` | no |
 | ` move_to_exact_match` | no |
 | ` finalize_mapping` | no |
+| ` _verify_nos_vs_qty` | no |
+| ` verify_raw_materials` | no |
 | ` get_batch_reservation_summary` | no |
 | ` get_batch_item` | no |
 | ` get_batch_stock_summary` | no |
@@ -171,6 +176,9 @@ _Generated: 2026-07-04 20:41:32_
 | ` _get_batch_reserved_by_others` | no |
 | ` _get_non_batch_reserved_by_others` | no |
 | ` _update_bom_item_weights` | no |
+| ` _calc_kg_per_nos` | no |
+| ` _row_get` | no |
+| ` _calc_group_rwd_allocations` | no |
 | ` reserve_batches` | no |
 | ` reserve_exact_match_batches` | no |
 | ` unreserve_exact_match_batches` | no |

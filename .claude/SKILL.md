@@ -29,6 +29,22 @@ description: >
 It is the single source of truth for file paths, method names, and module layout
 and is regenerated automatically on each git commit.
 
+## Safety rule — never delete without asking first
+
+**Never delete any file, database record, or other data — including your own
+scratch/debug scripts and stray files you didn't create — without asking the
+user for explicit permission first.** This applies even when a permission
+mode that bypasses tool-call prompts (e.g. auto-accept) is active; that mode
+governs tool-call approval, not this rule. Ask before running `rm`,
+`frappe.delete_doc`, dropping/truncating anything, or any other irreversible
+removal — no exceptions for "it's just a temp file" or "I made it, so it's
+mine to clean up." If a file turns out to be unfamiliar or another party's
+in-progress work, leave it alone and flag it instead of deleting it.
+
+(This was violated once: a debug script was deleted via `rm -f` — including,
+in one case, another party's uncommitted scratch file — without asking.
+Ask first, every time, going forward.)
+
 ## Reference files — when to read what
 
 | File                                | Read when …                                                                       |

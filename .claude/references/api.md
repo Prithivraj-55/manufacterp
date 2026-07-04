@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-07-04 20:41:32_
+_Generated: 2026-07-05 02:04:32_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -56,27 +56,28 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `reserve_batches` | 1057 |
-| `reserve_exact_match_batches` | 1164 |
-| `unreserve_exact_match_batches` | 1281 |
-| `check_mapping_batch_availability` | 1322 |
-| `unreserve_batches` | 1382 |
-| `reassign_batch` | 1423 |
-| `_test_simulate_se_release` | 1570 |
-| `make_production_plan` | 1589 |
-| `make_material_request` | 1647 |
-| `@frappe.validate_and_sanitize_search_inputs` | 171 |
-| `update_so_difference_kg` | 1798 |
-| `auto_purchase_from_mp` | 1853 |
-| `get_bom_info` | 197 |
-| `get_so_drawings_for_bom_picker` | 249 |
-| `get_raw_materials` | 312 |
-| `check_stock_availability` | 399 |
-| `move_to_exact_match` | 692 |
-| `finalize_mapping` | 855 |
-| `get_batch_reservation_summary` | 921 |
-| `get_batch_item` | 955 |
-| `get_batch_stock_summary` | 963 |
+| `verify_raw_materials` | 1069 |
+| `get_batch_reservation_summary` | 1085 |
+| `get_batch_item` | 1119 |
+| `get_batch_stock_summary` | 1127 |
+| `reserve_batches` | 1298 |
+| `reserve_exact_match_batches` | 1421 |
+| `unreserve_exact_match_batches` | 1538 |
+| `check_mapping_batch_availability` | 1579 |
+| `unreserve_batches` | 1645 |
+| `reassign_batch` | 1686 |
+| `_test_simulate_se_release` | 1833 |
+| `make_production_plan` | 1852 |
+| `make_material_request` | 1910 |
+| `@frappe.validate_and_sanitize_search_inputs` | 204 |
+| `update_so_difference_kg` | 2061 |
+| `auto_purchase_from_mp` | 2116 |
+| `get_bom_info` | 230 |
+| `get_so_drawings_for_bom_picker` | 282 |
+| `get_raw_materials` | 389 |
+| `check_stock_availability` | 477 |
+| `move_to_exact_match` | 770 |
+| `finalize_mapping` | 933 |
 ## production_management/production_utils.py
 
 | Method | Line |
@@ -150,4 +151,4 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 ## Total
 
-_82 whitelisted methods_
+_83 whitelisted methods_
