@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-07-05 02:48:09_
+_Generated: 2026-07-05 05:26:37_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -56,28 +56,28 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `verify_raw_materials` | 1192 |
-| `get_batch_reservation_summary` | 1208 |
-| `get_batch_item` | 1242 |
-| `get_batch_stock_summary` | 1250 |
-| `reserve_batches` | 1454 |
-| `reserve_exact_match_batches` | 1577 |
-| `unreserve_exact_match_batches` | 1694 |
-| `check_mapping_batch_availability` | 1735 |
-| `unreserve_batches` | 1801 |
-| `reassign_batch` | 1842 |
-| `_test_simulate_se_release` | 1989 |
-| `make_production_plan` | 2008 |
-| `make_material_request` | 2066 |
-| `update_so_difference_kg` | 2217 |
-| `auto_purchase_from_mp` | 2272 |
-| `@frappe.validate_and_sanitize_search_inputs` | 270 |
-| `get_bom_info` | 296 |
-| `get_so_drawings_for_bom_picker` | 348 |
-| `get_raw_materials` | 455 |
-| `check_stock_availability` | 543 |
-| `move_to_exact_match` | 836 |
-| `finalize_mapping` | 999 |
+| `finalize_mapping` | 1020 |
+| `verify_raw_materials` | 1216 |
+| `get_batch_reservation_summary` | 1232 |
+| `get_batch_item` | 1266 |
+| `get_batch_stock_summary` | 1274 |
+| `reserve_batches` | 1478 |
+| `reserve_exact_match_batches` | 1601 |
+| `unreserve_exact_match_batches` | 1718 |
+| `check_mapping_batch_availability` | 1759 |
+| `unreserve_batches` | 1825 |
+| `reassign_batch` | 1866 |
+| `_test_simulate_se_release` | 2013 |
+| `make_production_plan` | 2032 |
+| `make_material_request` | 2090 |
+| `update_so_difference_kg` | 2241 |
+| `auto_purchase_from_mp` | 2296 |
+| `@frappe.validate_and_sanitize_search_inputs` | 291 |
+| `get_bom_info` | 317 |
+| `get_so_drawings_for_bom_picker` | 369 |
+| `get_raw_materials` | 476 |
+| `check_stock_availability` | 564 |
+| `move_to_exact_match` | 857 |
 ## production_management/production_utils.py
 
 | Method | Line |
@@ -103,9 +103,9 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `get_pr_item_uom` | 19 |
-| `get_mp_for_pr` | 268 |
-| `allocate_pr_stock_to_mp` | 287 |
+| `get_pr_item_uom` | 23 |
+| `get_mp_for_pr` | 286 |
+| `allocate_pr_stock_to_mp` | 305 |
 ## sq_management/supplier_quotation.py
 
 | Method | Line |
@@ -115,10 +115,10 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
+| `refresh_mip_raw_materials` | 110 |
 | `create_from_subcontracting_order` | 17 |
-| `refresh_weight_summary` | 185 |
+| `refresh_weight_summary` | 199 |
 | `populate_from_production_plan` | 36 |
-| `refresh_mip_raw_materials` | 96 |
 ## subcontracting_management/material_issue_plan_transfer.py
 
 | Method | Line |
