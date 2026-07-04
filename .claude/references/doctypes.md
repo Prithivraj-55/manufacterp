@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-07-05 02:04:32_
+_Generated: 2026-07-05 02:31:12_
 
 ## drawing
 
@@ -177,6 +177,7 @@ _Generated: 2026-07-05 02:04:32_
 | ` _get_non_batch_reserved_by_others` | no |
 | ` _update_bom_item_weights` | no |
 | ` _calc_kg_per_nos` | no |
+| ` _calc_usable_nos_split` | no |
 | ` _row_get` | no |
 | ` _calc_group_rwd_allocations` | no |
 | ` reserve_batches` | no |
