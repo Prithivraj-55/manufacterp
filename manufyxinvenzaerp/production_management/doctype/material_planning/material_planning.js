@@ -515,7 +515,8 @@ frappe.ui.form.on("Material Planning", {
 							<td style="padding:8px 12px;font-weight:700;text-align:center;color:${s.unavail ? "red" : "green"};">${s.unavail}</td>
 						</tr>
 					</tbody>
-				</table>`;
+				</table>
+				${_split_details_html(s.split_details)}`;
 
 			frappe.msgprint({
 				title: __("Move to Unavailable Items — Summary"),
@@ -789,7 +790,16 @@ frappe.ui.form.on("Material Planning", {
 			frappe.msgprint(__("No items in Material Mapping to finalize."));
 			return;
 		}
-		let unmapped = (frm.doc.material_mapping || []).filter(r => !r.batch);
+		// A row also qualifies for finalizing when it HAS a batch but under-covers
+		// the requirement (Structurals/Plates only, not already reserved) — that
+		// partial mapping's shortfall still needs to move to purchase.
+		let unmapped = (frm.doc.material_mapping || []).filter(function(r) {
+			if (!r.batch) return true;
+			let group = r.batch_parent_item_group || r.parent_item_group || "";
+			return !r.is_reserved && flt(r.sec_qty)
+				&& (r.parent_item_group === "Structurals" || r.parent_item_group === "Plates")
+				&& flt(r.batch_calc_qty) < flt(r.qty);
+		});
 		if (!unmapped.length) {
 			frappe.msgprint(__("No items to move to purchase table, all are mapped."));
 			return;
@@ -811,10 +821,14 @@ frappe.ui.form.on("Material Planning", {
 				});
 				frm.refresh_field("material_mapping");
 
-				// Merge newly-unmapped rows with existing unavailable items (de-duplicate by item_code+bom_no)
+				// Merge newly-unmapped rows with existing unavailable items
+				// (de-duplicate by item_code+bom_no+duno_mark_no — omitting
+				// duno_mark_no here would wrongly collapse the same item's
+				// shortfalls from two different drawings into one row)
 				let existing = (frm.doc.unavailable_items || []).filter(r => r.item_code);
-				let existing_keys = new Set(existing.map(r => `${r.item_code}|${r.bom_no || ""}`));
-				let new_rows = (result.unavailable_items || []).filter(r => !existing_keys.has(`${r.item_code}|${r.bom_no || ""}`));
+				let dedup_key = r => `${r.item_code}|${r.bom_no || ""}|${r.duno_mark_no || ""}`;
+				let existing_keys = new Set(existing.map(dedup_key));
+				let new_rows = (result.unavailable_items || []).filter(r => !existing_keys.has(dedup_key(r)));
 				frm.clear_table("unavailable_items");
 				existing.concat(new_rows).forEach(function(row) {
 					let child = frm.add_child("unavailable_items");
@@ -832,7 +846,10 @@ frappe.ui.form.on("Material Planning", {
 
 				_update_weight_summary(frm);
 
-				frm._finalize_mapping_summary = { mapped, reserved, not_reserved, unavail };
+				frm._finalize_mapping_summary = {
+					mapped, reserved, not_reserved, unavail,
+					split_details: result.split_details || [],
+				};
 				frm.save();
 			},
 		});
@@ -1781,6 +1798,38 @@ function _partial_reservation_html(partial) {
 				<th>${__("Required")}</th><th>${__("Total Stock")}</th>
 				<th>${__("Reserved by Others")}</th>
 				<th>${__("Reserved")}</th><th>${__("Shortfall")}</th>
+			</tr></thead>
+			<tbody>${lines}</tbody>
+		</table>`;
+}
+
+// Breakdown table for rows split by finalize_mapping() — an under-covering
+// alternate mapping shrunk to what it can actually fulfil, with the rest
+// moved to Unavailable Items / purchase.
+function _split_details_html(split_details) {
+	if (!split_details || !split_details.length) return "";
+	let lines = split_details.map(function(d) {
+		let covers_cell = d.dropped
+			? `<span style="color:red;font-weight:bold">0 Nos — not usable</span>`
+			: `<span style="color:green;font-weight:bold">${d.usable_nos} Nos (${d.usable_kg} Kg)</span>`;
+		let excess_cell = d.dropped
+			? "—"
+			: (flt(d.excess_kg) > 0 ? `<span style="color:#e65100;font-weight:bold">+${d.excess_kg} Kg</span>` : "0 Kg");
+		return `<tr>
+			<td>${d.idx}</td>
+			<td>${d.item_code}</td>
+			<td>${d.duno_mark_no || ""}</td>
+			<td>${d.alternate}</td>
+			<td>${covers_cell}</td>
+			<td>${excess_cell}</td>
+			<td style="color:red;font-weight:bold">${d.shortfall_nos} Nos (${d.shortfall_kg} Kg)</td>
+		</tr>`;
+	}).join("");
+	return `<p style="margin-top:12px;">${__("Partially-mapped rows — split between what the alternate batch can fulfil and what still needs purchase:")}</p>
+		<table class="table table-bordered table-condensed" style="font-size:12px">
+			<thead><tr>
+				<th>${__("Row")}</th><th>${__("Item")}</th><th>${__("DUNO/Mark No")}</th><th>${__("Alternate")}</th>
+				<th>${__("Covers")}</th><th>${__("Excess (→ Diff in Kg)")}</th><th>${__("Moved to Purchase")}</th>
 			</tr></thead>
 			<tbody>${lines}</tbody>
 		</table>`;

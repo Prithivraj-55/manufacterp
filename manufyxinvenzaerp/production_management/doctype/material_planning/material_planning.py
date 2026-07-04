@@ -165,13 +165,30 @@ class MaterialPlanning(Document):
             required_qty = flt(row.qty)
             if batch_calc_qty < required_qty:
                 alternate = row.planned_item or row.batch
-                shortfall_warnings.append(
-                    _("Row {0}: <b>{1}</b> needs <b>{2} Kg</b>, "
-                      "but alternate item <b>{3}</b> mapped only for <b>{4} Kg</b>.").format(
-                        row.idx, row.item_code,
-                        flt(required_qty, 3), alternate, flt(batch_calc_qty, 3)
+                message = _(
+                    "Row {0}: <b>{1}</b> needs <b>{2} Kg</b>, "
+                    "but alternate item <b>{3}</b> mapped only for <b>{4} Kg</b>."
+                ).format(row.idx, row.item_code, flt(required_qty, 3), alternate, flt(batch_calc_qty, 3))
+
+                if group in ("Structurals", "Plates") and flt(row.sec_qty):
+                    usable_nos, usable_kg, shortfall_nos, shortfall_kg, excess_kg = _calc_usable_nos_split(
+                        row.qty, row.sec_qty, batch_calc_qty
                     )
-                )
+                    if usable_nos > 0:
+                        message += "<br>" + _(
+                            "Covers <b>{0} Nos</b> ({1} Kg) — the batch will be used for {0} Nos; "
+                            "the remaining <b>{2} Kg</b> is excess (added to Difference in Kg). "
+                            "Pending <b>{3} Nos</b> ({4} Kg) will move to Unavailable Items / "
+                            "Material Request when you click <b>Move to Unavailable Items</b>."
+                        ).format(usable_nos, usable_kg, excess_kg, shortfall_nos, shortfall_kg)
+                    else:
+                        message += "<br>" + _(
+                            "Covers <b>0 Nos</b> — this mapping is not usable. "
+                            "The full <b>{0} Nos</b> ({1} Kg) needs to be purchased; "
+                            "click <b>Move to Unavailable Items</b> to send it to Material Request."
+                        ).format(int(flt(row.sec_qty)), flt(required_qty, 3))
+
+                shortfall_warnings.append(message)
 
             if batch_calc_qty > available:
                 difference = flt(batch_calc_qty - available, 3)
@@ -933,15 +950,33 @@ def move_to_exact_match(doc, item_codes):
 def finalize_mapping(doc):
     """
     Scan the material_mapping table:
-      - Rows WITH a batch assigned  → stay in material_mapping
-      - Rows WITHOUT a batch        → move to unavailable_items
-    Returns updated material_mapping and unavailable_items lists.
+      - Rows WITHOUT a batch                              → move to unavailable_items
+      - Rows WITH a batch, fully covering the requirement  → stay in material_mapping
+      - Rows WITH a batch that under-covers (Structurals/
+        Plates only — a partial piece isn't usable) and
+        are NOT already reserved                           → SPLIT:
+          - shrink the kept row's qty/sec_qty down to just what the batch
+            can actually fulfil (whole Nos only), so the existing
+            batch_calc_qty − qty diff formula correctly shows the leftover
+            as excess instead of understating a phantom shortfall
+          - the remaining shortfall, for the ORIGINAL item (not the
+            alternate), moves to unavailable_items so it flows into the
+            existing Material Request / Purchase pipeline
+          - if the batch can't even cover ONE whole Nos, the mapping is
+            unusable — drop the batch entirely and move the FULL original
+            requirement to unavailable_items
+      - Rows WITH a batch already reserved                 → left untouched
+        (splitting a committed reservation needs an explicit unreserve
+        first, not a silent qty rewrite)
+    Returns updated material_mapping and unavailable_items lists, plus a
+    split_details list describing what happened to any split/dropped row.
     """
     if isinstance(doc, str):
         doc = frappe._dict(json.loads(doc))
 
     mapped = []
     unavailable = []
+    split_details = []
 
     for row in doc.get("material_mapping") or []:
         base = {
@@ -964,34 +999,73 @@ def finalize_mapping(doc):
             "unit_weight": flt(row.get("unit_weight")),
             "alternate_item": row.get("alternate_item") or "",
         }
-        if row.get("batch"):
-            mapped.append(dict(
-                base,
-                batch=row.get("batch"),
-                planned_item=row.get("planned_item"),
-                batch_mapped="Mapped",
-                batch_parent_item_group=row.get("batch_parent_item_group") or "",
-                batch_length=flt(row.get("batch_length")),
-                batch_width=flt(row.get("batch_width")),
-                batch_thickness=flt(row.get("batch_thickness")),
-                batch_unit_weight=flt(row.get("batch_unit_weight")),
-                batch_sec_qty=flt(row.get("batch_sec_qty")),
-                batch_calc_qty=flt(row.get("batch_calc_qty")),
-                batch_total_qty=flt(row.get("batch_total_qty")),
-                batch_reserved_qty=flt(row.get("batch_reserved_qty")),
-                batch_free_qty=flt(row.get("batch_free_qty")),
-                is_reserved=row.get("is_reserved") or 0,
-                reserved_qty=flt(row.get("reserved_qty")),
-                shortfall_qty=flt(row.get("shortfall_qty")),
-                reserved_on=row.get("reserved_on") or "",
-                store_location=row.get("store_location") or "",
-            ))
-        else:
+
+        batch = row.get("batch")
+        if not batch:
             unavailable.append(base)
+            continue
+
+        mapped_extra = dict(
+            batch=batch,
+            planned_item=row.get("planned_item"),
+            batch_mapped="Mapped",
+            batch_parent_item_group=row.get("batch_parent_item_group") or "",
+            batch_length=flt(row.get("batch_length")),
+            batch_width=flt(row.get("batch_width")),
+            batch_thickness=flt(row.get("batch_thickness")),
+            batch_unit_weight=flt(row.get("batch_unit_weight")),
+            batch_sec_qty=flt(row.get("batch_sec_qty")),
+            batch_calc_qty=flt(row.get("batch_calc_qty")),
+            batch_total_qty=flt(row.get("batch_total_qty")),
+            batch_reserved_qty=flt(row.get("batch_reserved_qty")),
+            batch_free_qty=flt(row.get("batch_free_qty")),
+            is_reserved=row.get("is_reserved") or 0,
+            reserved_qty=flt(row.get("reserved_qty")),
+            shortfall_qty=flt(row.get("shortfall_qty")),
+            reserved_on=row.get("reserved_on") or "",
+            store_location=row.get("store_location") or "",
+        )
+
+        group = row.get("parent_item_group") or ""
+        qty = flt(row.get("qty"))
+        sec_qty = flt(row.get("sec_qty"))
+        batch_calc_qty = flt(row.get("batch_calc_qty"))
+        is_reserved = bool(row.get("is_reserved"))
+        under_covers = group in ("Structurals", "Plates") and sec_qty and batch_calc_qty < qty
+
+        if under_covers and not is_reserved:
+            usable_nos, usable_kg, shortfall_nos, shortfall_kg, excess_kg = _calc_usable_nos_split(
+                qty, sec_qty, batch_calc_qty
+            )
+            if usable_nos > 0:
+                mapped.append(dict(base, qty=usable_kg, sec_qty=usable_nos, **mapped_extra))
+                unavailable.append(dict(base, qty=shortfall_kg, sec_qty=shortfall_nos))
+                split_details.append({
+                    "idx": row.get("idx"), "item_code": row.get("item_code"),
+                    "duno_mark_no": row.get("duno_mark_no") or "", "alternate": row.get("planned_item") or batch,
+                    "usable_nos": usable_nos, "usable_kg": usable_kg,
+                    "excess_kg": excess_kg,
+                    "shortfall_nos": shortfall_nos, "shortfall_kg": shortfall_kg,
+                    "dropped": False,
+                })
+            else:
+                unavailable.append(base)
+                split_details.append({
+                    "idx": row.get("idx"), "item_code": row.get("item_code"),
+                    "duno_mark_no": row.get("duno_mark_no") or "", "alternate": row.get("planned_item") or batch,
+                    "usable_nos": 0, "usable_kg": 0.0,
+                    "excess_kg": 0.0,
+                    "shortfall_nos": int(sec_qty), "shortfall_kg": flt(qty, 3),
+                    "dropped": True,
+                })
+            continue
+
+        mapped.append(dict(base, **mapped_extra))
 
     return {
         "material_mapping": mapped,
         "unavailable_items": unavailable,
+        "split_details": split_details,
     }
 
 
@@ -1233,6 +1307,39 @@ def _calc_kg_per_nos(group, length, width, thickness, unit_weight):
     if group == "Nuts and Bolts" and unit_weight:
         return unit_weight
     return 0.0
+
+
+def _calc_usable_nos_split(qty, sec_qty, batch_calc_qty):
+    """For a Material Mapping row (Structurals/Plates only — Nuts and Bolts
+    shortfalls never reach this table) whose mapped batch under-covers the
+    requirement: work out how many whole Sec Qty (Nos) of the ORIGINAL item
+    the mapped batch_calc_qty can actually fulfil. A partial piece isn't
+    usable — a structural length or plate either exists whole or it doesn't —
+    so this always rounds DOWN, never up.
+
+    Returns (usable_nos, usable_kg, shortfall_nos, shortfall_kg, excess_kg):
+      - usable_nos/usable_kg   — the whole pieces this mapping actually covers.
+      - shortfall_nos/shortfall_kg — the remaining pieces of the ORIGINAL item
+        still needed — these move to Unavailable Items / purchase.
+      - excess_kg              — batch_calc_qty beyond what usable_kg needed;
+        this is weight already drawn from the batch that doesn't correspond
+        to a complete piece, so it's tracked as Difference in Kg, not thrown away.
+    """
+    qty, sec_qty, batch_calc_qty = flt(qty), flt(sec_qty), flt(batch_calc_qty)
+    if not sec_qty:
+        return 0, 0.0, 0, flt(qty, 3), 0.0
+
+    kg_per_nos = qty / sec_qty
+    if not kg_per_nos:
+        return 0, 0.0, 0, flt(qty, 3), 0.0
+
+    usable_nos = int(round(batch_calc_qty / kg_per_nos, 9))
+    usable_nos = max(0, min(usable_nos, int(sec_qty)))
+    usable_kg = flt(usable_nos * kg_per_nos, 3)
+    shortfall_nos = int(sec_qty) - usable_nos
+    shortfall_kg = flt(shortfall_nos * kg_per_nos, 3)
+    excess_kg = flt(batch_calc_qty - usable_kg, 3)
+    return usable_nos, usable_kg, shortfall_nos, shortfall_kg, excess_kg
 
 
 def _row_get(row, key, default=None):
