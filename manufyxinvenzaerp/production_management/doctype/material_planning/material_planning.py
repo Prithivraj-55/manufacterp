@@ -995,21 +995,15 @@ def finalize_mapping(doc):
     }
 
 
-@frappe.whitelist()
-def verify_material_mapping(doc):
-    """Cross-check every Material Mapping row's Sec Qty (Nos) against its Qty
-    (Kg) using the same weight formula the rest of the app uses, and — for
-    rows that trace back to a Sales Order drawing line — against that line's
-    Total Sec Qty too. Surfaces exactly the class of mismatch behind the
-    ISMB250/BEAM-1B10 case (Sec Qty silently inflated by a rounding-driven
-    ceil() overshoot) so it can be caught in the Material Mapping table
-    itself instead of downstream in Purchase/Transfer.
+def _verify_nos_vs_qty(rows):
+    """Cross-check each row's Sec Qty (Nos) against its Qty (Kg) using the
+    same weight formula the rest of the app uses, and — for rows that trace
+    back to a Sales Order drawing line — against that line's Total Sec Qty
+    too. Surfaces exactly the class of mismatch behind the ISMB250/BEAM-1B10
+    case (Sec Qty silently inflated by a rounding-driven ceil() overshoot).
     """
-    if isinstance(doc, str):
-        doc = frappe._dict(json.loads(doc))
-
     issues = []
-    for row in doc.get("material_mapping") or []:
+    for row in rows:
         group = row.get("parent_item_group") or ""
         length = flt(row.get("length"))
         width = flt(row.get("width"))
@@ -1068,9 +1062,22 @@ def verify_material_mapping(doc):
                 "so_ok": so_ok,
             })
 
+    return issues
+
+
+@frappe.whitelist()
+def verify_raw_materials(doc):
+    """Verify the raw_materials table — run right after Get Raw Materials,
+    before Check Stock Availability creates any batch/reservation state, so
+    a Nos/Qty mismatch is caught at the earliest possible point.
+    """
+    if isinstance(doc, str):
+        doc = frappe._dict(json.loads(doc))
+
+    rows = doc.get("raw_materials") or []
     return {
-        "checked": len(doc.get("material_mapping") or []),
-        "issues": issues,
+        "checked": len(rows),
+        "issues": _verify_nos_vs_qty(rows),
     }
 
 

@@ -33,13 +33,13 @@
   "tab_stock_analysis",
   "section_raw_materials",
   "get_raw_materials_btn",
+  "verify_raw_materials_btn",
   "raw_materials",
   "section_available_raw_materials",
   "for_warehouse",
   "check_stock_btn",
   "available_raw_materials",
   "section_material_mapping",
-  "verify_material_mapping_btn",
   "finalize_mapping_btn",
   "material_mapping",
   "section_unavailable_items",
@@ -127,6 +127,11 @@
    "label": "Get Raw Materials"
   },
   {
+   "fieldname": "verify_raw_materials_btn",
+   "fieldtype": "Button",
+   "label": "Verify Raw Materials"
+  },
+  {
    "fieldname": "tab_bom_items",
    "fieldtype": "Tab Break",
    "label": "Selected BOMs"
@@ -206,11 +211,6 @@
    "fieldname": "section_material_mapping",
    "fieldtype": "Section Break",
    "label": "Material Mapping (Alternate Stock)"
-  },
-  {
-   "fieldname": "verify_material_mapping_btn",
-   "fieldtype": "Button",
-   "label": "Verify Raw Materials"
   },
   {
    "fieldname": "finalize_mapping_btn",
