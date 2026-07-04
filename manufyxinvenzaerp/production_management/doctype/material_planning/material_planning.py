@@ -18,7 +18,28 @@ class MaterialPlanning(Document):
             self._validate_batch_calc_qty()
         if self.unavailable_items:
             self._validate_alternate_item_qty()
+        self._update_weight_summary()
         _update_bom_item_weights(self)
+
+    def _update_weight_summary(self):
+        """Keep the header weight-summary fields in sync with the child tables
+        on every server-side save — these 4 fields were previously ONLY ever
+        recomputed client-side (material_planning.js _update_weight_summary),
+        so any server-side mutation (whitelisted methods, scripts) left them
+        stale, and the form showed 'Not Saved' the moment the client
+        recalculated a different value on the next load."""
+        total_raw = sum(
+            flt(r.qty) for r in (self.raw_materials or [])
+            if r.parent_item_group in ("Structurals", "Plates")
+        )
+        total_exact = sum(flt(r.required_qty) for r in (self.available_raw_materials or []))
+        expected_mapping = sum(flt(r.qty) for r in (self.material_mapping or []))
+        cross_mapped = sum(flt(r.batch_calc_qty) for r in (self.material_mapping or []))
+
+        self.total_weight_plates_structurals = flt(total_raw, 3)
+        self.weight_exact_raw_material = flt(total_exact, 3)
+        self.expected_weight_material_mapping = flt(expected_mapping, 3)
+        self.weight_cross_item_mapped = flt(cross_mapped, 3)
 
     def _apply_rwd_group_allocations(self):
         """Keep batch_sec_qty/batch_calc_qty correct for every 'Reserve stock
@@ -1046,7 +1067,10 @@ def finalize_mapping(doc):
             "width": flt(row.get("width")),
             "thickness": flt(row.get("thickness")),
             "unit_weight": flt(row.get("unit_weight")),
-            "alternate_item": row.get("alternate_item") or "",
+            # Material Mapping calls this field "planned_item"; Unavailable
+            # Items calls the same concept "alternate_item" — translate when
+            # a no-batch row moves back so the alternate isn't lost.
+            "alternate_item": row.get("alternate_item") or row.get("planned_item") or "",
         }
 
         batch = row.get("batch")
