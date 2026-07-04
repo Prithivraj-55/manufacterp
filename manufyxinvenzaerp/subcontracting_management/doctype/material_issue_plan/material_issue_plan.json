@@ -12,12 +12,14 @@
   "column_break_top",
   "company",
   "production_plan",
+  "load_drawings_btn",
   "section_source_doc",
   "subcontracting_order",
   "column_break_source_doc",
   "work_order",
   "section_warehouses",
   "source_warehouse",
+  "supplier_warehouse",
   "cnc_warehouse",
   "column_break_warehouses",
   "excess_return_warehouse",
@@ -91,16 +93,23 @@
    "reqd": 1
   },
   {
+   "depends_on": "eval:doc.production_plan",
+   "fieldname": "load_drawings_btn",
+   "fieldtype": "Button",
+   "label": "Load Drawings"
+  },
+  {
    "fieldname": "section_source_doc",
    "fieldtype": "Section Break",
    "label": "Issued Against"
   },
   {
-   "description": "The subcontracting order this material issue plan feeds. Filtered to orders raised against the selected Production Plan.",
+   "description": "The subcontracting order this material issue plan feeds. Auto-linked to the order raised against the selected Production Plan.",
    "fieldname": "subcontracting_order",
    "fieldtype": "Link",
    "label": "Subcontracting Order",
    "options": "Subcontracting Order",
+   "read_only": 1,
    "unique": 1
   },
   {
@@ -121,11 +130,20 @@
    "label": "Warehouses"
   },
   {
-   "description": "Warehouse to transfer raw materials FROM.",
+   "description": "Warehouse to transfer raw materials FROM. Auto-fetched from the Production Plan's Raw Material Warehouse.",
    "fieldname": "source_warehouse",
    "fieldtype": "Link",
    "label": "Source Warehouse (RM)",
-   "options": "Warehouse"
+   "options": "Warehouse",
+   "read_only": 1
+  },
+  {
+   "description": "Read-only — the destination warehouse material transfers TO. Resolved from the linked Subcontracting Order's Supplier Warehouse; set it there if this is blank.",
+   "fieldname": "supplier_warehouse",
+   "fieldtype": "Link",
+   "label": "Supplier Warehouse",
+   "options": "Warehouse",
+   "read_only": 1
   },
   {
    "description": "Staging warehouse for CNC-process items before transfer to supplier/WIP.",

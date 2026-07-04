@@ -6,22 +6,14 @@ frappe.ui.form.on("Material Issue Plan", {
 		frm.set_query("work_order", () => ({
 			filters: { production_plan: frm.doc.production_plan || "" },
 		}));
+		_add_view_all_raw_materials_button(frm);
 		_add_update_batch_button(frm);
 		_add_transfer_buttons(frm);
 		_render_excess_action_btn(frm);
 	},
 
-	production_plan(frm) {
-		if (frm.is_new() || !frm.doc.production_plan) return;
-		frappe.call({
-			method: "manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.populate_from_production_plan",
-			args: { mip_name: frm.doc.name },
-			freeze: true,
-			freeze_message: __("Loading drawings from Production Plan..."),
-			callback() {
-				frm.reload_doc();
-			},
-		});
+	load_drawings_btn(frm) {
+		_load_mip_drawings(frm);
 	},
 
 	refresh_raw_materials_btn(frm) {
@@ -37,6 +29,127 @@ frappe.ui.form.on("Material Issue Plan", {
 	},
 });
 
+// "Load Drawings" — sits right under the Production Plan field. Saves first if
+// needed (a new/dirty doc has nothing to populate_from_production_plan against
+// until it has a name), then loads every drawing + raw material.
+function _load_mip_drawings(frm) {
+	if (!frm.doc.production_plan) {
+		frappe.msgprint(__("Select a Production Plan first."));
+		return;
+	}
+	function _load() {
+		frappe.call({
+			method: "manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.populate_from_production_plan",
+			args: { mip_name: frm.doc.name },
+			freeze: true,
+			freeze_message: __("Loading drawings from Production Plan..."),
+			callback() { frm.reload_doc(); },
+		});
+	}
+	if (frm.is_new() || frm.is_dirty()) {
+		frm.save().then(_load);
+	} else {
+		_load();
+	}
+}
+
+// "View All" — raw_materials can run past 100 rows, well beyond the grid's
+// default page size, and the grid also hides several columns (Planned Item/
+// Alternate, Batch) at normal width. Show every row and column in one popup,
+// mirroring the same pattern used on Material Planning/Sales Order.
+function _add_view_all_raw_materials_button(frm) {
+	let grid = frm.fields_dict["raw_materials"] && frm.fields_dict["raw_materials"].grid;
+	if (!grid || frm.is_new()) return;
+
+	grid.add_custom_button(
+		frappe.utils.icon("eye", "xs") + " " + __("View All"),
+		() => _show_mip_raw_materials_popup(frm)
+	);
+}
+
+const _MIP_RAW_MATERIAL_COLS = [
+	{ fieldname: "item_code",              label: "Item Code" },
+	{ fieldname: "item_name",               label: "Item Name" },
+	{ fieldname: "planned_item",             label: "Planned Item (Alternate)" },
+	{ fieldname: "batch_no",                label: "Batch" },
+	{ fieldname: "duno_mark_no",             label: "DUNO/Mark No" },
+	{ fieldname: "customer_drawing_number",   label: "Cust Drawing Number" },
+	{ fieldname: "sales_order",              label: "Sales Order" },
+	{ fieldname: "material_planning",        label: "Material Planning" },
+	{ fieldname: "parent_item_group",        label: "Item Group" },
+	{ fieldname: "length",                  label: "Length (mm)" },
+	{ fieldname: "width",                   label: "Width (mm)" },
+	{ fieldname: "thickness",               label: "Thickness" },
+	{ fieldname: "sec_qty",                 label: "Sec Qty" },
+	{ fieldname: "qty",                     label: "Weight (Kg)" },
+	{ fieldname: "transferred_qty",          label: "Transferred Qty" },
+	{ fieldname: "is_reserved",              label: "Reserved" },
+	{ fieldname: "is_unavailable",           label: "Unavailable" },
+	{ fieldname: "cnc_process",             label: "CNC Process" },
+];
+
+function _show_mip_raw_materials_popup(frm) {
+	let rows = frm.doc.raw_materials || [];
+	if (!rows.length) {
+		frappe.msgprint(__("No data to display."));
+		return;
+	}
+
+	let th_style = "white-space:nowrap;padding:6px 10px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;";
+	let thead = "<tr>" + _MIP_RAW_MATERIAL_COLS.map(c =>
+		`<th style="${th_style}">${__(c.label)}</th>`
+	).join("") + "</tr>";
+
+	function _render_tbody(filtered_rows) {
+		return filtered_rows.map(function (row, idx) {
+			let cells = _MIP_RAW_MATERIAL_COLS.map(function (c) {
+				let val = row[c.fieldname];
+				if (val === null || val === undefined) val = "";
+				return `<td style="padding:5px 10px;white-space:nowrap;border-bottom:1px solid #f0f0f0;">${frappe.utils.escape_html(String(val))}</td>`;
+			}).join("");
+			let bg = idx % 2 !== 0 ? "background:#fafbfc;" : "";
+			return `<tr style="${bg}">${cells}</tr>`;
+		}).join("");
+	}
+
+	let filter_bar = `<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">
+		<input id="_mip_vw_duno" type="text" placeholder="${__("Filter DUNO/Mark No…")}"
+			style="border:1px solid #d1d8dd;border-radius:4px;padding:4px 8px;font-size:12px;width:180px;">
+		<input id="_mip_vw_item" type="text" placeholder="${__("Filter Item Code…")}"
+			style="border:1px solid #d1d8dd;border-radius:4px;padding:4px 8px;font-size:12px;width:180px;">
+		<span id="_mip_vw_count" style="font-size:12px;color:#6c757d;"></span>
+	</div>`;
+
+	let table_html = `<div style="overflow:auto;max-height:65vh;">
+		<table style="font-size:12px;border-collapse:collapse;width:100%;" id="_mip_vw_table">
+			<thead style="position:sticky;top:0;z-index:1;">${thead}</thead>
+			<tbody id="_mip_vw_tbody">${_render_tbody(rows)}</tbody>
+		</table>
+	</div>`;
+
+	let d = new frappe.ui.Dialog({
+		title: __("Raw Materials — {0} item(s)", [rows.length]),
+		size: "extra-large",
+	});
+	d.$body.html(filter_bar + table_html);
+
+	function _apply_filter() {
+		let duno_q = (d.$body.find("#_mip_vw_duno").val() || "").toLowerCase();
+		let item_q = (d.$body.find("#_mip_vw_item").val() || "").toLowerCase();
+		let filtered = rows.filter(function(r) {
+			let duno_ok = !duno_q || String(r.duno_mark_no || "").toLowerCase().includes(duno_q);
+			let item_ok = !item_q || String(r.item_code || "").toLowerCase().includes(item_q);
+			return duno_ok && item_ok;
+		});
+		d.$body.find("#_mip_vw_tbody").html(_render_tbody(filtered));
+		d.$body.find("#_mip_vw_count").text(__("{0} of {1} shown", [filtered.length, rows.length]));
+	}
+	d.$body.find("#_mip_vw_duno").on("input", _apply_filter);
+	d.$body.find("#_mip_vw_item").on("input", _apply_filter);
+
+	d.show();
+}
+
 // "Update Batch" — reassign the batch (and optionally dimensions/Sec Qty) already
 // selected for a raw-material row. Delegates entirely to Material Planning's own
 // reassign_batch, which unreserves, applies the new batch, re-validates mapping
@@ -45,9 +158,14 @@ function _add_update_batch_button(frm) {
 	let grid = frm.fields_dict["raw_materials"] && frm.fields_dict["raw_materials"].grid;
 	if (!grid || frm.is_new()) return;
 
+	// "top" (.grid-custom-buttons) rather than the default "bottom"
+	// (.grid-buttons, inside .grid-footer) — Frappe hides .grid-footer
+	// entirely for a read-only grid once every row fits on one page, which
+	// would silently hide this button too if it lived in the bottom toolbar.
 	grid.add_custom_button(
 		frappe.utils.icon("edit", "xs") + " " + __("Update Batch"),
-		() => _show_update_batch_dialog(frm)
+		() => _show_update_batch_dialog(frm),
+		"top"
 	);
 }
 
