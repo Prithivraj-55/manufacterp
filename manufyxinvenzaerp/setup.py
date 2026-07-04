@@ -2367,6 +2367,7 @@ def create_production_plan_custom_fields():
                     "options": "Supplier",
                     "insert_after": "custom_vendor_contractor_section",
                     "depends_on": "eval:doc.custom_process_planning && doc.custom_process_planning.some(r => r.work_type === 'Subcontractor')",
+                    "mandatory_depends_on": "eval:doc.custom_process_planning && doc.custom_process_planning.some(r => r.work_type === 'Subcontractor')",
                 },
             ],
         },

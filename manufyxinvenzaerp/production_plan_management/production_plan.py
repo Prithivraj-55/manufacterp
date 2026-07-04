@@ -795,6 +795,7 @@ def validate_process_planning_contiguity(doc, method):
 	rows — no interleaving, and every row must have a work_type set. A subcontractor
 	can't hand off to internal ops and then get material back mid-stream."""
 	seen_internal = False
+	has_subcontractor = False
 	for row in (doc.custom_process_planning or []):
 		if not row.work_type:
 			frappe.throw(
@@ -804,15 +805,26 @@ def validate_process_planning_contiguity(doc, method):
 			)
 		if row.work_type == "Internal Jobcard":
 			seen_internal = True
-		elif row.work_type == "Subcontractor" and seen_internal:
-			frappe.throw(
-				_("Row {0} ({1}): all Subcontractor operations must come before Internal "
-				  "Jobcard operations — group all Subcontractor rows first, then all "
-				  "Internal Jobcard rows. Alternating (Subcontractor → Internal Jobcard → "
-				  "Subcontractor) is not allowed.")
-				.format(row.idx, row.operation_name),
-				title=_("Invalid Operation Sequence"),
-			)
+		elif row.work_type == "Subcontractor":
+			has_subcontractor = True
+			if seen_internal:
+				frappe.throw(
+					_("Row {0} ({1}): all Subcontractor operations must come before Internal "
+					  "Jobcard operations — group all Subcontractor rows first, then all "
+					  "Internal Jobcard rows. Alternating (Subcontractor → Internal Jobcard → "
+					  "Subcontractor) is not allowed.")
+					.format(row.idx, row.operation_name),
+					title=_("Invalid Operation Sequence"),
+				)
+
+	# Backstop for the field's client-side mandatory_depends_on — covers API/
+	# import-created documents that bypass the form's own validation.
+	if has_subcontractor and not doc.custom_vendor_contractor:
+		frappe.throw(
+			_("Set Vendor/Contractor — it's required when any Process Planning row has "
+			  "Work Type set to Subcontractor."),
+			title=_("Vendor/Contractor Required"),
+		)
 
 
 def unlink_production_plan_on_trash(doc, method):
