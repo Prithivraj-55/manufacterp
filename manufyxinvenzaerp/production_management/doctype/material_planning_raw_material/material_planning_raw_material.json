@@ -10,6 +10,7 @@
   "item_code",
   "item_name",
   "bom_no",
+  "drawing",
   "duno_mark_no",
   "customer_drawing_number",
   "parent_item_group",
@@ -66,6 +67,13 @@
    "fieldtype": "Link",
    "label": "Source BOM",
    "options": "BOM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "drawing",
+   "fieldtype": "Link",
+   "label": "Drawing",
+   "options": "Drawing",
    "read_only": 1
   },
   {

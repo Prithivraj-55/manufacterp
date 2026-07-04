@@ -199,6 +199,10 @@ def _linked_material_plannings(doc):
 			pp_names.add(pp)
 	if doc.get("custom_production_plan"):
 		pp_names.add(doc.get("custom_production_plan"))
+	if doc.get("custom_mip_ref"):
+		pp = frappe.db.get_value("Material Issue Plan", doc.get("custom_mip_ref"), "production_plan")
+		if pp:
+			pp_names.add(pp)
 
 	mps = set()
 	for pp in pp_names:
@@ -357,11 +361,12 @@ def _update_sco_transferred_weight(sco_name):
 	  - qty from submitted 'Material Transfer' SEs that go CNC warehouse → supplier warehouse.
 	Also refreshes Op-1 SOE's available_to_consume_kg if it is still in draft.
 	"""
-	supplier_warehouse, cnc_warehouse = frappe.db.get_value(
-		"Subcontracting Order", sco_name, ["supplier_warehouse", "custom_cnc_warehouse"]
-	)
+	from manufyxinvenzaerp.subcontracting_management.subcontracting import _get_sco_transfer_warehouses
+
+	supplier_warehouse = frappe.db.get_value("Subcontracting Order", sco_name, "supplier_warehouse")
 	if not supplier_warehouse:
 		return
+	_, cnc_warehouse = _get_sco_transfer_warehouses(sco_name)
 
 	# Direct source → supplier transfers
 	r1 = frappe.db.sql(
@@ -422,9 +427,10 @@ def _update_sco_cnc_weight(sco_name):
 	"""Recompute SCO.custom_cnc_transferred_weight_kg:
 	  net qty currently in the CNC warehouse = sent to CNC minus already forwarded to supplier.
 	"""
-	cnc_warehouse, supplier_warehouse = frappe.db.get_value(
-		"Subcontracting Order", sco_name, ["custom_cnc_warehouse", "supplier_warehouse"]
-	)
+	from manufyxinvenzaerp.subcontracting_management.subcontracting import _get_sco_transfer_warehouses
+
+	supplier_warehouse = frappe.db.get_value("Subcontracting Order", sco_name, "supplier_warehouse")
+	_, cnc_warehouse = _get_sco_transfer_warehouses(sco_name)
 	if not cnc_warehouse:
 		return
 

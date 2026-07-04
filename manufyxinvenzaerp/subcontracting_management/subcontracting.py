@@ -130,7 +130,6 @@ def create_sco_from_production_plan(pp_name):
         "custom_total_weight_kg": flt(total_planned, 3),
         "custom_mapped_weight_kg": flt(total_mapped, 3),
         "custom_excess_weight_kg": flt(total_excess, 3),
-        "custom_source_warehouse": pp.custom_raw_material_warehouse or "",
     })
     sco.flags.ignore_validate = True
     sco.insert(ignore_permissions=True, ignore_mandatory=True)
@@ -792,12 +791,15 @@ def create_finished_goods_entry(sco_name):
         frappe.throw(_("No raw material has been transferred to the supplier yet. "
                        "Transfer raw materials before making the finished-goods entry."))
 
-    # Determine FG warehouse from SCO items or return warehouse
+    # Determine FG warehouse from SCO items or the linked Material Issue Plan's
+    # excess/return warehouse (custom_return_warehouse moved there).
     fg_warehouse = ""
     if sco.items:
         fg_warehouse = sco.items[0].warehouse or ""
     if not fg_warehouse:
-        fg_warehouse = sco.get("custom_return_warehouse") or ""
+        mip_name = frappe.db.get_value("Material Issue Plan", {"subcontracting_order": sco.name})
+        if mip_name:
+            fg_warehouse = frappe.db.get_value("Material Issue Plan", mip_name, "excess_return_warehouse") or ""
     if not fg_warehouse:
         frappe.throw(_("No finished-good warehouse set. Set the warehouse on the "
                        "Subcontracting Order item (or the Finished Goods/Return Warehouse) first."))
@@ -1440,12 +1442,24 @@ def _refresh_wo_drawing_transferred_weights(wo):
         jc_doc.save(ignore_permissions=True)
 
 
+def _get_sco_transfer_warehouses(sco_name):
+    """Source/CNC warehouse for an SCO, resolved via its Material Issue Plan —
+    these no longer live on the SCO itself (moved to Material Issue Plan)."""
+    mip_name = frappe.db.get_value("Material Issue Plan", {"subcontracting_order": sco_name})
+    if not mip_name:
+        return None, None
+    mip = frappe.db.get_value(
+        "Material Issue Plan", mip_name, ["source_warehouse", "cnc_warehouse"], as_dict=True
+    )
+    return (mip.source_warehouse, mip.cnc_warehouse) if mip else (None, None)
+
+
 def _refresh_sco_drawing_transferred_weights(sco):
     """SOE equivalent of _refresh_wo_drawing_transferred_weights.
     # SHARED_SCO_JC: mirrors _refresh_wo_drawing_transferred_weights
     """
-    source_warehouse = sco.get("custom_source_warehouse")
-    targets = [w for w in [sco.get("supplier_warehouse"), sco.get("custom_cnc_warehouse")] if w]
+    source_warehouse, cnc_warehouse = _get_sco_transfer_warehouses(sco.name)
+    targets = [w for w in [sco.get("supplier_warehouse"), cnc_warehouse] if w]
     if not source_warehouse or not targets:
         return
 

@@ -12,11 +12,13 @@
   "col_break",
   "duno_mark_no",
   "customer_drawing_number",
+  "sales_order",
   "material_planning",
   "customer_weight_kg",
   "total_weight_kg",
   "mapped_weight_kg",
   "excess_weight_kg",
+  "transferred_weight_kg",
   "completed_qty_nos"
  ],
  "fields": [
@@ -68,6 +70,13 @@
    "read_only": 1
   },
   {
+   "fieldname": "sales_order",
+   "fieldtype": "Link",
+   "label": "Sales Order",
+   "options": "Sales Order",
+   "read_only": 1
+  },
+  {
    "fieldname": "material_planning",
    "fieldtype": "Link",
    "label": "Material Planning",
@@ -102,6 +111,14 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Excess (Kg)",
+   "read_only": 1
+  },
+  {
+   "description": "Actual weight transferred so far for this drawing (proportional share of the parent's transferred total).",
+   "fieldname": "transferred_weight_kg",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Transferred (Kg)",
    "read_only": 1
   },
   {

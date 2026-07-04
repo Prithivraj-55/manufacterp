@@ -12,6 +12,7 @@ FIELD_LABELS = {
     "custom_unit_weight": "Unit Weight",
     "custom_sec_qty": "Sec Qty",
 }
+REFERENCE_FIELDS = ["custom_drawing", "custom_duno_mark_no", "custom_customer_drawing_number", "custom_sales_order"]
 
 
 @frappe.whitelist()
@@ -210,23 +211,17 @@ def _get_se_suffix(se_name):
 
 
 def _copy_from_po_item(row):
-    """Copy dimension fields from the linked PO Item when a PR is created from a PO."""
+    """Copy dimension + reference fields from the linked PO Item when a PR is created from a PO."""
     if not row.purchase_order_item:
         return
-    if row.custom_length or row.custom_width or row.custom_thickness or row.custom_sec_qty:
+    fields = ["custom_length", "custom_width", "custom_thickness", "custom_sec_qty", *REFERENCE_FIELDS]
+    if any(row.get(f) for f in fields):
         return
-    po_item = frappe.db.get_value(
-        "Purchase Order Item",
-        row.purchase_order_item,
-        ["custom_length", "custom_width", "custom_thickness", "custom_sec_qty"],
-        as_dict=True,
-    )
+    po_item = frappe.db.get_value("Purchase Order Item", row.purchase_order_item, fields, as_dict=True)
     if not po_item:
         return
-    row.custom_length = po_item.custom_length
-    row.custom_width = po_item.custom_width
-    row.custom_thickness = po_item.custom_thickness
-    row.custom_sec_qty = po_item.custom_sec_qty
+    for field in fields:
+        row.set(field, po_item.get(field))
 
 
 def _recalculate_qty(row):
@@ -298,13 +293,18 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
     pr = frappe.get_doc("Purchase Receipt", pr_name)
     mp = frappe.get_doc("Material Planning", mp_name)
 
-    # Index MP unavailable_items for O(1) lookup
-    by_alternate = {}   # alternate_item → [mp_row, ...]
-    by_original  = {}   # item_code      → [mp_row, ...]
+    # Index MP unavailable_items two ways: precise (item_code, duno_mark_no) when the
+    # PR item carries a DUNO reference, and a legacy item-code-only fallback for PRs
+    # created before this reference chain existed (no custom_duno_mark_no to match on).
+    by_alternate, by_alternate_any = {}, {}
+    by_original, by_original_any = {}, {}
     for row in (mp.unavailable_items or []):
+        duno = row.duno_mark_no or ""
         if row.alternate_item:
-            by_alternate.setdefault(row.alternate_item, []).append(row)
-        by_original.setdefault(row.item_code, []).append(row)
+            by_alternate.setdefault((row.alternate_item, duno), []).append(row)
+            by_alternate_any.setdefault(row.alternate_item, []).append(row)
+        by_original.setdefault((row.item_code, duno), []).append(row)
+        by_original_any.setdefault(row.item_code, []).append(row)
 
     # Existing allocations — avoid duplicates
     existing_exact   = {(r.item_code, r.batch_no)           for r in (mp.available_raw_materials or [])}
@@ -332,63 +332,80 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
 
         item_code = pr_item.item_code
         batch_no  = pr_item.batch_no or ""
+        pr_duno   = pr_item.get("custom_duno_mark_no") or ""
 
-        if item_code in by_alternate:
+        # When the PR item knows its DUNO, only allocate against that exact drawing's
+        # row — no fallback fan-out (a miss here should surface as unallocated, not
+        # mis-allocated to a different drawing's shortage). Only fall back to matching
+        # by item_code alone when the PR item has no DUNO reference at all (in-flight
+        # PRs created before this field existed).
+        if pr_duno:
+            matched_alternate = by_alternate.get((item_code, pr_duno), [])
+            matched_original  = by_original.get((item_code, pr_duno), [])
+        else:
+            matched_alternate = by_alternate_any.get(item_code, [])
+            matched_original  = by_original_any.get(item_code, [])
+
+        if matched_alternate:
             # Alternate item purchased → Material Mapping
-            for mp_row in by_alternate[item_code]:
+            for mp_row in matched_alternate:
                 key = (mp_row.item_code, batch_no)
                 if key in existing_mapping:
                     continue
                 existing_mapping.add(key)
                 mp.append("material_mapping", {
-                    "item_number":       mp_row.item_number,
-                    "sales_order":       mp_row.sales_order,
-                    "item_code":         mp_row.item_code,
-                    "item_name":         mp_row.item_name,
-                    "bom_no":            mp_row.bom_no,
-                    "duno_mark_no":      mp_row.duno_mark_no,
-                    "qty":               mp_row.qty,
-                    "uom":               mp_row.uom,
-                    "sec_qty":           flt(pr_item.custom_sec_qty) or mp_row.sec_qty,
-                    "sec_uom":           mp_row.sec_uom,
-                    "parent_item_group": mp_row.parent_item_group,
-                    "length":            flt(pr_item.custom_length)    or mp_row.length,
-                    "width":             flt(pr_item.custom_width)     or mp_row.width,
-                    "thickness":         flt(pr_item.custom_thickness) or mp_row.thickness,
-                    "unit_weight":       mp_row.unit_weight,
-                    "batch":             batch_no,
-                    "planned_item":      item_code,
+                    "item_number":            mp_row.item_number,
+                    "sales_order":            mp_row.sales_order,
+                    "item_code":              mp_row.item_code,
+                    "item_name":              mp_row.item_name,
+                    "bom_no":                 mp_row.bom_no,
+                    "drawing":                mp_row.drawing,
+                    "duno_mark_no":           mp_row.duno_mark_no,
+                    "customer_drawing_number": mp_row.customer_drawing_number,
+                    "qty":                    mp_row.qty,
+                    "uom":                    mp_row.uom,
+                    "sec_qty":                flt(pr_item.custom_sec_qty) or mp_row.sec_qty,
+                    "sec_uom":                mp_row.sec_uom,
+                    "parent_item_group":      mp_row.parent_item_group,
+                    "length":                 flt(pr_item.custom_length)    or mp_row.length,
+                    "width":                  flt(pr_item.custom_width)     or mp_row.width,
+                    "thickness":              flt(pr_item.custom_thickness) or mp_row.thickness,
+                    "unit_weight":            mp_row.unit_weight,
+                    "batch":                  batch_no,
+                    "planned_item":           item_code,
                 })
                 added_mapping += 1
 
-        elif item_code in by_original:
+        elif matched_original:
             # Original item purchased → Available Raw Materials (Exact Match)
             item_data = frappe.db.get_value(
                 "Item", item_code,
                 ["stock_uom", "custom_secondary_uom"],
                 as_dict=True,
             ) or {}
-            for mp_row in by_original[item_code]:
+            for mp_row in matched_original:
                 key = (item_code, batch_no)
                 if key in existing_exact:
                     continue
                 existing_exact.add(key)
                 mp.append("available_raw_materials", {
-                    "item_number":       mp_row.item_number,
-                    "sales_order":       mp_row.sales_order,
-                    "item_code":         item_code,
-                    "item_name":         pr_item.item_name or mp_row.item_name,
-                    "batch_no":          batch_no,
-                    "parent_item_group": mp_row.parent_item_group,
-                    "length":            flt(pr_item.custom_length)    or mp_row.length,
-                    "width":             flt(pr_item.custom_width)     or mp_row.width,
-                    "thickness":         flt(pr_item.custom_thickness) or mp_row.thickness,
-                    "required_qty":      mp_row.qty,
-                    "available_qty":     pr_item.qty,
-                    "sec_qty":           flt(pr_item.custom_sec_qty)   or mp_row.sec_qty,
-                    "sec_uom":           item_data.get("custom_secondary_uom") or mp_row.sec_uom,
-                    "uom":               item_data.get("stock_uom")    or mp_row.uom,
-                    "warehouse":         pr_item.warehouse or mp.for_warehouse,
+                    "item_number":            mp_row.item_number,
+                    "sales_order":            mp_row.sales_order,
+                    "item_code":              item_code,
+                    "item_name":              pr_item.item_name or mp_row.item_name,
+                    "duno_mark_no":           mp_row.duno_mark_no,
+                    "customer_drawing_number": mp_row.customer_drawing_number,
+                    "batch_no":               batch_no,
+                    "parent_item_group":      mp_row.parent_item_group,
+                    "length":                 flt(pr_item.custom_length)    or mp_row.length,
+                    "width":                  flt(pr_item.custom_width)     or mp_row.width,
+                    "thickness":              flt(pr_item.custom_thickness) or mp_row.thickness,
+                    "required_qty":           mp_row.qty,
+                    "available_qty":          pr_item.qty,
+                    "sec_qty":                flt(pr_item.custom_sec_qty)   or mp_row.sec_qty,
+                    "sec_uom":                item_data.get("custom_secondary_uom") or mp_row.sec_uom,
+                    "uom":                    item_data.get("stock_uom")    or mp_row.uom,
+                    "warehouse":              pr_item.warehouse or mp.for_warehouse,
                 })
                 added_exact += 1
 
@@ -396,3 +413,15 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
         mp.save(ignore_permissions=True)
 
     return {"added_exact": added_exact, "added_mapping": added_mapping}
+
+
+def on_submit_purchase_receipt(doc, method):
+    """Auto-allocate received batches back to every Material Planning this PR traces to."""
+    for mp_name in get_mp_for_pr(doc.name):
+        try:
+            allocate_pr_stock_to_mp(doc.name, mp_name)
+        except Exception:
+            frappe.log_error(
+                title=f"Material Planning auto-allocation failed for {doc.name} -> {mp_name}",
+                message=frappe.get_traceback(),
+            )

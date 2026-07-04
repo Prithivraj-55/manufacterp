@@ -10,7 +10,9 @@
   "item_code",
   "item_name",
   "bom_no",
+  "drawing",
   "duno_mark_no",
+  "customer_drawing_number",
   "col_break_1",
   "qty",
   "uom",
@@ -76,10 +78,23 @@
    "read_only": 1
   },
   {
+   "fieldname": "drawing",
+   "fieldtype": "Link",
+   "label": "Drawing",
+   "options": "Drawing",
+   "read_only": 1
+  },
+  {
    "fieldname": "duno_mark_no",
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "DUNO/Mark No",
+   "read_only": 1
+  },
+  {
+   "fieldname": "customer_drawing_number",
+   "fieldtype": "Data",
+   "label": "Cust Drawing Number",
    "read_only": 1
   },
   {
