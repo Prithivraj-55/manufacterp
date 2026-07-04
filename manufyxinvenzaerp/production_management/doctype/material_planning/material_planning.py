@@ -16,6 +16,8 @@ class MaterialPlanning(Document):
         self._apply_rwd_group_allocations()
         if self.material_mapping and self.for_warehouse:
             self._validate_batch_calc_qty()
+        if self.unavailable_items:
+            self._validate_alternate_item_qty()
         _update_bom_item_weights(self)
 
     def _apply_rwd_group_allocations(self):
@@ -165,29 +167,43 @@ class MaterialPlanning(Document):
             required_qty = flt(row.qty)
             if batch_calc_qty < required_qty:
                 alternate = row.planned_item or row.batch
-                message = _(
-                    "Row {0}: <b>{1}</b> needs <b>{2} Kg</b>, "
-                    "but alternate item <b>{3}</b> mapped only for <b>{4} Kg</b>."
-                ).format(row.idx, row.item_code, flt(required_qty, 3), alternate, flt(batch_calc_qty, 3))
+                points = [
+                    _("<b>{0}</b> needs <b>{1} Kg</b>, but alternate item <b>{2}</b> mapped only for <b>{3} Kg</b>.")
+                    .format(row.item_code, flt(required_qty, 3), alternate, flt(batch_calc_qty, 3))
+                ]
 
                 if group in ("Structurals", "Plates") and flt(row.sec_qty):
                     usable_nos, usable_kg, shortfall_nos, shortfall_kg, excess_kg = _calc_usable_nos_split(
                         row.qty, row.sec_qty, batch_calc_qty
                     )
                     if usable_nos > 0:
-                        message += "<br>" + _(
-                            "Covers <b>{0} Nos</b> ({1} Kg) — the batch will be used for {0} Nos; "
-                            "the remaining <b>{2} Kg</b> is excess (added to Difference in Kg). "
-                            "Pending <b>{3} Nos</b> ({4} Kg) will move to Unavailable Items / "
-                            "Material Request when you click <b>Move to Unavailable Items</b>."
-                        ).format(usable_nos, usable_kg, excess_kg, shortfall_nos, shortfall_kg)
+                        points.append(
+                            _("Covers <b>{0} Nos</b> ({1} Kg) — the batch will be used for {0} Nos.")
+                            .format(usable_nos, usable_kg)
+                        )
+                        points.append(
+                            _("Remaining <b>{0} Kg</b> is excess (added to Difference in Kg).")
+                            .format(excess_kg)
+                        )
+                        points.append(
+                            _("Pending <b>{0} Nos</b> ({1} Kg) will move to Unavailable Items / "
+                              "Material Request when you click <b>Move to Unavailable Items</b>.")
+                            .format(shortfall_nos, shortfall_kg)
+                        )
                     else:
-                        message += "<br>" + _(
-                            "Covers <b>0 Nos</b> — this mapping is not usable. "
-                            "The full <b>{0} Nos</b> ({1} Kg) needs to be purchased; "
-                            "click <b>Move to Unavailable Items</b> to send it to Material Request."
-                        ).format(int(flt(row.sec_qty)), flt(required_qty, 3))
+                        points.append(_("Covers <b>0 Nos</b> — this mapping is not usable."))
+                        points.append(
+                            _("The full <b>{0} Nos</b> ({1} Kg) needs to be purchased; "
+                              "click <b>Move to Unavailable Items</b> to send it to Material Request.")
+                            .format(int(flt(row.sec_qty)), flt(required_qty, 3))
+                        )
 
+                message = (
+                    _("Row {0}:").format(row.idx)
+                    + "<ul style='margin:4px 0 0 -18px;'>"
+                    + "".join("<li>{0}</li>".format(p) for p in points)
+                    + "</ul>"
+                )
                 shortfall_warnings.append(message)
 
             if batch_calc_qty > available:
@@ -215,6 +231,39 @@ class MaterialPlanning(Document):
                 indicator="orange",
             )
 
+    def _validate_alternate_item_qty(self):
+        """Unavailable Items row with an Alternate Item entered: the alternate's
+        computed Kg (alternate_quantity, from its dimensions/Sec Qty) must cover
+        the original Required Qty (qty), or the row won't have enough material
+        to allocate/reserve once it's picked up in Material Mapping."""
+        warnings = []
+        for row in (self.unavailable_items or []):
+            if not row.alternate_item:
+                continue
+            required_qty = flt(row.qty)
+            alternate_qty = flt(row.alternate_quantity)
+            if alternate_qty < required_qty:
+                shortfall = flt(required_qty - alternate_qty, 3)
+                points = [
+                    _("<b>{0}</b> needs <b>{1} Kg</b>, but alternate item <b>{2}</b> is mapped for only <b>{3} Kg</b>.")
+                    .format(row.item_code, flt(required_qty, 3), row.alternate_item, flt(alternate_qty, 3)),
+                    _("Shortfall of <b>{0} Kg</b> — plan/purchase material accordingly, otherwise this "
+                      "will not be enough to allocate and reserve during Material Mapping.")
+                    .format(shortfall),
+                ]
+                warnings.append(
+                    _("Row {0}:").format(row.idx)
+                    + "<ul style='margin:4px 0 0 -18px;'>"
+                    + "".join("<li>{0}</li>".format(p) for p in points)
+                    + "</ul>"
+                )
+
+        if warnings:
+            frappe.msgprint(
+                "<br>".join(warnings),
+                title=_("Alternate Item Quantity Shortfall"),
+                indicator="orange",
+            )
 
 
 @frappe.whitelist()
