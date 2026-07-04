@@ -209,6 +209,7 @@ frappe.ui.form.on("Material Planning", {
 		frm.set_df_property("get_raw_materials_btn",  "hidden", 0);
 		frm.set_df_property("check_stock_btn",         "hidden", has_raw     ? 0 : 1);
 		frm.set_df_property("update_exact_match_btn",  "hidden", has_unavail ? 0 : 1);
+		frm.set_df_property("verify_material_mapping_btn", "hidden", has_mapping ? 0 : 1);
 		frm.set_df_property("finalize_mapping_btn",    "hidden", has_mapping ? 0 : 1);
 
 		// Lock the SO picker and Show Drawings button once stock has been checked
@@ -227,6 +228,7 @@ frappe.ui.form.on("Material Planning", {
 			_style_btn("get_raw_materials_btn",  "refresh", "Get Raw Materials");
 			_style_btn("check_stock_btn",        "search",  "Check Stock Availability");
 			_style_btn("update_exact_match_btn", "tick",    "Update & Map Exact Matches");
+			_style_btn("verify_material_mapping_btn", "check", "Verify Raw Materials");
 			_style_btn("finalize_mapping_btn",   "move",    "Move to Unavailable Items");
 
 			// "View All" injected next to each section's action button
@@ -701,6 +703,72 @@ frappe.ui.form.on("Material Planning", {
 			+ "</ul><p style='margin-top:8px;'>" + __("Continue?") + "</p>";
 
 		frappe.confirm(msg, _run);
+	},
+
+	verify_material_mapping_btn(frm) {
+		if (!(frm.doc.material_mapping || []).length) {
+			frappe.msgprint(__("No items in Material Mapping to verify."));
+			return;
+		}
+		frappe.call({
+			method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.verify_material_mapping",
+			args: { doc: frm.doc },
+			freeze: true,
+			freeze_message: __("Verifying Nos vs Qty…"),
+			callback(r) {
+				if (!r.message) return;
+				let { checked, issues } = r.message;
+
+				if (!issues.length) {
+					frappe.show_alert({ message: __("All {0} row(s) verified — Nos and Qty match.", [checked]), indicator: "green" }, 5);
+					return;
+				}
+
+				let rows_html = issues.map(function(row) {
+					let formula_cell = row.formula_ok
+						? `<span style="color:#888;">—</span>`
+						: `<span style="color:#c0392b;font-weight:600;">${__("Expected")} ${row.checked_field === "sec_qty" ? "Sec Qty" : "Qty"} = ${row.formula_expected}</span>`;
+					let so_cell = row.so_expected_sec_qty === null
+						? `<span style="color:#888;">—</span>`
+						: (row.so_ok
+							? `<span style="color:#2e7d32;">${__("OK")}</span>`
+							: `<span style="color:#c0392b;font-weight:600;">${__("SO requires Sec Qty")} = ${row.so_expected_sec_qty}</span>`);
+					return `<tr>
+						<td style="padding:5px 10px;border-bottom:1px solid #f0f0f0;">${row.idx}</td>
+						<td style="padding:5px 10px;border-bottom:1px solid #f0f0f0;">${frappe.utils.escape_html(row.item_number)}</td>
+						<td style="padding:5px 10px;border-bottom:1px solid #f0f0f0;">${frappe.utils.escape_html(row.item_code || "")}</td>
+						<td style="padding:5px 10px;border-bottom:1px solid #f0f0f0;">${frappe.utils.escape_html(row.customer_drawing_number)}</td>
+						<td style="padding:5px 10px;border-bottom:1px solid #f0f0f0;">${row.sec_qty}</td>
+						<td style="padding:5px 10px;border-bottom:1px solid #f0f0f0;">${row.qty}</td>
+						<td style="padding:5px 10px;border-bottom:1px solid #f0f0f0;">${formula_cell}</td>
+						<td style="padding:5px 10px;border-bottom:1px solid #f0f0f0;">${so_cell}</td>
+					</tr>`;
+				}).join("");
+
+				let html = `<div style="overflow:auto;max-height:60vh;">
+					<table style="font-size:12px;border-collapse:collapse;width:100%;">
+						<thead><tr style="background:#f4f5f7;">
+							<th style="padding:6px 10px;text-align:left;">${__("Row")}</th>
+							<th style="padding:6px 10px;text-align:left;">${__("Item No")}</th>
+							<th style="padding:6px 10px;text-align:left;">${__("Material Code")}</th>
+							<th style="padding:6px 10px;text-align:left;">${__("Drawing")}</th>
+							<th style="padding:6px 10px;text-align:left;">${__("Sec Qty (Nos)")}</th>
+							<th style="padding:6px 10px;text-align:left;">${__("Qty (Kg)")}</th>
+							<th style="padding:6px 10px;text-align:left;">${__("Formula Check")}</th>
+							<th style="padding:6px 10px;text-align:left;">${__("Sales Order Check")}</th>
+						</tr></thead>
+						<tbody>${rows_html}</tbody>
+					</table>
+				</div>`;
+
+				let d = new frappe.ui.Dialog({
+					title: __("{0} of {1} row(s) need attention", [issues.length, checked]),
+					size: "extra-large",
+				});
+				d.$body.html(html);
+				d.show();
+			},
+		});
 	},
 
 	finalize_mapping_btn(frm) {

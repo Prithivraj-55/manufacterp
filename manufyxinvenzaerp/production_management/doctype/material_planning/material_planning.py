@@ -996,6 +996,85 @@ def finalize_mapping(doc):
 
 
 @frappe.whitelist()
+def verify_material_mapping(doc):
+    """Cross-check every Material Mapping row's Sec Qty (Nos) against its Qty
+    (Kg) using the same weight formula the rest of the app uses, and — for
+    rows that trace back to a Sales Order drawing line — against that line's
+    Total Sec Qty too. Surfaces exactly the class of mismatch behind the
+    ISMB250/BEAM-1B10 case (Sec Qty silently inflated by a rounding-driven
+    ceil() overshoot) so it can be caught in the Material Mapping table
+    itself instead of downstream in Purchase/Transfer.
+    """
+    if isinstance(doc, str):
+        doc = frappe._dict(json.loads(doc))
+
+    issues = []
+    for row in doc.get("material_mapping") or []:
+        group = row.get("parent_item_group") or ""
+        length = flt(row.get("length"))
+        width = flt(row.get("width"))
+        thickness = flt(row.get("thickness"))
+        unit_weight = flt(row.get("unit_weight"))
+        qty = flt(row.get("qty"))
+        sec_qty = flt(row.get("sec_qty"))
+
+        # Nuts and Bolts reverses the roles: qty holds Nos, sec_qty holds Kg
+        # (see setup.py's Nuts and Bolts qty handler) — everywhere else qty
+        # is Kg and sec_qty is Nos.
+        expected = None
+        checked_field = None
+        if group == "Structurals" and length and unit_weight:
+            expected = flt((length / 1000) * unit_weight * sec_qty, 3)
+            checked_field, actual = "qty", qty
+        elif group == "Plates" and length and width and thickness and unit_weight:
+            expected = flt((length / 1000) * (width / 1000) * thickness * unit_weight * sec_qty, 3)
+            checked_field, actual = "qty", qty
+        elif group == "Nuts and Bolts" and unit_weight:
+            expected = flt(unit_weight * qty, 3)
+            checked_field, actual = "sec_qty", sec_qty
+
+        formula_ok = expected is None or abs(expected - actual) <= 0.01
+
+        so_expected_sec_qty = None
+        so_ok = True
+        sales_order = row.get("sales_order")
+        if sales_order:
+            so_expected_sec_qty = frappe.db.get_value(
+                "Sales Order Drawing Raw Material",
+                {
+                    "parent": sales_order,
+                    "material_code": row.get("item_code"),
+                    "item_no": row.get("item_number"),
+                    "customer_drawing_number": row.get("customer_drawing_number"),
+                },
+                "total_sec_qty",
+            )
+            if so_expected_sec_qty is not None:
+                so_ok = abs(flt(so_expected_sec_qty) - sec_qty) <= 0.01
+
+        if not formula_ok or not so_ok:
+            issues.append({
+                "idx": row.get("idx"),
+                "item_code": row.get("item_code"),
+                "item_number": row.get("item_number") or "",
+                "customer_drawing_number": row.get("customer_drawing_number") or "",
+                "parent_item_group": group,
+                "qty": qty,
+                "sec_qty": sec_qty,
+                "checked_field": checked_field,
+                "formula_expected": expected,
+                "formula_ok": formula_ok,
+                "so_expected_sec_qty": flt(so_expected_sec_qty) if so_expected_sec_qty is not None else None,
+                "so_ok": so_ok,
+            })
+
+    return {
+        "checked": len(doc.get("material_mapping") or []),
+        "issues": issues,
+    }
+
+
+@frappe.whitelist()
 def get_batch_reservation_summary(batch_no):
     """Return all active reservations for a batch, enriched with SO customer and project."""
     rows = frappe.db.sql(
