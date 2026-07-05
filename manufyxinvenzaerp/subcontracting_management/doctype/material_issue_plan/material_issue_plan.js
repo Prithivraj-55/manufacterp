@@ -169,6 +169,14 @@ function _add_update_batch_button(frm) {
 	);
 }
 
+// Per-row "Update Batch" button (Button field on the child doctype) — opens the
+// same dialog as the grid toolbar button, pre-filtered/pre-selected onto this row.
+frappe.ui.form.on("Material Issue Plan Raw Material", {
+	update_batch_btn(frm, cdt, cdn) {
+		_show_update_batch_dialog(frm, locals[cdt][cdn].name);
+	},
+});
+
 // ── Transfer / CNC buttons ───────────────────────────────────────────────────
 
 function _add_transfer_buttons(frm) {
@@ -422,48 +430,213 @@ function _mip_excess_totals(frm) {
 	frm.set_value("excess_return_total_nos", flt(tnos, 3));
 }
 
-function _show_update_batch_dialog(frm) {
-	let rows = (frm.doc.raw_materials || []).filter((r) => r.source_table !== "Material Planning Unavailable Item");
-	if (!rows.length) {
-		frappe.msgprint(__("No reservable raw material rows to update. Unavailable items must go through Material Request/Purchase instead."));
+// Rows matching the free-text Customer Drawing No / DUNO-Mark No / Sales Order
+// filters (AND semantics, substring match; a blank filter matches everything) —
+// same filter semantics as Production Plan's drawing picker (public/js/production_plan.js).
+function _mip_row_matches_filters(r, f) {
+	return (!f.cdn || String(r.customer_drawing_number || "").toLowerCase().includes(f.cdn))
+		&& (!f.duno || String(r.duno_mark_no || "").toLowerCase().includes(f.duno))
+		&& (!f.so || String(r.sales_order || "").toLowerCase().includes(f.so));
+}
+
+// Batch/purchase-reference cell — reservable rows show their batch (or "no batch"),
+// unavailable/purchased rows show a link to the Purchase Receipt that fulfilled them.
+function _mip_batch_cell_html(r) {
+	if (r.batch_no) return frappe.utils.escape_html(r.batch_no);
+	if (r.purchase_receipt) {
+		return __("Purchased via {0}", [
+			`<a href="/app/purchase-receipt/${encodeURIComponent(r.purchase_receipt)}" target="_blank">`
+			+ `${frappe.utils.escape_html(r.purchase_receipt)}</a>`,
+		]);
+	}
+	return r.is_unavailable
+		? `<span style="color:#adb5bd;">${__("Pending Purchase")}</span>`
+		: `<span style="color:#adb5bd;">${__("no batch")}</span>`;
+}
+
+// Builds the filter bar + results table ONCE into the dialog's "picker_html" field
+// and returns a controller so the caller can update the highlighted row (on every
+// click) and pre-fill filters (on preselect) without tearing down and rebuilding the
+// filter inputs each time — rebuilding on every click would otherwise wipe out
+// whatever the user had already typed into the filter boxes.
+// Reservable rows (Material Mapping / Available Raw Material) are clickable and
+// call `on_select`; Unavailable Item rows are shown dimmed for context only —
+// they can't be reallocated here (must go through Material Request/Purchase).
+function _mip_build_picker(dialog, all_rows, on_select) {
+	let $wrap = dialog.fields_dict.picker_html.$wrapper;
+	let selected_row_name = null;
+
+	let filter_bar = `
+		<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;padding:8px 10px;background:#f8f9fa;border:1px solid #e9ecef;border-radius:4px;">
+			<div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:140px;">
+				<label style="font-size:10px;font-weight:600;color:#6c757d;margin:0;">${__("Customer Drawing No")}</label>
+				<input id="_mip_ub_cdn" type="text" placeholder="${__("Filter…")}"
+					style="border:1px solid #d1d8dd;border-radius:4px;padding:4px 8px;font-size:12px;width:100%;">
+			</div>
+			<div style="display:flex;flex-direction:column;gap:3px;min-width:100px;">
+				<label style="font-size:10px;font-weight:600;color:#6c757d;margin:0;">${__("DUNO / Mark No")}</label>
+				<input id="_mip_ub_duno" type="text" placeholder="${__("Filter…")}"
+					style="border:1px solid #d1d8dd;border-radius:4px;padding:4px 8px;font-size:12px;width:100%;">
+			</div>
+			<div style="display:flex;flex-direction:column;gap:3px;min-width:120px;">
+				<label style="font-size:10px;font-weight:600;color:#6c757d;margin:0;">${__("Sales Order")}</label>
+				<input id="_mip_ub_so" type="text" placeholder="${__("Filter…")}"
+					style="border:1px solid #d1d8dd;border-radius:4px;padding:4px 8px;font-size:12px;width:100%;">
+			</div>
+			<div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;justify-content:flex-end;padding-bottom:1px;">
+				<label style="font-size:10px;font-weight:600;color:#6c757d;margin:0;">&nbsp;</label>
+				<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+					<button class="btn btn-xs" id="_mip_ub_clear"
+						style="background:#c62828;color:#fff;border-color:#c62828;">${__("Clear Filters")}</button>
+					<span id="_mip_ub_count" style="font-size:12px;color:#6c757d;white-space:nowrap;"></span>
+				</div>
+			</div>
+		</div>`;
+
+	let th_style = "white-space:nowrap;padding:6px 10px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;";
+	let cols = [
+		["item_code", __("Item Code")],
+		["duno_mark_no", __("DUNO/Mark No")],
+		["customer_drawing_number", __("Cust Drawing No")],
+		["sales_order", __("Sales Order")],
+		["_batch", __("Batch / Purchase Ref")],
+		["sec_qty", __("Sec Qty")],
+		["qty", __("Qty (Kg)")],
+	];
+	let thead = "<tr>" + cols.map((c) => `<th style="${th_style}">${c[1]}</th>`).join("") + "</tr>";
+
+	let table_html = `<div style="overflow-x:auto;">
+		<table style="font-size:12px;border-collapse:collapse;width:100%;min-width:700px;">
+			<thead style="position:sticky;top:0;z-index:1;">${thead}</thead>
+			<tbody id="_mip_ub_tbody"></tbody>
+		</table>
+	</div>`;
+
+	$wrap.html(filter_bar + `<div style="max-height:32vh;overflow-y:auto;border:1px solid #e9ecef;border-radius:4px;">${table_html}</div>`);
+
+	function _render_rows(rows) {
+		let $tbody = $wrap.find("#_mip_ub_tbody");
+		$tbody.html(rows.map((r) => {
+			let reservable = r.source_table !== "Material Planning Unavailable Item";
+			let is_selected = r.name === selected_row_name;
+			let row_style = reservable
+				? `cursor:pointer;${is_selected ? "background:#e3f2fd;" : ""}`
+				: "cursor:not-allowed;color:#adb5bd;background:#fafbfc;";
+			let cells = [
+				frappe.utils.escape_html(r.item_code || ""),
+				frappe.utils.escape_html(r.duno_mark_no || ""),
+				frappe.utils.escape_html(r.customer_drawing_number || ""),
+				frappe.utils.escape_html(r.sales_order || ""),
+				_mip_batch_cell_html(r),
+				format_number(flt(r.sec_qty), null, 3),
+				format_number(flt(r.qty), null, 3),
+			];
+			return `<tr data-name="${frappe.utils.escape_html(r.name)}" data-reservable="${reservable ? 1 : 0}" style="${row_style}">`
+				+ cells.map((c) => `<td style="padding:5px 10px;white-space:nowrap;border-bottom:1px solid #f0f0f0;">${c}</td>`).join("")
+				+ "</tr>";
+		}).join(""));
+		$wrap.find("#_mip_ub_count").text(__("{0} shown", [rows.length]));
+
+		$tbody.find("tr[data-reservable='1']").on("click", function() {
+			let row = all_rows.find((r) => r.name === $(this).data("name"));
+			if (row) on_select(row);
+		});
+	}
+
+	function _get_filters() {
+		return {
+			cdn: (($wrap.find("#_mip_ub_cdn").val()) || "").toLowerCase().trim(),
+			duno: (($wrap.find("#_mip_ub_duno").val()) || "").toLowerCase().trim(),
+			so: (($wrap.find("#_mip_ub_so").val()) || "").toLowerCase().trim(),
+		};
+	}
+
+	function _apply_filter() {
+		let f = _get_filters();
+		_render_rows(all_rows.filter((r) => _mip_row_matches_filters(r, f)));
+	}
+
+	$wrap.find("#_mip_ub_cdn, #_mip_ub_duno, #_mip_ub_so").on("input", _apply_filter);
+	$wrap.find("#_mip_ub_clear").on("click", function() {
+		$wrap.find("#_mip_ub_cdn, #_mip_ub_duno, #_mip_ub_so").val("");
+		_apply_filter();
+	});
+
+	_render_rows(all_rows);
+
+	return {
+		// Highlight `row_name` as selected and re-render with whatever filters are
+		// currently typed (does NOT reset the filter inputs).
+		markSelected(row_name) {
+			selected_row_name = row_name;
+			_apply_filter();
+		},
+		// Pre-fill the filter inputs (used when opening via the per-row grid button)
+		// and apply them immediately.
+		setFilters(cdn, duno, so) {
+			$wrap.find("#_mip_ub_cdn").val(cdn || "");
+			$wrap.find("#_mip_ub_duno").val(duno || "");
+			$wrap.find("#_mip_ub_so").val(so || "");
+			_apply_filter();
+		},
+	};
+}
+
+const _MIP_ALLOC_FIELDS = [
+	"current_batch", "current_sec_qty", "current_qty",
+	"new_batch_no", "length", "width", "thickness", "sec_qty", "reserve_without_dimensions",
+];
+
+// "Update Batch" dialog — search/filter across every raw material row (reservable and
+// purchased/unavailable, for context), pick one reservable row, review its current
+// allocation (read-only) alongside an editable new-allocation panel, then reassign.
+// `preselect_row_name` (optional) is the raw_materials row to open straight onto,
+// used by the per-row grid button; the toolbar button opens it with nothing selected.
+function _show_update_batch_dialog(frm, preselect_row_name) {
+	let all_rows = frm.doc.raw_materials || [];
+	if (!all_rows.length) {
+		frappe.msgprint(__("No raw materials found. Use \"Refresh Raw Materials\" first."));
 		return;
 	}
 
-	let row_options = rows.map((r) => ({
-		label: `${r.item_code} — ${r.batch_no || __("no batch")} (${r.duno_mark_no || ""})`,
-		value: r.name,
-	}));
+	let selected_row = null;
 
 	let dialog = new frappe.ui.Dialog({
 		title: __("Update Batch"),
+		size: "extra-large",
 		fields: [
-			{
-				fieldname: "row_name",
-				fieldtype: "Select",
-				label: __("Raw Material Row"),
-				options: row_options.map((o) => o.label).join("\n"),
-				reqd: 1,
-			},
+			{ fieldtype: "HTML", fieldname: "picker_html" },
+			{ fieldtype: "HTML", fieldname: "no_selection_html" },
+			{ fieldtype: "Section Break", label: __("Current Allocation") },
+			{ fieldname: "current_batch", fieldtype: "Data", label: __("Current Batch / Purchase Ref"), read_only: 1 },
+			{ fieldname: "current_sec_qty", fieldtype: "Float", label: __("Current Sec Qty (Nos)"), read_only: 1 },
 			{ fieldtype: "Column Break" },
+			{ fieldname: "current_qty", fieldtype: "Float", label: __("Current Qty (Kg)"), read_only: 1 },
+			{ fieldtype: "Section Break", label: __("New Allocation") },
 			{ fieldname: "new_batch_no", fieldtype: "Link", options: "Batch", label: __("New Batch"), reqd: 1 },
-			{ fieldtype: "Section Break" },
 			{ fieldname: "length", fieldtype: "Float", label: __("Length (mm)") },
-			{ fieldname: "width", fieldtype: "Float", label: __("Width (mm)") },
 			{ fieldtype: "Column Break" },
+			{ fieldname: "width", fieldtype: "Float", label: __("Width (mm)") },
 			{ fieldname: "thickness", fieldtype: "Float", label: __("Thickness (mm)") },
 			{ fieldname: "sec_qty", fieldtype: "Float", label: __("Sec Qty (Nos)") },
 			{ fieldname: "reserve_without_dimensions", fieldtype: "Check", label: __("Reserve Without Dimensions") },
 		],
-		primary_action_label: __("Update"),
+		primary_action_label: __("Reassign Batch"),
 		primary_action(values) {
-			let picked = row_options.find((o) => o.label === values.row_name);
-			let row = rows.find((r) => r.name === picked.value);
+			if (!selected_row) {
+				frappe.msgprint(__("Select a raw material row first."));
+				return;
+			}
+			if (!values.new_batch_no) {
+				frappe.msgprint(__("Select a New Batch."));
+				return;
+			}
 			frappe.call({
 				method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.reassign_batch",
 				args: {
-					material_planning_name: row.material_planning,
-					source_table: row.source_table,
-					row_name: row.source_row,
+					material_planning_name: selected_row.material_planning,
+					source_table: selected_row.source_table,
+					row_name: selected_row.source_row,
 					new_batch_no: values.new_batch_no,
 					dimensions: JSON.stringify({
 						length: values.length,
@@ -472,6 +645,7 @@ function _show_update_batch_dialog(frm) {
 					}),
 					sec_qty: values.sec_qty,
 					reserve_without_dimensions: values.reserve_without_dimensions ? 1 : 0,
+					material_issue_plan: frm.doc.name,
 				},
 				freeze: true,
 				freeze_message: __("Reassigning batch..."),
@@ -480,9 +654,11 @@ function _show_update_batch_dialog(frm) {
 					let warnings = (r.message && r.message.warnings) || [];
 					if (warnings.length) {
 						frappe.msgprint({
-							title: __("Shortfall Warning"),
+							title: __("Reallocation Warnings"),
 							indicator: "orange",
-							message: warnings.map((w) => `${w.item_code} (${w.batch}): ${__("short by")} ${w.shortfall_qty}`).join("<br>"),
+							message: warnings.map((w) =>
+								w.reason || `${w.item_code} (${w.batch}): ${__("short by")} ${w.shortfall_qty}`
+							).join("<br>"),
 						});
 					}
 					frappe.call({
@@ -495,5 +671,43 @@ function _show_update_batch_dialog(frm) {
 			});
 		},
 	});
+
+	dialog.fields_dict.no_selection_html.$wrapper.html(
+		`<div style="color:#8d99a6;padding:8px 4px;font-size:12px;">`
+		+ __("Select a reservable row above to review its current allocation and reassign a new batch.")
+		+ `</div>`
+	);
+
+	function _toggle_allocation_fields(show) {
+		_MIP_ALLOC_FIELDS.forEach((f) => dialog.fields_dict[f].toggle(show));
+		dialog.fields_dict.no_selection_html.toggle(!show);
+	}
+
+	function _select_row(row) {
+		selected_row = row;
+		dialog.set_value("current_batch", row.batch_no || (row.purchase_receipt ? __("Purchased via {0}", [row.purchase_receipt]) : __("(none)")));
+		dialog.set_value("current_sec_qty", flt(row.sec_qty));
+		dialog.set_value("current_qty", flt(row.qty));
+		dialog.set_value("new_batch_no", "");
+		dialog.set_value("length", 0);
+		dialog.set_value("width", 0);
+		dialog.set_value("thickness", 0);
+		dialog.set_value("sec_qty", 0);
+		dialog.set_value("reserve_without_dimensions", 0);
+		_toggle_allocation_fields(true);
+		picker.markSelected(row.name);
+	}
+
+	_toggle_allocation_fields(false);
+	let picker = _mip_build_picker(dialog, all_rows, _select_row);
+
+	if (preselect_row_name) {
+		let row = all_rows.find((r) => r.name === preselect_row_name);
+		if (row) {
+			picker.setFilters(row.customer_drawing_number, row.duno_mark_no, row.sales_order);
+			_select_row(row);
+		}
+	}
+
 	dialog.show();
 }

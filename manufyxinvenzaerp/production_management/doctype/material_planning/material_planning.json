@@ -44,7 +44,10 @@
   "material_mapping",
   "section_unavailable_items",
   "update_exact_match_btn",
-  "unavailable_items"
+  "unavailable_items",
+  "tab_batch_change_log",
+  "section_batch_change_log",
+  "batch_change_log"
  ],
  "fields": [
   {
@@ -236,6 +239,23 @@
    "options": "Material Planning Unavailable Item"
   },
   {
+   "fieldname": "tab_batch_change_log",
+   "fieldtype": "Tab Break",
+   "label": "Batch Change Log"
+  },
+  {
+   "fieldname": "section_batch_change_log",
+   "fieldtype": "Section Break"
+  },
+  {
+   "description": "Audit trail of batch reassignments made from a linked Material Issue Plan's Update Batch action.",
+   "fieldname": "batch_change_log",
+   "fieldtype": "Table",
+   "label": "Batch Change Log",
+   "options": "Material Planning Batch Change Log",
+   "read_only": 1
+  },
+  {
    "fieldname": "section_weight_summary",
    "fieldtype": "Section Break",
    "label": "Weight Summary"
@@ -288,7 +308,7 @@
   }
  ],
  "links": [],
- "modified": "2026-07-05 00:00:00.000000",
+ "modified": "2026-07-05 19:50:00.000000",
  "modified_by": "Administrator",
  "module": "Production Management",
  "name": "Material Planning",

@@ -1862,14 +1862,82 @@ def unreserve_batches(material_planning_name, row_names):
     ]
 
 
+def _get_batch_dims(batch_no):
+    """(length, width, thickness) recorded on a Batch record itself."""
+    d = frappe.db.get_value(
+        "Batch", batch_no, ["custom_length", "custom_width", "custom_thickness"], as_dict=True
+    ) or {}
+    return flt(d.get("custom_length")), flt(d.get("custom_width")), flt(d.get("custom_thickness"))
+
+
+def _calc_batch_qty(group, length, width, thickness, sec_qty, unit_weight):
+    """Kg for a given item group + dimensions + Sec Qty (Nos) + unit weight.
+    Single source of truth for the formula mirrored from material_planning.js's
+    _recalc_batch_qty/_kg_per_nos — used both to apply a batch and to preview a
+    prospective allocation before anything is mutated."""
+    L, W, T, S, UW = flt(length), flt(width), flt(thickness), flt(sec_qty), flt(unit_weight)
+    if group == "Structurals" and L and UW and S:
+        return flt((L / 1000) * UW * S, 3)
+    if group == "Plates" and L and W and T and UW and S:
+        return flt((L / 1000) * (W / 1000) * T * UW * S, 3)
+    if group == "Nuts and Bolts" and S and UW:
+        return flt(S * UW, 3)
+    return 0.0
+
+
+def _precheck_batch_reassignment(mp, item_code, new_batch_no, group, length, width, thickness, sec_qty, unit_weight, required_qty):
+    """Non-blocking pre-checks run BEFORE a batch is unreserved/applied/reserved:
+    (1) does the new batch have enough free stock in the MP's warehouse, (2) does
+    the qty the new allocation computes to match what this row actually requires.
+    Both only warn (never frappe.throw) — same posture as the existing
+    check_mapping_batch_availability dry run this complements."""
+    warnings = []
+    if not new_batch_no or not mp.for_warehouse:
+        return warnings
+
+    free_qty = flt(get_batch_stock_summary(new_batch_no, mp.for_warehouse, mp.name or "").get("free_qty"))
+    prospective_qty = _calc_batch_qty(group, length, width, thickness, sec_qty, unit_weight)
+
+    if prospective_qty and free_qty < prospective_qty:
+        warnings.append({
+            "item_code": item_code or "",
+            "batch": new_batch_no,
+            "shortfall_qty": flt(prospective_qty - free_qty, 3),
+            "reason": _("Batch {0} has only {1} Kg free stock in {2}, less than the {3} Kg this allocation needs.")
+                .format(new_batch_no, free_qty, mp.for_warehouse, prospective_qty),
+        })
+
+    if prospective_qty and required_qty and abs(flt(prospective_qty - required_qty, 3)) > 0.001:
+        warnings.append({
+            "item_code": item_code or "",
+            "batch": new_batch_no,
+            "shortfall_qty": flt(required_qty - prospective_qty, 3),
+            "reason": _("New allocation for batch {0} computes to {1} Kg, which does not match the required {2} Kg for this row.")
+                .format(new_batch_no, prospective_qty, required_qty),
+        })
+    return warnings
+
+
+def _batch_change_remarks(item_code, old_batch, new_batch_no, material_issue_plan):
+    text = _("Batch changed from {0} to {1} for {2}").format(
+        old_batch or _("(none)"), new_batch_no or _("(none)"), item_code
+    )
+    if material_issue_plan:
+        text += _(" via Material Issue Plan {0}").format(material_issue_plan)
+    return text
+
+
 @frappe.whitelist()
 def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
-                    dimensions=None, sec_qty=None, reserve_without_dimensions=0):
+                    dimensions=None, sec_qty=None, reserve_without_dimensions=0,
+                    material_issue_plan=None):
     """Change the batch (and optionally dimensions/Sec Qty) already assigned to a
-    Material Mapping / Available Raw Material row: unreserve the old assignment,
-    apply the new batch, re-validate availability, and re-reserve — delegating to
-    Material Planning's own existing reservation functions throughout so this
-    stays the single source of truth for reservation bookkeeping. Used by Material
+    Material Mapping / Available Raw Material row, in three explicit steps:
+    (1) verify the new batch's stock and required-qty match (warn only), (2) unreserve
+    the old assignment, (3) apply the new batch, re-validate availability, and
+    re-reserve — delegating to Material Planning's own existing reservation functions
+    throughout so this stays the single source of truth for reservation bookkeeping.
+    Every reassignment is appended to batch_change_log for audit. Used by Material
     Issue Plan's "Update Batch" action; Material Planning's own grid keeps working
     unchanged alongside it."""
     if isinstance(dimensions, str):
@@ -1881,30 +1949,81 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
         frappe.throw(_("Unsupported source table for batch reassignment: {0}").format(source_table))
 
     new_item = get_batch_item(new_batch_no) if new_batch_no else None
+    new_item_data = (
+        frappe.db.get_value("Item", new_item, ["custom_unit_weight", "custom_parent_item_group"], as_dict=True) or {}
+        if new_item else {}
+    )
+    new_unit_weight = flt(new_item_data.get("custom_unit_weight"))
 
     mp = frappe.get_doc("Material Planning", material_planning_name)
+    warnings = []
 
     if source_table == "Material Planning Material Mapping":
         row = next((r for r in mp.material_mapping if r.name == row_name), None)
         if not row:
             frappe.throw(_("Row not found in Material Mapping."))
+
+        old_batch, old_sec_qty, old_qty = row.batch, flt(row.batch_sec_qty), flt(row.batch_calc_qty)
+
+        # Step 1 — batch dims come from the Batch record itself (not user input);
+        # Step 2 — compare against this row's own required qty.
+        if new_batch_no:
+            b_length, b_width, b_thickness = _get_batch_dims(new_batch_no)
+            group = new_item_data.get("custom_parent_item_group") or row.parent_item_group
+            precheck_sec_qty = flt(sec_qty) if sec_qty is not None else old_sec_qty
+            warnings.extend(_precheck_batch_reassignment(
+                mp, new_item or row.item_code, new_batch_no, group, b_length, b_width, b_thickness,
+                precheck_sec_qty, new_unit_weight, flt(row.qty),
+            ))
+
         if row.is_reserved:
             unreserve_batches(material_planning_name, json.dumps([row_name]))
             mp = frappe.get_doc("Material Planning", material_planning_name)
             row = next(r for r in mp.material_mapping if r.name == row_name)
 
         _apply_batch_to_mapping_row(row, new_batch_no, new_item, dimensions, sec_qty, reserve_without_dimensions)
+
+        mp.append("batch_change_log", {
+            "material_issue_plan": material_issue_plan or "",
+            "source_table": source_table,
+            "source_row": row_name,
+            "item_code": row.item_code,
+            "planned_item": row.planned_item if row.planned_item and row.planned_item != row.item_code else "",
+            "old_batch": old_batch,
+            "new_batch": new_batch_no or "",
+            "old_sec_qty": old_sec_qty,
+            "new_sec_qty": flt(row.batch_sec_qty),
+            "old_qty": old_qty,
+            "new_qty": flt(row.batch_calc_qty),
+            "remarks": _batch_change_remarks(row.item_code, old_batch, new_batch_no, material_issue_plan),
+        })
         mp.save(ignore_permissions=True)
 
     else:
         row = next((r for r in mp.available_raw_materials if r.name == row_name), None)
         if not row:
             frappe.throw(_("Row not found in Available Raw Materials."))
+
+        old_batch, old_sec_qty, old_qty = row.batch_no, flt(row.sec_qty), flt(row.required_qty)
+        item_code = row.item_code
+
+        if new_batch_no:
+            group = new_item_data.get("custom_parent_item_group") or row.parent_item_group
+            length = flt(dimensions.get("length")) if dimensions.get("length") is not None else flt(row.length)
+            width = flt(dimensions.get("width")) if dimensions.get("width") is not None else flt(row.width)
+            thickness = flt(dimensions.get("thickness")) if dimensions.get("thickness") is not None else flt(row.thickness)
+            precheck_sec_qty = flt(sec_qty) if sec_qty is not None else old_sec_qty
+            warnings.extend(_precheck_batch_reassignment(
+                mp, new_item or row.item_code, new_batch_no, group, length, width, thickness,
+                precheck_sec_qty, new_unit_weight, flt(row.overall_required_qty or row.required_qty),
+            ))
+
         if row.is_reserved:
             unreserve_exact_match_batches(material_planning_name, json.dumps([row_name]))
             mp = frappe.get_doc("Material Planning", material_planning_name)
             row = next(r for r in mp.available_raw_materials if r.name == row_name)
 
+        planned_item_for_log = ""
         if new_item and new_item != row.item_code:
             # Cross-item substitution — an exact-match row can't represent "batch is a
             # different item", so it moves to Material Mapping, where planned_item
@@ -1927,6 +2046,8 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
                 "thickness": row.thickness,
             })
             _apply_batch_to_mapping_row(new_row, new_batch_no, new_item, dimensions, sec_qty, reserve_without_dimensions)
+            new_sec_qty, new_qty = flt(new_row.batch_sec_qty), flt(new_row.batch_calc_qty)
+            planned_item_for_log = new_item
         else:
             row.batch_no = new_batch_no or ""
             if dimensions.get("length") is not None:
@@ -1937,12 +2058,27 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
                 row.thickness = flt(dimensions.get("thickness"))
             if sec_qty is not None:
                 row.sec_qty = flt(sec_qty)
+            new_sec_qty, new_qty = flt(row.sec_qty), flt(row.required_qty)
 
+        mp.append("batch_change_log", {
+            "material_issue_plan": material_issue_plan or "",
+            "source_table": source_table,
+            "source_row": row_name,
+            "item_code": item_code,
+            "planned_item": planned_item_for_log,
+            "old_batch": old_batch,
+            "new_batch": new_batch_no or "",
+            "old_sec_qty": old_sec_qty,
+            "new_sec_qty": new_sec_qty,
+            "old_qty": old_qty,
+            "new_qty": new_qty,
+            "remarks": _batch_change_remarks(item_code, old_batch, new_batch_no, material_issue_plan),
+        })
         mp.save(ignore_permissions=True)
 
     # Dry-run validation — the same check the JS already runs before/after save.
     mp = frappe.get_doc("Material Planning", material_planning_name)
-    warnings = check_mapping_batch_availability(mp.as_dict())
+    warnings.extend(check_mapping_batch_availability(mp.as_dict()))
 
     # Finalize the new reservation via the existing bulk reserve functions — both
     # only ever touch currently-unreserved rows that carry a batch, so calling them
@@ -1981,12 +2117,7 @@ def _apply_batch_to_mapping_row(row, new_batch_no, new_item, dimensions, sec_qty
         row.batch_calc_qty = 0.0
         return
 
-    batch_dims = frappe.db.get_value(
-        "Batch", new_batch_no, ["custom_length", "custom_width", "custom_thickness"], as_dict=True
-    ) or {}
-    row.batch_length = flt(batch_dims.get("custom_length"))
-    row.batch_width = flt(batch_dims.get("custom_width"))
-    row.batch_thickness = flt(batch_dims.get("custom_thickness"))
+    row.batch_length, row.batch_width, row.batch_thickness = _get_batch_dims(new_batch_no)
 
     item_data = (
         frappe.db.get_value("Item", new_item, ["custom_unit_weight", "custom_parent_item_group"], as_dict=True) or {}
@@ -1996,17 +2127,10 @@ def _apply_batch_to_mapping_row(row, new_batch_no, new_item, dimensions, sec_qty
     row.batch_parent_item_group = item_data.get("custom_parent_item_group") or ""
     row.batch_sec_qty = flt(sec_qty) if sec_qty is not None else flt(row.batch_sec_qty)
 
-    group = row.batch_parent_item_group
-    L, W, T = flt(row.batch_length), flt(row.batch_width), flt(row.batch_thickness)
-    S, UW = flt(row.batch_sec_qty), flt(row.batch_unit_weight)
-    qty = 0.0
-    if group == "Structurals" and L and UW and S:
-        qty = (L / 1000) * UW * S
-    elif group == "Plates" and L and W and T and UW and S:
-        qty = (L / 1000) * (W / 1000) * T * UW * S
-    elif group == "Nuts and Bolts" and S and UW:
-        qty = S * UW
-    row.batch_calc_qty = flt(qty, 3)
+    row.batch_calc_qty = _calc_batch_qty(
+        row.batch_parent_item_group, row.batch_length, row.batch_width, row.batch_thickness,
+        row.batch_sec_qty, row.batch_unit_weight,
+    )
 
 
 @frappe.whitelist()
