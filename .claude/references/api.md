@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-07-05 05:26:37_
+_Generated: 2026-07-05 22:30:07_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -66,12 +66,12 @@ All `@frappe.whitelist()` methods. Call from JS:
 | `unreserve_exact_match_batches` | 1718 |
 | `check_mapping_batch_availability` | 1759 |
 | `unreserve_batches` | 1825 |
-| `reassign_batch` | 1866 |
-| `_test_simulate_se_release` | 2013 |
-| `make_production_plan` | 2032 |
-| `make_material_request` | 2090 |
-| `update_so_difference_kg` | 2241 |
-| `auto_purchase_from_mp` | 2296 |
+| `reassign_batch` | 1931 |
+| `_test_simulate_se_release` | 2137 |
+| `make_production_plan` | 2156 |
+| `make_material_request` | 2214 |
+| `update_so_difference_kg` | 2365 |
+| `auto_purchase_from_mp` | 2420 |
 | `@frappe.validate_and_sanitize_search_inputs` | 291 |
 | `get_bom_info` | 317 |
 | `get_so_drawings_for_bom_picker` | 369 |
@@ -117,7 +117,7 @@ All `@frappe.whitelist()` methods. Call from JS:
 |--------|------|
 | `refresh_mip_raw_materials` | 110 |
 | `create_from_subcontracting_order` | 17 |
-| `refresh_weight_summary` | 199 |
+| `refresh_weight_summary` | 201 |
 | `populate_from_production_plan` | 36 |
 ## subcontracting_management/material_issue_plan_transfer.py
 
