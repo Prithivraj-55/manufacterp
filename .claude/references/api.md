@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-07-06 23:26:21_
+_Generated: 2026-07-06 23:59:54_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -115,10 +115,11 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `refresh_mip_raw_materials` | 110 |
+| `refresh_mip_raw_materials` | 122 |
 | `create_from_subcontracting_order` | 17 |
-| `refresh_weight_summary` | 201 |
-| `populate_from_production_plan` | 36 |
+| `refresh_weight_summary` | 213 |
+| `create_from_work_order` | 36 |
+| `populate_from_production_plan` | 55 |
 ## subcontracting_management/material_issue_plan_transfer.py
 
 | Method | Line |
@@ -133,12 +134,12 @@ All `@frappe.whitelist()` methods. Call from JS:
 | Method | Line |
 |--------|------|
 | `create_work_order_from_pp` | 151 |
-| `backfill_drawing_item_qty` | 1705 |
-| `get_wo_pending_items` | 1769 |
-| `create_partial_wo_transfer` | 1874 |
-| `create_cnc_to_wip_entry` | 1930 |
-| `create_return_stock_entry_for_wo` | 2029 |
-| `get_jc_summary` | 2081 |
+| `backfill_drawing_item_qty` | 1719 |
+| `get_wo_pending_items` | 1783 |
+| `create_partial_wo_transfer` | 1888 |
+| `create_cnc_to_wip_entry` | 1944 |
+| `create_return_stock_entry_for_wo` | 2043 |
+| `get_jc_summary` | 2095 |
 | `create_sco_from_production_plan` | 26 |
 | `create_supplier_operation_entries` | 286 |
 | `create_send_to_subcontractor_entry` | 303 |
@@ -151,4 +152,4 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 ## Total
 
-_83 whitelisted methods_
+_84 whitelisted methods_

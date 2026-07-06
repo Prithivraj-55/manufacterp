@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-07-06 23:26:21_
+_Generated: 2026-07-06 23:59:54_
 
 ## drawing
 
@@ -297,6 +297,7 @@ _Generated: 2026-07-06 23:26:21_
 |--------|-------------|
 | ` after_insert` | no |
 | ` create_from_subcontracting_order` | no |
+| ` create_from_work_order` | no |
 | ` populate_from_production_plan` | no |
 | ` refresh_mip_raw_materials` | no |
 | ` refresh_weight_summary` | no |
