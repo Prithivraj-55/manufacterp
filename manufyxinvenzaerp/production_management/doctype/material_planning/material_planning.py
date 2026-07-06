@@ -1930,7 +1930,7 @@ def _batch_change_remarks(item_code, old_batch, new_batch_no, material_issue_pla
 @frappe.whitelist()
 def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
                     dimensions=None, sec_qty=None, reserve_without_dimensions=0,
-                    material_issue_plan=None):
+                    allocate_based_on_sec_qty=1, material_issue_plan=None):
     """Change the batch (and optionally dimensions/Sec Qty) already assigned to a
     Material Mapping / Available Raw Material row, in three explicit steps:
     (1) verify the new batch's stock and required-qty match (warn only), (2) unreserve
@@ -1944,6 +1944,7 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
         dimensions = json.loads(dimensions) if dimensions else {}
     dimensions = dimensions or {}
     reserve_without_dimensions = int(reserve_without_dimensions)
+    allocate_based_on_sec_qty = int(allocate_based_on_sec_qty)
 
     if source_table not in ("Material Planning Material Mapping", "Material Planning Available Raw Material"):
         frappe.throw(_("Unsupported source table for batch reassignment: {0}").format(source_table))
@@ -1981,7 +1982,8 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
             mp = frappe.get_doc("Material Planning", material_planning_name)
             row = next(r for r in mp.material_mapping if r.name == row_name)
 
-        _apply_batch_to_mapping_row(row, new_batch_no, new_item, dimensions, sec_qty, reserve_without_dimensions)
+        _apply_batch_to_mapping_row(row, new_batch_no, new_item, dimensions, sec_qty, reserve_without_dimensions,
+                                     allocate_based_on_sec_qty)
 
         mp.append("batch_change_log", {
             "material_issue_plan": material_issue_plan or "",
@@ -2045,7 +2047,8 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
                 "width": row.width,
                 "thickness": row.thickness,
             })
-            _apply_batch_to_mapping_row(new_row, new_batch_no, new_item, dimensions, sec_qty, reserve_without_dimensions)
+            _apply_batch_to_mapping_row(new_row, new_batch_no, new_item, dimensions, sec_qty, reserve_without_dimensions,
+                                         allocate_based_on_sec_qty)
             new_sec_qty, new_qty = flt(new_row.batch_sec_qty), flt(new_row.batch_calc_qty)
             planned_item_for_log = new_item
         else:
@@ -2092,13 +2095,15 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
     return {"warnings": warnings}
 
 
-def _apply_batch_to_mapping_row(row, new_batch_no, new_item, dimensions, sec_qty, reserve_without_dimensions):
+def _apply_batch_to_mapping_row(row, new_batch_no, new_item, dimensions, sec_qty, reserve_without_dimensions,
+                                 allocate_based_on_sec_qty=1):
     """Set a Material Planning Material Mapping row's batch + recompute its
     batch_calc_qty, mirroring material_planning.js's _recalc_batch_qty formula."""
     row.batch = new_batch_no or ""
     row.planned_item = new_item or ""
     row.batch_mapped = "Mapped" if new_batch_no else "Not Mapped"
     row.reserve_without_dimensions = reserve_without_dimensions
+    row.allocate_based_on_sec_qty = allocate_based_on_sec_qty
 
     if dimensions.get("length") is not None:
         row.length = flt(dimensions.get("length"))

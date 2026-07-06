@@ -584,7 +584,8 @@ function _mip_build_picker(dialog, all_rows, on_select) {
 
 const _MIP_ALLOC_FIELDS = [
 	"current_batch", "current_sec_qty", "current_qty",
-	"new_batch_no", "length", "width", "thickness", "sec_qty", "reserve_without_dimensions",
+	"new_batch_no", "length", "width", "thickness", "sec_qty",
+	"reserve_without_dimensions", "allocate_based_on_sec_qty",
 ];
 
 // "Update Batch" dialog — search/filter across every raw material row (reservable and
@@ -613,13 +614,15 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 			{ fieldtype: "Column Break" },
 			{ fieldname: "current_qty", fieldtype: "Float", label: __("Current Qty (Kg)"), read_only: 1 },
 			{ fieldtype: "Section Break", label: __("New Allocation") },
-			{ fieldname: "new_batch_no", fieldtype: "Link", options: "Batch", label: __("New Batch"), reqd: 1 },
-			{ fieldname: "length", fieldtype: "Float", label: __("Length (mm)") },
+			{ fieldname: "new_batch_no", fieldtype: "Link", options: "Batch", label: __("New Batch"), reqd: 1,
+				description: __("Length/Width/Thickness are fetched from the batch automatically.") },
+			{ fieldname: "length", fieldtype: "Float", label: __("Length (mm)"), read_only: 1 },
 			{ fieldtype: "Column Break" },
-			{ fieldname: "width", fieldtype: "Float", label: __("Width (mm)") },
-			{ fieldname: "thickness", fieldtype: "Float", label: __("Thickness (mm)") },
+			{ fieldname: "width", fieldtype: "Float", label: __("Width (mm)"), read_only: 1 },
+			{ fieldname: "thickness", fieldtype: "Float", label: __("Thickness (mm)"), read_only: 1 },
 			{ fieldname: "sec_qty", fieldtype: "Float", label: __("Sec Qty (Nos)") },
 			{ fieldname: "reserve_without_dimensions", fieldtype: "Check", label: __("Reserve Without Dimensions") },
+			{ fieldname: "allocate_based_on_sec_qty", fieldtype: "Check", label: __("Allocate based on Sec Nos"), default: "1" },
 		],
 		primary_action_label: __("Reassign Batch"),
 		primary_action(values) {
@@ -631,6 +634,15 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 				frappe.msgprint(__("Select a New Batch."));
 				return;
 			}
+			// Material Mapping: length/width/thickness are the row's REQUIRED (demand)
+			// dimensions, a separate concept from the batch's own physical dimensions —
+			// reassign_batch already fetches the batch's dims from the Batch record
+			// directly for that table, so leave required dims untouched here.
+			// Available Raw Material: there's no such split — length/width/thickness
+			// there ARE the assigned batch's own dimensions, so send what we fetched.
+			let dimensions = selected_row.source_table === "Material Planning Material Mapping"
+				? {}
+				: { length: values.length, width: values.width, thickness: values.thickness };
 			frappe.call({
 				method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.reassign_batch",
 				args: {
@@ -638,19 +650,17 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 					source_table: selected_row.source_table,
 					row_name: selected_row.source_row,
 					new_batch_no: values.new_batch_no,
-					dimensions: JSON.stringify({
-						length: values.length,
-						width: values.width,
-						thickness: values.thickness,
-					}),
+					dimensions: JSON.stringify(dimensions),
 					sec_qty: values.sec_qty,
 					reserve_without_dimensions: values.reserve_without_dimensions ? 1 : 0,
+					allocate_based_on_sec_qty: values.allocate_based_on_sec_qty ? 1 : 0,
 					material_issue_plan: frm.doc.name,
 				},
 				freeze: true,
 				freeze_message: __("Reassigning batch..."),
 				callback(r) {
-					dialog.hide();
+					// Dialog stays open — the user reassigns several rows in one sitting;
+					// they close it themselves (X / click-outside) when done.
 					let warnings = (r.message && r.message.warnings) || [];
 					if (warnings.length) {
 						frappe.msgprint({
@@ -661,11 +671,36 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 							).join("<br>"),
 						});
 					}
+					// refresh_mip_raw_materials rebuilds the raw_materials snapshot from
+					// scratch, so every row gets a brand-new `.name` — re-locate the row via
+					// its stable source_table/source_row reference (the underlying Material
+					// Planning child row), not the MIP snapshot's own transient name.
+					let reassigned_source_table = selected_row.source_table;
+					let reassigned_source_row = selected_row.source_row;
 					frappe.call({
 						method: "manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.refresh_mip_raw_materials",
 						args: { mip_name: frm.doc.name },
 						freeze: true,
-						callback() { frm.reload_doc(); },
+						freeze_message: __("Refreshing raw materials..."),
+						callback() {
+							frm.reload_doc().then(() => {
+								// Mutate all_rows IN PLACE — _mip_build_picker/_select_row above
+								// already closed over this same array, so this refreshes both
+								// the picker table and this dialog's row lookups without
+								// needing to rebuild the picker or reopen the dialog.
+								all_rows.splice(0, all_rows.length, ...(frm.doc.raw_materials || []));
+								let updated_row = all_rows.find((r) =>
+									r.source_table === reassigned_source_table && r.source_row === reassigned_source_row
+								);
+								if (updated_row) {
+									// Re-selecting shows the just-updated Current Allocation and
+									// resets New Allocation inputs, ready for the next row.
+									_select_row(updated_row);
+								} else {
+									picker.markSelected(null);
+								}
+							});
+						},
 					});
 				},
 			});
@@ -683,6 +718,41 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 		dialog.fields_dict.no_selection_html.toggle(!show);
 	}
 
+	// Length/Width/Thickness always come from the Batch record itself (custom_length/
+	// custom_width/custom_thickness) — same as Material Planning's own Material Mapping
+	// grid — never typed in by hand.
+	function _fetch_batch_dims(batch_no) {
+		if (!batch_no) {
+			dialog.set_value("length", 0);
+			dialog.set_value("width", 0);
+			dialog.set_value("thickness", 0);
+			return;
+		}
+		frappe.db.get_value("Batch", batch_no, ["custom_length", "custom_width", "custom_thickness"]).then((r) => {
+			let d = r.message || {};
+			dialog.set_value("length", flt(d.custom_length));
+			dialog.set_value("width", flt(d.custom_width));
+			dialog.set_value("thickness", flt(d.custom_thickness));
+		});
+	}
+	dialog.fields_dict.new_batch_no.df.onchange = () => _fetch_batch_dims(dialog.get_value("new_batch_no"));
+
+	// "Reserve Without Dimensions" mirrors Material Mapping's own toggle: when checked,
+	// Sec Qty is no longer typed in — it's computed server-side (grouped Sec-Qty rounding
+	// across every row sharing this batch, same as reserve_batches/_calc_group_rwd_allocations)
+	// — and "Allocate based on Sec Nos" appears to control that computation.
+	function _toggle_rwd(checked) {
+		dialog.fields_dict.allocate_based_on_sec_qty.toggle(!!checked);
+		dialog.fields_dict.sec_qty.df.read_only = checked ? 1 : 0;
+		dialog.fields_dict.sec_qty.refresh();
+		if (checked) {
+			dialog.set_value("allocate_based_on_sec_qty", 1);
+			dialog.set_value("sec_qty", 0);
+		}
+	}
+	dialog.fields_dict.reserve_without_dimensions.df.onchange = () =>
+		_toggle_rwd(dialog.get_value("reserve_without_dimensions"));
+
 	function _select_row(row) {
 		selected_row = row;
 		dialog.set_value("current_batch", row.batch_no || (row.purchase_receipt ? __("Purchased via {0}", [row.purchase_receipt]) : __("(none)")));
@@ -694,7 +764,9 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 		dialog.set_value("thickness", 0);
 		dialog.set_value("sec_qty", 0);
 		dialog.set_value("reserve_without_dimensions", 0);
+		dialog.set_value("allocate_based_on_sec_qty", 1);
 		_toggle_allocation_fields(true);
+		_toggle_rwd(0);
 		picker.markSelected(row.name);
 	}
 
