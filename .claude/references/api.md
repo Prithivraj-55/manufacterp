@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-07-05 22:30:07_
+_Generated: 2026-07-06 23:26:21_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -67,11 +67,11 @@ All `@frappe.whitelist()` methods. Call from JS:
 | `check_mapping_batch_availability` | 1759 |
 | `unreserve_batches` | 1825 |
 | `reassign_batch` | 1931 |
-| `_test_simulate_se_release` | 2137 |
-| `make_production_plan` | 2156 |
-| `make_material_request` | 2214 |
-| `update_so_difference_kg` | 2365 |
-| `auto_purchase_from_mp` | 2420 |
+| `_test_simulate_se_release` | 2142 |
+| `make_production_plan` | 2161 |
+| `make_material_request` | 2219 |
+| `update_so_difference_kg` | 2370 |
+| `auto_purchase_from_mp` | 2425 |
 | `@frappe.validate_and_sanitize_search_inputs` | 291 |
 | `get_bom_info` | 317 |
 | `get_so_drawings_for_bom_picker` | 369 |

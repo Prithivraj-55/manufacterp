@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-07-05 22:30:07_
+_Generated: 2026-07-06 23:26:21_
 
 ## Modules
 
@@ -581,46 +581,47 @@ Functions:
 ### setup.py
 Functions:
   - 1231:after_install:
-  - 1276:after_migrate:
-  - 1322:setup_storage_location:
-  - 1344:create_item_client_script:
-  - 1360:create_item_custom_fields:
-  - 1436:create_purchase_order_custom_fields:
-  - 1542:hide_purchase_order_weight_fields:
-  - 1556:create_purchase_order_client_script:
-  - 1572:create_purchase_receipt_custom_fields:
-  - 1681:create_batch_custom_fields:
-  - 1746:create_purchase_receipt_client_script:
-  - 1762:create_material_request_custom_fields:
-  - 1882:create_material_request_client_script:
-  - 1898:create_rfq_custom_fields:
-  - 1974:create_rfq_client_script:
-  - 1990:create_sq_custom_fields:
-  - 2069:create_sq_client_script:
-  - 2085:create_bom_custom_fields:
-  - 2192:create_so_custom_fields:
-  - 2269:create_so_client_script:
-  - 2285:create_bom_client_script:
-  - 2305:create_production_plan_custom_fields:
-  - 2530:create_production_plan_client_script:
-  - 2552:create_job_card_custom_fields:
-  - 2817:create_job_card_client_script:
-  - 2835:create_stock_entry_custom_fields:
-  - 2975:create_stock_entry_client_script:
-  - 2997:remove_sco_purchase_order_mandatory:
-  - 3008:create_sco_custom_fields:
-  - 3425:create_sco_client_script:
-  - 3441:create_sco_ops_client_script:
-  - 3457:create_soe_client_script:
-  - 3473:create_manufacturing_settings_custom_fields:
-  - 3500:create_work_order_custom_fields:
-  - 3675:layout_work_order_fields:
-  - 3773:create_job_card_drawing_fields:
-  - 3841:layout_job_card_fields:
-  - 4326:create_wo_client_script:
-  - 4343:create_wo_ops_client_script:
-  - 4360:create_jc_drawing_client_script:
-  - 4381:create_material_planning_auto_purchase_fields:
+  - 1277:after_migrate:
+  - 1324:setup_storage_location:
+  - 1346:create_item_client_script:
+  - 1362:create_item_custom_fields:
+  - 1438:create_purchase_order_custom_fields:
+  - 1544:hide_purchase_order_weight_fields:
+  - 1558:create_purchase_order_client_script:
+  - 1574:create_purchase_receipt_custom_fields:
+  - 1683:create_batch_custom_fields:
+  - 1748:create_purchase_receipt_client_script:
+  - 1764:create_material_request_custom_fields:
+  - 1884:create_material_request_client_script:
+  - 1900:create_rfq_custom_fields:
+  - 1976:create_rfq_client_script:
+  - 1992:create_sq_custom_fields:
+  - 2071:create_sq_client_script:
+  - 2087:create_bom_custom_fields:
+  - 2194:create_so_custom_fields:
+  - 2271:create_so_client_script:
+  - 2287:create_bom_client_script:
+  - 2307:create_production_plan_custom_fields:
+  - 2532:create_production_plan_client_script:
+  - 2554:create_job_card_custom_fields:
+  - 2819:create_job_card_client_script:
+  - 2837:create_stock_entry_custom_fields:
+  - 2977:create_stock_entry_client_script:
+  - 2999:remove_sco_purchase_order_mandatory:
+  - 3010:hide_sco_job_worker_warehouse:
+  - 3026:create_sco_custom_fields:
+  - 3443:create_sco_client_script:
+  - 3459:create_sco_ops_client_script:
+  - 3475:create_soe_client_script:
+  - 3491:create_manufacturing_settings_custom_fields:
+  - 3518:create_work_order_custom_fields:
+  - 3693:layout_work_order_fields:
+  - 3791:create_job_card_drawing_fields:
+  - 3859:layout_job_card_fields:
+  - 4344:create_wo_client_script:
+  - 4361:create_wo_ops_client_script:
+  - 4378:create_jc_drawing_client_script:
+  - 4399:create_material_planning_auto_purchase_fields:
 
 ### sq_management/supplier_quotation.py
 Functions:
@@ -857,11 +858,11 @@ Functions:
 - `production_management/doctype/material_planning/material_planning.py:1759` — `check_mapping_batch_availability`
 - `production_management/doctype/material_planning/material_planning.py:1825` — `unreserve_batches`
 - `production_management/doctype/material_planning/material_planning.py:1931` — `reassign_batch`
-- `production_management/doctype/material_planning/material_planning.py:2137` — `_test_simulate_se_release`
-- `production_management/doctype/material_planning/material_planning.py:2156` — `make_production_plan`
-- `production_management/doctype/material_planning/material_planning.py:2214` — `make_material_request`
-- `production_management/doctype/material_planning/material_planning.py:2365` — `update_so_difference_kg`
-- `production_management/doctype/material_planning/material_planning.py:2420` — `auto_purchase_from_mp`
+- `production_management/doctype/material_planning/material_planning.py:2142` — `_test_simulate_se_release`
+- `production_management/doctype/material_planning/material_planning.py:2161` — `make_production_plan`
+- `production_management/doctype/material_planning/material_planning.py:2219` — `make_material_request`
+- `production_management/doctype/material_planning/material_planning.py:2370` — `update_so_difference_kg`
+- `production_management/doctype/material_planning/material_planning.py:2425` — `auto_purchase_from_mp`
 - `purchase_receipt_management/purchase_receipt.py:23` — `get_pr_item_uom`
 - `purchase_receipt_management/purchase_receipt.py:286` — `get_mp_for_pr`
 - `purchase_receipt_management/purchase_receipt.py:305` — `allocate_pr_stock_to_mp`
