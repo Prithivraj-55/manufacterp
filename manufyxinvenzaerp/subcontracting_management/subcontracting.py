@@ -1398,8 +1398,8 @@ def _refresh_wo_drawing_transferred_weights(wo):
     total mapped weight has actually moved.
     # SHARED_SCO_JC: mirrors _refresh_sco_drawing_transferred_weights
     """
-    source_warehouse = wo.get("custom_source_warehouse")
-    targets = [w for w in [wo.wip_warehouse, wo.get("custom_cnc_warehouse")] if w]
+    source_warehouse, cnc_warehouse = _get_wo_transfer_warehouses(wo.name)
+    targets = [w for w in [wo.wip_warehouse, cnc_warehouse] if w]
     if not source_warehouse or not targets:
         return
 
@@ -1446,6 +1446,20 @@ def _get_sco_transfer_warehouses(sco_name):
     """Source/CNC warehouse for an SCO, resolved via its Material Issue Plan —
     these no longer live on the SCO itself (moved to Material Issue Plan)."""
     mip_name = frappe.db.get_value("Material Issue Plan", {"subcontracting_order": sco_name})
+    if not mip_name:
+        return None, None
+    mip = frappe.db.get_value(
+        "Material Issue Plan", mip_name, ["source_warehouse", "cnc_warehouse"], as_dict=True
+    )
+    return (mip.source_warehouse, mip.cnc_warehouse) if mip else (None, None)
+
+
+def _get_wo_transfer_warehouses(wo_name):
+    """Source/CNC warehouse for a Work Order, resolved via its Material Issue Plan —
+    these no longer live on the Work Order itself (moved to Material Issue Plan).
+    # SHARED_SCO_JC: mirrors _get_sco_transfer_warehouses
+    """
+    mip_name = frappe.db.get_value("Material Issue Plan", {"work_order": wo_name})
     if not mip_name:
         return None, None
     mip = frappe.db.get_value(

@@ -33,6 +33,25 @@ def create_from_subcontracting_order(sco_name):
 
 
 @frappe.whitelist()
+def create_from_work_order(wo_name):
+    """Create (or return the existing) Material Issue Plan pre-filled from a Work Order."""
+    existing = frappe.db.get_value("Material Issue Plan", {"work_order": wo_name})
+    if existing:
+        return existing
+
+    wo = frappe.db.get_value("Work Order", wo_name, ["company", "production_plan"], as_dict=True)
+    if not wo or not wo.production_plan:
+        frappe.throw(_("This Work Order has no linked Production Plan."))
+
+    mip = frappe.new_doc("Material Issue Plan")
+    mip.company = wo.company
+    mip.production_plan = wo.production_plan
+    mip.work_order = wo_name
+    mip.insert(ignore_permissions=True)
+    return mip.name
+
+
+@frappe.whitelist()
 def populate_from_production_plan(mip_name):
     """Primary population entrypoint. The linked Production Plan's items already carry
     drawing/DUNO/sales-order/customer-drawing references (set by Material Planning's
@@ -62,19 +81,12 @@ def populate_from_production_plan(mip_name):
     if not mip.source_warehouse:
         mip.source_warehouse = pp.custom_raw_material_warehouse or ""
 
-    # CNC/Excess-return warehouses (and Source as a fallback) still default from
-    # a linked WO the first time, so existing work orders don't need re-entering
-    # warehouses already set there. (SCO carries no warehouse fields of its own —
-    # moved here permanently — so there is nothing to default from on that side.)
-    if mip.work_order and not (mip.source_warehouse and mip.cnc_warehouse and mip.excess_return_warehouse):
-        wo = frappe.db.get_value(
-            "Work Order", mip.work_order,
-            ["custom_source_warehouse", "custom_cnc_warehouse", "fg_warehouse"], as_dict=True,
-        )
-        if wo:
-            mip.source_warehouse = mip.source_warehouse or wo.get("custom_source_warehouse")
-            mip.cnc_warehouse = mip.cnc_warehouse or wo.get("custom_cnc_warehouse")
-            mip.excess_return_warehouse = mip.excess_return_warehouse or wo.get("fg_warehouse")
+    # Excess-return warehouse defaults from a linked WO's standard Finished Goods
+    # Warehouse the first time. (Neither SCO nor Work Order carry Source/CNC
+    # warehouse fields of their own anymore — both moved here permanently — so
+    # there is nothing to default those two from on either side.)
+    if mip.work_order and not mip.excess_return_warehouse:
+        mip.excess_return_warehouse = frappe.db.get_value("Work Order", mip.work_order, "fg_warehouse") or ""
 
     # Supplier Warehouse — read-only display of where material is transferring
     # TO, resolved from the linked SCO's standard field. Purely informational;
@@ -133,6 +145,7 @@ def refresh_mip_raw_materials(mip_name):
                 "customer_drawing_number": row.customer_drawing_number,
                 "sales_order": row.sales_order,
                 "batch_no": row.batch,
+                "purchase_receipt": row.purchase_receipt,
                 "parent_item_group": row.parent_item_group,
                 "length": row.length,
                 "width": row.width,
@@ -157,6 +170,7 @@ def refresh_mip_raw_materials(mip_name):
                 "customer_drawing_number": row.customer_drawing_number,
                 "sales_order": row.sales_order,
                 "batch_no": row.batch_no,
+                "purchase_receipt": row.purchase_receipt,
                 "parent_item_group": row.parent_item_group,
                 "length": row.length,
                 "width": row.width,

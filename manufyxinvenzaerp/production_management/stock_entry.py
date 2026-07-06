@@ -477,7 +477,6 @@ def _update_wo_transferred_weight(wo_name):
 	# SHARED_SCO_JC: mirrors _update_sco_transferred_weight
 	"""
 	wip_warehouse = frappe.db.get_value("Work Order", wo_name, "wip_warehouse")
-	cnc_warehouse = frappe.db.get_value("Work Order", wo_name, "custom_cnc_warehouse")
 	if not wip_warehouse:
 		return
 
@@ -520,8 +519,10 @@ def _update_wo_cnc_weight(wo_name):
 	net qty currently in CNC warehouse = sent to CNC minus already forwarded to WIP.
 	# SHARED_SCO_JC: mirrors _update_sco_cnc_weight
 	"""
-	cnc_warehouse = frappe.db.get_value("Work Order", wo_name, "custom_cnc_warehouse")
-	wip_warehouse  = frappe.db.get_value("Work Order", wo_name, "wip_warehouse")
+	from manufyxinvenzaerp.subcontracting_management.subcontracting import _get_wo_transfer_warehouses
+
+	_, cnc_warehouse = _get_wo_transfer_warehouses(wo_name)
+	wip_warehouse = frappe.db.get_value("Work Order", wo_name, "wip_warehouse")
 	if not cnc_warehouse:
 		return
 

@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-07-05 05:26:37_
+_Generated: 2026-07-07 00:05:47_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -66,12 +66,12 @@ All `@frappe.whitelist()` methods. Call from JS:
 | `unreserve_exact_match_batches` | 1718 |
 | `check_mapping_batch_availability` | 1759 |
 | `unreserve_batches` | 1825 |
-| `reassign_batch` | 1866 |
-| `_test_simulate_se_release` | 2013 |
-| `make_production_plan` | 2032 |
-| `make_material_request` | 2090 |
-| `update_so_difference_kg` | 2241 |
-| `auto_purchase_from_mp` | 2296 |
+| `reassign_batch` | 1931 |
+| `_test_simulate_se_release` | 2142 |
+| `make_production_plan` | 2161 |
+| `make_material_request` | 2219 |
+| `update_so_difference_kg` | 2370 |
+| `auto_purchase_from_mp` | 2425 |
 | `@frappe.validate_and_sanitize_search_inputs` | 291 |
 | `get_bom_info` | 317 |
 | `get_so_drawings_for_bom_picker` | 369 |
@@ -115,10 +115,11 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `refresh_mip_raw_materials` | 110 |
+| `refresh_mip_raw_materials` | 122 |
 | `create_from_subcontracting_order` | 17 |
-| `refresh_weight_summary` | 199 |
-| `populate_from_production_plan` | 36 |
+| `refresh_weight_summary` | 213 |
+| `create_from_work_order` | 36 |
+| `populate_from_production_plan` | 55 |
 ## subcontracting_management/material_issue_plan_transfer.py
 
 | Method | Line |
@@ -133,12 +134,12 @@ All `@frappe.whitelist()` methods. Call from JS:
 | Method | Line |
 |--------|------|
 | `create_work_order_from_pp` | 151 |
-| `backfill_drawing_item_qty` | 1705 |
-| `get_wo_pending_items` | 1769 |
-| `create_partial_wo_transfer` | 1874 |
-| `create_cnc_to_wip_entry` | 1930 |
-| `create_return_stock_entry_for_wo` | 2029 |
-| `get_jc_summary` | 2081 |
+| `backfill_drawing_item_qty` | 1719 |
+| `get_wo_pending_items` | 1783 |
+| `create_partial_wo_transfer` | 1888 |
+| `create_cnc_to_wip_entry` | 1944 |
+| `create_return_stock_entry_for_wo` | 2043 |
+| `get_jc_summary` | 2095 |
 | `create_sco_from_production_plan` | 26 |
 | `create_supplier_operation_entries` | 286 |
 | `create_send_to_subcontractor_entry` | 303 |
@@ -151,4 +152,4 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 ## Total
 
-_83 whitelisted methods_
+_84 whitelisted methods_

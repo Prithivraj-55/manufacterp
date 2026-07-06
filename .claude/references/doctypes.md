@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-07-05 05:26:37_
+_Generated: 2026-07-07 00:05:47_
 
 ## drawing
 
@@ -117,6 +117,17 @@ _Generated: 2026-07-05 05:26:37_
 
 ---
 
+## material_planning_batch_change_log
+
+| Key | Value |
+|-----|-------|
+| Module | production_management |
+| Path | `production_management/doctype/material_planning_batch_change_log` |
+| Controller | `production_management/doctype/material_planning_batch_change_log/material_planning_batch_change_log.py` |
+| Client script | none |
+
+---
+
 ## material_planning_bom_item
 
 | Key | Value |
@@ -187,6 +198,10 @@ _Generated: 2026-07-05 05:26:37_
 | ` unreserve_exact_match_batches` | no |
 | ` check_mapping_batch_availability` | no |
 | ` unreserve_batches` | no |
+| ` _get_batch_dims` | no |
+| ` _calc_batch_qty` | no |
+| ` _precheck_batch_reassignment` | no |
+| ` _batch_change_remarks` | no |
 | ` reassign_batch` | no |
 | ` _apply_batch_to_mapping_row` | no |
 | ` _test_simulate_se_release` | no |
@@ -282,6 +297,7 @@ _Generated: 2026-07-05 05:26:37_
 |--------|-------------|
 | ` after_insert` | no |
 | ` create_from_subcontracting_order` | no |
+| ` create_from_work_order` | no |
 | ` populate_from_production_plan` | no |
 | ` refresh_mip_raw_materials` | no |
 | ` refresh_weight_summary` | no |

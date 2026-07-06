@@ -1254,6 +1254,7 @@ def after_install():
     create_stock_entry_custom_fields()
     create_stock_entry_client_script()
     remove_sco_purchase_order_mandatory()
+    hide_sco_job_worker_warehouse()
     create_sco_custom_fields()
     create_sco_client_script()
     create_sco_ops_client_script()
@@ -1299,6 +1300,7 @@ def after_migrate():
     create_stock_entry_custom_fields()
     create_stock_entry_client_script()
     remove_sco_purchase_order_mandatory()
+    hide_sco_job_worker_warehouse()
     create_sco_custom_fields()
     create_sco_client_script()
     create_sco_ops_client_script()
@@ -3005,6 +3007,22 @@ def remove_sco_purchase_order_mandatory():
     frappe.db.commit()
 
 
+def hide_sco_job_worker_warehouse():
+    """Hide Job Worker Warehouse — CustomSubcontractingOrder._auto_set_supplier_warehouse
+    (overrides.py) resolves it automatically from the Job Worker's dedicated Warehouse
+    ('<Job Worker> - <Company Abbr>') on PP-flow SCOs, so the user no longer picks it."""
+    frappe.make_property_setter(
+        {
+            "doctype": "Subcontracting Order",
+            "fieldname": "supplier_warehouse",
+            "property": "hidden",
+            "value": 1,
+            "property_type": "Check",
+        }
+    )
+    frappe.db.commit()
+
+
 def create_sco_custom_fields():
     create_custom_fields(
         {
@@ -3512,29 +3530,11 @@ def create_work_order_custom_fields():
                     "insert_after": "wip_warehouse",
                 },
                 {
-                    "fieldname": "custom_source_warehouse",
-                    "fieldtype": "Link",
-                    "label": "Source Warehouse (RM)",
-                    "options": "Warehouse",
-                    "reqd": 1,
-                    "insert_after": "custom_all_ops_complete",
-                    "description": "Warehouse to transfer raw materials FROM to the WIP warehouse",
-                },
-                {
-                    "fieldname": "custom_cnc_warehouse",
-                    "fieldtype": "Link",
-                    "label": "CNC Warehouse",
-                    "options": "Warehouse",
-                    "insert_after": "custom_source_warehouse",
-                    "description": "Staging warehouse for CNC-process items before transfer to WIP",
-                    "allow_on_submit": 1,
-                },
-                {
                     "fieldname": "custom_cnc_transferred_weight_kg",
                     "fieldtype": "Float",
                     "label": "CNC Warehouse Qty (Kg)",
                     "read_only": 1,
-                    "insert_after": "custom_cnc_warehouse",
+                    "insert_after": "custom_all_ops_complete",
                     "description": "Weight currently sitting in CNC warehouse awaiting transfer to WIP",
                     "allow_on_submit": 1,
                 },
@@ -3610,55 +3610,10 @@ def create_work_order_custom_fields():
                     "insert_after": "custom_transferred_weight_kg",
                 },
                 {
-                    "fieldname": "custom_tab_excess_return",
-                    "fieldtype": "Tab Break",
-                    "label": "Excess Material Return",
-                    "insert_after": "custom_transferred_weight_kg",
-                },
-                {
-                    "fieldname": "custom_section_excess_return",
-                    "fieldtype": "Section Break",
-                    "label": "",
-                    "insert_after": "custom_tab_excess_return",
-                    "description": "Off-cut / balance material left after CNC/internal processing. "
-                                   "Enter items in their new dimensions and Sec Nos — weight is auto-calculated. "
-                                   "Use 'Return Excess Entry' to receive them into inventory.",
-                },
-                {
-                    "fieldname": "custom_excess_actions_html",
-                    "fieldtype": "HTML",
-                    "label": "",
-                    "insert_after": "custom_section_excess_return",
-                },
-                {
-                    "fieldname": "custom_excess_return_items",
-                    "fieldtype": "Table",
-                    "label": "Excess Material Items",
-                    "options": "SCO Excess Material Item",
-                    "allow_on_submit": 1,
-                    "insert_after": "custom_excess_actions_html",
-                },
-                {
-                    "fieldname": "custom_excess_return_total_kg",
-                    "fieldtype": "Float",
-                    "label": "Total Return Weight (Kg)",
-                    "read_only": 1,
-                    "allow_on_submit": 1,
-                    "insert_after": "custom_excess_return_items",
-                },
-                {
-                    "fieldname": "custom_excess_return_total_nos",
-                    "fieldtype": "Float",
-                    "label": "Total Return Sec Nos",
-                    "read_only": 1,
-                    "allow_on_submit": 1,
-                    "insert_after": "custom_excess_return_total_kg",
-                },
-                {
                     "fieldname": "custom_operations_tab",
                     "fieldtype": "Tab Break",
                     "label": "Operations",
-                    "insert_after": "custom_excess_return_total_nos",
+                    "insert_after": "custom_weight_summary_column_break",
                 },
                 {
                     "fieldname": "custom_operations_html",
@@ -3723,7 +3678,7 @@ def layout_work_order_fields():
         "process_loss_qty", "project",
         "section_break_ndpq", "required_items",
         "warehouses", "source_warehouse", "wip_warehouse", "custom_all_ops_complete",
-        "custom_source_warehouse", "custom_cnc_warehouse", "custom_cnc_transferred_weight_kg",
+        "custom_cnc_transferred_weight_kg",
         "column_break_12", "fg_warehouse", "scrap_warehouse",
         "custom_section_drawings", "custom_drawing_items",
         "custom_section_weights", "custom_customer_weight_kg", "custom_total_weight_kg",
@@ -3738,9 +3693,6 @@ def layout_work_order_fields():
         "update_consumed_material_cost_in_project",
         "serial_no_and_batch_for_finished_good_section", "has_serial_no", "has_batch_no",
         "column_break_18", "batch_size", "required_items_section",
-        # Tab: Excess Material Return (custom)
-        "custom_tab_excess_return", "custom_section_excess_return", "custom_excess_actions_html",
-        "custom_excess_return_items", "custom_excess_return_total_kg", "custom_excess_return_total_nos",
         # Tab: Operations summary (custom)
         "custom_operations_tab", "custom_operations_html",
         # Tab: Operations (core) — hidden; kept in the order list so field_order
@@ -3913,8 +3865,8 @@ def layout_job_card_fields():
 WO_CLIENT_SCRIPT = """
 frappe.ui.form.on("Work Order", {
 \trefresh(frm) {
-\t\t// Hide core "Create Pick List" / "Start" / "Create Job Card" buttons — the
-\t\t// custom drawing/weight/transfer buttons above replace this flow.
+\t\t// Hide core "Create Pick List" / "Start" / "Create Job Card" buttons — raw
+\t\t// material issuance is fully delegated to Material Issue Plan instead.
 \t\tfrm.remove_custom_button(__("Create Pick List"));
 \t\tfrm.remove_custom_button(__("Start"));
 \t\tfrm.remove_custom_button(__("Create Job Card"));
@@ -3931,224 +3883,22 @@ frappe.ui.form.on("Work Order", {
 \t\t}
 
 \t\tif (frm.doc.docstatus === 1 && frm.doc.production_plan) {
-
-\t\t\t// All non-CNC items → WIP warehouse in one shot
-\t\t\tfrm.add_custom_button(__("All to WIP Warehouse"), function() {
-\t\t\t\tif (!frm.doc.custom_source_warehouse) {
-\t\t\t\t\tfrappe.msgprint(__("Please set the Source Warehouse (RM) field first."));
-\t\t\t\t\treturn;
-\t\t\t\t}
+\t\t\tfrm.add_custom_button(__("Material Issue Plan"), function() {
 \t\t\t\tfrappe.call({
-\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.get_wo_pending_items",
+\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.create_from_work_order",
 \t\t\t\t\targs: { wo_name: frm.doc.name },
-\t\t\t\t\tfreeze: true, freeze_message: __("Checking pending items…"),
+\t\t\t\t\tfreeze: true,
+\t\t\t\t\tfreeze_message: __("Creating Material Issue Plan…"),
 \t\t\t\t\tcallback: function(r) {
-\t\t\t\t\t\tvar pending = (r.message || []).filter(function(d) { return !d.cnc_process; });
-\t\t\t\t\t\tif (!pending.length) {
-\t\t\t\t\t\t\tfrappe.msgprint({ title: __("No Pending Items"), message: __("All materials have already been transferred to WIP."), indicator: "orange" });
-\t\t\t\t\t\t\treturn;
+\t\t\t\t\t\tif (r.message) {
+\t\t\t\t\t\t\tfrappe.set_route("Form", "Material Issue Plan", r.message);
 \t\t\t\t\t\t}
-\t\t\t\t\t\tfrappe.confirm(__("Pending items will be transferred to WIP warehouse. Continue?"), function() {
-\t\t\t\t\t\t\tfrappe.call({
-\t\t\t\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_partial_wo_transfer",
-\t\t\t\t\t\t\t\targs: { wo_name: frm.doc.name, selected_items_json: JSON.stringify(pending), transfer_type: "wip" },
-\t\t\t\t\t\t\t\tfreeze: true, freeze_message: __("Creating transfer entry…"),
-\t\t\t\t\t\t\t\tcallback: function(r2) {
-\t\t\t\t\t\t\t\t\tif (r2.message) {
-\t\t\t\t\t\t\t\t\t\tfrappe.msgprint({ title: __("Stock Entry Created"), message: __("Transfer entry: ") + '<a href="/app/stock-entry/' + encodeURIComponent(r2.message) + '">' + r2.message + "</a>", indicator: "green" });
-\t\t\t\t\t\t\t\t\t\tfrm.reload_doc();
-\t\t\t\t\t\t\t\t\t}
-\t\t\t\t\t\t\t\t}
-\t\t\t\t\t\t\t});
-\t\t\t\t\t\t});
 \t\t\t\t\t}
 \t\t\t\t});
-\t\t\t}, __("Transfer"));
-
-\t\t\t// CNC items → CNC warehouse (only when CNC warehouse is set)
-\t\t\tif (frm.doc.custom_cnc_warehouse) {
-\t\t\t\tfrm.add_custom_button(__("To CNC Warehouse"), function() {
-\t\t\t\t\tif (!frm.doc.custom_source_warehouse) {
-\t\t\t\t\t\tfrappe.msgprint(__("Please set the Source Warehouse (RM) field first."));
-\t\t\t\t\t\treturn;
-\t\t\t\t\t}
-\t\t\t\t\tfrappe.call({
-\t\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.get_wo_pending_items",
-\t\t\t\t\t\targs: { wo_name: frm.doc.name },
-\t\t\t\t\t\tfreeze: true, freeze_message: __("Loading materials…"),
-\t\t\t\t\t\tcallback: function(r) { show_wo_transfer_popup(frm, r.message || [], "cnc"); }
-\t\t\t\t\t});
-\t\t\t\t}, __("Transfer"));
-\t\t\t}
-
-\t\t\t// Partial selection → WIP warehouse
-\t\t\tfrm.add_custom_button(__("Partial to WIP Warehouse"), function() {
-\t\t\t\tif (!frm.doc.custom_source_warehouse) {
-\t\t\t\t\tfrappe.msgprint(__("Please set the Source Warehouse (RM) field first."));
-\t\t\t\t\treturn;
-\t\t\t\t}
-\t\t\t\tfrappe.call({
-\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.get_wo_pending_items",
-\t\t\t\t\targs: { wo_name: frm.doc.name },
-\t\t\t\t\tfreeze: true, freeze_message: __("Loading materials…"),
-\t\t\t\t\tcallback: function(r) { show_wo_transfer_popup(frm, r.message || [], "wip"); }
-\t\t\t\t});
-\t\t\t}, __("Transfer"));
-
-\t\t\t// CNC warehouse → WIP warehouse after CNC processing
-\t\t\tif (frm.doc.custom_cnc_transferred_weight_kg) {
-\t\t\t\tfrm.add_custom_button(__("CNC to WIP"), function() {
-\t\t\t\t\tif (!frm.doc.custom_cnc_warehouse) {
-\t\t\t\t\t\tfrappe.msgprint(__("No CNC Warehouse set on this Work Order."));
-\t\t\t\t\t\treturn;
-\t\t\t\t\t}
-\t\t\t\t\tfrappe.call({
-\t\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_cnc_to_wip_entry",
-\t\t\t\t\t\targs: { wo_name: frm.doc.name },
-\t\t\t\t\t\tfreeze: true, freeze_message: __("Creating CNC to WIP Entry…"),
-\t\t\t\t\t\tcallback: function(r) {
-\t\t\t\t\t\t\tif (r.message) {
-\t\t\t\t\t\t\t\tfrappe.msgprint({ title: __("CNC to WIP Entry Created"), message: __("Review and submit: ") + '<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>", indicator: "green" });
-\t\t\t\t\t\t\t\tfrm.reload_doc();
-\t\t\t\t\t\t\t}
-\t\t\t\t\t\t}
-\t\t\t\t\t});
-\t\t\t\t}, __("Transfer"));
-\t\t\t}
-
+\t\t\t}, __("Create"));
 \t\t}
-\t\t_wo_render_excess_action_btn(frm);
 \t},
-
-\tcustom_excess_return_items_remove(frm) {
-\t\t_wo_excess_totals(frm);
-\t}
 });
-
-function show_wo_transfer_popup(frm, pending_items, transfer_type) {
-\tvar items = pending_items.filter(function(d) { return transfer_type === "cnc" ? d.cnc_process : !d.cnc_process; });
-\tif (!items.length) {
-\t\tfrappe.msgprint({ title: __("No Pending Items"), message: transfer_type === "cnc" ? __("No pending CNC items to transfer.") : __("No pending WIP items to transfer."), indicator: "orange" });
-\t\treturn;
-\t}
-\tvar title = transfer_type === "cnc" ? __("Select Materials — To CNC Warehouse") : __("Select Materials — Partial to WIP Warehouse");
-\tvar $filter = $("<input class='form-control form-control-sm' placeholder='" + __("Filter items…") + "' style='margin-bottom:8px'>");
-\tvar $actions = $("<div style='margin-bottom:8px'><button class='btn btn-xs btn-default wo-sel-all'>" + __("Select All") + "</button> <button class='btn btn-xs btn-default wo-desel-all'>" + __("Deselect All") + "</button></div>");
-\tvar $table = $("<table class='table table-bordered table-condensed' style='margin-bottom:0'><thead><tr><th style='width:32px'></th><th>" + __("Item Code") + "</th><th>" + __("Item Name") + "</th><th>" + __("Batch No") + "</th><th class='text-right'>" + __("Qty (Kg)") + "</th><th class='text-right'>" + __("Sec Qty (Nos)") + "</th></tr></thead><tbody></tbody></table>");
-\tvar $tbody = $table.find("tbody");
-\titems.forEach(function(d, idx) {
-\t\t$tbody.append("<tr data-idx='" + idx + "'><td class='text-center'><input type='checkbox' class='wo-item-chk' checked></td><td>" + frappe.utils.escape_html(d.item_code) + "</td><td>" + frappe.utils.escape_html(d.item_name || "") + "</td><td>" + frappe.utils.escape_html(d.batch_no || "") + "</td><td class='text-right'>" + format_number(flt(d.qty), null, 3) + "</td><td class='text-right'>" + format_number(flt(d.custom_sec_qty), null, 3) + "</td></tr>");
-\t});
-\t$filter.on("input", function() { var q = $(this).val().toLowerCase(); $tbody.find("tr").each(function() { $(this).toggle($(this).text().toLowerCase().indexOf(q) >= 0); }); });
-\t$actions.find(".wo-sel-all").on("click",   function() { $tbody.find(".wo-item-chk").prop("checked", true); });
-\t$actions.find(".wo-desel-all").on("click", function() { $tbody.find(".wo-item-chk").prop("checked", false); });
-\tvar $content = $("<div>").append($filter, $actions, $table);
-\tvar dlg = new frappe.ui.Dialog({
-\t\ttitle: title, size: "extra-large",
-\t\tfields: [{ fieldtype: "HTML", fieldname: "content" }],
-\t\tprimary_action_label: __("Transfer Selected"),
-\t\tprimary_action: function() {
-\t\t\tvar selected = [];
-\t\t\t$tbody.find("tr").each(function() { if ($(this).find(".wo-item-chk").prop("checked")) selected.push(items[parseInt($(this).data("idx"), 10)]); });
-\t\t\tif (!selected.length) { frappe.msgprint(__("Please select at least one item.")); return; }
-\t\t\tdlg.hide();
-\t\t\tfrappe.call({
-\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_partial_wo_transfer",
-\t\t\t\targs: { wo_name: frm.doc.name, selected_items_json: JSON.stringify(selected), transfer_type: transfer_type },
-\t\t\t\tfreeze: true, freeze_message: __("Creating transfer entry…"),
-\t\t\t\tcallback: function(r) {
-\t\t\t\t\tif (r.message) {
-\t\t\t\t\t\tfrappe.msgprint({ title: __("Stock Entry Created"), message: __("Transfer entry: ") + '<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>", indicator: "green" });
-\t\t\t\t\t\tfrm.reload_doc();
-\t\t\t\t\t}
-\t\t\t\t}
-\t\t\t});
-\t\t}
-\t});
-\tdlg.fields_dict.content.$wrapper.html($content);
-\tdlg.show();
-}
-
-function _wo_render_excess_action_btn(frm) {
-\tvar field = frm.fields_dict["custom_excess_actions_html"];
-\tif (!field) return;
-\tvar $w = field.$wrapper;
-\tif (frm.doc.docstatus !== 1) { $w.html(""); return; }
-\t$w.html("<div style='margin:8px 0'><button class='btn btn-sm btn-default wo-return-excess-btn'>Return Excess Entry</button></div>");
-\t$w.find(".wo-return-excess-btn").on("click", function() {
-\t\tif (!frm.doc.fg_warehouse) {
-\t\t\tfrappe.msgprint(__("Please set the Finished Goods Warehouse on this Work Order."));
-\t\t\treturn;
-\t\t}
-\t\tif (frm.is_dirty()) { frappe.msgprint(__("Please save the Excess Material Return table before receiving.")); return; }
-\t\tif (!(frm.doc.custom_excess_return_items || []).length) { frappe.msgprint(__("Add the off-cut items to the Excess Material Return table first.")); return; }
-\t\tfrappe.call({
-\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_return_stock_entry_for_wo",
-\t\t\targs: { wo_name: frm.doc.name, target_warehouse: frm.doc.fg_warehouse },
-\t\t\tfreeze: true,
-\t\t\tcallback: function(r) {
-\t\t\t\tif (r.message) {
-\t\t\t\t\tfrappe.msgprint({ title: __("Return Excess Entry Created"), message: __("Return Stock Entry: ") + '<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>", indicator: "green" });
-\t\t\t\t\tfrm.reload_doc();
-\t\t\t\t}
-\t\t\t}
-\t\t});
-\t});
-}
-
-frappe.ui.form.on("SCO Excess Material Item", {
-\tform_render(frm, cdt, cdn) {
-\t\tvar row = locals[cdt][cdn];
-\t\tif (!row.stock_entry_created) return;
-\t\tvar grid_row = frm.fields_dict.custom_excess_return_items && frm.fields_dict.custom_excess_return_items.grid.get_row(cdn);
-\t\tif (!grid_row) return;
-\t\t["item_code","length","width","thickness","sec_qty","qty"].forEach(function(f) {
-\t\t\tvar fld = grid_row.get_field(f); if (fld) { fld.df.read_only = 1; fld.refresh(); }
-\t\t});
-\t},
-\titem_code(frm, cdt, cdn) {
-\t\tvar row = locals[cdt][cdn];
-\t\tif (row.stock_entry_created) { frappe.msgprint(__("This row is locked — Stock Entry already created.")); return; }
-\t\tif (!row.item_code) return;
-\t\tfrappe.db.get_value("Item", row.item_code, ["custom_parent_item_group","custom_unit_weight","custom_secondary_uom","stock_uom"], function(v) {
-\t\t\tif (!v) return;
-\t\t\tfrappe.model.set_value(cdt, cdn, "parent_item_group", v.custom_parent_item_group || "");
-\t\t\tfrappe.model.set_value(cdt, cdn, "unit_weight", v.custom_unit_weight || 0);
-\t\t\tfrappe.model.set_value(cdt, cdn, "sec_uom", v.custom_secondary_uom || "");
-\t\t\tfrappe.model.set_value(cdt, cdn, "uom", v.stock_uom || "");
-\t\t});
-\t},
-\tlength(frm, cdt, cdn)    { if (!locals[cdt][cdn].stock_entry_created) _wo_excess_calc(frm, cdt, cdn); },
-\twidth(frm, cdt, cdn)     { if (!locals[cdt][cdn].stock_entry_created) _wo_excess_calc(frm, cdt, cdn); },
-\tthickness(frm, cdt, cdn) { if (!locals[cdt][cdn].stock_entry_created) _wo_excess_calc(frm, cdt, cdn); },
-\tsec_qty(frm, cdt, cdn)   { if (!locals[cdt][cdn].stock_entry_created) _wo_excess_calc(frm, cdt, cdn); },
-\tqty(frm, cdt, cdn) {
-\t\tvar row = locals[cdt][cdn];
-\t\tif (!row.stock_entry_created && row.parent_item_group === "Nuts and Bolts" && row.unit_weight) {
-\t\t\tfrappe.model.set_value(cdt, cdn, "sec_qty", flt(row.unit_weight * flt(row.qty), 3));
-\t\t}
-\t\t_wo_excess_totals(frm);
-\t}
-});
-
-function _wo_excess_calc(frm, cdt, cdn) {
-\tvar row = locals[cdt][cdn];
-\tvar g = row.parent_item_group, qty = null;
-\tif (g === "Structurals") {
-\t\tif (row.length && row.unit_weight && row.sec_qty) qty = (row.length / 1000) * row.unit_weight * row.sec_qty;
-\t} else if (g === "Plates") {
-\t\tif (row.length && row.width && row.thickness && row.unit_weight && row.sec_qty) qty = (row.length / 1000) * (row.width / 1000) * row.thickness * row.unit_weight * row.sec_qty;
-\t}
-\tif (qty !== null) frappe.model.set_value(cdt, cdn, "qty", flt(qty, 3));
-\t_wo_excess_totals(frm);
-}
-
-function _wo_excess_totals(frm) {
-\tvar tkg = 0, tnos = 0;
-\t(frm.doc.custom_excess_return_items || []).forEach(function(r) { tkg += flt(r.qty); tnos += flt(r.sec_qty); });
-\tfrm.set_value("custom_excess_return_total_kg",  flt(tkg, 3));
-\tfrm.set_value("custom_excess_return_total_nos", flt(tnos, 3));
-}
 """.strip()
 
 
