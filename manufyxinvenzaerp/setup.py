@@ -1254,6 +1254,7 @@ def after_install():
     create_stock_entry_custom_fields()
     create_stock_entry_client_script()
     remove_sco_purchase_order_mandatory()
+    hide_sco_job_worker_warehouse()
     create_sco_custom_fields()
     create_sco_client_script()
     create_sco_ops_client_script()
@@ -1299,6 +1300,7 @@ def after_migrate():
     create_stock_entry_custom_fields()
     create_stock_entry_client_script()
     remove_sco_purchase_order_mandatory()
+    hide_sco_job_worker_warehouse()
     create_sco_custom_fields()
     create_sco_client_script()
     create_sco_ops_client_script()
@@ -3002,6 +3004,22 @@ def remove_sco_purchase_order_mandatory():
         {"doctype": "Subcontracting Order Item", "fieldname": "warehouse", "property": "reqd", "value": 0, "property_type": "Check"},
     ]:
         frappe.make_property_setter(args)
+    frappe.db.commit()
+
+
+def hide_sco_job_worker_warehouse():
+    """Hide Job Worker Warehouse — CustomSubcontractingOrder._auto_set_supplier_warehouse
+    (overrides.py) resolves it automatically from the Job Worker's dedicated Warehouse
+    ('<Job Worker> - <Company Abbr>') on PP-flow SCOs, so the user no longer picks it."""
+    frappe.make_property_setter(
+        {
+            "doctype": "Subcontracting Order",
+            "fieldname": "supplier_warehouse",
+            "property": "hidden",
+            "value": 1,
+            "property_type": "Check",
+        }
+    )
     frappe.db.commit()
 
 

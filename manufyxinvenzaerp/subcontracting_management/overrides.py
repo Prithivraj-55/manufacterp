@@ -43,10 +43,27 @@ class CustomSubcontractingOrder(SubcontractingOrder):
             return
 
         # PP flow: skip all PO-dependent validation; run only what's safe.
+        self._auto_set_supplier_warehouse()
         self._pp_validate_items()
         self.validate_supplied_items()
         self.calculate_additional_costs()
         self._pp_calculate_amounts()
+
+    def _auto_set_supplier_warehouse(self):
+        """Job Worker Warehouse is hidden on the form (setup.py hide_sco_job_worker_warehouse)
+        since every active Job Worker has a dedicated Warehouse named '<Job Worker> - <Company
+        Abbr>' (e.g. 'INTERNATIONAL STEEL PRO - MIPL') — resolve it automatically instead of
+        asking the user to pick it. Leaves the field untouched if already set (e.g. by an
+        existing doc) or if no matching Warehouse exists yet (mandatory validation will then
+        surface the standard "create it first" error)."""
+        if self.supplier_warehouse or not self.supplier:
+            return
+        abbr = frappe.db.get_value("Company", self.company, "abbr")
+        if not abbr:
+            return
+        warehouse = f"{self.supplier} - {abbr}"
+        if frappe.db.exists("Warehouse", warehouse):
+            self.supplier_warehouse = warehouse
 
     # ── on_submit / on_cancel overrides ──────────────────────────────────────
 
