@@ -12,6 +12,14 @@ class MaterialIssuePlan(Document):
         if self.production_plan:
             populate_from_production_plan(self.name)
 
+    def on_trash(self):
+        """Remove Batch Change Log rows referencing this MIP from all linked
+        Material Planning documents so no orphaned audit trail remains."""
+        frappe.db.delete(
+            "Material Planning Batch Change Log",
+            {"material_issue_plan": self.name},
+        )
+
 
 @frappe.whitelist()
 def create_from_subcontracting_order(sco_name):
@@ -292,11 +300,18 @@ def get_target_context(mip):
         )
         if not sco:
             frappe.throw(_("Linked Subcontracting Order {0} not found.").format(mip.subcontracting_order))
+        # MIP's own supplier_warehouse takes priority; fall back to SCO's field
+        primary_warehouse = mip.supplier_warehouse or sco.supplier_warehouse
+        if not primary_warehouse:
+            frappe.throw(
+                _("Supplier Warehouse is not set. Please set it directly on this Material Issue Plan "
+                  "(Warehouses section) or on the linked Subcontracting Order {0}.").format(mip.subcontracting_order)
+            )
         return frappe._dict({
             "doctype": "Subcontracting Order",
             "name": mip.subcontracting_order,
             "company": sco.company,
-            "primary_warehouse": sco.supplier_warehouse,
+            "primary_warehouse": primary_warehouse,
             "primary_se_type": "Send to Subcontractor",
             "link_field": "subcontracting_order",
             "ref_field": "custom_sco_ref",
@@ -305,11 +320,17 @@ def get_target_context(mip):
         wo = frappe.db.get_value("Work Order", mip.work_order, ["company", "wip_warehouse"], as_dict=True)
         if not wo:
             frappe.throw(_("Linked Work Order {0} not found.").format(mip.work_order))
+        primary_warehouse = mip.supplier_warehouse or wo.wip_warehouse
+        if not primary_warehouse:
+            frappe.throw(
+                _("WIP Warehouse is not set. Please set it in the Supplier / WIP Warehouse field on this "
+                  "Material Issue Plan or on the linked Work Order {0}.").format(mip.work_order)
+            )
         return frappe._dict({
             "doctype": "Work Order",
             "name": mip.work_order,
             "company": wo.company,
-            "primary_warehouse": wo.wip_warehouse,
+            "primary_warehouse": primary_warehouse,
             "primary_se_type": "Material Transfer",
             "link_field": "work_order",
             "ref_field": "custom_wo_ref",
@@ -318,14 +339,14 @@ def get_target_context(mip):
 
 
 def _resolve_warehouses(mip):
-    """Source + target warehouses for the live weight-summary calc. Source/CNC
-    always come from MIP's own fields now (SCO no longer carries them at all);
-    the primary target (supplier/WIP) is read from the linked SCO/WO since that
-    stays a standard ERPNext field there."""
+    """Source + target warehouses for the live weight-summary calc.
+    MIP's own supplier_warehouse takes priority; falls back to SCO/WO."""
     source_warehouse = mip.source_warehouse or None
     target_warehouses = [w for w in [mip.cnc_warehouse] if w]
 
-    if mip.subcontracting_order:
+    if mip.supplier_warehouse:
+        target_warehouses.append(mip.supplier_warehouse)
+    elif mip.subcontracting_order:
         supplier_warehouse = frappe.db.get_value("Subcontracting Order", mip.subcontracting_order, "supplier_warehouse")
         if supplier_warehouse:
             target_warehouses.append(supplier_warehouse)

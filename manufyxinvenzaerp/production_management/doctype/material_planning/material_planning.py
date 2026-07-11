@@ -14,12 +14,49 @@ class MaterialPlanning(Document):
         self.material_mapping = [r for r in (self.material_mapping or []) if r.item_code]
         self.unavailable_items = [r for r in (self.unavailable_items or []) if r.item_code]
         self._apply_rwd_group_allocations()
+        self._validate_no_cross_table_batch_duplicate()
         if self.material_mapping and self.for_warehouse:
             self._validate_batch_calc_qty()
         if self.unavailable_items:
             self._validate_alternate_item_qty()
         self._update_weight_summary()
         _update_bom_item_weights(self)
+        self._auto_update_planning_status()
+
+    def _auto_update_planning_status(self):
+        """Auto-set status to Working when any mapping/ARM row exists.
+        Never auto-downgrade from Batch Mapping Completed."""
+        if self.planning_status == "Batch Mapping Completed":
+            return
+        has_work = (
+            any(r.item_code for r in (self.material_mapping or []))
+            or any(r.item_code for r in (self.available_raw_materials or []))
+        )
+        self.planning_status = "Working" if has_work else "Open"
+
+    def _validate_no_cross_table_batch_duplicate(self):
+        """Block saving when the same batch is assigned in both Material Mapping
+        and Exact Match (Available Raw Materials) — even if not yet reserved.
+        A batch can only serve one table at a time; assigning it in both
+        would cause double-counting at transfer time."""
+        mm_batches = {
+            r.batch: r.idx
+            for r in (self.material_mapping or [])
+            if r.batch
+        }
+        if not mm_batches:
+            return
+        conflicts = []
+        for r in (self.available_raw_materials or []):
+            if r.batch_no and r.batch_no in mm_batches:
+                conflicts.append(
+                    _("Batch <b>{0}</b> is assigned in both Material Mapping (Row {1}) "
+                      "and Exact Match (Row {2}). Remove it from one table before saving.").format(
+                        r.batch_no, mm_batches[r.batch_no], r.idx
+                    )
+                )
+        if conflicts:
+            frappe.throw("<br><br>".join(conflicts), title=_("Duplicate Batch Across Tables"))
 
     def _update_weight_summary(self):
         """Keep the header weight-summary fields in sync with the child tables
@@ -141,9 +178,16 @@ class MaterialPlanning(Document):
                 continue
 
             batch_stock = _get_batch_total_stock(row.batch, self.for_warehouse)
-            reserved_by_others = _get_batch_reserved_by_others(row.batch, mp_name)
+            reserved_by_others = _get_batch_reserved_by_others(row.batch, mp_name, exclude_table="material_mapping")
             allocated_so_far = batch_allocated.get(row.batch, 0.0)
             available = max(0.0, batch_stock - reserved_by_others - allocated_so_far)
+
+            # Skip stock-coverage check when the batch has no stock in the source
+            # warehouse — it was either already transferred out or not yet received.
+            # Throwing here would prevent any save after a partial transfer.
+            if not batch_stock:
+                batch_allocated[row.batch] = allocated_so_far
+                continue
 
             if row.reserve_without_dimensions:
                 # Bypass dimension/calc check. When "Allocate based on Sec Nos"
@@ -672,7 +716,7 @@ def check_stock_availability(doc):
                 batch_total_kg.setdefault(b["batch_no"], flt(b["qty"]))
                 batch_total_sec.setdefault(b["batch_no"], flt(b.get("custom_sec_qty")))
                 if b["batch_no"] not in batch_remaining:
-                    reserved_by_others = _get_batch_reserved_by_others(b["batch_no"], mp_name)
+                    reserved_by_others = _get_batch_reserved_by_others(b["batch_no"], mp_name, exclude_table="available_raw_materials")
                     net_qty = max(0.0, flt(b["qty"]) - reserved_by_others)
                     batch_remaining[b["batch_no"]] = net_qty
 
@@ -738,17 +782,27 @@ def check_stock_availability(doc):
 
                 # Partial stock — add a shortfall row to Material Mapping so the gap
                 # is visible immediately (NOS/Kg check) without waiting for reservation.
-                if shortage > 0:
-                    available_sec_qty = sum(flt(b.get("custom_sec_qty")) for b in matched_batches)
+                if flt(shortage, 3) > 0:
+                    # Use proportional Nos for the available Kg (same as ARM rows use
+                    # _alloc_sec_qty), not the raw batch total Nos — otherwise a batch
+                    # that covers all required Nos by count but not by Kg produces
+                    # available_sec_qty >= required_sec_qty and shortfall_nos = 0,
+                    # hiding the Nos gap in the mapping row.
+                    available_sec_qty = sum(
+                        _alloc_sec_qty(
+                            b["qty"],
+                            batch_total_kg.get(b["batch_no"]),
+                            batch_total_sec.get(b["batch_no"]),
+                        )
+                        for b in matched_batches
+                    )
                     required_sec_qty = flt(row.get("sec_qty"))
                     if not available_sec_qty and required_sec_qty and required_qty:
-                        # batch has no custom_sec_qty — derive NOS from Kg ratio
-                        # use flt(..., 0) (round to nearest) to avoid ceil float over-count
                         available_sec_qty = flt(available_qty / (required_qty / required_sec_qty), 0)
                     shortfall_nos = max(0.0, required_sec_qty - available_sec_qty)
                     shortfall_row = dict(base_row)
                     shortfall_row["qty"] = flt(shortage, 3)
-                    shortfall_row["sec_qty"] = flt(shortfall_nos)
+                    shortfall_row["sec_qty"] = flt(shortfall_nos, 3)
                     shortfall_row["batch_mapped"] = "Not Mapped"
                     material_mapping.append(shortfall_row)
                     shortfall_count += 1
@@ -923,7 +977,7 @@ def move_to_exact_match(doc, item_codes):
                 batch_total_kg.setdefault(b["batch_no"], flt(b["qty"]))
                 batch_total_sec.setdefault(b["batch_no"], flt(b.get("custom_sec_qty")))
                 if b["batch_no"] not in batch_remaining:
-                    reserved_by_others = _get_batch_reserved_by_others(b["batch_no"], mp_name)
+                    reserved_by_others = _get_batch_reserved_by_others(b["batch_no"], mp_name, exclude_table="available_raw_materials")
                     already_allocated  = pre_allocated.get(b["batch_no"], 0.0)
                     batch_remaining[b["batch_no"]] = max(
                         0.0, flt(b["qty"]) - reserved_by_others - already_allocated
@@ -1298,30 +1352,64 @@ def _get_batch_total_stock(batch_no, warehouse):
     return flt(result[0].qty) if result else 0.0
 
 
-def _get_batch_reserved_by_others(batch_no, exclude_mp):
+def _get_batch_reserved_by_others(batch_no, exclude_mp, exclude_table=None):
     """Return total reserved_qty committed to other Material Planning docs for this batch.
 
     Checks both material_mapping (field: batch) and available_raw_materials
     (field: batch_no) so reservations in either table are counted.
+
+    exclude_table: "material_mapping" or "available_raw_materials".
+      When set, only that table applies the same-MP exclusion; the OTHER
+      table counts ALL MPs including the current one, so intra-MP
+      cross-table double-reservation is detected at reservation time.
+      When None (default), both tables exclude the current MP (legacy behaviour,
+      used for display-only helpers where the calling table is unknown).
     """
-    mm = frappe.db.sql(
-        """
-        SELECT COALESCE(SUM(reserved_qty), 0) AS total
-        FROM `tabMaterial Planning Material Mapping`
-        WHERE batch = %s AND is_reserved = 1 AND parent != %s
-        """,
-        (batch_no, exclude_mp),
-        as_dict=True,
-    )
-    arm = frappe.db.sql(
-        """
-        SELECT COALESCE(SUM(reserved_qty), 0) AS total
-        FROM `tabMaterial Planning Available Raw Material`
-        WHERE batch_no = %s AND is_reserved = 1 AND parent != %s
-        """,
-        (batch_no, exclude_mp),
-        as_dict=True,
-    )
+    exclude_mm = exclude_table in (None, "material_mapping")
+    exclude_arm = exclude_table in (None, "available_raw_materials")
+
+    if exclude_mm:
+        mm = frappe.db.sql(
+            """
+            SELECT COALESCE(SUM(reserved_qty), 0) AS total
+            FROM `tabMaterial Planning Material Mapping`
+            WHERE batch = %s AND is_reserved = 1 AND parent != %s
+            """,
+            (batch_no, exclude_mp),
+            as_dict=True,
+        )
+    else:
+        mm = frappe.db.sql(
+            """
+            SELECT COALESCE(SUM(reserved_qty), 0) AS total
+            FROM `tabMaterial Planning Material Mapping`
+            WHERE batch = %s AND is_reserved = 1
+            """,
+            (batch_no,),
+            as_dict=True,
+        )
+
+    if exclude_arm:
+        arm = frappe.db.sql(
+            """
+            SELECT COALESCE(SUM(reserved_qty), 0) AS total
+            FROM `tabMaterial Planning Available Raw Material`
+            WHERE batch_no = %s AND is_reserved = 1 AND parent != %s
+            """,
+            (batch_no, exclude_mp),
+            as_dict=True,
+        )
+    else:
+        arm = frappe.db.sql(
+            """
+            SELECT COALESCE(SUM(reserved_qty), 0) AS total
+            FROM `tabMaterial Planning Available Raw Material`
+            WHERE batch_no = %s AND is_reserved = 1
+            """,
+            (batch_no,),
+            as_dict=True,
+        )
+
     return flt(mm[0].total if mm else 0) + flt(arm[0].total if arm else 0)
 
 
@@ -1339,6 +1427,58 @@ def _get_non_batch_reserved_by_others(item_code, warehouse, exclude_mp):
         as_dict=True,
     )
     return flt(result[0].total if result else 0)
+
+
+@frappe.whitelist()
+def get_batch_cross_table_usage(batch_no, mp_name, warehouse):
+    """Return the full per-table allocation picture for a batch within one MP.
+
+    Called by the JS batch-selection handler to build the detailed conflict
+    popup before allowing the batch to be committed to a row.
+    """
+    total_qty = _get_batch_total_stock(batch_no, warehouse)
+    reserved_by_others = _get_batch_reserved_by_others(batch_no, mp_name)
+
+    mm_rows = frappe.db.sql(
+        """
+        SELECT idx, item_code,
+               CASE WHEN is_reserved = 1 THEN reserved_qty
+                    WHEN batch_calc_qty > 0 THEN batch_calc_qty
+                    ELSE qty END AS qty,
+               is_reserved
+        FROM `tabMaterial Planning Material Mapping`
+        WHERE parent = %s AND batch = %s
+        ORDER BY idx
+        """,
+        (mp_name, batch_no),
+        as_dict=True,
+    )
+    arm_rows = frappe.db.sql(
+        """
+        SELECT idx, item_code,
+               CASE WHEN is_reserved = 1 THEN reserved_qty ELSE required_qty END AS qty,
+               is_reserved
+        FROM `tabMaterial Planning Available Raw Material`
+        WHERE parent = %s AND batch_no = %s
+        ORDER BY idx
+        """,
+        (mp_name, batch_no),
+        as_dict=True,
+    )
+
+    mm_total  = sum(flt(r.qty) for r in mm_rows)
+    arm_total = sum(flt(r.qty) for r in arm_rows)
+    available_qty = max(0.0, flt(total_qty) - flt(reserved_by_others) - mm_total - arm_total)
+
+    return {
+        "total_qty":         flt(total_qty, 3),
+        "reserved_by_others": flt(reserved_by_others, 3),
+        "mm_rows":  [{"idx": r.idx, "item_code": r.item_code, "qty": flt(r.qty, 3), "is_reserved": r.is_reserved} for r in mm_rows],
+        "arm_rows": [{"idx": r.idx, "item_code": r.item_code, "qty": flt(r.qty, 3), "is_reserved": r.is_reserved} for r in arm_rows],
+        "mm_total":       flt(mm_total, 3),
+        "arm_total":      flt(arm_total, 3),
+        "available_qty":  flt(available_qty, 3),
+    }
 
 
 def _update_bom_item_weights(mp):
@@ -1544,7 +1684,7 @@ def reserve_batches(material_planning_name):
             to_reserve = required_qty
 
         batch_stock = _get_batch_total_stock(row.batch, mp.for_warehouse)
-        reserved_by_others = _get_batch_reserved_by_others(row.batch, material_planning_name)
+        reserved_by_others = _get_batch_reserved_by_others(row.batch, material_planning_name, exclude_table="material_mapping")
         allocated_here = batch_allocated_here.get(row.batch, 0.0)
         available = max(0.0, flt(batch_stock) - flt(reserved_by_others) - allocated_here)
 
@@ -1631,7 +1771,7 @@ def reserve_exact_match_batches(material_planning_name):
         if row.batch_no:
             # ── Batch item ──────────────────────────────────────────────────
             batch_stock = _get_batch_total_stock(row.batch_no, mp.for_warehouse)
-            reserved_by_others = _get_batch_reserved_by_others(row.batch_no, material_planning_name)
+            reserved_by_others = _get_batch_reserved_by_others(row.batch_no, material_planning_name, exclude_table="available_raw_materials")
             allocated_here = batch_allocated_here.get(row.batch_no, 0.0)
             available = max(0.0, flt(batch_stock) - flt(reserved_by_others) - allocated_here)
 
@@ -1795,7 +1935,7 @@ def check_mapping_batch_availability(doc):
             required_qty = batch_calc_qty if (batch_calc_qty > 0 and group in ("Structurals", "Plates")) else base_qty
 
         batch_stock = _get_batch_total_stock(batch, warehouse)
-        reserved_by_others = _get_batch_reserved_by_others(batch, mp_name)
+        reserved_by_others = _get_batch_reserved_by_others(batch, mp_name, exclude_table="material_mapping")
         allocated_here = batch_allocated_here.get(batch, 0.0)
         available = max(0.0, flt(batch_stock) - flt(reserved_by_others) - allocated_here)
 
@@ -2473,3 +2613,128 @@ def auto_purchase_from_mp(material_planning_name):
     frappe.db.commit()
 
     return {"mr": mr_name, "po": po.name, "pr": pr.name}
+
+
+# ---------------------------------------------------------------------------
+# Batch Mapping Completed validation
+# ---------------------------------------------------------------------------
+
+def _collect_batch_mapping_issues(mp):
+    """Return a list of human-readable issue strings for the given MP doc.
+    Empty list = everything is clean and the mapping can be marked complete."""
+    issues = []
+    warehouse = mp.for_warehouse or ""
+
+    # 1. Items in Material Mapping with no batch selected
+    for r in (mp.material_mapping or []):
+        if r.item_code and not r.batch:
+            issues.append(
+                _("Material Mapping Row {0} ({1} — {2}): No batch selected.").format(
+                    r.idx, r.item_code, r.duno_mark_no or "-"
+                )
+            )
+
+    # 2. Items in Exact Match with no batch selected
+    for r in (mp.available_raw_materials or []):
+        if r.item_code and not r.batch_no:
+            issues.append(
+                _("Exact Match Row {0} ({1} — {2}): No batch selected.").format(
+                    r.idx, r.item_code, r.duno_mark_no or "-"
+                )
+            )
+
+    # 3. Cross-table duplicate batches
+    mm_batches = {r.batch: r.idx for r in (mp.material_mapping or []) if r.batch}
+    for r in (mp.available_raw_materials or []):
+        if r.batch_no and r.batch_no in mm_batches:
+            issues.append(
+                _("Batch <b>{0}</b> appears in both Material Mapping (Row {1}) and Exact Match (Row {2}). "
+                  "Remove it from one table.").format(r.batch_no, mm_batches[r.batch_no], r.idx)
+            )
+
+    # 4. Material Mapping rows with batch but not reserved
+    for r in (mp.material_mapping or []):
+        if r.batch and not r.is_reserved:
+            issues.append(
+                _("Material Mapping Row {0} — Batch <b>{1}</b> ({2}): Batch selected but not reserved. "
+                  "Run <b>Reserve Batches</b> first.").format(r.idx, r.batch, r.item_code)
+            )
+
+    # 5. Exact Match rows with batch but not reserved
+    for r in (mp.available_raw_materials or []):
+        if r.batch_no and not r.is_reserved:
+            issues.append(
+                _("Exact Match Row {0} — Batch <b>{1}</b> ({2}): Batch selected but not reserved. "
+                  "Run <b>Reserve Exact Match Batches</b> first.").format(r.idx, r.batch_no, r.item_code)
+            )
+
+    # 6. Over-allocation: total reserved across ALL MPs vs actual stock
+    if warehouse:
+        seen_batches = set()
+        for r in (mp.material_mapping or []):
+            if r.batch and r.is_reserved:
+                seen_batches.add(r.batch)
+        for r in (mp.available_raw_materials or []):
+            if r.batch_no and r.is_reserved:
+                seen_batches.add(r.batch_no)
+
+        for batch_no in seen_batches:
+            stock = _get_batch_total_stock(batch_no, warehouse)
+            mm_res = flt(frappe.db.sql(
+                "SELECT COALESCE(SUM(reserved_qty),0) FROM `tabMaterial Planning Material Mapping` "
+                "WHERE batch = %s AND is_reserved = 1", batch_no
+            )[0][0])
+            arm_res = flt(frappe.db.sql(
+                "SELECT COALESCE(SUM(reserved_qty),0) FROM `tabMaterial Planning Available Raw Material` "
+                "WHERE batch_no = %s AND is_reserved = 1", batch_no
+            )[0][0])
+            total_res = flt(mm_res + arm_res, 3)
+            if flt(total_res, 3) > flt(stock, 3):
+                over = flt(total_res - stock, 3)
+                issues.append(
+                    _("Batch <b>{0}</b>: Over-allocated by <b>{1} Kg</b> "
+                      "(Stock: {2} Kg, Total Reserved across all plans: {3} Kg).").format(
+                        batch_no, over, flt(stock, 3), total_res
+                    )
+                )
+
+        # 7. Reserve-without-dimensions Nos check: batch_sec_qty must cover sec_qty per row
+        for r in (mp.material_mapping or []):
+            if (r.batch and r.is_reserved and r.reserve_without_dimensions
+                    and r.batch_parent_item_group in ("Structurals", "Plates")):
+                batch_total_nos = flt(frappe.db.get_value("Batch", r.batch, "custom_sec_qty") or 0)
+                if batch_total_nos and flt(r.batch_sec_qty, 3) > flt(batch_total_nos, 3):
+                    issues.append(
+                        _("Material Mapping Row {0} — Batch <b>{1}</b> ({2}): "
+                          "Allocated Nos ({3}) exceeds batch stock Nos ({4}).").format(
+                            r.idx, r.batch, r.item_code,
+                            flt(r.batch_sec_qty, 3), batch_total_nos
+                        )
+                    )
+
+    # 8. Items with no stock at all (unavailable_items)
+    unavail = [r for r in (mp.unavailable_items or []) if r.item_code]
+    if unavail:
+        item_list = ", ".join(
+            f"{r.item_code} (Row {r.idx})" for r in unavail[:10]
+        )
+        if len(unavail) > 10:
+            item_list += _(" … and {0} more").format(len(unavail) - 10)
+        issues.append(
+            _("{0} item(s) in <b>Unavailable Items</b> have no stock assigned: {1}. "
+              "Purchase and map them before completing.").format(len(unavail), item_list)
+        )
+
+    return issues
+
+
+@frappe.whitelist()
+def complete_batch_mapping(mp_name):
+    """Validate all mapping conditions and, if clean, set status to
+    'Batch Mapping Completed'. Returns {status, issues} to the client."""
+    mp = frappe.get_doc("Material Planning", mp_name)
+    issues = _collect_batch_mapping_issues(mp)
+    if not issues:
+        frappe.db.set_value("Material Planning", mp_name, "planning_status", "Batch Mapping Completed")
+        return {"status": "ok", "issues": []}
+    return {"status": "issues", "issues": issues}

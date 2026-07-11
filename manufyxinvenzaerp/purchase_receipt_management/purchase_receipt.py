@@ -500,8 +500,13 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
 
 
 def on_submit_purchase_receipt(doc, method):
-    """Auto-allocate received batches back to every Material Planning this PR traces to."""
-    for mp_name in get_mp_for_pr(doc.name):
+    """Auto-allocate received batches back to every Material Planning this PR traces to,
+    then refresh any Material Issue Plans that link to those MPs so their raw-material
+    snapshot stays current for the transfer popup."""
+    from manufyxinvenzaerp.subcontracting_management.material_issue_plan import refresh_mip_raw_materials
+
+    affected_mps = get_mp_for_pr(doc.name)
+    for mp_name in affected_mps:
         try:
             allocate_pr_stock_to_mp(doc.name, mp_name)
         except Exception:
@@ -509,3 +514,72 @@ def on_submit_purchase_receipt(doc, method):
                 title=f"Material Planning auto-allocation failed for {doc.name} -> {mp_name}",
                 message=frappe.get_traceback(),
             )
+
+    # Refresh MIP raw-material snapshots for any MIPs linked to affected MPs
+    if affected_mps:
+        mip_rows = frappe.db.get_all(
+            "SCO Drawing Item",
+            filters={"material_planning": ("in", affected_mps)},
+            fields=["parent"],
+            distinct=True,
+        )
+        for row in mip_rows:
+            try:
+                refresh_mip_raw_materials(row.parent)
+            except Exception:
+                frappe.log_error(
+                    title=f"MIP raw-material refresh failed for {row.parent} after {doc.name}",
+                    message=frappe.get_traceback(),
+                )
+
+
+@frappe.whitelist()
+def get_pr_mp_allocations(pr_name):
+    """Return which Material Planning documents have batches from this PR allocated,
+    so the client can show a post-submit popup. Only returns data if at least one
+    batch from this PR appears in a reserved row of any MP."""
+    pr = frappe.get_doc("Purchase Receipt", pr_name)
+    pr_batches = {}
+    for item in (pr.items or []):
+        batch_no = item.batch_no
+        if not batch_no:
+            # Try to get batch from serial_and_batch_bundle
+            batch_no = _get_batch_from_bundle(item.serial_and_batch_bundle or "")
+        if batch_no:
+            pr_batches.setdefault(batch_no, []).append({
+                "item_code": item.item_code,
+                "qty": flt(item.qty, 3),
+            })
+
+    if not pr_batches:
+        return []
+
+    batch_list = list(pr_batches.keys())
+    ph = ", ".join(["%s"] * len(batch_list))
+
+    mm_rows = frappe.db.sql(
+        f"SELECT parent AS mp, batch AS batch_no, item_code, SUM(reserved_qty) AS reserved_qty "
+        f"FROM `tabMaterial Planning Material Mapping` "
+        f"WHERE batch IN ({ph}) AND is_reserved = 1 "
+        f"GROUP BY parent, batch, item_code",
+        batch_list, as_dict=True,
+    )
+
+    arm_rows = frappe.db.sql(
+        f"SELECT parent AS mp, batch_no, item_code, SUM(reserved_qty) AS reserved_qty "
+        f"FROM `tabMaterial Planning Available Raw Material` "
+        f"WHERE batch_no IN ({ph}) AND is_reserved = 1 "
+        f"GROUP BY parent, batch_no, item_code",
+        batch_list, as_dict=True,
+    )
+
+    result = []
+    for r in (list(mm_rows) + list(arm_rows)):
+        result.append({
+            "material_planning": r.mp,
+            "batch_no": r.batch_no,
+            "item_code": r.item_code,
+            "reserved_qty": flt(r.reserved_qty, 3),
+        })
+
+    return result

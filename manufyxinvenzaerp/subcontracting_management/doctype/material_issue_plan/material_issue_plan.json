@@ -131,20 +131,18 @@
    "label": "Warehouses"
   },
   {
-   "description": "Warehouse to transfer raw materials FROM. Auto-fetched from the Production Plan's Raw Material Warehouse.",
+   "description": "Warehouse to transfer raw materials FROM. Auto-fetched from the Production Plan's Raw Material Warehouse — override here if needed.",
    "fieldname": "source_warehouse",
    "fieldtype": "Link",
    "label": "Source Warehouse (RM)",
-   "options": "Warehouse",
-   "read_only": 1
+   "options": "Warehouse"
   },
   {
-   "description": "Read-only — the destination warehouse material transfers TO. Resolved from the linked Subcontracting Order's Supplier Warehouse; set it there if this is blank.",
+   "description": "Supplier warehouse for Subcontracting Orders; WIP warehouse for internal Work Orders.",
    "fieldname": "supplier_warehouse",
    "fieldtype": "Link",
-   "label": "Supplier Warehouse",
-   "options": "Warehouse",
-   "read_only": 1
+   "label": "Supplier / WIP Warehouse",
+   "options": "Warehouse"
   },
   {
    "description": "Staging warehouse for CNC-process items before transfer to supplier/WIP.",
@@ -311,9 +309,21 @@
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [
-  {"color": "Blue", "style": "Primary", "title": "Open"},
-  {"color": "Orange", "style": "Warning", "title": "In Progress"},
-  {"color": "Green", "style": "Success", "title": "Completed"}
+  {
+   "color": "Blue",
+   "style": "Primary",
+   "title": "Open"
+  },
+  {
+   "color": "Orange",
+   "style": "Warning",
+   "title": "In Progress"
+  },
+  {
+   "color": "Green",
+   "style": "Success",
+   "title": "Completed"
+  }
  ],
  "state_fieldname": "status",
  "track_changes": 1

@@ -386,8 +386,76 @@ frappe.ui.form.on("Material Planning", {
 				);
 			}, __("Create"));
 		}
+
+		// ── Batch Mapping Completed button ──────────────────────────────────
+		if (!frm.doc.__islocal && frm.doc.docstatus !== 2) {
+			if (frm.doc.planning_status === "Batch Mapping Completed") {
+				// Already completed — show a "Reopen" option to re-enable editing
+				frm.add_custom_button(__("Reopen Mapping"), function () {
+					frappe.confirm(
+						__("Mark this Material Planning as <b>Working</b> again to allow changes?"),
+						function () {
+							frappe.db.set_value("Material Planning", frm.doc.name, "planning_status", "Working")
+								.then(function () {
+									frm.reload_doc();
+									frappe.show_alert({ message: __("Status reset to Working."), indicator: "orange" }, 4);
+								});
+						}
+					);
+				}, __("Status"));
+			} else {
+				frm.add_custom_button(__("Batch Mapping Completed"), function () {
+					_run_batch_mapping_complete(frm);
+				}, __("Status"));
+			}
+		}
 	},
 });
+
+// ── Batch Mapping Completed — run validation then set status ────────────────
+function _run_batch_mapping_complete(frm) {
+	if (frm.is_dirty()) {
+		frappe.msgprint(__("Please save the document first before marking Batch Mapping as Completed."));
+		return;
+	}
+	frappe.call({
+		method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.complete_batch_mapping",
+		args: { mp_name: frm.doc.name },
+		freeze: true,
+		freeze_message: __("Validating batch mapping…"),
+		callback(r) {
+			if (!r.message) return;
+			let d = r.message;
+			if (d.status === "ok") {
+				frm.reload_doc();
+				frappe.msgprint({
+					title: __("Batch Mapping Completed"),
+					indicator: "green",
+					message: __("No overlapping issue in selected batches. Ready to transfer — you can now start work."),
+				});
+			} else {
+				// Show issues in a formatted dialog
+				let issue_html = d.issues.map(function(iss, i) {
+					return `<tr>
+						<td style="padding:4px 6px;vertical-align:top;color:#888">${i + 1}</td>
+						<td style="padding:4px 6px">${iss}</td>
+					</tr>`;
+				}).join("");
+				frappe.msgprint({
+					title: __("Batch Mapping Incomplete — {0} Issue(s) Found", [d.issues.length]),
+					indicator: "red",
+					message: `
+						<p style="margin-bottom:8px">${__("Resolve the following issues before marking Batch Mapping as Completed:")}</p>
+						<table style="width:100%;font-size:12px;border-collapse:collapse">
+							<tbody>${issue_html}</tbody>
+						</table>
+						<p style="margin-top:10px;color:#555">${__("After resolving all issues, click <b>Status → Batch Mapping Completed</b> again.")}</p>
+					`,
+				});
+			}
+		},
+	});
+}
 
 // Batch availability warning popup shown before save
 function _show_batch_warning_popup(warnings) {
@@ -1628,6 +1696,64 @@ function _calc_rwd_preview(frm, cdt, cdn) {
 }
 
 // Fetch and populate batch stock summary (total / reserved / free) for a mapping row
+// Cross-table batch conflict check.
+// Calls on_clean() only if no conflict found; shows a blocking popup and
+// clears the batch field if the same batch is already used in the other table.
+function _check_cross_table_batch_conflict(frm, batch_no, calling_table, cdt, cdn, on_clean) {
+	if (!batch_no || !frm.doc.for_warehouse || !frm.doc.name ||
+		String(frm.doc.name).startsWith("new-")) {
+		on_clean && on_clean();
+		return;
+	}
+	frappe.call({
+		method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.get_batch_cross_table_usage",
+		args: { batch_no, mp_name: frm.doc.name, warehouse: frm.doc.for_warehouse },
+		callback(r) {
+			if (!r.message) { on_clean && on_clean(); return; }
+			let d = r.message;
+
+			let conflict_rows  = calling_table === "material_mapping" ? d.arm_rows  : d.mm_rows;
+			let conflict_total = calling_table === "material_mapping" ? d.arm_total : d.mm_total;
+			let conflict_label = calling_table === "material_mapping"
+				? __("Exact Match") : __("Material Mapping");
+
+			if (!conflict_rows || !conflict_rows.length) { on_clean && on_clean(); return; }
+
+			// Build row-by-row detail
+			let row_lines = conflict_rows.map(r =>
+				__("Row {0} ({1}) — {2} Kg {3}", [
+					r.idx, r.item_code, flt(r.qty, 3),
+					r.is_reserved ? __("(Reserved)") : __("(Not Reserved)"),
+				])
+			).join("<br>");
+
+			let msg = __("Batch <b>{0}</b> is already used in the <b>{1}</b> table:", [batch_no, conflict_label])
+				+ "<br>" + row_lines
+				+ "<br><br>"
+				+ __("Total allocated in {0}: <b>{1} Kg</b>", [conflict_label, flt(conflict_total, 3)])
+				+ "<br>"
+				+ __("Stock in warehouse: <b>{0} Kg</b>", [flt(d.total_qty, 3)])
+				+ "<br>"
+				+ __("Reserved by other plans: <b>{0} Kg</b>", [flt(d.reserved_by_others, 3)])
+				+ "<br>"
+				+ __("Available after above allocations: <b>{0} Kg</b>", [flt(d.available_qty, 3)])
+				+ "<br><br><b>"
+				+ __("The same batch cannot be used in both tables. Remove it from one table first.")
+				+ "</b>";
+
+			frappe.msgprint({ title: __("Batch Already Used"), message: msg, indicator: "red" });
+
+			// Clear the batch field in the current row
+			if (calling_table === "material_mapping") {
+				frappe.model.set_value(cdt, cdn, "batch", "");
+				frappe.model.set_value(cdt, cdn, "planned_item", "");
+			} else {
+				frappe.model.set_value(cdt, cdn, "batch_no", "");
+			}
+		},
+	});
+}
+
 function _fetch_batch_stock_summary(frm, cdt, cdn) {
 	let row = locals[cdt][cdn];
 	if (!row.batch || !frm.doc.for_warehouse) return;
@@ -1697,53 +1823,54 @@ frappe.ui.form.on("Material Planning Material Mapping", {
 			return;
 		}
 
-		// Batch is being assigned — mark as Mapped and fetch stock summary
-		frappe.model.set_value(cdt, cdn, "batch_mapped", "Mapped");
-		_fetch_batch_stock_summary(frm, cdt, cdn);
+		// Cross-table conflict check — all dimension/stock fetching runs only if clean
+		let _batch_selected = row.batch;
+		_check_cross_table_batch_conflict(frm, _batch_selected, "material_mapping", cdt, cdn, function() {
+			// No conflict — proceed with normal batch setup
+			frappe.model.set_value(cdt, cdn, "batch_mapped", "Mapped");
+			_fetch_batch_stock_summary(frm, cdt, cdn);
 
-		// Fetch batch dimensions (length, width, thickness)
-		frappe.db.get_value(
-			"Batch",
-			row.batch,
-			["custom_length", "custom_width", "custom_thickness"],
-			function(d) {
-				if (!d) return;
-				frappe.model.set_value(cdt, cdn, "batch_length",    flt(d.custom_length));
-				frappe.model.set_value(cdt, cdn, "batch_width",     flt(d.custom_width));
-				frappe.model.set_value(cdt, cdn, "batch_thickness", flt(d.custom_thickness));
-				_recalc_batch_qty(frm, cdt, cdn);
-			}
-		);
+			frappe.db.get_value(
+				"Batch",
+				_batch_selected,
+				["custom_length", "custom_width", "custom_thickness"],
+				function(d) {
+					if (!d) return;
+					frappe.model.set_value(cdt, cdn, "batch_length",    flt(d.custom_length));
+					frappe.model.set_value(cdt, cdn, "batch_width",     flt(d.custom_width));
+					frappe.model.set_value(cdt, cdn, "batch_thickness", flt(d.custom_thickness));
+					_recalc_batch_qty(frm, cdt, cdn);
+				}
+			);
 
-		// Fetch planned item → then fetch unit_weight and item group from that item
-		frappe.call({
-			method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.get_batch_item",
-			args: { batch_no: row.batch },
-			callback(r) {
-				if (!r.message) return;
-				let item_code = r.message;
-				frappe.model.set_value(cdt, cdn, "planned_item", item_code);
+			frappe.call({
+				method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.get_batch_item",
+				args: { batch_no: _batch_selected },
+				callback(r) {
+					if (!r.message) return;
+					let item_code = r.message;
+					frappe.model.set_value(cdt, cdn, "planned_item", item_code);
 
-				frappe.db.get_value(
-					"Item",
-					item_code,
-					["custom_unit_weight", "custom_parent_item_group"],
-					function(d) {
-						if (!d) return;
-						frappe.model.set_value(cdt, cdn, "batch_unit_weight",        flt(d.custom_unit_weight));
-						frappe.model.set_value(cdt, cdn, "batch_parent_item_group",  d.custom_parent_item_group || "");
-						_recalc_batch_qty(frm, cdt, cdn);
-						// Alert user to enter Sec Qty for dimensional items
-						let group = d.custom_parent_item_group || "";
-						if (group === "Structurals" || group === "Plates") {
-							frappe.show_alert({
-								message: __("Batch selected — enter <b>Sec Qty (NOS)</b> to calculate the required weight."),
-								indicator: "blue",
-							}, 6);
+					frappe.db.get_value(
+						"Item",
+						item_code,
+						["custom_unit_weight", "custom_parent_item_group"],
+						function(d) {
+							if (!d) return;
+							frappe.model.set_value(cdt, cdn, "batch_unit_weight",        flt(d.custom_unit_weight));
+							frappe.model.set_value(cdt, cdn, "batch_parent_item_group",  d.custom_parent_item_group || "");
+							_recalc_batch_qty(frm, cdt, cdn);
+							let group = d.custom_parent_item_group || "";
+							if (group === "Structurals" || group === "Plates") {
+								frappe.show_alert({
+									message: __("Batch selected — enter <b>Sec Qty (NOS)</b> to calculate the required weight."),
+									indicator: "blue",
+								}, 6);
+							}
 						}
-					}
-				);
-			},
+					);
+				},
+			});
 		});
 	},
 
@@ -2119,6 +2246,12 @@ frappe.ui.form.on("Material Planning Available Raw Material", {
 		let df = frappe.meta.get_docfield("Material Planning Available Raw Material", "skip_auto_suggest_batch", cdn);
 		if (df) df.read_only = row.is_reserved ? 1 : 0;
 		frm.fields_dict["available_raw_materials"].grid.refresh_row(cdn);
+	},
+
+	batch_no(frm, cdt, cdn) {
+		let row = locals[cdt][cdn];
+		if (!row.batch_no) return;
+		_check_cross_table_batch_conflict(frm, row.batch_no, "available_raw_materials", cdt, cdn, null);
 	},
 
 	skip_auto_suggest_batch(frm, cdt, cdn) {

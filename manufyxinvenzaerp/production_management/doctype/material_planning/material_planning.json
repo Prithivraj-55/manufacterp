@@ -71,7 +71,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Status",
-   "options": "Open\nIn Progress\nCompleted",
+   "options": "Open\nWorking\nBatch Mapping Completed",
    "read_only": 1
   },
   {
@@ -230,7 +230,7 @@
    "description": "Items with no stock at selected in the warehouse. These must be purchased before production can proceed. Once a purchase receipt is created and stock is available, Click 'Update &amp; Map Exact Matches' to move them to exact matching table and Material Mapping to assign batch manually.",
    "fieldname": "section_unavailable_items",
    "fieldtype": "Section Break",
-   "label": "Unavailable Items (No Stock \u2014 Needs Purchase)"
+   "label": "Unavailable Items (No Stock — Needs Purchase)"
   },
   {
    "fieldname": "unavailable_items",
@@ -264,7 +264,7 @@
    "description": "Sum of required Kg across all items in Raw Materials.",
    "fieldname": "total_weight_plates_structurals",
    "fieldtype": "Float",
-   "label": "Total Weight \u2014 Plates & Structurals (Kg)",
+   "label": "Total Weight — Plates & Structurals (Kg)",
    "precision": "3",
    "read_only": 1
   },
@@ -272,7 +272,7 @@
    "description": "Sum of required Kg in Available Raw Materials (Exact Match).",
    "fieldname": "weight_exact_raw_material",
    "fieldtype": "Float",
-   "label": "Weight \u2014 Exact Raw Material (Kg)",
+   "label": "Weight — Exact Raw Material (Kg)",
    "precision": "3",
    "read_only": 1
   },
@@ -284,7 +284,7 @@
    "description": "Sum of required Kg for primary items in Material Mapping (Alternate Stock).",
    "fieldname": "expected_weight_material_mapping",
    "fieldtype": "Float",
-   "label": "Expected Item Weight \u2014 Material Mapping (Kg)",
+   "label": "Expected Item Weight — Material Mapping (Kg)",
    "precision": "3",
    "read_only": 1
   },
@@ -354,9 +354,21 @@
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [
-  {"color": "Blue", "style": "Primary", "title": "Open"},
-  {"color": "Orange", "style": "Warning", "title": "In Progress"},
-  {"color": "Green", "style": "Success", "title": "Completed"}
+  {
+   "color": "Gray",
+   "style": "Secondary",
+   "title": "Open"
+  },
+  {
+   "color": "Orange",
+   "style": "Warning",
+   "title": "Working"
+  },
+  {
+   "color": "Green",
+   "style": "Success",
+   "title": "Batch Mapping Completed"
+  }
  ],
  "state_fieldname": "planning_status",
  "track_changes": 1
