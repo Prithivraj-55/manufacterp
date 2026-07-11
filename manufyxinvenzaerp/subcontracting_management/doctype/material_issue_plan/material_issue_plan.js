@@ -765,6 +765,10 @@ const _MIP_ALLOC_FIELDS = [
 	"new_batch_no", "length", "width", "thickness", "sec_qty", "calculated_qty",
 	"reserve_without_dimensions", "allocate_based_on_sec_qty",
 ];
+const _MIP_NEW_ALLOC_FIELDS = [
+	"new_batch_no", "length", "width", "thickness", "sec_qty", "calculated_qty",
+	"reserve_without_dimensions", "allocate_based_on_sec_qty",
+];
 
 // "Update Batch" dialog — search/filter across every raw material row (reservable and
 // purchased/unavailable, for context), pick one reservable row, review its current
@@ -791,7 +795,8 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 			{ fieldname: "current_sec_qty", fieldtype: "Float", label: __("Current Sec Qty (Nos)"), read_only: 1 },
 			{ fieldtype: "Column Break" },
 			{ fieldname: "current_qty", fieldtype: "Float", label: __("Current Qty (Kg)"), read_only: 1 },
-			{ fieldtype: "Section Break", label: __("New Allocation") },
+			{ fieldtype: "HTML", fieldname: "transferred_notice_html" },
+			{ fieldtype: "Section Break", label: __("New Allocation"), fieldname: "new_alloc_section" },
 			{ fieldname: "new_batch_no", fieldtype: "Link", options: "Batch", label: __("New Batch"), reqd: 1,
 				description: __("Length/Width/Thickness are fetched from the batch automatically.") },
 			{ fieldname: "length", fieldtype: "Float", label: __("Length (mm)"), read_only: 1 },
@@ -807,6 +812,10 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 		primary_action(values) {
 			if (!selected_row) {
 				frappe.msgprint(__("Select a raw material row first."));
+				return;
+			}
+			if (flt(selected_row.transferred_qty) > 0) {
+				frappe.msgprint(__("This batch has already been transferred. Reassignment is not allowed."));
 				return;
 			}
 			if (!values.new_batch_no) {
@@ -891,10 +900,30 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 		+ __("Select a reservable row above to review its current allocation and reassign a new batch.")
 		+ `</div>`
 	);
+	dialog.fields_dict.transferred_notice_html.$wrapper.html("");
 
-	function _toggle_allocation_fields(show) {
+	function _toggle_allocation_fields(show, is_transferred) {
 		_MIP_ALLOC_FIELDS.forEach((f) => dialog.fields_dict[f].toggle(show));
 		dialog.fields_dict.no_selection_html.toggle(!show);
+		// Hide "New Allocation" section and its fields if already transferred
+		let block_edit = show && is_transferred;
+		_MIP_NEW_ALLOC_FIELDS.forEach((f) => dialog.fields_dict[f].toggle(!block_edit));
+		dialog.fields_dict.new_alloc_section && dialog.fields_dict.new_alloc_section.toggle && dialog.fields_dict.new_alloc_section.toggle(!block_edit);
+		dialog.fields_dict.transferred_notice_html.toggle(block_edit);
+		if (block_edit) {
+			dialog.fields_dict.transferred_notice_html.$wrapper.html(
+				`<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:4px;padding:10px 14px;margin:8px 0;color:#856404;">`
+				+ `<b>${__("Already Transferred")}</b> — `
+				+ __("This batch has been transferred to the Supplier / WIP Warehouse. Batch reassignment is not allowed after transfer.")
+				+ `</div>`
+			);
+		} else {
+			dialog.fields_dict.transferred_notice_html.$wrapper.html("");
+		}
+		// Show/hide the Reassign Batch button accordingly
+		if (dialog.get_primary_btn) {
+			dialog.get_primary_btn().toggle(!block_edit);
+		}
 	}
 
 	// Length/Width/Thickness always come from the Batch record itself (custom_length/
@@ -955,6 +984,7 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 
 	function _select_row(row) {
 		selected_row = row;
+		let is_transferred = flt(row.transferred_qty) > 0;
 		dialog.set_value("current_batch", row.batch_no || (row.purchase_receipt ? __("Purchased via {0}", [row.purchase_receipt]) : __("(none)")));
 		dialog.set_value("current_sec_qty", flt(row.sec_qty));
 		dialog.set_value("current_qty", flt(row.qty));
@@ -966,13 +996,42 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 		dialog.set_value("calculated_qty", 0);
 		dialog.set_value("reserve_without_dimensions", 0);
 		dialog.set_value("allocate_based_on_sec_qty", 1);
-		_toggle_allocation_fields(true);
+		_toggle_allocation_fields(true, is_transferred);
 		_toggle_rwd(0);
 		picker.markSelected(row.name);
 	}
 
-	_toggle_allocation_fields(false);
+	_toggle_allocation_fields(false, false);
 	let picker = _mip_build_picker(dialog, all_rows, _select_row);
+
+	// "Refresh Raw Materials" button inside the dialog header
+	dialog.$wrapper.find(".modal-header .modal-title").after(
+		`<button class="btn btn-xs btn-default mip-dlg-refresh" style="margin-left:12px;vertical-align:middle;">`
+		+ frappe.utils.icon("refresh", "xs") + " " + __("Refresh Raw Materials")
+		+ `</button>`
+	);
+	dialog.$wrapper.find(".mip-dlg-refresh").on("click", function() {
+		frappe.call({
+			method: "manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.refresh_mip_raw_materials",
+			args: { mip_name: frm.doc.name },
+			freeze: true,
+			freeze_message: __("Refreshing raw materials..."),
+			callback() {
+				frm.reload_doc().then(() => {
+					all_rows.splice(0, all_rows.length, ...(frm.doc.raw_materials || []));
+					// Re-select the current row with updated data if one was selected
+					if (selected_row) {
+						let updated = all_rows.find((r) =>
+							r.source_table === selected_row.source_table && r.source_row === selected_row.source_row
+						);
+						if (updated) _select_row(updated);
+						else _toggle_allocation_fields(false, false);
+					}
+					frappe.show_alert({ message: __("Raw materials refreshed"), indicator: "green" });
+				});
+			},
+		});
+	});
 
 	if (preselect_row_name) {
 		let row = all_rows.find((r) => r.name === preselect_row_name);

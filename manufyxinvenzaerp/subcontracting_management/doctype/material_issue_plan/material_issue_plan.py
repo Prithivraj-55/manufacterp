@@ -131,8 +131,14 @@ def refresh_mip_raw_materials(mip_name):
     """Rebuild the raw-material snapshot fresh from every Material Planning linked to
     this plan's drawings. Material Planning's own child tables remain the source of
     truth for reservation state — this only refreshes MIP's read-only display copy."""
+    from manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer import (
+        _get_already_transferred_batches,
+    )
+
     mip = frappe.get_doc("Material Issue Plan", mip_name)
     mp_names = sorted({r.material_planning for r in (mip.drawing_items or []) if r.material_planning})
+
+    transferred_batches = _get_already_transferred_batches(mip)
 
     mip.set("raw_materials", [])
 
@@ -162,6 +168,7 @@ def refresh_mip_raw_materials(mip_name):
                 "sec_qty": sec_qty,
                 "sec_uom": row.sec_uom,
                 "qty": qty,
+                "transferred_qty": qty if row.batch and row.batch in transferred_batches else 0,
                 "is_reserved": row.is_reserved,
                 "is_unavailable": 0,
                 "cnc_process": row.cnc_process,
@@ -186,6 +193,7 @@ def refresh_mip_raw_materials(mip_name):
                 "sec_qty": row.sec_qty,
                 "sec_uom": row.sec_uom,
                 "qty": row.required_qty,
+                "transferred_qty": row.required_qty if row.batch_no and row.batch_no in transferred_batches else 0,
                 "is_reserved": row.is_reserved,
                 "is_unavailable": 0,
                 "cnc_process": row.cnc_process,
@@ -208,6 +216,7 @@ def refresh_mip_raw_materials(mip_name):
                 "unit_weight": row.unit_weight,
                 "sec_qty": row.sec_qty,
                 "qty": row.qty,
+                "transferred_qty": 0,
                 "is_reserved": 0,
                 "is_unavailable": 1,
             })
