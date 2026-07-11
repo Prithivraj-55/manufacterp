@@ -59,6 +59,9 @@ doctype_js = {
     "Purchase Order": "public/js/purchase_order.js",
     "Purchase Receipt": "public/js/purchase_receipt.js",
     "Batch": "public/js/batch.js",
+    "Job Card": "public/js/job_card.js",
+    "Supplier Operation Entry": "public/js/supplier_operation_entry.js",
+    "Inspection Entry": "public/js/inspection_entry.js",
 }
 # Svg Icons
 # ------------------
@@ -193,8 +196,12 @@ doc_events = {
 		"validate": [
 			"manufyxinvenzaerp.production_management.job_card.validate_job_card",
 			"manufyxinvenzaerp.subcontracting_management.subcontracting.validate_job_card_drawing_entry",
+			"manufyxinvenzaerp.production_management.inspection.validate_job_card_inspection",
 		],
-		"before_submit": "manufyxinvenzaerp.subcontracting_management.subcontracting.before_submit_job_card_drawing_entry",
+		"before_submit": [
+			"manufyxinvenzaerp.subcontracting_management.subcontracting.before_submit_job_card_drawing_entry",
+			"manufyxinvenzaerp.production_management.inspection.before_submit_job_card_inspection_gate",
+		],
 		"on_update": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_update_job_card_drawing_entry",
 		"on_submit": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_submit_job_card_drawing_entry",
 	},
@@ -205,8 +212,14 @@ doc_events = {
 		"on_cancel": "manufyxinvenzaerp.production_management.stock_entry.on_cancel_stock_entry",
 	},
 	"Supplier Operation Entry": {
-		"validate": "manufyxinvenzaerp.subcontracting_management.subcontracting.validate_supplier_operation_entry",
-		"before_submit": "manufyxinvenzaerp.subcontracting_management.subcontracting.before_submit_supplier_operation_entry",
+		"validate": [
+			"manufyxinvenzaerp.subcontracting_management.subcontracting.validate_supplier_operation_entry",
+			"manufyxinvenzaerp.production_management.inspection.validate_soe_inspection",
+		],
+		"before_submit": [
+			"manufyxinvenzaerp.subcontracting_management.subcontracting.before_submit_supplier_operation_entry",
+			"manufyxinvenzaerp.production_management.inspection.before_submit_soe_inspection_gate",
+		],
 		"on_update": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_update_supplier_operation_entry",
 		"on_submit": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_submit_supplier_operation_entry",
 		"before_delete": "manufyxinvenzaerp.subcontracting_management.subcontracting.before_delete_supplier_operation_entry",
@@ -221,6 +234,9 @@ doc_events = {
 		],
 		"on_trash": "manufyxinvenzaerp.production_plan_management.production_plan.unlink_production_plan_on_trash",
 		"on_cancel": "manufyxinvenzaerp.production_plan_management.production_plan.unlink_production_plan_on_trash",
+	},
+	"Inspection Entry": {
+		"on_submit": "manufyxinvenzaerp.production_management.inspection.on_submit_inspection_entry",
 	},
 }
 

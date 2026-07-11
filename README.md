@@ -202,11 +202,21 @@ The central planning document that bridges a BOM/Sales Order with raw material a
 - `get_routing_operations_for_bom` — whitelisted; returns routing operations for a BOM for use in the Material Planning JS.
 - `get_raw_materials_for_job_card` — whitelisted; returns the raw material requirement for a Job Card factoring in prior transfers and subcontractor consumption.
 
-**Custom child tables:** `Job Card Raw Material`, `Material Planning Available Raw Material`, `Material Planning BOM Item`, `Material Planning Material Mapping`, `Material Planning Raw Material`, `Material Planning Unavailable Item`, `Production Plan Available Raw Material`
+#### Inspection Workflow (`inspection.py`)
+QC sign-off workflow shared identically by Job Card and Supplier Operation Entry, scoped to the `Fitup Inspection` and `Final Inspection` routing operations only:
+- `add_inspection_call` — whitelisted; logs a new inspection call round from the source doc's Inspection Call Date, auto-advancing Inspection Status Open → Working.
+- `create_inspection_entry` — whitelisted; creates a draft **Inspection Entry** (submittable doctype) prefilled with traceability (Work Order/SCO/Production Plan/Sales Order/Customer/Supplier) from the latest pending call round.
+- `on_submit_inspection_entry` — propagates the QC result back to the parent's Inspection Call Log row and sets overall Inspection Status to Completed (fully cleared) or Working (rework remains, awaiting the next call).
+- `before_submit_job_card_inspection_gate` / `before_submit_soe_inspection_gate` — block Job Card/SOE submission for these two operations until Inspection Status is Completed.
+- `_resolve_traceability` — resolves Sales Order/Customer from the source doc's own drawing-detail rows, falling back to the linked Work Order.
+
+**Custom child tables:** `Job Card Raw Material`, `Material Planning Available Raw Material`, `Material Planning BOM Item`, `Material Planning Material Mapping`, `Material Planning Raw Material`, `Material Planning Unavailable Item`, `Production Plan Available Raw Material`, `Inspection Call Log` (one row per inspection call round, on Job Card and Supplier Operation Entry)
 
 **Custom master doctypes:** `Storage Location`, `Store Location`, `Process Planning`
 
-**Custom report:** `Manufyxinvenza Stock Balance` — script report showing stock by batch with secondary qty (kg).
+**Custom submittable doctype:** `Inspection Entry` — QC's Ok/Not Ok + Total Checked/Cleared/Rework Qty sign-off record for a single inspection round.
+
+**Custom reports:** `Manufyxinvenza Stock Balance` — script report showing stock by batch with secondary qty (kg). `Inspection Status Report` — one row per inspection round across all Job Cards/SOEs at the two inspection checkpoints, with full traceability and rework history.
 
 ---
 
@@ -266,6 +276,9 @@ Whitelisted functions that drive the UI buttons on Production Plan, SCO, and Wor
 
 **Custom child tables:** `SCO Drawing Item`, `SCO Excess Material Item`, `SOE Consumption Log`, `SOE Drawing Detail`, `Supplier Operation Item`, `Job Card Consumption Log` (Job Card's own drawing-level consumption log — split from `SOE Consumption Log` so Job Card keeps Employee/From Time/To Time while the Supplier Operation Entry version stays lean)
 
+#### Inspection Tab (own-schema fields, not fixtures)
+Supplier Operation Entry carries the same Inspection tab as Job Card (Inspection Status, Inspection Call Date, Inspection Call Log table), gated to the `Fitup Inspection`/`Final Inspection` operations. Since SOE is an app-owned doctype, these fields live directly in its own `.json` rather than as Custom Field fixtures — see `production_management/inspection.py` (§8) for the shared logic.
+
 ---
 
 ## Custom Doctypes
@@ -289,6 +302,8 @@ Whitelisted functions that drive the UI buttons on Production Plan, SCO, and Wor
 | Production Plan Available Raw Material | production_management | Child table |
 | Storage Location | production_management | Master |
 | Store Location | production_management | Master |
+| Inspection Entry | production_management | Primary document (submittable) |
+| Inspection Call Log | production_management | Child table |
 | Supplier Operation Entry | subcontracting_management | Primary document |
 | Supplier Operation Item | subcontracting_management | Child table |
 | SCO Drawing Item | subcontracting_management | Child table |

@@ -298,7 +298,7 @@ Custom fields are exported as fixtures and applied across the following standard
 | Material Request / Items | Material Planning link, Dimensions, Sec Qty |
 | Supplier Quotation / Items | Dimensions, Sec Qty |
 | Production Plan / Items | Drawing, DUNO/Mark No, Customer, Material Planning link; Process Planning table, Vendor/Contractor |
-| Job Card | Raw Material Consumption child table, Dimensions per row |
+| Job Card | Raw Material Consumption child table, Dimensions per row, Inspection tab (Inspection Status, Inspection Call Date, Inspection Call Log table) |
 | Stock Entry / Items | Dimensions, Sec Qty, Parent Item Group, Supplier, Invoice No |
 | Subcontracting Order | Production Plan, Work Order, Source Warehouse, WIP Warehouse, All Ops Complete |
 
@@ -324,8 +324,47 @@ Custom fields are exported as fixtures and applied across the following standard
 | Process Planning | production_management | Child table on Production Plan — operation routing |
 | Production Plan Available Raw Material | production_management | Child table |
 | Storage Location / Store Location | production_management | Master doctypes for inventory dimension |
+| Inspection Entry | production_management | Submittable QC sign-off record for Fitup Inspection / Final Inspection rounds |
+| Inspection Call Log | production_management | Child table on Job Card/SOE — one row per inspection call round |
 | Supplier Operation Entry | subcontracting_management | Per-operation subcontractor material consumption |
 | Supplier Operation Item | subcontracting_management | Child table |
+
+---
+
+## 17. Inspection Call / QC Workflow (Fitup Inspection & Final Inspection)
+
+A QC sign-off workflow layered on top of Job Card and Supplier Operation Entry, scoped to exactly two routing checkpoints: **Fitup Inspection** and **Final Inspection**. Manufacturing logs the inspection call; a separate QC team records the result — matching the real-world split between the manufacturing team (fills quantities as usual, then requests a QC visit) and QC (reviews and signs off on its own page).
+
+### 17.1 Inspection Tab on Job Card / Supplier Operation Entry
+- New **Inspection** tab, visible only when `operation` is Fitup Inspection or Final Inspection (`depends_on` gated).
+- **Inspection Status** (Open → Working → Completed): starts Open, flips to Working once the first call is logged, becomes Completed only once a round fully clears the checked quantity.
+- **Inspection Call Date**: the entry point field the manufacturing team sets before logging a new call.
+- **Inspection Call Log** (child table, read-only grid): one row per round — Round No, Inspection Call Date, linked Inspection Entry, Round Status (Pending/Completed), Rework Remarks (denormalized from the entry).
+
+### 17.2 Buttons: Add Inspection Call / Create Inspection Entry
+- **"Add Inspection Call"**: validates an Inspection Call Date is set, blocks logging a new round while one is already pending, appends a round, and auto-advances Inspection Status Open → Working.
+- **"Create Inspection Entry"**: once a round is pending, creates a draft **Inspection Entry** — prefilled with Operation, Round No, Call Date, and denormalized Work Order/Subcontracting Order/Production Plan/Sales Order/Customer/Supplier traceability — and routes to it as a separate page for QC to fill in.
+
+### 17.3 Inspection Entry (Custom Submittable Doctype)
+QC fills in: **Status** (Ok/Not Ok), **Total Checked Qty**, **Cleared Qty**, **Rework Qty** (auto-computed), **Rework Remarks** (mandatory when Rework Qty > 0).
+
+**Server-side rule**: Not Ok always implies Rework Qty > 0, and Ok always implies full clearance — `cleared_qty == total_checked_qty` with Status "Not Ok" is rejected, and partial clearance with Status "Ok" is rejected.
+
+On submit, propagates back to the parent Job Card/SOE: marks that round's call-log row Completed, copies the rework remarks, and sets the parent's overall Inspection Status to **Completed** (fully cleared) or leaves it **Working** (rework remains — manufacturing logs a new call date and the cycle repeats).
+
+### 17.4 Submission Gate
+Job Card / Supplier Operation Entry submission is blocked for the Fitup Inspection / Final Inspection operations until Inspection Status is Completed — mirrors the existing "Status must be Completed" gate already used for the drawing-flow consumption fields.
+
+### 17.5 Inspection Status Report
+New Script Report showing **one row per inspection round** (full rework history, not just the latest): Production Plan, Sales Order, Customer, Reference Type + Reference (Work Order/Subcontracting Order), Active Doctype + Active Document (Job Card/SOE), Operation, Round No, Inspection Call Date, Inspection Status, Round Status, Total Checked Qty, Cleared Qty, Rework Qty, Rework Remarks. Filterable by Operation, Inspection Status, Production Plan, Sales Order.
+
+### 17.6 Shared Logic Module
+`production_management/inspection.py` holds all the logic shared identically by Job Card and SOE (`add_inspection_call`, `create_inspection_entry`, `on_submit_inspection_entry`, the before-submit gate, and `_resolve_traceability` — resolves Sales Order/Customer from the Job Card/SOE's own drawing-detail rows, falling back to the linked Work Order's Sales Order).
+
+### 17.7 Roles
+Inspection Entry create/write/submit access: System Manager, Manufacturing Manager, Manufacturing User, and **Quality Manager** (ERPNext's existing QC role — reused rather than creating a new one).
+
+*Design note: ERPNext's standard Quality Inspection doctype was evaluated as an alternative and rejected — it has no accepted/rejected quantity tracking at all (purely parameter/reading-based), mandatory `item_code`/`sample_size` fields that don't map to this use case, only a single Quality Inspection Link per Job Card (no multi-round support), and no support for Supplier Operation Entry as a reference type without patching core ERPNext code.*
 
 ---
 

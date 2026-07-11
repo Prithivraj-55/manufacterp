@@ -23,7 +23,12 @@
   "section_break_drawing_details",
   "drawing_details",
   "section_break_log",
-  "consumption_log"
+  "consumption_log",
+  "custom_inspection_tab",
+  "custom_inspection_status",
+  "custom_inspection_call_date",
+  "custom_inspection_call_log_section",
+  "custom_inspection_call_log"
  ],
  "fields": [
   {
@@ -147,6 +152,41 @@
    "fieldtype": "Table",
    "label": "Consumption Log",
    "options": "SOE Consumption Log"
+  },
+  {
+   "fieldname": "custom_inspection_tab",
+   "fieldtype": "Tab Break",
+   "label": "Inspection",
+   "depends_on": "eval:[\"Fitup Inspection\",\"Final Inspection\"].includes(doc.operation)"
+  },
+  {
+   "fieldname": "custom_inspection_status",
+   "fieldtype": "Select",
+   "label": "Inspection Status",
+   "options": "Open\nWorking\nCompleted",
+   "default": "Open",
+   "read_only": 1,
+   "no_copy": 1,
+   "depends_on": "eval:[\"Fitup Inspection\",\"Final Inspection\"].includes(doc.operation)"
+  },
+  {
+   "fieldname": "custom_inspection_call_date",
+   "fieldtype": "Date",
+   "label": "Inspection Call Date",
+   "depends_on": "eval:[\"Fitup Inspection\",\"Final Inspection\"].includes(doc.operation)"
+  },
+  {
+   "fieldname": "custom_inspection_call_log_section",
+   "fieldtype": "Section Break",
+   "label": "Inspection Call Log",
+   "depends_on": "eval:[\"Fitup Inspection\",\"Final Inspection\"].includes(doc.operation)"
+  },
+  {
+   "fieldname": "custom_inspection_call_log",
+   "fieldtype": "Table",
+   "label": "Inspection Call Log",
+   "options": "Inspection Call Log",
+   "read_only": 1
   }
  ],
  "is_submittable": 1,

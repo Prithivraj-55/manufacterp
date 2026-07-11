@@ -1266,6 +1266,7 @@ def after_install():
     create_job_card_drawing_fields()
     layout_job_card_fields()
     create_jc_drawing_client_script()
+    create_job_card_inspection_fields()
     create_material_planning_auto_purchase_fields()
     create_manufacturing_settings_custom_fields()
     from manufyxinvenzaerp.production_management.production_utils import (
@@ -1312,6 +1313,7 @@ def after_migrate():
     create_job_card_drawing_fields()
     layout_job_card_fields()
     create_jc_drawing_client_script()
+    create_job_card_inspection_fields()
     create_material_planning_auto_purchase_fields()
     create_manufacturing_settings_custom_fields()
     from manufyxinvenzaerp.production_management.production_utils import (
@@ -3792,6 +3794,65 @@ def create_job_card_drawing_fields():
     )
 
 
+INSPECTION_OPERATIONS = ["Fitup Inspection", "Final Inspection"]
+INSPECTION_DEPENDS_ON = 'eval:["Fitup Inspection","Final Inspection"].includes(doc.operation)'
+
+
+def create_job_card_inspection_fields():
+    """Inspection Call / QC tab on Job Card — only relevant for the two QC
+    checkpoint operations (Fitup Inspection, Final Inspection).
+    # SHARED_JC_SOE_INSPECTION: mirrors the same fields added on Supplier
+    # Operation Entry directly in its own doctype json.
+    """
+    create_custom_fields(
+        {
+            "Job Card": [
+                {
+                    "fieldname": "custom_inspection_tab",
+                    "fieldtype": "Tab Break",
+                    "label": "Inspection",
+                    "insert_after": "storage_location",
+                    "depends_on": INSPECTION_DEPENDS_ON,
+                },
+                {
+                    "fieldname": "custom_inspection_status",
+                    "fieldtype": "Select",
+                    "label": "Inspection Status",
+                    "options": "Open\nWorking\nCompleted",
+                    "default": "Open",
+                    "read_only": 1,
+                    "no_copy": 1,
+                    "insert_after": "custom_inspection_tab",
+                    "depends_on": INSPECTION_DEPENDS_ON,
+                },
+                {
+                    "fieldname": "custom_inspection_call_date",
+                    "fieldtype": "Date",
+                    "label": "Inspection Call Date",
+                    "insert_after": "custom_inspection_status",
+                    "depends_on": INSPECTION_DEPENDS_ON,
+                },
+                {
+                    "fieldname": "custom_inspection_call_log_section",
+                    "fieldtype": "Section Break",
+                    "label": "Inspection Call Log",
+                    "insert_after": "custom_inspection_call_date",
+                    "depends_on": INSPECTION_DEPENDS_ON,
+                },
+                {
+                    "fieldname": "custom_inspection_call_log",
+                    "fieldtype": "Table",
+                    "label": "Inspection Call Log",
+                    "options": "Inspection Call Log",
+                    "read_only": 1,
+                    "insert_after": "custom_inspection_call_log_section",
+                },
+            ],
+        },
+        update=True,
+    )
+
+
 def layout_job_card_fields():
     """Hide noisy core Job Card fields/tabs that duplicate the custom drawing/
     consumption tracking, and surface Sequence Id as a quick filter/list column.
@@ -3847,7 +3908,9 @@ def layout_job_card_fields():
         "serial_and_batch_bundle", "batch_no", "serial_no", "barcode", "job_started",
         "started_time", "current_time", "amended_from", "custom_raw_material_consumption_tab",
         "custom_raw_material_consumption", "connections_tab", "inventory_dimension",
-        "storage_location",
+        "storage_location", "custom_inspection_tab", "custom_inspection_status",
+        "custom_inspection_call_date", "custom_inspection_call_log_section",
+        "custom_inspection_call_log",
     ]
     frappe.make_property_setter(
         {

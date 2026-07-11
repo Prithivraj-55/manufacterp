@@ -1,0 +1,63 @@
+{
+ "actions": [],
+ "creation": "2026-07-11 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "round_no",
+  "call_date",
+  "inspection_entry",
+  "round_status",
+  "remarks"
+ ],
+ "fields": [
+  {
+   "fieldname": "round_no",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Round No",
+   "read_only": 1
+  },
+  {
+   "fieldname": "call_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Inspection Call Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "inspection_entry",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Inspection Entry",
+   "options": "Inspection Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "round_status",
+   "fieldtype": "Select",
+   "default": "Pending",
+   "in_list_view": 1,
+   "label": "Round Status",
+   "options": "Pending\nCompleted",
+   "read_only": 1
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Rework Remarks",
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-07-11 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Production Management",
+ "name": "Inspection Call Log",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}
