@@ -1389,20 +1389,14 @@ def _get_mp_actual_transferred_weight(mp_name, source_warehouse, target_warehous
 
 def _refresh_wo_drawing_transferred_weights(wo):
     """Update Op-1 JC's custom_drawing_details.transferred_weight_kg rows to reflect
-    ACTUAL Stock Entry transfers so far, instead of the Material Planning reservation
-    (mapped_weight_kg) that used to be copied in verbatim at JC-creation time.
+    ACTUAL Stock Entry transfers so far.
 
-    Several drawings can share one Material Planning document (item-level reservation
-    split proportionally across drawings) — so each drawing's live figure is its
-    existing mapped-weight share, scaled by how much of THAT Material Planning's
-    total mapped weight has actually moved.
+    Uses wo.custom_transferred_weight_kg (already correctly computed by
+    _update_wo_transferred_weight) and scales each drawing's transferred weight
+    proportionally to its mapped_weight_kg share of the WO total. This works
+    regardless of whether MP row reservations have been cleared by SE submission.
     # SHARED_SCO_JC: mirrors _refresh_sco_drawing_transferred_weights
     """
-    source_warehouse, cnc_warehouse = _get_wo_transfer_warehouses(wo.name)
-    targets = [w for w in [wo.wip_warehouse, cnc_warehouse] if w]
-    if not source_warehouse or not targets:
-        return
-
     jc_op1 = frappe.db.get_value(
         "Job Card",
         {"work_order": wo.name, "sequence_id": 1, "docstatus": ["!=", 2]},
@@ -1416,23 +1410,14 @@ def _refresh_wo_drawing_transferred_weights(wo):
         return
 
     wo_rows = {d.drawing: d for d in (wo.get("custom_drawing_items") or [])}
-    mp_actual_cache = {}
-    mp_total_cache = {}
+    total_wo_mapped = sum(flt(d.mapped_weight_kg) for d in (wo.get("custom_drawing_items") or []))
+    transferred_weight = flt(wo.get("custom_transferred_weight_kg") or 0)
+    ratio = min(transferred_weight / total_wo_mapped, 1.0) if total_wo_mapped else 0.0
+
     changed = False
     for row in jc_doc.custom_drawing_details:
         wo_row = wo_rows.get(row.drawing)
-        mp_name = wo_row.get("material_planning") if wo_row else None
-        new_val = 0.0
-        if mp_name and wo_row and flt(wo_row.mapped_weight_kg):
-            if mp_name not in mp_total_cache:
-                mp_total_cache[mp_name] = _get_mp_total_weight(mp_name)
-            if mp_name not in mp_actual_cache:
-                mp_actual_cache[mp_name] = _get_mp_actual_transferred_weight(
-                    mp_name, source_warehouse, targets
-                )
-            mp_total = mp_total_cache[mp_name]
-            ratio = (mp_actual_cache[mp_name] / mp_total) if mp_total else 0.0
-            new_val = flt(flt(wo_row.mapped_weight_kg) * min(ratio, 1.0), 3)
+        new_val = flt(flt(wo_row.mapped_weight_kg) * ratio, 3) if wo_row else 0.0
         if flt(row.transferred_weight_kg) != new_val:
             row.transferred_weight_kg = new_val
             changed = True
@@ -1470,13 +1455,10 @@ def _get_wo_transfer_warehouses(wo_name):
 
 def _refresh_sco_drawing_transferred_weights(sco):
     """SOE equivalent of _refresh_wo_drawing_transferred_weights.
+    Uses sco.custom_transferred_weight_kg (already correctly computed) and scales
+    each drawing proportionally to its mapped_weight_kg share of the SCO total.
     # SHARED_SCO_JC: mirrors _refresh_wo_drawing_transferred_weights
     """
-    source_warehouse, cnc_warehouse = _get_sco_transfer_warehouses(sco.name)
-    targets = [w for w in [sco.get("supplier_warehouse"), cnc_warehouse] if w]
-    if not source_warehouse or not targets:
-        return
-
     soe_op1 = frappe.db.get_value(
         "Supplier Operation Entry",
         {"subcontracting_order": sco.name, "sequence_id": 1, "docstatus": ["!=", 2]},
@@ -1490,23 +1472,14 @@ def _refresh_sco_drawing_transferred_weights(sco):
         return
 
     sco_rows = {d.drawing: d for d in (sco.get("custom_drawing_items") or [])}
-    mp_actual_cache = {}
-    mp_total_cache = {}
+    total_sco_mapped = sum(flt(d.mapped_weight_kg) for d in (sco.get("custom_drawing_items") or []))
+    transferred_weight = flt(sco.get("custom_transferred_weight_kg") or 0)
+    ratio = min(transferred_weight / total_sco_mapped, 1.0) if total_sco_mapped else 0.0
+
     changed = False
     for row in soe_doc.drawing_details:
         sco_row = sco_rows.get(row.drawing)
-        mp_name = sco_row.get("material_planning") if sco_row else None
-        new_val = 0.0
-        if mp_name and sco_row and flt(sco_row.mapped_weight_kg):
-            if mp_name not in mp_total_cache:
-                mp_total_cache[mp_name] = _get_mp_total_weight(mp_name)
-            if mp_name not in mp_actual_cache:
-                mp_actual_cache[mp_name] = _get_mp_actual_transferred_weight(
-                    mp_name, source_warehouse, targets
-                )
-            mp_total = mp_total_cache[mp_name]
-            ratio = (mp_actual_cache[mp_name] / mp_total) if mp_total else 0.0
-            new_val = flt(flt(sco_row.mapped_weight_kg) * min(ratio, 1.0), 3)
+        new_val = flt(flt(sco_row.mapped_weight_kg) * ratio, 3) if sco_row else 0.0
         if flt(row.transferred_weight_kg) != new_val:
             row.transferred_weight_kg = new_val
             changed = True
