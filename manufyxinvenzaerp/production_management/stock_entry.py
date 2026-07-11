@@ -98,16 +98,19 @@ def on_submit_stock_entry(doc, method):
 	# ERPNext's validate_subcontract_order which throws when supplied_items is empty.
 	if doc.stock_entry_type == "Send to Subcontractor" and doc.get("custom_sco_ref"):
 		_update_sco_transferred_weight(doc.custom_sco_ref)
+		_refresh_linked_mip_weight(sco_ref=doc.custom_sco_ref)
 
 	if doc.stock_entry_type == "Material Transfer" and doc.get("custom_sco_ref"):
 		_update_sco_transferred_weight(doc.custom_sco_ref)
 		_update_sco_cnc_weight(doc.custom_sco_ref)
+		_refresh_linked_mip_weight(sco_ref=doc.custom_sco_ref)
 
 	# SHARED_SCO_JC: WO transfer tracking mirrors SCO tracking above.
 	# custom_wo_ref is set on Material Transfer SEs created by our WO transfer buttons.
 	if doc.stock_entry_type == "Material Transfer" and doc.get("custom_wo_ref"):
 		_update_wo_transferred_weight(doc.custom_wo_ref)
 		_update_wo_cnc_weight(doc.custom_wo_ref)
+		_refresh_linked_mip_weight(wo_ref=doc.custom_wo_ref)
 
 
 def _reduce_batch_sec_qty(batch_no, consumed_qty):
@@ -236,6 +239,18 @@ def _release_material_planning_reservations(doc):
 	cleared = {"is_reserved": 0, "reserved_qty": 0, "shortfall_qty": 0, "reserved_on": None}
 
 	if linked_mps:
+		# When a primary (non-CNC) SE is submitted, preserve CNC row reservations so
+		# the CNC transfer can still run without needing to re-reserve. Only clear CNC
+		# reservations if this SE itself is a CNC-destined transfer.
+		cnc_warehouse = None
+		if doc.get("custom_mip_ref"):
+			cnc_warehouse = frappe.db.get_value(
+				"Material Issue Plan", doc.get("custom_mip_ref"), "cnc_warehouse"
+			)
+		se_is_cnc_transfer = bool(
+			cnc_warehouse and any(getattr(item, "t_warehouse", None) == cnc_warehouse for item in doc.items)
+		)
+
 		# Scoped release: only this consumption's own MP reservations, on both tables.
 		for child_dt, batch_field in (
 			("Material Planning Material Mapping", "batch"),
@@ -248,10 +263,12 @@ def _release_material_planning_reservations(doc):
 					"parent": ["in", list(linked_mps)],
 					"is_reserved": 1,
 				},
-				pluck="name",
+				fields=["name", "cnc_process"],
 			)
-			for name in rows:
-				frappe.db.set_value(child_dt, name, cleared, update_modified=False)
+			for r in rows:
+				if r.cnc_process and not se_is_cnc_transfer:
+					continue  # preserve CNC reservations when submitting a non-CNC SE
+				frappe.db.set_value(child_dt, r.name, cleared, update_modified=False)
 		return
 
 	# Fallback (no Production Plan link): legacy batch-wide release on Material Mapping.
@@ -264,6 +281,24 @@ def _release_material_planning_reservations(doc):
 		frappe.db.set_value("Material Planning Material Mapping", name, cleared, update_modified=False)
 
 
+def _refresh_linked_mip_weight(sco_ref=None, wo_ref=None):
+	"""After SE submit/cancel, refresh the transferred_weight_kg on the linked MIP."""
+	from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
+		refresh_weight_summary,
+	)
+	try:
+		if sco_ref:
+			mip_name = frappe.db.get_value("Material Issue Plan", {"subcontracting_order": sco_ref})
+		elif wo_ref:
+			mip_name = frappe.db.get_value("Material Issue Plan", {"work_order": wo_ref})
+		else:
+			return
+		if mip_name:
+			refresh_weight_summary(mip_name)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "MIP weight refresh failed")
+
+
 def on_cancel_stock_entry(doc, method):
 	"""When a Stock Entry is cancelled, batch stock returns — restore Material Planning
 	reservations and the consumed Sec Qty (Nos) on the batch."""
@@ -273,15 +308,18 @@ def on_cancel_stock_entry(doc, method):
 	# Recalculate transferred weight on SCO if a relevant SE is cancelled
 	if doc.stock_entry_type == "Send to Subcontractor" and doc.get("custom_sco_ref"):
 		_update_sco_transferred_weight(doc.custom_sco_ref)
+		_refresh_linked_mip_weight(sco_ref=doc.custom_sco_ref)
 
 	if doc.stock_entry_type == "Material Transfer" and doc.get("custom_sco_ref"):
 		_update_sco_transferred_weight(doc.custom_sco_ref)
 		_update_sco_cnc_weight(doc.custom_sco_ref)
+		_refresh_linked_mip_weight(sco_ref=doc.custom_sco_ref)
 
 	# SHARED_SCO_JC: WO cancel mirrors SCO cancel above.
 	if doc.stock_entry_type == "Material Transfer" and doc.get("custom_wo_ref"):
 		_update_wo_transferred_weight(doc.custom_wo_ref)
 		_update_wo_cnc_weight(doc.custom_wo_ref)
+		_refresh_linked_mip_weight(wo_ref=doc.custom_wo_ref)
 
 
 def _restore_batch_sec_qty(doc):

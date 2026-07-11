@@ -1641,8 +1641,9 @@ def _get_mp_reserved_batches(mp_name, source_warehouse, supplier_warehouse):
     for r in rows:
         if not r.batch:
             continue
-        # reserve_without_dimensions rows skip dimensional calc — use reserved_qty directly
-        qty = flt(r.reserved_qty) if r.reserve_without_dimensions else flt(r.batch_calc_qty)
+        # Always use reserved_qty — it's the actual stock held back for this row.
+        # batch_calc_qty is the full requirement which may exceed what's available (shortfall).
+        qty = flt(r.reserved_qty)
         if qty <= 0:
             continue
         # When the batch belongs to a different item (cross-item mapping), planned_item
@@ -1677,7 +1678,7 @@ def _get_mp_reserved_batches(mp_name, source_warehouse, supplier_warehouse):
         ],
     )
     for r in rows2:
-        qty = flt(r.reserved_qty) or flt(r.available_qty)
+        qty = flt(r.reserved_qty)   # available_qty is pre-reservation stock, not what's actually reserved
         if r.batch_no and qty > 0:
             items.append({
                 "item_code": r.item_code,

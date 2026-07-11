@@ -177,6 +177,75 @@ frappe.ui.form.on("Material Issue Plan Raw Material", {
 	},
 });
 
+// ── Transfer readiness pre-flight check ──────────────────────────────────────
+
+function _check_transfer_readiness(frm, on_proceed) {
+	frappe.call({
+		method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.get_mip_readiness_check",
+		args: { mip_name: frm.doc.name },
+		callback(r) {
+			let d = r.message || {};
+			if (!d.has_issues) {
+				on_proceed();
+				return;
+			}
+
+			// Build issue table
+			function _rows(items, label, batch_col) {
+				if (!items || !items.length) return "";
+				let hdr = batch_col ? `<th>${__("Batch")}</th>` : "";
+				let rows = items.map(function(it) {
+					let bc = batch_col ? `<td>${it.batch || "-"}</td>` : "";
+					return `<tr>
+						<td>${it.material_planning}</td>
+						<td>${it.table} / Row ${it.row}</td>
+						<td>${it.item_code}</td>
+						<td>${it.duno_mark_no || "-"}</td>
+						${bc}
+						<td>${it.qty} ${it.uom}</td>
+					</tr>`;
+				}).join("");
+				return `<p style="margin:10px 0 4px;font-weight:bold">${label}</p>
+					<table class="table table-bordered table-condensed" style="font-size:11px">
+						<thead><tr>
+							<th>${__("Material Planning")}</th>
+							<th>${__("Table / Row")}</th>
+							<th>${__("Item Code")}</th>
+							<th>${__("DUNO/Mark No")}</th>
+							${hdr}
+							<th>${__("Qty")}</th>
+						</tr></thead>
+						<tbody>${rows}</tbody>
+					</table>`;
+			}
+
+			let html = "";
+			if (d.unmapped && d.unmapped.length) {
+				html += _rows(d.unmapped, `⚠ ${__("Not Mapped / No Batch Assigned ({0} item(s)) — these will NOT be transferred", [d.unmapped.length])}`, false);
+			}
+			if (d.unreserved && d.unreserved.length) {
+				html += _rows(d.unreserved, `⚠ ${__("Batch Assigned but NOT Reserved ({0} item(s)) — these will NOT be transferred", [d.unreserved.length])}`, true);
+			}
+			html += `<p style="margin-top:10px;color:#555">
+				${__("Ensure stocks are purchased and mapped against Material Planning, or assign batches using the <b>Update Batch</b> option in the Material Issue Plan.")}
+			</p>`;
+
+			let dialog = new frappe.ui.Dialog({
+				title: __("Transfer Readiness Check — Issues Found"),
+				fields: [{ fieldtype: "HTML", fieldname: "body", options: html }],
+				primary_action_label: __("Proceed Anyway"),
+				primary_action() {
+					dialog.hide();
+					on_proceed();
+				},
+				secondary_action_label: __("Cancel"),
+				secondary_action() { dialog.hide(); },
+			});
+			dialog.show();
+		},
+	});
+}
+
 // ── Transfer / CNC buttons ───────────────────────────────────────────────────
 
 function _add_transfer_buttons(frm) {
@@ -184,63 +253,98 @@ function _add_transfer_buttons(frm) {
 	if (!frm.doc.subcontracting_order && !frm.doc.work_order) return;
 
 	frm.add_custom_button(__("All Pending Material"), function() {
-		frappe.confirm(__("Transfer all pending reserved material out of the Source Warehouse. Continue?"), function() {
+		_check_transfer_readiness(frm, function() {
+			// Check pending count before showing confirm — avoid confusing dialog when nothing is left
 			frappe.call({
-				method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.create_mip_transfer_entry",
+				method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.get_mip_pending_items",
 				args: { mip_name: frm.doc.name },
 				freeze: true,
-				freeze_message: __("Creating transfer entry…"),
+				freeze_message: __("Checking pending items…"),
 				callback(r) {
-					if (r.message) {
-						let links = Object.values(r.message).map((n) =>
-							'<a href="/app/stock-entry/' + encodeURIComponent(n) + '">' + n + "</a>").join(", ");
-						frappe.msgprint({ title: __("Stock Entry Created"), message: links, indicator: "green" });
-						frm.reload_doc();
+					let primary_pending = (r.message || []).filter(function(p) { return !p.cnc_process; });
+					if (!primary_pending.length) {
+						frappe.msgprint({
+							title: __("Nothing to Transfer"),
+							message: __("All reserved materials have already been transferred to the Supplier / WIP Warehouse."),
+							indicator: "blue",
+						});
+						return;
 					}
+					frappe.confirm(
+						__("Transfer {0} item(s) to the Supplier / WIP Warehouse. Continue?", [primary_pending.length]),
+						function() {
+							frappe.call({
+								method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.create_mip_transfer_entry",
+								args: { mip_name: frm.doc.name },
+								freeze: true,
+								freeze_message: __("Creating transfer entry…"),
+								callback(r) {
+									if (r.message) {
+										let links = Object.values(r.message).map((n) =>
+											'<a href="/app/stock-entry/' + encodeURIComponent(n) + '">' + n + "</a>").join(", ");
+										frappe.msgprint({ title: __("Stock Entry Created"), message: links, indicator: "green" });
+										frm.reload_doc();
+									}
+								},
+							});
+						}
+					);
 				},
 			});
 		});
 	}, __("Transfer"));
 
 	frm.add_custom_button(__("Select Materials to Transfer"), function() {
-		frappe.call({
-			method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.get_mip_pending_items",
-			args: { mip_name: frm.doc.name },
-			freeze: true,
-			freeze_message: __("Loading pending materials…"),
-			callback(r) { _show_mip_transfer_popup(frm, r.message || [], "primary"); },
-		});
-	}, __("Transfer"));
-
-	if (frm.doc.cnc_warehouse) {
-		frm.add_custom_button(__("To CNC Warehouse"), function() {
+		_check_transfer_readiness(frm, function() {
 			frappe.call({
 				method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.get_mip_pending_items",
 				args: { mip_name: frm.doc.name },
 				freeze: true,
 				freeze_message: __("Loading pending materials…"),
-				callback(r) { _show_mip_transfer_popup(frm, r.message || [], "cnc"); },
+				callback(r) { _show_mip_transfer_popup(frm, r.message || [], "primary"); },
+			});
+		});
+	}, __("Transfer"));
+
+	if (frm.doc.cnc_warehouse) {
+		frm.add_custom_button(__("To CNC Warehouse"), function() {
+			_check_transfer_readiness(frm, function() {
+				frappe.call({
+					method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.get_mip_pending_items",
+					args: { mip_name: frm.doc.name },
+					freeze: true,
+					freeze_message: __("Loading pending materials…"),
+					callback(r) { _show_mip_transfer_popup(frm, r.message || [], "cnc"); },
+				});
 			});
 		}, __("Transfer"));
 
-		frm.add_custom_button(__("CNC to Supplier/WIP"), function() {
-			frappe.call({
-				method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.create_mip_cnc_forward_entry",
-				args: { mip_name: frm.doc.name },
-				freeze: true,
-				freeze_message: __("Forwarding CNC material…"),
-				callback(r) {
-					if (r.message) {
-						frappe.msgprint({ title: __("Stock Entry Created"), message: '<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>", indicator: "green" });
-						frm.reload_doc();
-					}
-				},
-			});
-		}, __("Transfer"));
+		frappe.call({
+			method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.has_cnc_stock",
+			args: { mip_name: frm.doc.name },
+			callback(r) {
+				if (r.message) {
+					frm.add_custom_button(__("CNC to Supplier/WIP"), function() {
+						frappe.call({
+							method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.create_mip_cnc_forward_entry",
+							args: { mip_name: frm.doc.name },
+							freeze: true,
+							freeze_message: __("Forwarding CNC material…"),
+							callback(r) {
+								if (r.message) {
+									frappe.msgprint({ title: __("Stock Entry Created"), message: '<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>", indicator: "green" });
+									frm.reload_doc();
+								}
+							},
+						});
+					}, __("Transfer"));
+				}
+			},
+		});
 	}
 }
 
-// Popup with three filter modes — Material-wise (free text), DUNO/Mark No-wise,
+// Popup with three filter modes — Item Code (searchable list), DUNO/Mark No (searchable list),
 // Drawing-wise — combined with AND semantics, then transfer only the checked rows.
 function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 	var items = pending_items.filter(function(d) { return transfer_type === "cnc" ? d.cnc_process : !d.cnc_process; });
@@ -253,18 +357,82 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 		return;
 	}
 
-	var duno_options = Array.from(new Set(items.map((d) => d.duno_mark_no).filter(Boolean))).sort();
-	var drawing_options = Array.from(new Set(items.map((d) => d.drawing).filter(Boolean))).sort();
+	var item_code_options = Array.from(new Set(items.map((d) => d.item_code).filter(Boolean))).sort();
+	var duno_options     = Array.from(new Set(items.map((d) => d.duno_mark_no).filter(Boolean))).sort();
+	var drawing_options  = Array.from(new Set(items.map((d) => d.drawing).filter(Boolean))).sort();
+	var so_options       = Array.from(new Set(items.map((d) => d.sales_order).filter(Boolean))).sort();
+	var cdn_options      = Array.from(new Set(items.map((d) => d.customer_drawing_number).filter(Boolean))).sort();
 
-	var $filter = $("<input class='form-control form-control-sm' placeholder='" + __("Material-wise filter…") + "' style='margin-bottom:8px'>");
-	var $duno = $("<select class='form-control form-control-sm' style='margin-bottom:8px'><option value=''>" + __("All DUNO/Mark No") + "</option>"
-		+ duno_options.map((d) => "<option value='" + d + "'>" + d + "</option>").join("") + "</select>");
+	// Searchable dropdown list — text input that opens a filtered option list on focus/type.
+	// Returns { $el, getValue(), reset() }. Triggers a custom "mip:filter" event on $el
+	// whenever the selected value changes (so callers bind a single event).
+	function _make_search_list(options, placeholder) {
+		var current_val = "";
+		var uid = "mip_sl_" + Math.random().toString(36).slice(2);
+		var $wrap = $('<div>').css({ position: "relative", marginBottom: "8px" });
+		var $input = $('<input type="text" class="form-control form-control-sm" autocomplete="off">')
+			.attr("placeholder", placeholder);
+		var $drop = $('<div>').css({
+			position: "absolute", top: "100%", left: 0, right: 0, zIndex: 9999,
+			background: "#fff", border: "1px solid #d1d8dd", borderRadius: "4px",
+			maxHeight: "200px", overflowY: "auto", display: "none",
+			boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+		});
+		$wrap.append($input, $drop);
+
+		function _render(q) {
+			var filtered = q ? options.filter(function(o) { return o.toLowerCase().includes(q.toLowerCase()); }) : options;
+			$drop.empty();
+			var $all = $('<div>').css({ padding: "6px 10px", cursor: "pointer", fontSize: "12px",
+				color: "#6c757d", borderBottom: "1px solid #f0f0f0" }).text(__("All"));
+			$all.on("mouseenter", function() { $(this).css("background", "#f0f4f7"); })
+				.on("mouseleave", function() { $(this).css("background", ""); })
+				.on("mousedown", function(e) {
+					e.preventDefault();
+					current_val = ""; $input.val(""); $drop.hide(); $wrap.trigger("mip:filter");
+				});
+			$drop.append($all);
+			filtered.forEach(function(opt) {
+				var $opt = $('<div>').css({ padding: "6px 10px", cursor: "pointer", fontSize: "12px" }).text(opt);
+				$opt.on("mouseenter", function() { $(this).css("background", "#f0f4f7"); })
+					.on("mouseleave", function() { $(this).css("background", ""); })
+					.on("mousedown", function(e) {
+						e.preventDefault();
+						current_val = opt; $input.val(opt); $drop.hide(); $wrap.trigger("mip:filter");
+					});
+				$drop.append($opt);
+			});
+			if (filtered.length || !q) $drop.show(); else $drop.hide();
+		}
+
+		$input.on("focus", function() { _render($input.val()); });
+		$input.on("blur",  function() { $drop.hide(); });
+		$input.on("input", function() { current_val = ""; _render($input.val()); $wrap.trigger("mip:filter"); });
+
+		return {
+			$el: $wrap,
+			getValue() { return current_val || $input.val() || ""; },
+			reset() { current_val = ""; $input.val(""); $drop.hide(); },
+		};
+	}
+
+	var item_search = _make_search_list(item_code_options, __("Search item code…"));
+	var duno_search  = _make_search_list(duno_options, __("Search DUNO/Mark No…"));
+	var so_search    = _make_search_list(so_options, __("Search Sales Order…"));
+	var cdn_search   = _make_search_list(cdn_options, __("Search Customer Drawing No…"));
 	var $drawing = $("<select class='form-control form-control-sm' style='margin-bottom:8px'><option value=''>" + __("All Drawings") + "</option>"
 		+ drawing_options.map((d) => "<option value='" + d + "'>" + d + "</option>").join("") + "</select>");
-	var $filter_row = $("<div class='row'>").append(
-		$("<div class='col-sm-4'>").append($filter),
-		$("<div class='col-sm-4'>").append($duno),
-		$("<div class='col-sm-4'>").append($drawing)
+
+	var $filter_row = $("<div>").append(
+		$("<div class='row'>").append(
+			$("<div class='col-sm-4'>").append(item_search.$el),
+			$("<div class='col-sm-4'>").append(duno_search.$el),
+			$("<div class='col-sm-4'>").append($drawing)
+		),
+		$("<div class='row'>").append(
+			$("<div class='col-sm-6'>").append(so_search.$el),
+			$("<div class='col-sm-6'>").append(cdn_search.$el)
+		)
 	);
 	var $actions = $("<div style='margin-bottom:8px'>"
 		+ "<button class='btn btn-xs btn-default mip-sel-all'>" + __("Select All") + "</button> "
@@ -283,7 +451,11 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 	var $tbody = $table.find("tbody");
 	items.forEach(function(d, idx) {
 		$tbody.append(
-			"<tr data-idx='" + idx + "' data-duno='" + (d.duno_mark_no || "") + "' data-drawing='" + (d.drawing || "") + "'>" +
+			"<tr data-idx='" + idx + "' data-item='" + frappe.utils.escape_html(d.item_code || "") + "'"
+			+ " data-duno='" + frappe.utils.escape_html(d.duno_mark_no || "") + "'"
+			+ " data-drawing='" + frappe.utils.escape_html(d.drawing || "") + "'"
+			+ " data-so='" + frappe.utils.escape_html(d.sales_order || "") + "'"
+			+ " data-cdn='" + frappe.utils.escape_html(d.customer_drawing_number || "") + "'>" +
 			"<td class='text-center'><input type='checkbox' class='mip-item-chk' checked></td>" +
 			"<td>" + frappe.utils.escape_html(d.item_code) + "</td>" +
 			"<td>" + frappe.utils.escape_html(d.batch_no || "") + "</td>" +
@@ -295,19 +467,25 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 	});
 
 	function _apply_filters() {
-		var q = $filter.val().toLowerCase();
-		var duno = $duno.val();
+		var item_q  = item_search.getValue().toLowerCase();
+		var duno_q  = duno_search.getValue().toLowerCase();
+		var so_q    = so_search.getValue().toLowerCase();
+		var cdn_q   = cdn_search.getValue().toLowerCase();
 		var drawing = $drawing.val();
 		$tbody.find("tr").each(function() {
 			var $row = $(this);
-			var matches = (!q || $row.text().toLowerCase().indexOf(q) >= 0)
-				&& (!duno || $row.data("duno") === duno)
-				&& (!drawing || $row.data("drawing") === drawing);
+			var matches = (!item_q  || $row.data("item").toLowerCase().includes(item_q))
+				&& (!duno_q  || $row.data("duno").toLowerCase().includes(duno_q))
+				&& (!drawing || $row.data("drawing") === drawing)
+				&& (!so_q   || $row.data("so").toLowerCase().includes(so_q))
+				&& (!cdn_q  || $row.data("cdn").toLowerCase().includes(cdn_q));
 			$row.toggle(matches);
 		});
 	}
-	$filter.on("input", _apply_filters);
-	$duno.on("change", _apply_filters);
+	item_search.$el.on("mip:filter", _apply_filters);
+	duno_search.$el.on("mip:filter", _apply_filters);
+	so_search.$el.on("mip:filter", _apply_filters);
+	cdn_search.$el.on("mip:filter", _apply_filters);
 	$drawing.on("change", _apply_filters);
 	$actions.find(".mip-sel-all").on("click", function() { $tbody.find("tr:visible .mip-item-chk").prop("checked", true); });
 	$actions.find(".mip-desel-all").on("click", function() { $tbody.find("tr:visible .mip-item-chk").prop("checked", false); });
@@ -584,7 +762,7 @@ function _mip_build_picker(dialog, all_rows, on_select) {
 
 const _MIP_ALLOC_FIELDS = [
 	"current_batch", "current_sec_qty", "current_qty",
-	"new_batch_no", "length", "width", "thickness", "sec_qty",
+	"new_batch_no", "length", "width", "thickness", "sec_qty", "calculated_qty",
 	"reserve_without_dimensions", "allocate_based_on_sec_qty",
 ];
 
@@ -621,6 +799,7 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 			{ fieldname: "width", fieldtype: "Float", label: __("Width (mm)"), read_only: 1 },
 			{ fieldname: "thickness", fieldtype: "Float", label: __("Thickness (mm)"), read_only: 1 },
 			{ fieldname: "sec_qty", fieldtype: "Float", label: __("Sec Qty (Nos)") },
+			{ fieldname: "calculated_qty", fieldtype: "Float", label: __("Calculated Qty (Kg)"), read_only: 1 },
 			{ fieldname: "reserve_without_dimensions", fieldtype: "Check", label: __("Reserve Without Dimensions") },
 			{ fieldname: "allocate_based_on_sec_qty", fieldtype: "Check", label: __("Allocate based on Sec Nos"), default: "1" },
 		],
@@ -726,6 +905,7 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 			dialog.set_value("length", 0);
 			dialog.set_value("width", 0);
 			dialog.set_value("thickness", 0);
+			dialog.set_value("calculated_qty", 0);
 			return;
 		}
 		frappe.db.get_value("Batch", batch_no, ["custom_length", "custom_width", "custom_thickness"]).then((r) => {
@@ -733,9 +913,29 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 			dialog.set_value("length", flt(d.custom_length));
 			dialog.set_value("width", flt(d.custom_width));
 			dialog.set_value("thickness", flt(d.custom_thickness));
+			_calc_new_qty();
 		});
 	}
 	dialog.fields_dict.new_batch_no.df.onchange = () => _fetch_batch_dims(dialog.get_value("new_batch_no"));
+
+	function _calc_new_qty() {
+		if (!selected_row) return;
+		let g = selected_row.parent_item_group;
+		let uw = flt(selected_row.unit_weight);
+		let l = flt(dialog.get_value("length"));
+		let w = flt(dialog.get_value("width"));
+		let t = flt(dialog.get_value("thickness"));
+		let sec = flt(dialog.get_value("sec_qty"));
+		let qty = 0;
+		if (g === "Structurals" && l && uw && sec) {
+			qty = (l / 1000) * uw * sec;
+		} else if (g === "Plates" && l && w && t && uw && sec) {
+			qty = (l / 1000) * (w / 1000) * t * uw * sec;
+		}
+		dialog.set_value("calculated_qty", flt(qty, 3));
+	}
+	dialog.fields_dict.sec_qty.df.onchange = () => _calc_new_qty();
+	dialog.fields_dict.sec_qty.$input && dialog.fields_dict.sec_qty.$input.on("input", _calc_new_qty);
 
 	// "Reserve Without Dimensions" mirrors Material Mapping's own toggle: when checked,
 	// Sec Qty is no longer typed in — it's computed server-side (grouped Sec-Qty rounding
@@ -763,6 +963,7 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 		dialog.set_value("width", 0);
 		dialog.set_value("thickness", 0);
 		dialog.set_value("sec_qty", 0);
+		dialog.set_value("calculated_qty", 0);
 		dialog.set_value("reserve_without_dimensions", 0);
 		dialog.set_value("allocate_based_on_sec_qty", 1);
 		_toggle_allocation_fields(true);

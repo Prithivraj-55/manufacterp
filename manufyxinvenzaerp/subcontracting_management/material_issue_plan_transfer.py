@@ -61,10 +61,16 @@ def get_mip_pending_items(mip_name):
     if not raw_items:
         return []
 
-    # duno/drawing lookup per (item_code, batch_no), from the MIP's own raw_materials
-    # snapshot (duno) and drawing_items (duno -> drawing), for the transfer popup's filters.
+    # duno/drawing/sales_order/customer_drawing_number lookup per (item_code, batch_no),
+    # from the MIP's own raw_materials snapshot, for the transfer popup's filters.
     duno_by_key = {
         (r.item_code, r.batch_no or ""): r.duno_mark_no or "" for r in (mip.raw_materials or [])
+    }
+    so_by_key = {
+        (r.item_code, r.batch_no or ""): r.sales_order or "" for r in (mip.raw_materials or [])
+    }
+    cdn_by_key = {
+        (r.item_code, r.batch_no or ""): r.customer_drawing_number or "" for r in (mip.raw_materials or [])
     }
     drawing_by_duno = {d.duno_mark_no: d.drawing for d in (mip.drawing_items or []) if d.duno_mark_no}
 
@@ -135,15 +141,143 @@ def get_mip_pending_items(mip_name):
             "custom_parent_item_group": item.get("custom_parent_item_group") or "",
             "duno_mark_no": duno,
             "drawing": drawing_by_duno.get(duno, ""),
+            "sales_order": so_by_key.get((item_code, batch_no), ""),
+            "customer_drawing_number": cdn_by_key.get((item_code, batch_no), ""),
         })
 
     return result
 
 
 @frappe.whitelist()
+def has_cnc_stock(mip_name):
+    """Returns True if at least one submitted Stock Entry has transferred material
+    to this MIP's CNC warehouse, so the UI can conditionally show 'CNC to Supplier/WIP'."""
+    mip = frappe.get_cached_doc("Material Issue Plan", mip_name)
+    if not mip.cnc_warehouse:
+        return False
+    result = frappe.db.sql("""
+        SELECT 1
+        FROM `tabStock Entry Detail` sed
+        JOIN `tabStock Entry` se ON se.name = sed.parent
+        WHERE se.custom_mip_ref = %s
+          AND se.stock_entry_type = 'Material Transfer'
+          AND se.docstatus = 1
+          AND sed.t_warehouse = %s
+        LIMIT 1
+    """, (mip_name, mip.cnc_warehouse))
+    return bool(result)
+
+
+def _get_already_transferred_batches(mip):
+    """Return the set of batch_nos already physically moved by submitted SEs for this MIP.
+    After SE submission, is_reserved is cleared on MP rows, so without this exclusion
+    already-transferred batches would appear as false-positive 'unreserved' warnings."""
+    filters = {"docstatus": 1}
+    if mip.subcontracting_order:
+        filters["custom_sco_ref"] = mip.subcontracting_order
+    elif mip.work_order:
+        filters["custom_wo_ref"] = mip.work_order
+    else:
+        return set()
+    se_names = frappe.db.get_all("Stock Entry", filters=filters, pluck="name")
+    if not se_names:
+        return set()
+    batch_nos = frappe.db.get_all(
+        "Stock Entry Detail",
+        filters={"parent": ["in", se_names]},
+        pluck="batch_no",
+    )
+    return {b for b in batch_nos if b}
+
+
+@frappe.whitelist()
+def get_mip_readiness_check(mip_name):
+    """Return a readiness summary for the MIP transfer pre-flight check.
+    Checks all linked MPs for:
+      - unmapped items (in unavailable_items — no batch, no stock)
+      - unreserved items (batch assigned in mapping/ARM but not reserved AND not yet transferred)
+    Returns {"unmapped": [...], "unreserved": [...]} so JS can warn the user
+    before initiating transfer."""
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+    mp_names = sorted({r.material_planning for r in (mip.drawing_items or []) if r.material_planning})
+
+    transferred_batches = _get_already_transferred_batches(mip)
+
+    unmapped = []
+    unreserved = []
+
+    for mp_name in mp_names:
+        mp = frappe.get_doc("Material Planning", mp_name)
+
+        # Items in unavailable_items = no stock found / not yet purchased
+        for r in (mp.unavailable_items or []):
+            if not r.item_code:
+                continue
+            unmapped.append({
+                "material_planning": mp_name,
+                "table": "Unavailable Items",
+                "row": r.idx,
+                "item_code": r.item_code,
+                "item_name": r.item_name or "",
+                "duno_mark_no": r.duno_mark_no or "",
+                "qty": flt(r.qty, 3),
+                "uom": r.uom or "Kg",
+            })
+
+        # Material Mapping rows with batch but not reserved and not already transferred
+        for r in (mp.material_mapping or []):
+            if r.item_code and r.batch and not r.is_reserved:
+                if r.batch not in transferred_batches:
+                    unreserved.append({
+                        "material_planning": mp_name,
+                        "table": "Material Mapping",
+                        "row": r.idx,
+                        "item_code": r.item_code,
+                        "item_name": r.item_name or "",
+                        "batch": r.batch,
+                        "duno_mark_no": r.duno_mark_no or "",
+                        "qty": flt(r.qty, 3),
+                        "uom": r.uom or "Kg",
+                    })
+            elif r.item_code and not r.batch:
+                unmapped.append({
+                    "material_planning": mp_name,
+                    "table": "Material Mapping",
+                    "row": r.idx,
+                    "item_code": r.item_code,
+                    "item_name": r.item_name or "",
+                    "duno_mark_no": r.duno_mark_no or "",
+                    "qty": flt(r.qty, 3),
+                    "uom": r.uom or "Kg",
+                })
+
+        # Exact Match rows with batch but not reserved and not already transferred
+        for r in (mp.available_raw_materials or []):
+            if r.item_code and r.batch_no and not r.is_reserved:
+                if r.batch_no not in transferred_batches:
+                    unreserved.append({
+                        "material_planning": mp_name,
+                        "table": "Exact Match",
+                        "row": r.idx,
+                        "item_code": r.item_code,
+                        "item_name": r.item_name or "",
+                        "batch": r.batch_no,
+                        "duno_mark_no": r.duno_mark_no or "",
+                        "qty": flt(r.required_qty, 3),
+                        "uom": r.uom or "Kg",
+                    })
+
+    return {
+        "unmapped": unmapped,
+        "unreserved": unreserved,
+        "has_issues": bool(unmapped or unreserved),
+    }
+
+
+@frappe.whitelist()
 def create_mip_transfer_entry(mip_name):
-    """Transfer ALL pending reserved material — CNC-flagged items to the CNC
-    warehouse (Material Transfer), everything else to the primary warehouse."""
+    """Transfer ALL pending non-CNC reserved material to the primary (Supplier/WIP)
+    warehouse. CNC items are intentionally excluded — use 'To CNC Warehouse' for those."""
     mip = frappe.get_doc("Material Issue Plan", mip_name)
     ctx = get_target_context(mip)
     pending = get_mip_pending_items(mip_name)
@@ -151,32 +285,18 @@ def create_mip_transfer_entry(mip_name):
         frappe.throw(_("No reserved batches pending transfer. Ensure batches are reserved in the linked Material Planning documents."))
 
     primary_rows = [p for p in pending if not p["cnc_process"]]
-    cnc_rows = [p for p in pending if p["cnc_process"]]
+    if not primary_rows:
+        frappe.throw(_("No pending items for the primary warehouse. CNC items can be transferred using 'To CNC Warehouse'."))
 
-    result = {}
-    if primary_rows:
-        se = frappe.get_doc(_tag_stock_entry({
-            "doctype": "Stock Entry",
-            "stock_entry_type": ctx.primary_se_type,
-            "company": ctx.company,
-            "items": primary_rows,
-        }, mip_name, ctx))
-        se.insert(ignore_permissions=True)
-        result["primary_se"] = se.name
-
-    if cnc_rows:
-        cnc_se = frappe.get_doc(_tag_stock_entry({
-            "doctype": "Stock Entry",
-            "stock_entry_type": "Material Transfer",
-            "company": ctx.company,
-            "items": cnc_rows,
-        }, mip_name, ctx))
-        cnc_se.insert(ignore_permissions=True)
-        result["cnc_se"] = cnc_se.name
-
-    if not result:
-        frappe.throw(_("No items to transfer."))
-    return result
+    se = frappe.get_doc(_tag_stock_entry({
+        "doctype": "Stock Entry",
+        "stock_entry_type": ctx.primary_se_type,
+        "company": ctx.company,
+        "items": primary_rows,
+    }, mip_name, ctx))
+    frappe.db.commit()  # release read-locks before SE insert to avoid gap-lock deadlock
+    se.insert(ignore_permissions=True)
+    return {"primary_se": se.name}
 
 
 @frappe.whitelist()
@@ -230,6 +350,7 @@ def create_mip_partial_transfer(mip_name, selected_items_json, transfer_type):
         "company": ctx.company,
         "items": se_items,
     }, mip_name, ctx))
+    frappe.db.commit()
     se.insert(ignore_permissions=True)
     return se.name
 
@@ -320,6 +441,7 @@ def create_mip_cnc_forward_entry(mip_name):
         "company": ctx.company,
         "items": se_items,
     }, mip_name, ctx))
+    frappe.db.commit()
     se.insert(ignore_permissions=True)
     return se.name
 
@@ -366,6 +488,7 @@ def create_mip_excess_return_entry(mip_name):
         "company": mip.company,
         "items": se_items,
     })
+    frappe.db.commit()
     se.insert(ignore_permissions=True)
 
     for r in mip.excess_return_items:

@@ -44,6 +44,7 @@ def execute():
         if name:
             frappe.delete_doc("Custom Field", name, ignore_permissions=True, force=True)
 
-    frappe.db.delete("SCO Excess Material Item", {"parenttype": "Work Order"})
+    if frappe.db.table_exists("SCO Excess Material Item"):
+        frappe.db.delete("SCO Excess Material Item", {"parenttype": "Work Order"})
 
     frappe.db.commit()
