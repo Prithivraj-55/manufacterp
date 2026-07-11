@@ -1,6 +1,6 @@
 # Manufyxinvenzaerp — Implemented Features
 **App:** manufyxinvenzaerp | **Platform:** Frappe v15 / ERPNext v15 | **Site:** manufact
-**Date:** 2026-06-16
+**Date:** 2026-07-11
 
 ---
 
@@ -230,9 +230,10 @@ The largest and most complex module. Drives all raw material identification, sto
 - Auto-populated from Work Order required items (with WIP stock qty, dimensions, previous operation consumption).
 - **Server-side Consumption Validation**:
   - Structurals/Plates: consumed qty cannot exceed transferred qty to WIP.
-  - For operations beyond the first: `Current Nos` cannot exceed `Previous Operation Nos`.
+  - `Current Nos` cannot exceed `Previous Operation Nos` (whenever a previous-operation Nos value exists — see below).
   - Nuts & Bolts: `manual_qty` cannot exceed WIP stock.
-- **Previous Operation Data**: fetched from the preceding Job Card; falls back to the last submitted Supplier Operation Entry (for Scenario 3 hybrid subcontractor → internal handoff).
+- **Previous Operation Data**: fetched from the preceding Job Card; falls back to the last submitted Supplier Operation Entry (Scenario 3 hybrid subcontractor → internal handoff). A Work Order's Job Cards are always locally renumbered starting at `sequence_id = 1`, so a hybrid plan's *first* Work Order Job Card also has `sequence_id = 1` — the fallback now runs for that case too (previously it only ran for `sequence_id > 1`, silently returning 0 available-to-consume for the WO's first operation after a subcontracted block). The matching "Nos can't exceed previous operation" guard, server-side and in the Job Card client script, was ungated the same way so it actually enforces once the sequence_id 1 case carries a real previous-op value.
+- **Consumption Log** (`custom_consumption_log`, drawing-level Nos/Kg log with Employee, From Time, To Time) is backed by its own **Job Card Consumption Log** child doctype — kept separate from Supplier Operation Entry's own Consumption Log (see 14.5) so each side can carry different fields.
 
 ---
 
@@ -279,6 +280,7 @@ All actions are triggered from the Production Plan / SCO via buttons:
 - On validate: consumed qty vs transferred; cross-operation Nos check (cannot exceed previous operation's Nos); Nuts & Bolts manual qty check.
 - On submit: reduces `custom_sec_qty` on batch master for consumed items; marks `custom_all_ops_complete` on the SCO when the last operation is submitted.
 - **SCO Dashboard**: Supplier Operation Entries appear in the Subcontracting Order connections dashboard.
+- **Consumption Log** (`consumption_log`, drawing-level Nos/Kg log): Date, Drawing, Qty (Nos), Weight (Kg), Remark — kept lean, with no Employee/From Time/To Time fields (those stayed on Job Card's own Consumption Log, see 12).
 
 ---
 
@@ -318,6 +320,7 @@ Custom fields are exported as fixtures and applied across the following standard
 | Material Planning Raw Material | production_management | Child table — exploded raw material list |
 | Material Planning Unavailable Item | production_management | Child table — items to purchase |
 | Job Card Raw Material | production_management | Child table — per-operation consumption |
+| Job Card Consumption Log | subcontracting_management | Child table on Job Card — drawing-level Nos/Kg consumption log, with Employee/From Time/To Time |
 | Process Planning | production_management | Child table on Production Plan — operation routing |
 | Production Plan Available Raw Material | production_management | Child table |
 | Storage Location / Store Location | production_management | Master doctypes for inventory dimension |

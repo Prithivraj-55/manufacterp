@@ -264,7 +264,7 @@ Whitelisted functions that drive the UI buttons on Production Plan, SCO, and Wor
 | `get_jc_summary` | Job Card completion summary for a Work Order |
 | `backfill_drawing_item_qty` | Back-fills historical drawing qty data |
 
-**Custom child tables:** `SCO Drawing Item`, `SCO Excess Material Item`, `SOE Consumption Log`, `SOE Drawing Detail`, `Supplier Operation Item`
+**Custom child tables:** `SCO Drawing Item`, `SCO Excess Material Item`, `SOE Consumption Log`, `SOE Drawing Detail`, `Supplier Operation Item`, `Job Card Consumption Log` (Job Card's own drawing-level consumption log — split from `SOE Consumption Log` so Job Card keeps Employee/From Time/To Time while the Supplier Operation Entry version stays lean)
 
 ---
 
@@ -295,6 +295,7 @@ Whitelisted functions that drive the UI buttons on Production Plan, SCO, and Wor
 | SCO Excess Material Item | subcontracting_management | Child table |
 | SOE Consumption Log | subcontracting_management | Child table |
 | SOE Drawing Detail | subcontracting_management | Child table |
+| Job Card Consumption Log | subcontracting_management | Child table |
 | Manufyxinvenza Settings | manufyxinvenzaerp | Settings singleton |
 
 ---

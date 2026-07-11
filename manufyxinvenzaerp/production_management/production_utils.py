@@ -181,40 +181,46 @@ def _get_transferred_qty_for_item(item_code, wip_warehouse):
 
 def _get_previous_operation_consumed(work_order, item_code, current_sequence_id):
 	"""Find the immediately preceding Job Card's consumption for item_code.
-	Falls back to the last submitted Supplier Operation Entry when the preceding
-	Job Card has no consumption data (Scenario 3: subcontractor → internal handoff)."""
-	if not current_sequence_id or current_sequence_id <= 1:
+	Falls back to the last submitted Supplier Operation Entry when there is no
+	preceding Job Card to read from — either because the immediately preceding
+	Job Card has no consumption data yet, or because this is sequence_id 1 (a
+	Work Order's Job Cards are always locally renumbered starting at 1, so the
+	Work Order's very first Job Card in a Scenario 3 hybrid plan is where the
+	subcontractor → internal handoff must be picked up)."""
+	if not current_sequence_id or current_sequence_id < 1:
 		return {}
 
-	prev_jc = frappe.db.sql(
-		"""
-		SELECT name
-		FROM `tabJob Card`
-		WHERE work_order = %s
-		  AND sequence_id < %s
-		  AND docstatus != 2
-		ORDER BY sequence_id DESC
-		LIMIT 1
-		""",
-		(work_order, current_sequence_id),
-		as_dict=True,
-	)
-	if prev_jc:
-		row = frappe.db.get_value(
-			"Job Card Raw Material",
-			{"parent": prev_jc[0]["name"], "item_code": item_code},
-			["current_stock_qty", "stock_uom", "current_sec_qty", "sec_uom"],
+	if current_sequence_id > 1:
+		prev_jc = frappe.db.sql(
+			"""
+			SELECT name
+			FROM `tabJob Card`
+			WHERE work_order = %s
+			  AND sequence_id < %s
+			  AND docstatus != 2
+			ORDER BY sequence_id DESC
+			LIMIT 1
+			""",
+			(work_order, current_sequence_id),
 			as_dict=True,
 		)
-		if row and (flt(row.current_stock_qty) > 0 or flt(row.current_sec_qty) > 0):
-			return {
-				"consumed_stock_qty": flt(row.current_stock_qty),
-				"stock_uom": row.stock_uom or "",
-				"sec_qty": flt(row.current_sec_qty),
-				"sec_uom": row.sec_uom or "",
-			}
+		if prev_jc:
+			row = frappe.db.get_value(
+				"Job Card Raw Material",
+				{"parent": prev_jc[0]["name"], "item_code": item_code},
+				["current_stock_qty", "stock_uom", "current_sec_qty", "sec_uom"],
+				as_dict=True,
+			)
+			if row and (flt(row.current_stock_qty) > 0 or flt(row.current_sec_qty) > 0):
+				return {
+					"consumed_stock_qty": flt(row.current_stock_qty),
+					"stock_uom": row.stock_uom or "",
+					"sec_qty": flt(row.current_sec_qty),
+					"sec_uom": row.sec_uom or "",
+				}
 
-	# Scenario 3 fallback: preceding op was subcontracted — look at the last submitted SOE
+	# Scenario 3 fallback: preceding op was subcontracted (or this is Job Card 1
+	# of the Work Order) — look at the last submitted SOE on the sibling SCO.
 	return _get_prev_soe_consumed_for_jc(work_order, item_code)
 
 

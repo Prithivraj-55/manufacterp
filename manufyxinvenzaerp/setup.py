@@ -2649,7 +2649,6 @@ function jc_warn_qty_exceeded(frm, cdt, cdn, current_qty) {
 \tvar prev_consumed = flt(row.prev_operation_consumed_stock_qty);
 \tvar prev_sec = flt(row.prev_operation_sec_qty);
 \tvar curr_sec = flt(row.current_sec_qty);
-\tvar seq = frm.doc.sequence_id || 1;
 
 \t// Warning: current qty exceeds transferred WIP stock
 \tif (transferred > 0 && flt(current_qty) > transferred) {
@@ -2662,8 +2661,11 @@ function jc_warn_qty_exceeded(frm, cdt, cdn, current_qty) {
 \t\t}, 8);
 \t}
 
-\t// Warning: Nos entered exceed previous operation's completed Nos (ops 2–12)
-\tif (seq > 1 && prev_sec > 0 && curr_sec > prev_sec) {
+\t// Warning: Nos entered exceed previous operation's completed Nos. prev_sec is 0
+\t// when there is genuinely no predecessor, so no explicit sequence_id gate is
+\t// needed — this also covers a hybrid plan's Job Card 1, fed by the last
+\t// submitted Supplier Operation Entry.
+\tif (prev_sec > 0 && curr_sec > prev_sec) {
 \t\tfrappe.show_alert({
 \t\t\tmessage: __("Item \\"{0}\\": previous operation completed {1} Nos — you entered {2} Nos which exceeds it.", [
 \t\t\t\trow.item_code, prev_sec, curr_sec
@@ -3753,7 +3755,7 @@ def create_job_card_drawing_fields():
                     "fieldname": "custom_consumption_log",
                     "fieldtype": "Table",
                     "label": "Consumption Log",
-                    "options": "SOE Consumption Log",
+                    "options": "Job Card Consumption Log",
                     "insert_after": "custom_consumption_log_section",
                 },
                 {
@@ -4017,7 +4019,7 @@ function show_jc_drawing_popup(jc) {
 # ─── Job Card drawing consumption script (mirrors SOE_CLIENT_SCRIPT) ─────
 
 JC_DRAWING_CLIENT_SCRIPT = """
-frappe.ui.form.on("SOE Consumption Log", {
+frappe.ui.form.on("Job Card Consumption Log", {
 \tdrawing: function(frm) { _jc_sync_drawing_nos(frm); },
 \tqty_nos: function(frm) { _jc_sync_drawing_nos(frm); },
 \tcustom_consumption_log_remove: function(frm) { _jc_sync_drawing_nos(frm); },
