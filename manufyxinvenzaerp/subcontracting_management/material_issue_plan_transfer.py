@@ -251,9 +251,11 @@ def get_mip_readiness_check(mip_name):
                     "uom": r.uom or "Kg",
                 })
 
-        # Exact Match rows with batch but not reserved and not already transferred
+        # Exact Match rows — batch assigned but not reserved / no batch assigned yet
         for r in (mp.available_raw_materials or []):
-            if r.item_code and r.batch_no and not r.is_reserved:
+            if not r.item_code:
+                continue
+            if r.batch_no and not r.is_reserved:
                 if r.batch_no not in transferred_batches:
                     unreserved.append({
                         "material_planning": mp_name,
@@ -266,6 +268,17 @@ def get_mip_readiness_check(mip_name):
                         "qty": flt(r.required_qty, 3),
                         "uom": r.uom or "Kg",
                     })
+            elif not r.batch_no:
+                unmapped.append({
+                    "material_planning": mp_name,
+                    "table": "Exact Match",
+                    "row": r.idx,
+                    "item_code": r.item_code,
+                    "item_name": r.item_name or "",
+                    "duno_mark_no": r.duno_mark_no or "",
+                    "qty": flt(r.required_qty, 3),
+                    "uom": r.uom or "Kg",
+                })
 
     return {
         "unmapped": unmapped,

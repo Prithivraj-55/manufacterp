@@ -1,11 +1,15 @@
 {
  "actions": [],
- "creation": "2026-06-19 00:00:00.000000",
+ "creation": "2026-07-11 00:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
   "date",
+  "employee",
+  "employee_name",
+  "from_time",
+  "to_time",
   "drawing",
   "qty_nos",
   "weight_kg",
@@ -18,6 +22,33 @@
    "in_list_view": 1,
    "label": "Date",
    "reqd": 1
+  },
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Employee",
+   "options": "Employee"
+  },
+  {
+   "fetch_from": "employee.employee_name",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "from_time",
+   "fieldtype": "Time",
+   "in_list_view": 1,
+   "label": "From Time"
+  },
+  {
+   "fieldname": "to_time",
+   "fieldtype": "Time",
+   "in_list_view": 1,
+   "label": "To Time"
   },
   {
    "fieldname": "drawing",
@@ -52,7 +83,7 @@
  "modified": "2026-07-11 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Subcontracting Management",
- "name": "SOE Consumption Log",
+ "name": "Job Card Consumption Log",
  "owner": "Administrator",
  "permissions": [],
  "sort_field": "modified",

@@ -1,0 +1,240 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-07-11 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "source_doctype",
+  "job_card",
+  "supplier_operation_entry",
+  "operation",
+  "round_no",
+  "call_date",
+  "column_break_reference",
+  "work_order",
+  "subcontracting_order",
+  "production_plan",
+  "sales_order",
+  "customer",
+  "supplier",
+  "section_break_result",
+  "status",
+  "total_checked_qty",
+  "cleared_qty",
+  "rework_qty",
+  "column_break_result",
+  "rework_remarks",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "INSP-.####"
+  },
+  {
+   "fieldname": "source_doctype",
+   "fieldtype": "Select",
+   "label": "Source Doctype",
+   "options": "Job Card\nSupplier Operation Entry",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "job_card",
+   "fieldtype": "Link",
+   "label": "Job Card",
+   "options": "Job Card",
+   "read_only": 1,
+   "mandatory_depends_on": "eval:doc.source_doctype==\"Job Card\""
+  },
+  {
+   "fieldname": "supplier_operation_entry",
+   "fieldtype": "Link",
+   "label": "Supplier Operation Entry",
+   "options": "Supplier Operation Entry",
+   "read_only": 1,
+   "mandatory_depends_on": "eval:doc.source_doctype==\"Supplier Operation Entry\""
+  },
+  {
+   "fieldname": "operation",
+   "fieldtype": "Link",
+   "label": "Operation",
+   "options": "Operation",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "round_no",
+   "fieldtype": "Int",
+   "label": "Round No",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "call_date",
+   "fieldtype": "Date",
+   "label": "Inspection Call Date",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_reference",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "work_order",
+   "fieldtype": "Link",
+   "label": "Work Order",
+   "options": "Work Order",
+   "read_only": 1
+  },
+  {
+   "fieldname": "subcontracting_order",
+   "fieldtype": "Link",
+   "label": "Subcontracting Order",
+   "options": "Subcontracting Order",
+   "read_only": 1
+  },
+  {
+   "fieldname": "production_plan",
+   "fieldtype": "Link",
+   "label": "Production Plan",
+   "options": "Production Plan",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sales_order",
+   "fieldtype": "Link",
+   "label": "Sales Order",
+   "options": "Sales Order",
+   "read_only": 1
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "label": "Customer",
+   "options": "Customer",
+   "read_only": 1
+  },
+  {
+   "fieldname": "supplier",
+   "fieldtype": "Link",
+   "label": "Supplier",
+   "options": "Supplier",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_result",
+   "fieldtype": "Section Break",
+   "label": "Inspection Result"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "\nOk\nNot Ok",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "total_checked_qty",
+   "fieldtype": "Float",
+   "label": "Total Checked Qty",
+   "reqd": 1
+  },
+  {
+   "fieldname": "cleared_qty",
+   "fieldtype": "Float",
+   "label": "Cleared Qty",
+   "reqd": 1
+  },
+  {
+   "fieldname": "rework_qty",
+   "fieldtype": "Float",
+   "label": "Rework Qty",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_result",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "rework_remarks",
+   "fieldtype": "Small Text",
+   "label": "Rework Remarks",
+   "mandatory_depends_on": "eval:doc.rework_qty>0"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "options": "Inspection Entry",
+   "no_copy": 1,
+   "print_hide": 1,
+   "read_only": 1
+  }
+ ],
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-07-11 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Production Management",
+ "name": "Inspection Entry",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "cancel": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Manufacturing Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Manufacturing User",
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Quality Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

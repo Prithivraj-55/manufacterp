@@ -12,7 +12,6 @@ def validate_job_card(doc, method):
 		return
 
 	wip_warehouse = doc.wip_warehouse
-	sequence_id = doc.sequence_id or 1
 
 	for row in doc.custom_raw_material_consumption:
 		group = (row.parent_item_group or "").strip()
@@ -30,18 +29,22 @@ def validate_job_card(doc, method):
 					)
 				)
 
-			# Block save if this operation's Nos exceed the previous operation's Nos
-			if sequence_id > 1:
-				prev_sec = flt(row.prev_operation_sec_qty)
-				curr_sec = flt(row.current_sec_qty)
-				if prev_sec > 0 and curr_sec > prev_sec:
-					frappe.throw(
-						_("Row {0}: Item <b>{1}</b> — {2} Nos entered, but only {3} Nos were "
-						  "completed in the previous operation. Cannot exceed previous operation "
-						  "quantity.").format(
-							row.idx, row.item_code, curr_sec, prev_sec
-						)
+			# Block save if this operation's Nos exceed the previous operation's Nos.
+			# prev_operation_sec_qty is 0 when there's genuinely no predecessor (e.g.
+			# sequence_id 1 outside a Scenario 3 hybrid plan), so no explicit
+			# sequence_id > 1 gate is needed here — it would otherwise also skip the
+			# check for a hybrid plan's Job Card 1, which carries a real prev qty
+			# handed off from the last submitted Supplier Operation Entry.
+			prev_sec = flt(row.prev_operation_sec_qty)
+			curr_sec = flt(row.current_sec_qty)
+			if prev_sec > 0 and curr_sec > prev_sec:
+				frappe.throw(
+					_("Row {0}: Item <b>{1}</b> — {2} Nos entered, but only {3} Nos were "
+					  "completed in the previous operation. Cannot exceed previous operation "
+					  "quantity.").format(
+						row.idx, row.item_code, curr_sec, prev_sec
 					)
+				)
 		else:
 			# Nuts and Bolts — validate manual_qty against actual WIP stock
 			if wip_warehouse:

@@ -131,8 +131,14 @@ def refresh_mip_raw_materials(mip_name):
     """Rebuild the raw-material snapshot fresh from every Material Planning linked to
     this plan's drawings. Material Planning's own child tables remain the source of
     truth for reservation state — this only refreshes MIP's read-only display copy."""
+    from manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer import (
+        _get_already_transferred_batches,
+    )
+
     mip = frappe.get_doc("Material Issue Plan", mip_name)
     mp_names = sorted({r.material_planning for r in (mip.drawing_items or []) if r.material_planning})
+
+    transferred_batches = _get_already_transferred_batches(mip)
 
     mip.set("raw_materials", [])
 
@@ -162,6 +168,7 @@ def refresh_mip_raw_materials(mip_name):
                 "sec_qty": sec_qty,
                 "sec_uom": row.sec_uom,
                 "qty": qty,
+                "transferred_qty": qty if row.batch and row.batch in transferred_batches else 0,
                 "is_reserved": row.is_reserved,
                 "is_unavailable": 0,
                 "cnc_process": row.cnc_process,
@@ -186,6 +193,7 @@ def refresh_mip_raw_materials(mip_name):
                 "sec_qty": row.sec_qty,
                 "sec_uom": row.sec_uom,
                 "qty": row.required_qty,
+                "transferred_qty": row.required_qty if row.batch_no and row.batch_no in transferred_batches else 0,
                 "is_reserved": row.is_reserved,
                 "is_unavailable": 0,
                 "cnc_process": row.cnc_process,
@@ -208,6 +216,7 @@ def refresh_mip_raw_materials(mip_name):
                 "unit_weight": row.unit_weight,
                 "sec_qty": row.sec_qty,
                 "qty": row.qty,
+                "transferred_qty": 0,
                 "is_reserved": 0,
                 "is_unavailable": 1,
             })
@@ -219,27 +228,40 @@ def refresh_mip_raw_materials(mip_name):
 
 @frappe.whitelist()
 def refresh_weight_summary(mip_name):
-    """Recompute the four header weight-summary fields (and their per-drawing
-    breakdown) live from the linked Material Planning(s) — reused, unmodified
-    from the functions subcontracting.py already uses for SCO/WO rollups."""
+    """Recompute the four header weight-summary fields (and their per-drawing breakdown).
+
+    Transferred weight is read directly from the linked SCO/WO's
+    custom_transferred_weight_kg — already correctly computed by
+    _update_sco/wo_transferred_weight — and distributed proportionally across
+    drawings by planned weight share. This is independent of MP reservation
+    status, so it stays accurate after SE submission clears is_reserved.
+    """
     from manufyxinvenzaerp.subcontracting_management.subcontracting import (
         _get_mp_drawing_weight,
         _get_mp_mapped_weight_by_duno,
         _get_mp_excess_by_duno,
-        _get_mp_actual_transferred_weight,
     )
 
     mip = frappe.get_doc("Material Issue Plan", mip_name)
-    source_warehouse, target_warehouses = _resolve_warehouses(mip)
 
     if mip.subcontracting_order:
         mip.supplier_warehouse = frappe.db.get_value(
             "Subcontracting Order", mip.subcontracting_order, "supplier_warehouse"
         ) or ""
 
+    # Actual transferred weight — read from the linked SCO or WO
+    actual_transferred = 0.0
+    if mip.subcontracting_order:
+        actual_transferred = flt(frappe.db.get_value(
+            "Subcontracting Order", mip.subcontracting_order, "custom_transferred_weight_kg"
+        ))
+    elif mip.work_order:
+        actual_transferred = flt(frappe.db.get_value(
+            "Work Order", mip.work_order, "custom_transferred_weight_kg"
+        ))
+
     mapped_by_mp = {}
     excess_by_mp = {}
-    transferred_by_mp = {}
 
     total_planned = 0.0
     allocated = 0.0
@@ -252,10 +274,6 @@ def refresh_weight_summary(mip_name):
         if mp_name not in mapped_by_mp:
             mapped_by_mp[mp_name] = _get_mp_mapped_weight_by_duno(mp_name)
             excess_by_mp[mp_name] = _get_mp_excess_by_duno(mp_name)
-            transferred_by_mp[mp_name] = (
-                flt(_get_mp_actual_transferred_weight(mp_name, source_warehouse, target_warehouses))
-                if source_warehouse and target_warehouses else 0.0
-            )
 
         d.total_weight_kg = flt(_get_mp_drawing_weight(mp_name, d.duno_mark_no), 3)
         d.mapped_weight_kg = flt(mapped_by_mp[mp_name].get(d.duno_mark_no), 3)
@@ -265,19 +283,14 @@ def refresh_weight_summary(mip_name):
         allocated += d.mapped_weight_kg
         excess += d.excess_weight_kg
 
-    # Apportion each MP's actual-transferred total across its drawings by mapped-weight
-    # share — same proportional-attribution technique already used elsewhere in this
-    # app (e.g. _refresh_sco_drawing_transferred_weights) rather than inventing a new one.
-    mp_mapped_totals = {mp: sum(v for v in d.values()) for mp, d in mapped_by_mp.items()}
+    # Distribute transferred weight across drawings by planned-weight share
     transferred = 0.0
     for d in mip.drawing_items or []:
-        mp_name = d.material_planning
-        if not mp_name:
+        if not d.material_planning:
             continue
-        mp_total_mapped = mp_mapped_totals.get(mp_name) or 0
-        mp_transferred = transferred_by_mp.get(mp_name) or 0
         d.transferred_weight_kg = (
-            flt(mp_transferred * (d.mapped_weight_kg / mp_total_mapped), 3) if mp_total_mapped else 0.0
+            flt(actual_transferred * (d.total_weight_kg / total_planned), 3)
+            if total_planned else 0.0
         )
         transferred += d.transferred_weight_kg
 
