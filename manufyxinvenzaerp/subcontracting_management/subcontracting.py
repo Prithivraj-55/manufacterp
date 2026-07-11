@@ -1509,32 +1509,44 @@ def _get_mp_drawing_weight(mp_name, duno_mark_no):
 def _get_mp_mapped_weight_by_duno(mp_name):
     """Return {duno_mark_no: mapped_weight_kg} for a Material Planning document.
 
-    Mapped weight = the actual reserved batch weight that gets transferred to the
-    supplier — cross-mapped rows (Material Mapping batch_calc_qty) plus exact-match
-    rows (Available Raw Material reserved_qty). Exact-match rows carry no
-    DUNO/Mark No, so their weight is attributed across drawings in proportion to
-    each drawing's planned qty for that item (from the Raw Materials sub-table),
-    which keeps the per-drawing rows reconciling with the Material Planning total.
+    Mapped weight = the batch weight allocated to each drawing — cross-mapped rows
+    (Material Mapping batch_calc_qty) plus exact-match rows (Available Raw Material
+    reserved_qty or required_qty). Exact-match rows carry no DUNO/Mark No, so their
+    weight is attributed across drawings in proportion to each drawing's planned qty
+    for that item (from the Raw Materials sub-table).
+
+    Includes all batch-assigned rows regardless of is_reserved, so the figure stays
+    accurate after SE submission clears the reservation flag.
     """
     mapped = defaultdict(float)
     if not mp_name:
         return mapped
 
-    # Cross-mapped, reserved — already carries the DUNO/Mark No
-    for r in frappe.get_all(
-        "Material Planning Material Mapping",
-        filters={"parent": mp_name, "is_reserved": 1},
-        fields=["duno_mark_no", "batch_calc_qty"],
+    # Cross-mapped — already carries the DUNO/Mark No; include whether reserved or not
+    for r in frappe.db.sql(
+        """
+        SELECT duno_mark_no, batch_calc_qty
+        FROM `tabMaterial Planning Material Mapping`
+        WHERE parent = %s AND batch IS NOT NULL AND batch != '' AND batch_calc_qty > 0
+        """,
+        mp_name,
+        as_dict=True,
     ):
-        if flt(r.batch_calc_qty) > 0:
-            mapped[r.duno_mark_no or ""] += flt(r.batch_calc_qty)
+        mapped[r.duno_mark_no or ""] += flt(r.batch_calc_qty)
 
-    # Exact-match, reserved — no DUNO; split per item by each drawing's planned share
-    exact_rows = frappe.get_all(
-        "Material Planning Available Raw Material",
-        filters={"parent": mp_name, "is_reserved": 1},
-        fields=["item_code", "reserved_qty", "available_qty"],
+    # Exact-match — no DUNO; split per item by each drawing's planned share
+    exact_rows = frappe.db.sql(
+        """
+        SELECT item_code,
+               COALESCE(NULLIF(reserved_qty, 0), required_qty) AS qty
+        FROM `tabMaterial Planning Available Raw Material`
+        WHERE parent = %s AND batch_no IS NOT NULL AND batch_no != ''
+          AND COALESCE(NULLIF(reserved_qty, 0), required_qty) > 0
+        """,
+        mp_name,
+        as_dict=True,
     )
+    exact_rows = [frappe._dict(r) for r in exact_rows]
     if exact_rows:
         item_duno_qty = defaultdict(lambda: defaultdict(float))  # item -> duno -> planned qty
         item_total = defaultdict(float)                          # item -> total planned qty
@@ -1547,7 +1559,7 @@ def _get_mp_mapped_weight_by_duno(mp_name):
             item_total[p.item_code] += flt(p.qty)
 
         for er in exact_rows:
-            qty = flt(er.reserved_qty) or flt(er.available_qty)
+            qty = flt(er.qty)
             if qty <= 0:
                 continue
             shares = item_duno_qty.get(er.item_code)
