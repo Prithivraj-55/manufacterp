@@ -6,6 +6,13 @@ frappe.ui.form.on("Material Issue Plan", {
 		frm.set_query("work_order", () => ({
 			filters: { production_plan: frm.doc.production_plan || "" },
 		}));
+		// Scope every warehouse field to the document's own Company — previously
+		// unfiltered, showing every warehouse across every company.
+		["source_warehouse", "supplier_warehouse", "cnc_warehouse", "excess_return_warehouse"].forEach((fieldname) => {
+			frm.set_query(fieldname, () => ({
+				filters: { company: frm.doc.company || "" },
+			}));
+		});
 		_add_view_all_raw_materials_button(frm);
 		_add_update_batch_button(frm);
 		_add_transfer_buttons(frm);
