@@ -39,11 +39,12 @@ frappe.ui.form.on("Purchase Receipt", {
 				});
 
 				let sections = Object.entries(by_mp).map(function([mp, rows]) {
-					let mp_link = `<a href="/app/material-planning/${encodeURIComponent(mp)}" target="_blank"><b>${mp}</b></a>`;
+					let mp_safe = frappe.utils.escape_html(mp);
+					let mp_link = `<a href="/app/material-planning/${encodeURIComponent(mp)}" target="_blank"><b>${mp_safe}</b></a>`;
 					let row_html = rows.map(function(r) {
 						return `<tr>
-							<td style="padding:3px 6px">${r.batch_no}</td>
-							<td style="padding:3px 6px">${r.item_code}</td>
+							<td style="padding:3px 6px">${frappe.utils.escape_html(String(r.batch_no == null ? "" : r.batch_no))}</td>
+							<td style="padding:3px 6px">${frappe.utils.escape_html(String(r.item_code == null ? "" : r.item_code))}</td>
 							<td style="padding:3px 6px;text-align:right">${flt(r.reserved_qty, 3)} Kg</td>
 						</tr>`;
 					}).join("");

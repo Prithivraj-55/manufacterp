@@ -1,4 +1,5 @@
 import json
+from collections import defaultdict
 
 import frappe
 from frappe import _
@@ -537,6 +538,11 @@ def get_raw_materials(doc):
 
     rows = []
 
+    # Collect all exploded items across every BOM first, so the per-item
+    # custom_secondary_uom lookup below can be a single batched query instead
+    # of one frappe.db.get_value call per row (Report 4 Finding D-03).
+    exploded_by_bom = []
+    all_item_codes = set()
     for bom_row in doc.get("bom_items") or []:
         bom_no = bom_row.get("bom_no")
         planned_qty = flt(bom_row.get("qty_to_manufacture")) or 1
@@ -549,7 +555,19 @@ def get_raw_materials(doc):
             continue
 
         item_details = get_exploded_items({}, company, bom_no, False, planned_qty=planned_qty)
+        exploded_by_bom.append((bom_no, duno_mark_no, customer_drawing_number, sales_order, drawing, item_details))
+        for detail in item_details.values():
+            if detail.get("item_code"):
+                all_item_codes.add(detail.get("item_code"))
 
+    sec_uom_by_item = {}
+    if all_item_codes:
+        for rec in frappe.get_all(
+            "Item", filters={"name": ["in", list(all_item_codes)]}, fields=["name", "custom_secondary_uom"]
+        ):
+            sec_uom_by_item[rec.name] = rec.custom_secondary_uom or ""
+
+    for bom_no, duno_mark_no, customer_drawing_number, sales_order, drawing, item_details in exploded_by_bom:
         for _dim_key, detail in item_details.items():
             group = detail.get("custom_parent_item_group") or ""
             length = flt(detail.get("custom_length"))
@@ -570,9 +588,7 @@ def get_raw_materials(doc):
             elif group == "Nuts and Bolts" and unit_weight:
                 sec_qty = flt(qty * unit_weight, 3)
 
-            sec_uom = (
-                frappe.db.get_value("Item", detail.get("item_code"), "custom_secondary_uom") or ""
-            )
+            sec_uom = sec_uom_by_item.get(detail.get("item_code"), "")
 
             rows.append({
                 "item_number": detail.get("custom_item_number") or "",
@@ -616,7 +632,10 @@ def check_stock_availability(doc):
         - unavailable_items       : plain stock qty < required (needs purchase)
     Also updates raw_materials rows with available_qty and shortage_qty.
     """
-    from manufyxinvenzaerp.production_plan_management.production_plan import get_sbb_available_qty
+    from manufyxinvenzaerp.production_plan_management.production_plan import (
+        get_sbb_batches_bulk,
+        match_batches_by_dimension,
+    )
 
     if isinstance(doc, str):
         doc = frappe._dict(json.loads(doc))
@@ -653,6 +672,27 @@ def check_stock_availability(doc):
     if all_item_codes:
         for rec in frappe.get_all("Item", filters={"name": ["in", all_item_codes]}, fields=["name", "has_batch_no"]):
             item_batch_flag[rec.name] = rec.has_batch_no
+
+    # Batch every stock/reservation lookup the per-row loop below used to make
+    # individually (Report 4 Finding D-02): the SBB batch fetch, the
+    # cross-MP-reservation lookup for every batch that fetch could surface,
+    # and both non-batch stock/reservation lookups -- each collapsed from one
+    # query per row/batch to one query (or a handful) for the whole document.
+    # The loop's own row-by-row consumption logic below is unchanged; only the
+    # data it reads is now looked up from these pre-fetched dicts instead of
+    # triggering a fresh query.
+    batch_item_codes = [ic for ic in all_item_codes if item_batch_flag.get(ic)]
+    non_batch_item_codes = [ic for ic in all_item_codes if not item_batch_flag.get(ic)]
+
+    sbb_batches_by_item = get_sbb_batches_bulk(batch_item_codes, warehouse, location=location)
+    all_possible_batch_nos = {
+        b["batch_no"] for batches in sbb_batches_by_item.values() for b in batches
+    }
+    reserved_by_others_map = _get_batch_reserved_by_others_bulk(
+        all_possible_batch_nos, mp_name, exclude_table="available_raw_materials"
+    )
+    non_batch_stock_map = _get_non_batch_stock_bulk(non_batch_item_codes, warehouse)
+    non_batch_reserved_map = _get_non_batch_reserved_by_others_bulk(non_batch_item_codes, warehouse, mp_name)
 
     for row in doc.get("raw_materials") or []:
         item_code = row.get("item_code")
@@ -708,7 +748,9 @@ def check_stock_availability(doc):
                 "custom_width": flt(row.get("width")),
             }
 
-            _, raw_matched_batches = get_sbb_available_qty(item_code, warehouse, dimensions, location=location)
+            _, raw_matched_batches = match_batches_by_dimension(
+                sbb_batches_by_item.get(item_code, []), dimensions
+            )
 
             # Capture each batch's TOTAL stock Kg and TOTAL Nos before any allocation —
             # needed to split Sec Qty (Nos) proportionally to the Kg each row reserves.
@@ -716,7 +758,7 @@ def check_stock_availability(doc):
                 batch_total_kg.setdefault(b["batch_no"], flt(b["qty"]))
                 batch_total_sec.setdefault(b["batch_no"], flt(b.get("custom_sec_qty")))
                 if b["batch_no"] not in batch_remaining:
-                    reserved_by_others = _get_batch_reserved_by_others(b["batch_no"], mp_name, exclude_table="available_raw_materials")
+                    reserved_by_others = reserved_by_others_map.get(b["batch_no"], 0)
                     net_qty = max(0.0, flt(b["qty"]) - reserved_by_others)
                     batch_remaining[b["batch_no"]] = net_qty
 
@@ -833,8 +875,8 @@ def check_stock_availability(doc):
 
         else:
             # ── Non-batch item: net of cross-MP reservations ─────────────────
-            total_stock = _get_non_batch_stock(item_code, warehouse)
-            reserved_by_others = _get_non_batch_reserved_by_others(item_code, warehouse, mp_name)
+            total_stock = non_batch_stock_map.get(item_code, 0)
+            reserved_by_others = non_batch_reserved_map.get(item_code, 0)
             available_qty = max(0.0, total_stock - reserved_by_others)
             shortage = max(0.0, required_qty - available_qty)
 
@@ -905,6 +947,30 @@ def _get_non_batch_stock(item_code, warehouse):
         as_dict=True,
     )
     return flt(result[0].qty if result else 0)
+
+
+def _get_non_batch_stock_bulk(item_codes, warehouse):
+    """Batched variant of _get_non_batch_stock -- one query for a set of
+    items instead of one query per item (Report 4 Finding D-02). Returns
+    {item_code: qty}; an item with no result is simply absent (callers
+    should use .get(item_code, 0), same net effect as the single-item
+    function returning 0)."""
+    item_codes = list({c for c in item_codes if c})
+    if not item_codes:
+        return {}
+    ph = ", ".join(["%s"] * len(item_codes))
+    rows = frappe.db.sql(
+        f"""
+        SELECT item_code, COALESCE(SUM(actual_qty), 0) AS qty
+        FROM `tabStock Ledger Entry`
+        WHERE item_code IN ({ph}) AND warehouse = %s
+          AND is_cancelled = 0 AND docstatus < 2
+        GROUP BY item_code
+        """,
+        [*item_codes, warehouse],
+        as_dict=True,
+    )
+    return {r.item_code: flt(r.qty) for r in rows}
 
 
 @frappe.whitelist()
@@ -1095,6 +1161,9 @@ def finalize_mapping(doc):
     Returns updated material_mapping and unavailable_items lists, plus a
     split_details list describing what happened to any split/dropped row.
     """
+    if not frappe.has_permission("Material Planning", "write"):
+        frappe.throw(_("Not permitted to finalize Material Planning mapping"), frappe.PermissionError)
+
     if isinstance(doc, str):
         doc = frappe._dict(json.loads(doc))
 
@@ -1285,6 +1354,8 @@ def verify_raw_materials(doc):
 @frappe.whitelist()
 def get_batch_reservation_summary(batch_no):
     """Return all active reservations for a batch, enriched with SO customer and project."""
+    if not frappe.has_permission("Material Planning", "read"):
+        frappe.throw(_("Not permitted to view Material Planning reservations"), frappe.PermissionError)
     rows = frappe.db.sql(
         """
         SELECT mm.parent AS mp_name, mm.sales_order, mm.reserved_qty, mm.item_code, mm.item_name
@@ -1413,6 +1484,74 @@ def _get_batch_reserved_by_others(batch_no, exclude_mp, exclude_table=None):
     return flt(mm[0].total if mm else 0) + flt(arm[0].total if arm else 0)
 
 
+def _get_batch_reserved_by_others_bulk(batch_nos, exclude_mp, exclude_table=None):
+    """Batched variant of _get_batch_reserved_by_others -- 2 queries total for
+    a set of batches instead of 2 queries per batch (Report 4 Finding D-02).
+    Same exclude_table semantics as the single-batch function. Returns
+    {batch_no: reserved_qty}; a batch with no reservation is simply absent
+    (callers should use .get(batch_no, 0))."""
+    batch_nos = list({b for b in batch_nos if b})
+    if not batch_nos:
+        return {}
+
+    exclude_mm = exclude_table in (None, "material_mapping")
+    exclude_arm = exclude_table in (None, "available_raw_materials")
+    ph = ", ".join(["%s"] * len(batch_nos))
+    totals = defaultdict(float)
+
+    if exclude_mm:
+        mm_rows = frappe.db.sql(
+            f"""
+            SELECT batch, COALESCE(SUM(reserved_qty), 0) AS total
+            FROM `tabMaterial Planning Material Mapping`
+            WHERE batch IN ({ph}) AND is_reserved = 1 AND parent != %s
+            GROUP BY batch
+            """,
+            [*batch_nos, exclude_mp],
+            as_dict=True,
+        )
+    else:
+        mm_rows = frappe.db.sql(
+            f"""
+            SELECT batch, COALESCE(SUM(reserved_qty), 0) AS total
+            FROM `tabMaterial Planning Material Mapping`
+            WHERE batch IN ({ph}) AND is_reserved = 1
+            GROUP BY batch
+            """,
+            batch_nos,
+            as_dict=True,
+        )
+    for r in mm_rows:
+        totals[r.batch] += flt(r.total)
+
+    if exclude_arm:
+        arm_rows = frappe.db.sql(
+            f"""
+            SELECT batch_no, COALESCE(SUM(reserved_qty), 0) AS total
+            FROM `tabMaterial Planning Available Raw Material`
+            WHERE batch_no IN ({ph}) AND is_reserved = 1 AND parent != %s
+            GROUP BY batch_no
+            """,
+            [*batch_nos, exclude_mp],
+            as_dict=True,
+        )
+    else:
+        arm_rows = frappe.db.sql(
+            f"""
+            SELECT batch_no, COALESCE(SUM(reserved_qty), 0) AS total
+            FROM `tabMaterial Planning Available Raw Material`
+            WHERE batch_no IN ({ph}) AND is_reserved = 1
+            GROUP BY batch_no
+            """,
+            batch_nos,
+            as_dict=True,
+        )
+    for r in arm_rows:
+        totals[r.batch_no] += flt(r.total)
+
+    return dict(totals)
+
+
 def _get_non_batch_reserved_by_others(item_code, warehouse, exclude_mp):
     """Return total reserved_qty committed to other MPs for a non-batch item in a warehouse."""
     result = frappe.db.sql(
@@ -1429,6 +1568,30 @@ def _get_non_batch_reserved_by_others(item_code, warehouse, exclude_mp):
     return flt(result[0].total if result else 0)
 
 
+def _get_non_batch_reserved_by_others_bulk(item_codes, warehouse, exclude_mp):
+    """Batched variant of _get_non_batch_reserved_by_others -- one query for a
+    set of items instead of one query per item (Report 4 Finding D-02).
+    Returns {item_code: reserved_qty}; an item with no reservation is simply
+    absent (callers should use .get(item_code, 0))."""
+    item_codes = list({c for c in item_codes if c})
+    if not item_codes:
+        return {}
+    ph = ", ".join(["%s"] * len(item_codes))
+    rows = frappe.db.sql(
+        f"""
+        SELECT item_code, COALESCE(SUM(reserved_qty), 0) AS total
+        FROM `tabMaterial Planning Available Raw Material`
+        WHERE item_code IN ({ph}) AND warehouse = %s
+          AND (batch_no IS NULL OR batch_no = '')
+          AND is_reserved = 1 AND parent != %s
+        GROUP BY item_code
+        """,
+        [*item_codes, warehouse, exclude_mp],
+        as_dict=True,
+    )
+    return {r.item_code: flt(r.total) for r in rows}
+
+
 @frappe.whitelist()
 def get_batch_cross_table_usage(batch_no, mp_name, warehouse):
     """Return the full per-table allocation picture for a batch within one MP.
@@ -1436,6 +1599,8 @@ def get_batch_cross_table_usage(batch_no, mp_name, warehouse):
     Called by the JS batch-selection handler to build the detailed conflict
     popup before allowing the batch to be committed to a row.
     """
+    if not frappe.has_permission("Material Planning", "read"):
+        frappe.throw(_("Not permitted to view Material Planning reservations"), frappe.PermissionError)
     total_qty = _get_batch_total_stock(batch_no, warehouse)
     reserved_by_others = _get_batch_reserved_by_others(batch_no, mp_name)
 
@@ -1625,6 +1790,8 @@ def reserve_batches(material_planning_name):
     Returns updated rows + list of partially reserved items for JS warning.
     """
     mp = frappe.get_doc("Material Planning", material_planning_name)
+    if not frappe.has_permission("Material Planning", "write", doc=mp):
+        frappe.throw(_("Not permitted to reserve batches on this Material Planning"), frappe.PermissionError)
     if not mp.material_mapping:
         frappe.throw(_("No items in Material Mapping to reserve."))
     if not mp.for_warehouse:
@@ -2575,6 +2742,8 @@ def auto_purchase_from_mp(material_planning_name):
     )
 
     mp = frappe.get_doc("Material Planning", material_planning_name)
+    if not frappe.has_permission("Material Planning", "write", doc=mp):
+        frappe.throw(_("Not permitted to run Auto Purchase on this Material Planning"), frappe.PermissionError)
 
     supplier  = mp.get("custom_auto_purchase_supplier")
     warehouse = mp.get("for_warehouse")

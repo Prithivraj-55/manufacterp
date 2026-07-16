@@ -75,7 +75,8 @@
    "label": "Item Code",
    "options": "Item",
    "read_only": 1,
-   "reqd": 1
+   "reqd": 1,
+   "search_index": 1
   },
   {
    "fetch_from": "item_code.item_name",
@@ -193,7 +194,8 @@
    "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Assign Batch",
-   "options": "Batch"
+   "options": "Batch",
+   "search_index": 1
   },
   {
    "default": "0",
@@ -316,7 +318,8 @@
    "fieldname": "is_reserved",
    "fieldtype": "Check",
    "label": "Reserved",
-   "read_only": 1
+   "read_only": 1,
+   "search_index": 1
   },
   {
    "fieldname": "reserved_qty",

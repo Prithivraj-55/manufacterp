@@ -237,9 +237,10 @@ def refresh_weight_summary(mip_name):
     status, so it stays accurate after SE submission clears is_reserved.
     """
     from manufyxinvenzaerp.subcontracting_management.subcontracting import (
-        _get_mp_drawing_weight,
+        _get_mp_drawing_weights_by_duno,
         _get_mp_mapped_weight_by_duno,
         _get_mp_excess_by_duno,
+        _get_mp_total_weight,
     )
 
     mip = frappe.get_doc("Material Issue Plan", mip_name)
@@ -262,6 +263,11 @@ def refresh_weight_summary(mip_name):
 
     mapped_by_mp = {}
     excess_by_mp = {}
+    drawing_weight_by_mp = {}  # mp_name -> {duno_mark_no: planned_kg} (Phase 1 perf fix:
+                                # was one live query per drawing_items row via
+                                # _get_mp_drawing_weight; now one grouped query per
+                                # unique mp_name, mirroring mapped_by_mp/excess_by_mp
+                                # right above, which were already memoized this way.)
 
     total_planned = 0.0
     allocated = 0.0
@@ -274,8 +280,17 @@ def refresh_weight_summary(mip_name):
         if mp_name not in mapped_by_mp:
             mapped_by_mp[mp_name] = _get_mp_mapped_weight_by_duno(mp_name)
             excess_by_mp[mp_name] = _get_mp_excess_by_duno(mp_name)
+        if mp_name not in drawing_weight_by_mp:
+            drawing_weight_by_mp[mp_name] = _get_mp_drawing_weights_by_duno(mp_name)
 
-        d.total_weight_kg = flt(_get_mp_drawing_weight(mp_name, d.duno_mark_no), 3)
+        # Mirrors _get_mp_drawing_weight(mp_name, d.duno_mark_no) exactly: grouped
+        # lookup for a real DUNO/Mark No, falling back to the MP's total weight
+        # when it's blank -- same fallback _get_mp_drawing_weight itself uses.
+        if d.duno_mark_no:
+            planned_weight = drawing_weight_by_mp[mp_name].get(d.duno_mark_no, 0.0)
+        else:
+            planned_weight = _get_mp_total_weight(mp_name)
+        d.total_weight_kg = flt(planned_weight, 3)
         d.mapped_weight_kg = flt(mapped_by_mp[mp_name].get(d.duno_mark_no), 3)
         d.excess_weight_kg = flt(excess_by_mp[mp_name].get(d.duno_mark_no), 3)
 
@@ -298,6 +313,17 @@ def refresh_weight_summary(mip_name):
     mip.allocated_weight_kg = flt(allocated, 3)
     mip.transferred_weight_kg = flt(transferred, 3)
     mip.excess_weight_kg = flt(excess, 3)
+    # Perf: this function only ever changes the 4 header weight fields above and
+    # per-row weight fields on drawing_items -- it never touches any Link field's
+    # VALUE (Material Issue Plan has no validate() of its own and no doc_events
+    # registered in hooks.py, so nothing else runs here either way). A plain
+    # .save() still re-validates every Link field on every row of every child
+    # table, including raw_materials, which this function never touches -- on a
+    # ~100-row Material Issue Plan that redundant check alone measured at ~0.35s
+    # of a ~1.1s Stock Entry submission. ignore_links skips only that
+    # re-validation; every other part of the normal save (timestamps, the
+    # Version/track_changes log, child-table diffing) is unaffected.
+    mip.flags.ignore_links = True
     mip.save(ignore_permissions=True)
     return mip.name
 

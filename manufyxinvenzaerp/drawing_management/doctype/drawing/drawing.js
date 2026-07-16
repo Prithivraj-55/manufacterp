@@ -259,13 +259,13 @@ function render_items_summary(frm) {
 	html += '<thead style="position:sticky;top:0;background:#f5f5f5;z-index:1;">';
 	html += "<tr>" + cols.map(function (c) {
 		var minw = (c[1] === "material_code" || c[1] === "material_name") ? ' style="min-width:160px;"' : '';
-		return "<th" + minw + ">" + c[0] + "</th>";
+		return "<th" + minw + ">" + frappe.utils.escape_html(c[0]) + "</th>";
 	}).join("") + "</tr></thead>";
 	html += "<tbody>";
 	rows.forEach(function (row) {
 		html += "<tr>" + cols.map(function (c) {
 			var val = row[c[1]] != null ? row[c[1]] : "";
-			return "<td>" + val + "</td>";
+			return "<td>" + frappe.utils.escape_html(String(val)) + "</td>";
 		}).join("") + "</tr>";
 	});
 	html += "</tbody></table></div>";

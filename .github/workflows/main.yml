@@ -6,9 +6,85 @@ on:
       - main
 
 jobs:
+  # ── Test gate ────────────────────────────────────────────────────────────────
+  # Runs the app's full pytest/unittest suite (tests/) against a throwaway site
+  # before the deploy job below is allowed to run. This is a new addition
+  # (Phase 1 / HP-08, Report 3 Finding M-07) — previously this pipeline had no
+  # test-execution step at all, so a regression the existing suite would catch
+  # could still reach production. Runs on its own ephemeral MariaDB/Redis
+  # instance, never against the production site — the deploy job is unchanged
+  # below and still SSHes into production separately.
+  test:
+    name: Run App Test Suite
+    runs-on: ubuntu-latest
+
+    services:
+      mariadb:
+        image: mariadb:10.6
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          path: manufyxinvenzaerp
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-server wkhtmltopdf mariadb-client libmysqlclient-dev
+
+      - name: Install bench
+        run: pip install frappe-bench
+
+      - name: Init bench + get apps
+        run: |
+          bench init --skip-redis-config-generation --python "$(which python3)" --frappe-branch version-15 test-bench
+          cd test-bench
+          bench get-app erpnext --branch version-15
+          rm -rf apps/manufyxinvenzaerp
+          cp -r "$GITHUB_WORKSPACE/manufyxinvenzaerp" apps/manufyxinvenzaerp
+
+      - name: Configure site + install apps
+        working-directory: test-bench
+        run: |
+          bench set-mariadb-host 127.0.0.1
+          bench set-config -g root_login root
+          bench set-config -g root_password root
+          bench new-site test-site.local --force \
+            --mariadb-root-password root \
+            --admin-password admin \
+            --no-mariadb-socket
+          bench --site test-site.local install-app erpnext
+          bench --site test-site.local install-app manufyxinvenzaerp
+
+      - name: Run test suite
+        working-directory: test-bench
+        run: bench --site test-site.local run-tests --app manufyxinvenzaerp
+
+  # ── Deploy ───────────────────────────────────────────────────────────────────
   deploy:
     name: SSH Deploy
     runs-on: ubuntu-latest
+    needs: test
 
     steps:
       - name: Checkout code

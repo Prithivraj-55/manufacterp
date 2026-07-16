@@ -1,6 +1,7 @@
 import frappe
 from frappe import _
 from frappe.utils import flt
+from manufyxinvenzaerp.utils.dimension_formula import calculate_qty
 
 
 @frappe.whitelist()
@@ -332,12 +333,10 @@ def parse_drawing_items_csv(csv_content):
 
 		# Calculate primary qty using the same formula as drawing.py
 		qty = 0.0
-		if parent_item_group == "Structurals":
-			if length and unit_weight and sec_qty:
-				qty = (length / 1000) * unit_weight * sec_qty
-		elif parent_item_group == "Plates":
-			if length and width and thickness and unit_weight and sec_qty:
-				qty = (length / 1000) * (width / 1000) * thickness * unit_weight * sec_qty
+		if parent_item_group in ("Structurals", "Plates"):
+			calc = calculate_qty(parent_item_group, length, width, thickness, unit_weight, sec_qty)
+			if calc is not None:
+				qty = calc
 
 		rows.append({
 			"item_number":           item_number,

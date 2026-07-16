@@ -1,5 +1,6 @@
 import frappe
 from frappe.utils import flt
+from manufyxinvenzaerp.utils.dimension_formula import calculate_qty
 
 
 def recalculate_raw_material_qty(doc, method):
@@ -21,13 +22,9 @@ def recalculate_raw_material_qty(doc, method):
         sec_qty = flt(row.sec_qty)
         tq = total_qty_map.get(row.customer_drawing_number, 1.0)
 
-        qty = 0.0
-        if pig == "Structurals":
-            if length and unit_wt and sec_qty:
-                qty = (length / 1000.0) * unit_wt * sec_qty
-        elif pig == "Plates":
-            if length and width and thickness and unit_wt and sec_qty:
-                qty = (length / 1000.0) * (width / 1000.0) * thickness * unit_wt * sec_qty
+        if pig in ("Structurals", "Plates"):
+            qty = calculate_qty(pig, length, width, thickness, unit_wt, sec_qty)
+            qty = qty if qty is not None else 0.0
         else:
             qty = sec_qty
 

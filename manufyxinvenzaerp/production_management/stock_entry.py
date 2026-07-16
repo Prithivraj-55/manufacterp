@@ -297,6 +297,19 @@ def _refresh_linked_mip_weight(sco_ref=None, wo_ref=None):
 			refresh_weight_summary(mip_name)
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "MIP weight refresh failed")
+		# Report 3 Finding H-02 / Phase 1 HP-04: surface this to the submitting
+		# user instead of only recording it in the Error Log -- the Material
+		# Issue Plan's displayed transferred weight can otherwise go silently
+		# stale after this Stock Entry submit/cancel with no on-screen signal.
+		frappe.msgprint(
+			_(
+				"Could not refresh the linked Material Issue Plan's transferred weight after "
+				"this Stock Entry. Its displayed weight summary may be stale until it is "
+				"manually refreshed."
+			),
+			indicator="orange",
+			title=_("Material Issue Plan Refresh Failed"),
+		)
 
 
 def on_cancel_stock_entry(doc, method):

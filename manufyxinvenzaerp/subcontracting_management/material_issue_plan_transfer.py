@@ -290,7 +290,18 @@ def get_mip_readiness_check(mip_name):
 @frappe.whitelist()
 def create_mip_transfer_entry(mip_name):
     """Transfer ALL pending non-CNC reserved material to the primary (Supplier/WIP)
-    warehouse. CNC items are intentionally excluded — use 'To CNC Warehouse' for those."""
+    warehouse. CNC items are intentionally excluded — use 'To CNC Warehouse' for those.
+
+    WARNING (Phase 1 H-07 / Report 3 Finding H-07): the frappe.db.commit()
+    below ends the request's transaction early on purpose, to release
+    read-locks before the Stock Entry insert and avoid a MySQL gap-lock
+    deadlock. This means everything before that line is permanently committed
+    regardless of what happens afterward -- there is no rollback path if a
+    later step in this function fails. Do NOT add a write above the
+    frappe.db.commit() line without re-reading this warning: a write
+    introduced there would no longer be all-or-nothing with the rest of this
+    function.
+    """
     mip = frappe.get_doc("Material Issue Plan", mip_name)
     ctx = get_target_context(mip)
     pending = get_mip_pending_items(mip_name)
@@ -319,6 +330,12 @@ def create_mip_partial_transfer(mip_name, selected_items_json, transfer_type):
     transfer_type: "primary" -> Send to Subcontractor/Material Transfer to the
                                 supplier/WIP warehouse
                    "cnc"     -> Material Transfer to the CNC warehouse
+
+    WARNING (Phase 1 H-07 / Report 3 Finding H-07): same manual mid-request
+    frappe.db.commit() pattern as create_mip_transfer_entry above (releases
+    read-locks before the Stock Entry insert to avoid a gap-lock deadlock) --
+    do NOT add a write above that commit() call without re-reading its
+    warning there first.
     """
     selected = _json.loads(selected_items_json) if isinstance(selected_items_json, str) else selected_items_json
     if not selected:
@@ -371,7 +388,13 @@ def create_mip_partial_transfer(mip_name, selected_items_json, transfer_type):
 @frappe.whitelist()
 def create_mip_cnc_forward_entry(mip_name):
     """Forward material currently sitting in the CNC warehouse on to the
-    supplier/WIP warehouse — nets already-forwarded qty against what was sent."""
+    supplier/WIP warehouse — nets already-forwarded qty against what was sent.
+
+    WARNING (Phase 1 H-07 / Report 3 Finding H-07): same manual mid-request
+    frappe.db.commit() pattern as create_mip_transfer_entry above -- do NOT
+    add a write above that commit() call without re-reading its warning there
+    first.
+    """
     mip = frappe.get_doc("Material Issue Plan", mip_name)
     ctx = get_target_context(mip)
     cnc_warehouse = mip.cnc_warehouse
@@ -462,7 +485,15 @@ def create_mip_cnc_forward_entry(mip_name):
 @frappe.whitelist()
 def create_mip_excess_return_entry(mip_name):
     """Receive unconsumed/off-cut material back into stock as fresh Material
-    Receipt stock (new batches, new dimensions) from mip.excess_return_items."""
+    Receipt stock (new batches, new dimensions) from mip.excess_return_items.
+
+    WARNING (Phase 1 H-07 / Report 3 Finding H-07): same manual mid-request
+    frappe.db.commit() pattern as create_mip_transfer_entry above -- do NOT
+    add a write above that commit() call without re-reading its warning there
+    first. (The mip.excess_return_items flag updates and mip.save() further
+    down in this function run AFTER the commit, which is fine -- the warning
+    is specifically about writes introduced ABOVE the commit() line.)
+    """
     mip = frappe.get_doc("Material Issue Plan", mip_name)
     if not mip.excess_return_warehouse:
         frappe.throw(_("Please set the Excess/Return Warehouse on this Material Issue Plan first."))
