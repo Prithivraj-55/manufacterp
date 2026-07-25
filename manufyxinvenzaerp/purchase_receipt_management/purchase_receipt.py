@@ -318,6 +318,35 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
         else:
             remaining_qty_by_row[mp_row.name] = remaining
 
+    def _split_allocation(matched_rows, received_qty, sequential):
+        """Client change request Phase 2.5: a consolidated purchase line (no
+        DUNO to disambiguate — e.g. one bought via a Material Planning
+        Consolidate Item row that summed several drawings' requirements for
+        the same item_code) matching MORE THAN ONE Unavailable Item row must
+        split its received qty SEQUENTIALLY across those rows — fill the
+        first (by original document order/idx) fully, then the next, and so
+        on — rather than crediting the full received qty to every matched row
+        independently (which double/triple-counts the same physical receipt).
+        Any dimension-driven shortfall naturally lands on the last row(s) in
+        the sequence, since earlier rows are always filled first. A single
+        match, or a precise item+DUNO match, is unaffected — same behavior as
+        before (the full received qty applies to that one row)."""
+        if not sequential or len(matched_rows) <= 1:
+            return [(mp_row, flt(received_qty)) for mp_row in matched_rows]
+
+        allocations = []
+        remaining_receipt = flt(received_qty)
+        for mp_row in sorted(matched_rows, key=lambda r: r.idx):
+            if remaining_receipt <= QTY_EPSILON:
+                break
+            row_requirement = flt(remaining_qty_by_row.get(mp_row.name, mp_row.qty))
+            alloc_qty = flt(min(remaining_receipt, row_requirement), 3)
+            if alloc_qty <= 0:
+                continue
+            allocations.append((mp_row, alloc_qty))
+            remaining_receipt = flt(remaining_receipt - alloc_qty, 3)
+        return allocations
+
     # Batch-resolve the PO Item -> MR Item -> MR chain for every PR row up
     # front (3 queries total) instead of 3 frappe.db.get_value calls per row
     # (Report 4 Finding D-04) -- the loop below does the same lookups as
@@ -368,8 +397,12 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
         # When the PR item knows its DUNO, only allocate against that exact drawing's
         # row — no fallback fan-out (a miss here should surface as unallocated, not
         # mis-allocated to a different drawing's shortage). Only fall back to matching
-        # by item_code alone when the PR item has no DUNO reference at all (in-flight
-        # PRs created before this field existed).
+        # by item_code alone when the PR item has no DUNO reference at all -- either an
+        # in-flight PR created before this field existed, or (client change request
+        # Phase 2.5) a consolidated purchase line that intentionally spans several
+        # drawings' worth of the same item_code and must split sequentially across them.
+        sequential = not pr_duno
+
         if pr_duno:
             matched_alternate = by_alternate.get((item_code, pr_duno), [])
             matched_original  = by_original.get((item_code, pr_duno), [])
@@ -388,13 +421,15 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
             ) or {}
             batch_total_qty    = _get_batch_total_stock(batch_no, mp.for_warehouse) if batch_no else 0.0
             batch_reserved_qty = _get_batch_reserved_by_others(batch_no, mp_name) if batch_no else 0.0
+            received_qty = flt(pr_item.qty)
 
-            for mp_row in matched_alternate:
-                _consume(mp_row, flt(pr_item.qty))
+            for mp_row, alloc_qty in _split_allocation(matched_alternate, received_qty, sequential):
+                _consume(mp_row, alloc_qty)
                 key = (mp_row.item_code, batch_no, mp_row.duno_mark_no or "")
                 if key in existing_mapping:
                     continue
                 existing_mapping.add(key)
+                ratio = (alloc_qty / received_qty) if received_qty else 0.0
                 mp.append("material_mapping", {
                     "item_number":            mp_row.item_number,
                     "sales_order":            mp_row.sales_order,
@@ -421,8 +456,8 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
                     "batch_width":            flt(pr_item.custom_width),
                     "batch_thickness":        flt(pr_item.custom_thickness),
                     "batch_unit_weight":      flt(alt_item_data.get("custom_unit_weight")),
-                    "batch_sec_qty":          flt(pr_item.custom_sec_qty),
-                    "batch_calc_qty":         flt(pr_item.qty),
+                    "batch_sec_qty":          flt(flt(pr_item.custom_sec_qty) * ratio, 3),
+                    "batch_calc_qty":         flt(alloc_qty, 3),
                     "batch_total_qty":        flt(batch_total_qty, 3),
                     "batch_reserved_qty":     flt(batch_reserved_qty, 3),
                     "batch_free_qty":         flt(max(0.0, batch_total_qty - batch_reserved_qty), 3),
@@ -437,12 +472,15 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
                 ["stock_uom", "custom_secondary_uom"],
                 as_dict=True,
             ) or {}
-            for mp_row in matched_original:
-                _consume(mp_row, flt(pr_item.qty))
+            received_qty = flt(pr_item.qty)
+
+            for mp_row, alloc_qty in _split_allocation(matched_original, received_qty, sequential):
+                _consume(mp_row, alloc_qty)
                 key = (item_code, batch_no, mp_row.duno_mark_no or "")
                 if key in existing_exact:
                     continue
                 existing_exact.add(key)
+                ratio = (alloc_qty / received_qty) if received_qty else 0.0
                 mp.append("available_raw_materials", {
                     "item_number":            mp_row.item_number,
                     "sales_order":            mp_row.sales_order,
@@ -456,9 +494,9 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
                     "width":                  flt(pr_item.custom_width)     or mp_row.width,
                     "thickness":              flt(pr_item.custom_thickness) or mp_row.thickness,
                     "overall_required_qty":   flt(mp_row.qty, 3),
-                    "required_qty":           flt(min(flt(pr_item.qty), flt(mp_row.qty)), 3),
-                    "available_qty":          flt(pr_item.qty, 3),
-                    "sec_qty":                flt(pr_item.custom_sec_qty)   or mp_row.sec_qty,
+                    "required_qty":           flt(min(alloc_qty, flt(mp_row.qty)), 3),
+                    "available_qty":          flt(alloc_qty, 3),
+                    "sec_qty":                flt(flt(pr_item.custom_sec_qty) * ratio, 3) or mp_row.sec_qty,
                     "sec_uom":                item_data.get("custom_secondary_uom") or mp_row.sec_uom,
                     "uom":                    item_data.get("stock_uom")    or mp_row.uom,
                     "warehouse":              pr_item.warehouse or mp.for_warehouse,

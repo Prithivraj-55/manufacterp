@@ -21,6 +21,126 @@ frappe.ui.form.on("Purchase Receipt Item", {
 	},
 });
 
+// Inspection Call workflow (shared with Job Card / Supplier Operation Entry
+// via manufyxinvenzaerp.production_management.inspection) — opt-in per Item
+// (`custom_inspection_required`). The call date is captured per round via a
+// popup and stored only on the call log row (and its linked Inspection
+// Entry) — Purchase Receipt itself does not persist a separate date field.
+// Both actions render as Button fields inside the Inspection tab (not the
+// page toolbar), right above Inspection Status.
+function _pr_inspection_state(frm) {
+	const log = frm.doc.custom_inspection_call_log || [];
+	const last = log.length ? log[log.length - 1] : null;
+	const in_progress = last && last.round_status !== "Completed";
+	return { log, last, in_progress };
+}
+
+frappe.ui.form.on("Purchase Receipt", {
+	refresh(frm) {
+		if (frm.is_new()) return;
+
+		const { last, in_progress } = _pr_inspection_state(frm);
+		let label = __("Create Inspection");
+		if (in_progress && !last.inspection_entry) label = __("Create Inspection Entry");
+		else if (in_progress && last.inspection_entry) label = __("View Inspection Entry");
+		frm.set_df_property("custom_create_inspection_btn", "label", label);
+	},
+
+	custom_create_inspection_btn(frm) {
+		const { last, in_progress } = _pr_inspection_state(frm);
+
+		if (in_progress && last.inspection_entry) {
+			frappe.set_route("Form", "Inspection Entry", last.inspection_entry);
+			return;
+		}
+
+		if (in_progress && !last.inspection_entry) {
+			frappe.call({
+				method: "manufyxinvenzaerp.production_management.inspection.create_inspection_entry",
+				args: { source_doctype: "Purchase Receipt", source_name: frm.doc.name },
+				freeze: true,
+				freeze_message: __("Creating Inspection Entry…"),
+				callback(r) {
+					if (r.message) {
+						frm.reload_doc();
+						frappe.set_route("Form", "Inspection Entry", r.message);
+					}
+				},
+			});
+			return;
+		}
+
+		frappe.prompt(
+			[{
+				fieldname: "call_date",
+				fieldtype: "Date",
+				label: __("Inspection Call Date"),
+				reqd: 1,
+				default: frappe.datetime.get_today(),
+			}],
+			function (values) {
+				frappe.call({
+					method: "manufyxinvenzaerp.production_management.inspection.add_inspection_call",
+					args: {
+						source_doctype: "Purchase Receipt",
+						source_name: frm.doc.name,
+						call_date: values.call_date,
+					},
+					freeze: true,
+					freeze_message: __("Logging inspection call…"),
+					callback() {
+						frappe.call({
+							method: "manufyxinvenzaerp.production_management.inspection.create_inspection_entry",
+							args: { source_doctype: "Purchase Receipt", source_name: frm.doc.name },
+							freeze: true,
+							freeze_message: __("Creating Inspection Entry…"),
+							callback(r) {
+								frm.reload_doc();
+								if (r.message) {
+									frappe.set_route("Form", "Inspection Entry", r.message);
+								}
+							},
+						});
+					},
+				});
+			},
+			__("Create Inspection"),
+			__("Create")
+		);
+	},
+
+	custom_update_inspection_call_date_btn(frm) {
+		const { last } = _pr_inspection_state(frm);
+		if (!last) return;
+
+		frappe.prompt(
+			[{
+				fieldname: "call_date",
+				fieldtype: "Date",
+				label: __("Inspection Call Date"),
+				reqd: 1,
+				default: last.call_date,
+			}],
+			function (values) {
+				frappe.call({
+					method: "manufyxinvenzaerp.production_management.inspection.update_inspection_call_date",
+					args: {
+						source_doctype: "Purchase Receipt",
+						source_name: frm.doc.name,
+						call_date: values.call_date,
+					},
+					freeze: true,
+					callback() {
+						frm.reload_doc();
+					},
+				});
+			},
+			__("Update Inspection Call Date"),
+			__("Update")
+		);
+	},
+});
+
 // After PR submission: show popup if any batches were auto-allocated to Material Planning
 frappe.ui.form.on("Purchase Receipt", {
 	after_submit(frm) {
