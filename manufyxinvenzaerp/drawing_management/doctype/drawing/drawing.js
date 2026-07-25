@@ -59,6 +59,53 @@ frappe.ui.form.on("Drawing", {
             });
         }
 
+		if (!frm.is_new()) {
+			frm.add_custom_button(__("Update Customer Weight"), function () {
+				frappe.prompt(
+					[{
+						fieldname: "new_weight",
+						fieldtype: "Float",
+						label: __("New Customer Provided Weight (Kg)"),
+						reqd: 1,
+						default: frm.doc.customer_provided_wt,
+						description: __("Current value: {0} Kg", [frm.doc.customer_provided_wt || 0]),
+					}],
+					function (values) {
+						frappe.call({
+							method: "manufyxinvenzaerp.drawing_management.drawing_utils.update_customer_provided_weight",
+							args: { drawing_name: frm.doc.name, new_weight: values.new_weight },
+							freeze: true,
+							freeze_message: __("Updating weight and cascading to linked documents…"),
+							callback: function (r) {
+								if (!r.message) return;
+								var m = r.message;
+								frappe.msgprint({
+									title: __("Customer Weight Updated"),
+									indicator: "green",
+									message: __(
+										"Weight changed from {0} Kg to {1} Kg.<br>Sales Order updated: {2}<br>" +
+										"Production Plan Items updated: {3}<br>Drawing rows (Subcontracting Order / " +
+										"Material Issue Plan) updated: {4}<br>Subcontracting Orders re-totalled: {5}<br>" +
+										"Material Issue Plans refreshed: {6}<br><br>" +
+										"Batch allocation/reservation was <b>not</b> changed automatically — " +
+										"reallocate manually if needed.",
+										[
+											m.old_weight, m.new_weight, m.sales_order_updated ? __("Yes") : __("No"),
+											m.production_plan_items_updated, m.drawing_rows_updated,
+											m.subcontracting_orders_updated, m.material_issue_plans_updated,
+										]
+									),
+								});
+								frm.reload_doc();
+							},
+						});
+					},
+					__("Update Customer Provided Weight"),
+					__("Update")
+				);
+			});
+		}
+
 		frm.set_query("batch", "items", function (doc, cdt, cdn) {
 			var row = locals[cdt][cdn];
 			return {

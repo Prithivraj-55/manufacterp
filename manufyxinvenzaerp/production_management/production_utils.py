@@ -6,17 +6,11 @@ FORMULA_GROUPS = {"Structurals", "Plates"}
 
 OPERATIONS = [
 	"Material Issue",
-	"Cutting Status",
-	"Material Matching",
 	"Fit-up",
-	"Fitup Inspection",
 	"Welding",
-	"Welding Inspection",
 	"Final",
-	"Final Inspection",
 	"Blasting",
 	"Painting",
-	"Despatch",
 ]
 
 ROUTING_NAME = "Standard Manufacturing Routing"
@@ -27,7 +21,7 @@ ROUTING_NAME = "Standard Manufacturing Routing"
 # ─────────────────────────────────────────────────────────────────────────────
 
 def create_operations_workstations_routing():
-	"""Idempotently create 12 operations, 12 workstations, and 1 routing."""
+	"""Idempotently create 6 operations, 6 workstations, and 1 routing."""
 	_create_operations()
 	_create_workstations()
 	_create_routing()

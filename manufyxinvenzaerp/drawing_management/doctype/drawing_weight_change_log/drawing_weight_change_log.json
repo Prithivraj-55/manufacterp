@@ -1,0 +1,59 @@
+{
+ "actions": [],
+ "creation": "2026-07-25 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "old_weight",
+  "new_weight",
+  "column_break_who",
+  "changed_by",
+  "changed_on"
+ ],
+ "fields": [
+  {
+   "fieldname": "old_weight",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Old Weight (Kg)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "new_weight",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "New Weight (Kg)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_who",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "changed_by",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Changed By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "changed_on",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Changed On",
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-07-25 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Drawing Management",
+ "name": "Drawing Weight Change Log",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "creation",
+ "sort_order": "DESC"
+}
