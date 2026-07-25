@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
 jobs:
   # ── Test gate ────────────────────────────────────────────────────────────────
   # Runs the app's full pytest/unittest suite (tests/) against a throwaway site
