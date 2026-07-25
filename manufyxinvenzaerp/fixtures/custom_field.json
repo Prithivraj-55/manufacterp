@@ -2571,7 +2571,7 @@
   "collapsible": 0,
   "collapsible_depends_on": null,
   "columns": 0,
-  "default": null,
+  "default": "All Item Groups",
   "depends_on": null,
   "description": "Primary category determining calculation method",
   "docstatus": 0,
