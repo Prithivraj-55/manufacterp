@@ -34,7 +34,7 @@ def _clear_mr_links():
     for row in _get_unavailable_rows():
         frappe.db.set_value("Material Planning Unavailable Item", row.name, "alternate_item", None)
 
-    frappe.db.set_value("Material Planning", MP_NAME, "status", "Draft")
+    frappe.db.set_value("Material Planning", MP_NAME, "planning_status", "Draft")
     frappe.db.commit()
 
 
