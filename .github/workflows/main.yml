@@ -99,7 +99,7 @@ jobs:
             --admin-password admin \
             --no-mariadb-socket
           bench --site test-site.local install-app erpnext
-          bench --site test-site.local execute erpnext.setup.setup_wizard.operations.install_fixtures.install
+          bench --site test-site.local execute erpnext.setup.setup_wizard.operations.install_fixtures.install --kwargs '{"country": "India"}'
           bench --site test-site.local install-app manufyxinvenzaerp
 
       - name: Run test suite
