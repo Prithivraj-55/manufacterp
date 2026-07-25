@@ -23,6 +23,8 @@ jobs:
         id: pr
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          COMMIT_SHA: ${{ github.sha }}
         run: |
           set -e
           EXISTING_PR=$(gh pr list --base main --head devbranch --state open --json number --jq '.[0].number')
@@ -31,11 +33,12 @@ jobs:
             echo "Reusing existing open PR #$EXISTING_PR"
             PR_NUMBER="$EXISTING_PR"
           else
+            TITLE="Auto-deploy: $(printf '%s' "$COMMIT_MESSAGE" | head -n1)"
             PR_URL=$(gh pr create \
               --base main \
               --head devbranch \
-              --title "Auto-deploy: ${{ github.event.head_commit.message }}" \
-              --body "Auto-created by the [autodeploy] tag on commit ${{ github.sha }}.")
+              --title "$TITLE" \
+              --body "Auto-created by the [autodeploy] tag on commit ${COMMIT_SHA}.")
             PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
             echo "Created PR #$PR_NUMBER"
           fi
