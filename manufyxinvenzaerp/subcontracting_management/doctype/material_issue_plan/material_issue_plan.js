@@ -178,11 +178,60 @@ function _add_update_batch_button(frm) {
 
 // Per-row "Update Batch" button (Button field on the child doctype) — opens the
 // same dialog as the grid toolbar button, pre-filtered/pre-selected onto this row.
+// excess_length/width/sec_qty changes get a live Excess Calc Qty preview here
+// (client change request Phase 5.3) — the authoritative calc + excess_return_items
+// sync happens server-side on save (validate() -> _sync_excess_return_from_raw_materials),
+// this is just immediate feedback while the user is still typing.
+// use_length/width/sec_qty and balance_length/width/sec_qty get the same kind
+// of live W1/W2 Kg preview (client change request Phase 5.2) -- authoritative
+// calc + the actual transferred-qty cap / post-submit batch resize both happen
+// server-side (material_issue_plan.py's validate(), material_issue_plan_transfer.py,
+// production_management/stock_entry.py).
 frappe.ui.form.on("Material Issue Plan Raw Material", {
 	update_batch_btn(frm, cdt, cdn) {
 		_show_update_batch_dialog(frm, locals[cdt][cdn].name);
 	},
+	excess_length(frm, cdt, cdn) { _recalc_excess_calc_qty(cdt, cdn); },
+	excess_width(frm, cdt, cdn) { _recalc_excess_calc_qty(cdt, cdn); },
+	excess_sec_qty(frm, cdt, cdn) { _recalc_excess_calc_qty(cdt, cdn); },
+	use_length(frm, cdt, cdn) { _recalc_cut_sheet_qty(cdt, cdn, "use"); },
+	use_width(frm, cdt, cdn) { _recalc_cut_sheet_qty(cdt, cdn, "use"); },
+	use_sec_qty(frm, cdt, cdn) { _recalc_cut_sheet_qty(cdt, cdn, "use"); },
+	balance_length(frm, cdt, cdn) { _recalc_cut_sheet_qty(cdt, cdn, "balance"); },
+	balance_width(frm, cdt, cdn) { _recalc_cut_sheet_qty(cdt, cdn, "balance"); },
+	balance_sec_qty(frm, cdt, cdn) { _recalc_cut_sheet_qty(cdt, cdn, "balance"); },
 });
+
+function _recalc_excess_calc_qty(cdt, cdn) {
+	let row = locals[cdt][cdn];
+	let g = row.parent_item_group;
+	let qty = null;
+	if (g === "Structurals") {
+		if (row.excess_length && row.unit_weight && row.excess_sec_qty) {
+			qty = (row.excess_length / 1000) * row.unit_weight * row.excess_sec_qty;
+		}
+	} else if (g === "Plates") {
+		if (row.excess_length && row.excess_width && row.thickness && row.unit_weight && row.excess_sec_qty) {
+			qty = (row.excess_length / 1000) * (row.excess_width / 1000) * row.thickness * row.unit_weight * row.excess_sec_qty;
+		}
+	}
+	frappe.model.set_value(cdt, cdn, "excess_calc_qty", qty !== null ? flt(qty, 3) : 0);
+}
+
+function _recalc_cut_sheet_qty(cdt, cdn, prefix) {
+	let row = locals[cdt][cdn];
+	let g = row.parent_item_group;
+	let L = row[prefix + "_length"], W = row[prefix + "_width"], S = row[prefix + "_sec_qty"];
+	let qty = null;
+	if (g === "Structurals") {
+		if (L && row.unit_weight && S) qty = (L / 1000) * row.unit_weight * S;
+	} else if (g === "Plates") {
+		if (L && W && row.thickness && row.unit_weight && S) {
+			qty = (L / 1000) * (W / 1000) * row.thickness * row.unit_weight * S;
+		}
+	}
+	frappe.model.set_value(cdt, cdn, prefix + "_calc_qty", qty !== null ? flt(qty, 3) : 0);
+}
 
 // ── Transfer readiness pre-flight check ──────────────────────────────────────
 
@@ -542,19 +591,131 @@ function _render_excess_action_btn(frm) {
 	if (frm.is_dirty()) return;
 
 	frm.add_custom_button(__("Return Excess Entry"), function() {
-		frappe.call({
-			method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.create_mip_excess_return_entry",
-			args: { mip_name: frm.doc.name },
-			freeze: true,
-			freeze_message: __("Creating return entry…"),
-			callback(r) {
-				if (r.message) {
-					frappe.msgprint({ title: __("Return Excess Entry Created"), message: __("Return Stock Entry: ") + '<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>", indicator: "green" });
-					frm.reload_doc();
-				}
-			},
-		});
+		_show_return_excess_dialog(frm);
 	});
+}
+
+// "Return Excess Entry" -- review/edit the planned Qty and record a mandatory
+// Reason for every row before the actual Material Receipt Stock Entry is
+// created (client change request Phase 5.6). Structurals/Plates rows edit
+// Length/Width/Sec Qty (Qty is always DERIVED for these groups -- Stock
+// Entry's own validate_stock_entry hook recalculates Qty from dimensions on
+// Material Receipt, so a directly-typed Qty would be silently discarded);
+// every other group (e.g. Nuts and Bolts) edits Qty directly, matching how
+// this same row already behaves everywhere else in this app (_mip_excess_calc
+// below). Qty/dimensions + Reason entered here are saved back onto the
+// excess_return_items row itself server-side, so re-opening this dialog
+// later (or the grid) shows whatever was last entered.
+function _show_return_excess_dialog(frm) {
+	let rows = (frm.doc.excess_return_items || []).filter((r) => !r.stock_entry_created && flt(r.qty) > 0);
+	if (!rows.length) {
+		frappe.msgprint(__("No pending excess return rows to process. All rows already have a Stock Entry created, or no rows with Weight (Kg) > 0 exist."));
+		return;
+	}
+
+	function _is_dim_driven(g) { return g === "Structurals" || g === "Plates"; }
+
+	let rows_html = rows.map(function(r) {
+		let g = r.parent_item_group;
+		let dims_html;
+		if (_is_dim_driven(g)) {
+			dims_html = `<input type="number" step="any" class="form-control form-control-sm _rex_length" placeholder="${__("Length (mm)")}" value="${flt(r.length)}" style="margin-bottom:4px;">`
+				+ (g === "Plates" ? `<input type="number" step="any" class="form-control form-control-sm _rex_width" placeholder="${__("Width (mm)")}" value="${flt(r.width)}" style="margin-bottom:4px;">` : "")
+				+ `<input type="number" step="any" class="form-control form-control-sm _rex_sec_qty" placeholder="${__("Sec Qty")}" value="${flt(r.sec_qty)}">`;
+		} else {
+			dims_html = `<span style="color:#adb5bd;font-size:11px;">${__("n/a")}</span>`;
+		}
+		let qty_html = _is_dim_driven(g)
+			? `<span class="_rex_qty_preview">${format_number(flt(r.qty), null, 3)}</span>`
+			: `<input type="number" step="any" class="form-control form-control-sm _rex_qty" value="${flt(r.qty)}">`;
+		return `<tr data-name="${frappe.utils.escape_html(r.name)}" data-group="${frappe.utils.escape_html(g || "")}"
+			data-thickness="${flt(r.thickness)}" data-unit-weight="${flt(r.unit_weight)}">
+			<td style="padding:6px 8px;vertical-align:top;">${frappe.utils.escape_html(r.item_code || "")}</td>
+			<td style="padding:6px 8px;">${dims_html}</td>
+			<td style="padding:6px 8px;vertical-align:top;text-align:right;">${qty_html}</td>
+			<td style="padding:6px 8px;">
+				<input type="text" class="form-control form-control-sm _rex_reason" placeholder="${__("Reason (required)…")}" value="${frappe.utils.escape_html(r.return_reason || "")}">
+			</td>
+		</tr>`;
+	}).join("");
+
+	let table_html = `<table class="table table-bordered table-condensed" style="margin-bottom:0;">
+		<thead><tr>
+			<th style="padding:6px 8px;">${__("Item Code")}</th>
+			<th style="padding:6px 8px;width:170px;">${__("Length / Width / Sec Qty")}</th>
+			<th style="padding:6px 8px;width:100px;">${__("Qty (Kg)")}</th>
+			<th style="padding:6px 8px;">${__("Return Reason")}</th>
+		</tr></thead>
+		<tbody>${rows_html}</tbody>
+	</table>`;
+
+	let dialog = new frappe.ui.Dialog({
+		title: __("Return Excess Entry — Review Qty & Reason"),
+		size: "extra-large",
+		fields: [{ fieldtype: "HTML", fieldname: "rows_html", options: table_html }],
+		primary_action_label: __("Create Return Entry"),
+		primary_action() {
+			let payload = [];
+			let missing_reason = false;
+			dialog.$wrapper.find("tbody tr").each(function() {
+				let $tr = $(this);
+				let reason = ($tr.find("._rex_reason").val() || "").trim();
+				let g = $tr.data("group");
+				let entry = { name: $tr.data("name"), return_reason: reason };
+				if (_is_dim_driven(g)) {
+					entry.length = flt($tr.find("._rex_length").val());
+					if (g === "Plates") entry.width = flt($tr.find("._rex_width").val());
+					entry.sec_qty = flt($tr.find("._rex_sec_qty").val());
+				} else {
+					entry.qty = flt($tr.find("._rex_qty").val());
+				}
+				if (!reason) missing_reason = true;
+				payload.push(entry);
+			});
+			if (missing_reason) {
+				frappe.msgprint({
+					title: __("Reason Required"),
+					message: __("Please enter a Return Reason for every row before continuing."),
+					indicator: "orange",
+				});
+				return;
+			}
+			dialog.hide();
+			frappe.call({
+				method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.create_mip_excess_return_entry",
+				args: { mip_name: frm.doc.name, rows_json: JSON.stringify(payload) },
+				freeze: true,
+				freeze_message: __("Creating return entry…"),
+				callback(r) {
+					if (r.message) {
+						frappe.msgprint({ title: __("Return Excess Entry Created"), message: __("Return Stock Entry: ") + '<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>", indicator: "green" });
+						frm.reload_doc();
+					}
+				},
+			});
+		},
+	});
+
+	// Live Qty preview as the user edits Length/Width/Sec Qty on a dimension-driven row.
+	dialog.$wrapper.find("tbody tr").each(function() {
+		let $tr = $(this);
+		let g = $tr.data("group");
+		if (!_is_dim_driven(g)) return;
+		function _refresh() {
+			let L = flt($tr.find("._rex_length").val());
+			let W = flt($tr.find("._rex_width").val());
+			let S = flt($tr.find("._rex_sec_qty").val());
+			let uw = flt($tr.data("unit-weight"));
+			let T = flt($tr.data("thickness"));
+			let qty = null;
+			if (g === "Structurals" && L && uw && S) qty = (L / 1000) * uw * S;
+			else if (g === "Plates" && L && W && T && uw && S) qty = (L / 1000) * (W / 1000) * T * uw * S;
+			$tr.find("._rex_qty_preview").text(qty !== null ? format_number(flt(qty, 3), null, 3) : "—");
+		}
+		$tr.find("._rex_length, ._rex_width, ._rex_sec_qty").on("input", _refresh);
+	});
+
+	dialog.show();
 }
 
 // Weight auto-calc for excess_return_items — SCO Excess Material Item is a shared

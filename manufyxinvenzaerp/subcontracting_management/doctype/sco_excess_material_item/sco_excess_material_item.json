@@ -17,7 +17,9 @@
   "sec_uom",
   "qty",
   "uom",
-  "stock_entry_created"
+  "return_reason",
+  "stock_entry_created",
+  "source_mip_raw_material_row"
  ],
  "fields": [
   {
@@ -117,12 +119,28 @@
   },
   {
    "allow_on_submit": 1,
+   "description": "Mandatory before the Return Excess Entry can be created (client change request Phase 5.6) -- why the actual returned Qty is what it is, especially when edited away from the auto-suggested value.",
+   "fieldname": "return_reason",
+   "fieldtype": "Small Text",
+   "label": "Return Reason"
+  },
+  {
+   "allow_on_submit": 1,
    "default": "0",
    "fieldname": "stock_entry_created",
    "fieldtype": "Check",
    "in_list_view": 1,
    "label": "Stock Entry Created",
    "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "source_mip_raw_material_row",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Source MIP Raw Material Row",
+   "read_only": 1,
+   "description": "Row name of the Material Issue Plan Raw Material row this excess entry was auto-populated from (client change request Phase 5.3), so re-saving the plan updates rather than duplicates it."
   }
  ],
  "istable": 1,

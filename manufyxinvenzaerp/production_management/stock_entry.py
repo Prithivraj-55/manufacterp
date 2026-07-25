@@ -1,12 +1,19 @@
 import frappe
 from frappe import _
 from frappe.utils import flt, now
+from manufyxinvenzaerp.utils.reference_copy import copy_reference_fields_if_blank
 
 FORMULA_GROUPS = {"Structurals", "Plates"}
+REFERENCE_FIELDS = ["custom_drawing", "custom_duno_mark_no", "custom_customer_drawing_number", "custom_sales_order"]
 
 
 def validate_stock_entry(doc, method):
 	"""Recalculate qty for formula-group items. Show popup only when qty was manually edited."""
+	for row in doc.items:
+		_copy_from_material_request_item(row)
+
+	_sync_batch_remarks(doc)
+
 	# For Manufacture, fill Sec Qty (Nos) on consumed rows proportional to the Kg consumed,
 	# so the batch piece count is correctly reduced on submit. Done before totals + stock move.
 	if doc.stock_entry_type == "Manufacture":
@@ -36,6 +43,36 @@ def validate_stock_entry(doc, method):
 			_("Quantities for Structurals/Plates have been recalculated from dimensions."),
 			indicator="orange",
 		)
+
+
+def _sync_batch_remarks(doc):
+	"""Mirror each item row's assigned batch's own Batch Remarks (client
+	change request Phase 6.3) onto its own custom_batch_remarks field.
+	Applies to every Stock Entry type (not gated by the Structurals/Plates
+	FORMULA_GROUPS check below, which is unrelated) -- one bulk query
+	regardless of row count."""
+	batch_nos = {r.batch_no for r in doc.items if r.get("batch_no")}
+	if not batch_nos:
+		return
+	remarks_by_batch = dict(frappe.get_all(
+		"Batch", filters={"name": ["in", list(batch_nos)]},
+		fields=["name", "custom_batch_remarks"], as_list=True,
+	))
+	for row in doc.items:
+		if row.get("batch_no"):
+			row.custom_batch_remarks = remarks_by_batch.get(row.batch_no) or ""
+
+
+def _copy_from_material_request_item(row):
+	"""Copy drawing/DUNO/sales order references from the linked MR Item, same
+	pattern as Purchase Order's/Purchase Receipt's _copy_from_mr_item -- covers
+	the standard "Make Stock Entry" flow from a Material Request (client change
+	request Phase 1.3). Project is already a core field on Stock Entry Detail
+	so it needs no custom field, but core "Make" flows don't map it forward on
+	their own -- copy it here too."""
+	copy_reference_fields_if_blank(row, "Material Request Item", "material_request_item", REFERENCE_FIELDS)
+	if not row.get("project") and row.get("material_request_item"):
+		row.project = frappe.db.get_value("Material Request Item", row.material_request_item, "project")
 
 
 def on_submit_stock_entry(doc, method):
@@ -93,6 +130,11 @@ def on_submit_stock_entry(doc, method):
 	# Release reservations for all consumed batches
 	_release_material_planning_reservations(doc)
 
+	# Cut Sheet (client change request Phase 5.2): resize any batch this transfer
+	# only partially moved (To Use / W1) down to its Balance (W2) dimensions --
+	# same batch, no new one created.
+	_resize_cut_sheet_batches(doc)
+
 	# When materials are sent to supplier (or routed via CNC warehouse), update SCO weight fields.
 	# We track via custom_sco_ref (not the standard subcontracting_order) to avoid
 	# ERPNext's validate_subcontract_order which throws when supplied_items is empty.
@@ -116,6 +158,40 @@ def on_submit_stock_entry(doc, method):
 def _reduce_batch_sec_qty(batch_no, consumed_qty):
 	current = flt(frappe.db.get_value("Batch", batch_no, "custom_sec_qty"))
 	frappe.db.set_value("Batch", batch_no, "custom_sec_qty", flt(current - flt(consumed_qty), 3))
+
+
+def _resize_cut_sheet_batches(doc):
+	"""After a MIP-tracked transfer Stock Entry submits, resize (in place --
+	no new batch) any batch whose corresponding MIP raw_materials row has Cut
+	Sheet enabled: the batch's own Length/Width/Sec Qty update to the Balance
+	(W2) dimensions, since only the To Use (W1) portion actually left the
+	warehouse (client change request Phase 5.2). Only Material Issue Plan
+	transfers carry custom_mip_ref, so this is a no-op for every other Stock
+	Entry in the system."""
+	mip_name = doc.get("custom_mip_ref")
+	if not mip_name:
+		return
+
+	cut_sheet_rows = frappe.get_all(
+		"Material Issue Plan Raw Material",
+		filters={"parent": mip_name, "cut_sheet": 1},
+		fields=["item_code", "batch_no", "balance_length", "balance_width", "balance_sec_qty"],
+	)
+	if not cut_sheet_rows:
+		return
+	by_key = {(r.item_code, r.batch_no): r for r in cut_sheet_rows if r.batch_no}
+
+	for row in doc.items:
+		if not row.batch_no:
+			continue
+		match = by_key.get((row.item_code, row.batch_no))
+		if not match:
+			continue
+		frappe.db.set_value("Batch", row.batch_no, {
+			"custom_length": flt(match.balance_length),
+			"custom_width": flt(match.balance_width),
+			"custom_sec_qty": flt(match.balance_sec_qty),
+		})
 
 
 def _batch_total_kg_all_wh(batch_no):
