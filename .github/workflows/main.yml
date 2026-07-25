@@ -85,6 +85,8 @@ jobs:
           bench init --skip-redis-config-generation --python "$(which python3)" --frappe-branch version-15 test-bench
           cd test-bench
           bench get-app erpnext --branch version-15
+          bench get-app hrms --branch version-15
+          bench get-app india_compliance --branch version-15
           bench get-app manufyxinvenzaerp "$GITHUB_WORKSPACE/manufyxinvenzaerp"
 
       - name: Configure site + install apps
@@ -100,6 +102,9 @@ jobs:
             --no-mariadb-socket
           bench --site test-site.local install-app erpnext
           bench --site test-site.local execute erpnext.setup.setup_wizard.operations.install_fixtures.install --kwargs '{"country": "India"}'
+          bench --site test-site.local execute frappe.desk.page.setup_wizard.install_fixtures.install
+          bench --site test-site.local install-app hrms
+          bench --site test-site.local install-app india_compliance
           bench --site test-site.local install-app manufyxinvenzaerp
 
       - name: Run test suite

@@ -1402,6 +1402,7 @@ def create_item_custom_fields():
                 "options": "Item Group",
                 "insert_after": "custom_material_spec",
                 "reqd": 1,
+                "default": "All Item Groups",
                 "description": "Primary category determining calculation method",
             },
             {

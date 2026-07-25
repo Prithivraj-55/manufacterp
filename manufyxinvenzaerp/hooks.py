@@ -277,7 +277,14 @@ override_doctype_dashboards = {
 # Testing
 # -------
 
-# before_tests = "manufyxinvenzaerp.install.before_tests"
+# frappe.get_hooks("before_tests", app_name=app) only fires the hook registered by the
+# app under test -- india_compliance's own before_tests (which sets
+# frappe.flags.skip_test_records=True and seeds GST-compliant fixtures) never runs when
+# testing this app, so frappe falls back to its generic test data. That generic data
+# leaves Item Tax Template at india_compliance's own default (gst_treatment="Taxable",
+# gst_rate=0), which india_compliance's own validation then rejects. Delegating to the
+# same setup used when testing india_compliance directly avoids the conflict.
+before_tests = "india_compliance.tests.before_tests"
 
 # Overriding Methods
 # ------------------------------
