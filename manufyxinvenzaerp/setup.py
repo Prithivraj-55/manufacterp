@@ -1228,7 +1228,22 @@ function _so_show_table_popup(frm, fieldname) {
 """.strip()
 
 
+def create_default_warehouse_types():
+    """Ensure the Warehouse Type master records ERPNext's own
+    Company.create_default_warehouses() links to already exist. Core creates a
+    "Goods In Transit" warehouse with warehouse_type="Transit" for every new
+    company, and Frappe's Link validation fails outright if that Warehouse Type
+    record doesn't exist yet -- so this must run before any Company can be
+    created, whether that's a real company on a live site or a test-runner
+    fixture on a fresh install."""
+    for wt in ["Stores", "Work In Progress", "Finished Goods", "Transit"]:
+        if not frappe.db.exists("Warehouse Type", wt):
+            frappe.get_doc({"doctype": "Warehouse Type", "name": wt}).insert(ignore_permissions=True)
+    frappe.db.commit()
+
+
 def after_install():
+    create_default_warehouse_types()
     create_item_custom_fields()
     create_item_client_script()
     create_purchase_order_custom_fields()
@@ -1280,6 +1295,7 @@ def after_install():
 
 
 def after_migrate():
+    create_default_warehouse_types()
     create_item_custom_fields()
     create_item_client_script()
     create_purchase_order_custom_fields()
