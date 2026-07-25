@@ -35,7 +35,7 @@ def _find_or_create_mr():
     mr.custom_material_planning = MP_NAME
     mr.append("items", {"item_code": item, "qty": 1, "uom": uom, "schedule_date": today()})
     mr.insert(ignore_permissions=True)
-    frappe.db.set_value("Material Planning", MP_NAME, "status", "Material Request Created")
+    frappe.db.set_value("Material Planning", MP_NAME, "planning_status", "Material Request Created")
     frappe.db.commit()
     return mr.name
 
@@ -48,7 +48,7 @@ def _cancel_all_mrs():
     )
     for mr in mrs:
         frappe.db.set_value("Material Request", mr.name, "status", "Cancelled")
-    frappe.db.set_value("Material Planning", MP_NAME, "status", "Draft")
+    frappe.db.set_value("Material Planning", MP_NAME, "planning_status", "Draft")
     frappe.db.commit()
 
 
@@ -96,7 +96,7 @@ class TestMaterialRequestEdgeCases(unittest.TestCase):
         mr_doc = frappe.get_doc("Material Request", self.mr_name)
         unlink_material_request_on_cancel(mr_doc)
 
-        mp_status = frappe.db.get_value("Material Planning", MP_NAME, "status")
+        mp_status = frappe.db.get_value("Material Planning", MP_NAME, "planning_status")
         docstatus = frappe.db.get_value("Material Planning", MP_NAME, "docstatus")
         expected = "Submitted" if docstatus == 1 else "Draft"
         self.assertEqual(mp_status, expected, f"MP status should revert to {expected}")
@@ -136,7 +136,7 @@ class TestMaterialRequestEdgeCases(unittest.TestCase):
             self.skipTest("No MR to test")
         mr_doc = frappe.get_doc("Material Request", self.mr_name)
         unlink_material_request_on_cancel(mr_doc)
-        mp_status = frappe.db.get_value("Material Planning", MP_NAME, "status")
+        mp_status = frappe.db.get_value("Material Planning", MP_NAME, "planning_status")
         docstatus = frappe.db.get_value("Material Planning", MP_NAME, "docstatus")
         expected = "Submitted" if docstatus == 1 else "Draft"
         self.assertEqual(mp_status, expected)
