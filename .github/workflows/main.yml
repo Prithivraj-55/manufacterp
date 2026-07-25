@@ -31,31 +31,56 @@ jobs:
           --health-timeout=5s
           --health-retries=10
 
+      redis-cache:
+        image: redis:alpine
+        ports:
+          - 13000:6379
+
+      redis-queue:
+        image: redis:alpine
+        ports:
+          - 11000:6379
+
     steps:
+      - name: Notify Telegram - Deployment started
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT_ID}" \
+            --data-urlencode "text=Deployment process initiated for Manufyxinvenza"
+
       - name: Checkout code
+        id: checkout
         uses: actions/checkout@v4
         with:
           path: manufyxinvenzaerp
 
       - name: Setup Python
+        id: setup-python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Setup Node
+        id: setup-node
         uses: actions/setup-node@v4
         with:
           node-version: "18"
 
       - name: Install system dependencies
+        id: install-sysdeps
         run: |
           sudo apt-get update
           sudo apt-get install -y redis-server wkhtmltopdf mariadb-client libmysqlclient-dev
 
       - name: Install bench
+        id: install-bench
         run: pip install frappe-bench
 
       - name: Init bench + get apps
+        id: init-bench
         run: |
           bench init --skip-redis-config-generation --python "$(which python3)" --frappe-branch version-15 test-bench
           cd test-bench
@@ -64,6 +89,7 @@ jobs:
           cp -r "$GITHUB_WORKSPACE/manufyxinvenzaerp" apps/manufyxinvenzaerp
 
       - name: Configure site + install apps
+        id: configure-site
         working-directory: test-bench
         run: |
           bench set-mariadb-host 127.0.0.1
@@ -77,8 +103,45 @@ jobs:
           bench --site test-site.local install-app manufyxinvenzaerp
 
       - name: Run test suite
+        id: run-tests
         working-directory: test-bench
         run: bench --site test-site.local run-tests --app manufyxinvenzaerp
+
+      - name: Notify Telegram - Test environment completed
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT_ID}" \
+            --data-urlencode "text=Completed test environment, moving to live server update"
+
+      - name: Notify Telegram - Issue detected
+        if: failure()
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          STEPS_JSON: ${{ toJSON(steps) }}
+        run: |
+          FAILED_ID=$(echo "$STEPS_JSON" | jq -r 'to_entries[] | select(.value.outcome=="failure") | .key' | head -n1)
+
+          case "$FAILED_ID" in
+            checkout) STEP_DESC="Checkout code" ;;
+            setup-python) STEP_DESC="Setup Python" ;;
+            setup-node) STEP_DESC="Setup Node" ;;
+            install-sysdeps) STEP_DESC="Install system dependencies" ;;
+            install-bench) STEP_DESC="Install bench" ;;
+            init-bench) STEP_DESC="Init bench + get apps" ;;
+            configure-site) STEP_DESC="Configure site + install apps" ;;
+            run-tests) STEP_DESC="Run test suite" ;;
+            *) STEP_DESC="Unknown step" ;;
+          esac
+
+          MESSAGE="Issue: ${STEP_DESC} process failed. Remaining steps stopped, deploy will not run."
+
+          curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT_ID}" \
+            --data-urlencode "text=${MESSAGE}"
 
   # ── Deploy ───────────────────────────────────────────────────────────────────
   deploy:
@@ -88,9 +151,11 @@ jobs:
 
     steps:
       - name: Checkout code
+        id: checkout-deploy
         uses: actions/checkout@v4
 
       - name: Deploy to Frappe Server
+        id: ssh-deploy
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -199,3 +264,33 @@ jobs:
 
             # ── Old log cleanup (keep last 20 deploys only) ──────────────────
             cd "$LOG_DIR" && ls -t | tail -n +21 | xargs -r rm --
+
+      - name: Notify Telegram - Deploy completed
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT_ID}" \
+            --data-urlencode "text=Live deploy completed"
+
+      - name: Notify Telegram - Issue detected
+        if: failure()
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          STEPS_JSON: ${{ toJSON(steps) }}
+        run: |
+          FAILED_ID=$(echo "$STEPS_JSON" | jq -r 'to_entries[] | select(.value.outcome=="failure") | .key' | head -n1)
+
+          case "$FAILED_ID" in
+            checkout-deploy) STEP_DESC="Checkout code" ;;
+            ssh-deploy) STEP_DESC="Live server update (SSH deploy)" ;;
+            *) STEP_DESC="Unknown step" ;;
+          esac
+
+          MESSAGE="Issue: ${STEP_DESC} process failed. Remaining steps stopped."
+
+          curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT_ID}" \
+            --data-urlencode "text=${MESSAGE}"
