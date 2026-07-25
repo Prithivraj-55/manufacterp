@@ -9,6 +9,7 @@
   "source_doctype",
   "job_card",
   "supplier_operation_entry",
+  "purchase_receipt",
   "operation",
   "round_no",
   "call_date",
@@ -19,13 +20,19 @@
   "sales_order",
   "customer",
   "supplier",
-  "section_break_result",
+  "section_break_status",
   "status",
+  "feedback",
+  "overall_remarks",
+  "inspection_complete_date",
+  "section_break_result",
   "total_checked_qty",
   "cleared_qty",
   "rework_qty",
   "column_break_result",
   "rework_remarks",
+  "section_break_pr_items",
+  "items",
   "amended_from"
  ],
  "fields": [
@@ -39,7 +46,7 @@
    "fieldname": "source_doctype",
    "fieldtype": "Select",
    "label": "Source Doctype",
-   "options": "Job Card\nSupplier Operation Entry",
+   "options": "Job Card\nSupplier Operation Entry\nPurchase Receipt",
    "read_only": 1,
    "reqd": 1
   },
@@ -58,6 +65,14 @@
    "options": "Supplier Operation Entry",
    "read_only": 1,
    "mandatory_depends_on": "eval:doc.source_doctype==\"Supplier Operation Entry\""
+  },
+  {
+   "fieldname": "purchase_receipt",
+   "fieldtype": "Link",
+   "label": "Purchase Receipt",
+   "options": "Purchase Receipt",
+   "read_only": 1,
+   "mandatory_depends_on": "eval:doc.source_doctype==\"Purchase Receipt\""
   },
   {
    "fieldname": "operation",
@@ -128,29 +143,56 @@
    "read_only": 1
   },
   {
-   "fieldname": "section_break_result",
+   "fieldname": "section_break_status",
    "fieldtype": "Section Break",
-   "label": "Inspection Result"
+   "label": "Result"
   },
   {
    "fieldname": "status",
    "fieldtype": "Select",
    "label": "Status",
-   "options": "\nOk\nNot Ok",
+   "options": "\nOpen\nWorking\nCompleted",
+   "default": "Open",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "feedback",
+   "fieldtype": "Select",
+   "label": "Feedback",
+   "options": "\nOk\nNot Ok",
+   "mandatory_depends_on": "eval:doc.status==\"Completed\""
+  },
+  {
+   "fieldname": "overall_remarks",
+   "fieldtype": "Small Text",
+   "label": "Overall Remarks"
+  },
+  {
+   "fieldname": "inspection_complete_date",
+   "fieldtype": "Date",
+   "label": "Inspection Complete Date",
+   "read_only": 1,
+   "no_copy": 1,
+   "description": "Set automatically when this Inspection Entry is submitted."
+  },
+  {
+   "fieldname": "section_break_result",
+   "fieldtype": "Section Break",
+   "label": "Inspection Result",
+   "depends_on": "eval:doc.source_doctype!=\"Purchase Receipt\""
   },
   {
    "fieldname": "total_checked_qty",
    "fieldtype": "Float",
    "label": "Total Checked Qty",
-   "reqd": 1
+   "mandatory_depends_on": "eval:doc.source_doctype!=\"Purchase Receipt\""
   },
   {
    "fieldname": "cleared_qty",
    "fieldtype": "Float",
    "label": "Cleared Qty",
-   "reqd": 1
+   "mandatory_depends_on": "eval:doc.source_doctype!=\"Purchase Receipt\""
   },
   {
    "fieldname": "rework_qty",
@@ -167,6 +209,18 @@
    "fieldtype": "Small Text",
    "label": "Rework Remarks",
    "mandatory_depends_on": "eval:doc.rework_qty>0"
+  },
+  {
+   "fieldname": "section_break_pr_items",
+   "fieldtype": "Section Break",
+   "label": "Inspected Items",
+   "depends_on": "eval:doc.source_doctype==\"Purchase Receipt\""
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Items",
+   "options": "Inspection Entry Item"
   },
   {
    "fieldname": "amended_from",

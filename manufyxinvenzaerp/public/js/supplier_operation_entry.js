@@ -1,8 +1,6 @@
-const SOE_INSPECTION_OPERATIONS = ["Fitup Inspection", "Final Inspection"];
-
 frappe.ui.form.on("Supplier Operation Entry", {
 	refresh(frm) {
-		if (frm.is_new() || !SOE_INSPECTION_OPERATIONS.includes(frm.doc.operation)) return;
+		if (frm.is_new() || !frm.doc.custom_inspection_mandatory) return;
 
 		const log = frm.doc.custom_inspection_call_log || [];
 		const pending = log.find(r => r.round_status === "Pending");

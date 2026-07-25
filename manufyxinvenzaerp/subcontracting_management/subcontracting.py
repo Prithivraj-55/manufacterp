@@ -2,7 +2,7 @@ from collections import defaultdict
 
 import frappe
 from frappe import _
-from frappe.utils import flt, today
+from frappe.utils import cint, flt, today
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -26,6 +26,13 @@ def get_sco_dashboard_data(data):
 def create_sco_from_production_plan(pp_name):
     """Create a Draft Subcontracting Order from a submitted Production Plan.
     Populates drawing items and total weight from Material Planning reservations.
+
+    Subcontracting Order is the single production-execution doctype for all three
+    Production Plan Types (Internal Job / Supplier Job / Supplier with Material) --
+    Work Order is no longer created from Production Plan at all (client change
+    request Phase 0.4/4.1). Process Planning rows can be Subcontractor and/or
+    Internal Jobcard in any mix; Supplier Operation Entry is the universal
+    one-row-per-operation execution document regardless of who performs it.
     """
     if not frappe.has_permission("Subcontracting Order", "create"):
         frappe.throw(_("Not permitted to create Subcontracting Orders"), frappe.PermissionError)
@@ -43,10 +50,11 @@ def create_sco_from_production_plan(pp_name):
 
     pp = frappe.get_doc("Production Plan", pp_name)
 
-    sub_ops = [r for r in (pp.custom_process_planning or []) if r.work_type == "Subcontractor"]
-    if not sub_ops:
-        frappe.throw(_("No Subcontractor operations found in the Process Planning table."))
-    if not pp.custom_vendor_contractor:
+    all_ops = pp.custom_process_planning or []
+    if not all_ops:
+        frappe.throw(_("No operations found in the Process Planning table."))
+    has_sub = any(r.work_type == "Subcontractor" for r in all_ops)
+    if has_sub and not pp.custom_vendor_contractor:
         frappe.throw(_("Please set the Vendor/Contractor on the Production Plan before creating a Subcontracting Order."))
 
     wo_list = frappe.get_all("Work Order", filters={"production_plan": pp_name}, limit=1, pluck="name")
@@ -131,7 +139,7 @@ def create_sco_from_production_plan(pp_name):
         "company": company,
         "currency": currency,
         "conversion_rate": 1,
-        "supplier": pp.custom_vendor_contractor,
+        "supplier": pp.custom_vendor_contractor or "",
         "schedule_date": today(),
         "items": [{
             "item_code": fg_item,
@@ -1303,29 +1311,40 @@ def _build_soe_drawing_rows(sco, seq_idx):
 
 
 def _create_soes_for_sco(sco):
-    """Create one SOE per Subcontractor operation in the linked Production Plan.
+    """Create one SOE per operation (Subcontractor or Internal Jobcard) in the linked
+    Production Plan -- Supplier Operation Entry is the universal one-row-per-operation
+    execution document regardless of who performs it (client change request Phase
+    0.4/4.1: Work Order/Job Card no longer used for internal operations at all).
     Idempotent — skips any sequence_id that already has a live SOE.
     Op-1 gets available_to_consume_kg from custom_transferred_weight_kg (0 if not yet
     transferred). Each SOE is populated with drawing_details rows so drawing-level
-    Nos tracking is available from the start.
+    Nos tracking is available from the start. Internal Jobcard rows get no
+    supplier/supplier_warehouse (executed by the internal team, not a supplier).
+
+    Process Planning rows with Create Operation unchecked (client change request
+    Phase 4.2) are dropped entirely before numbering -- they never get an SOE and
+    are treated as if they don't exist for sequencing purposes, so the
+    available-to-consume chain correctly skips straight from the operation before
+    to the operation after. Create Operation defaults to enabled; only an explicit
+    uncheck (0) disables a row -- unset/None is treated as enabled.
     """
     pp_name = sco.custom_production_plan if hasattr(sco, "custom_production_plan") else sco.get("custom_production_plan")
     if not pp_name:
         return []
 
     pp = frappe.get_doc("Production Plan", pp_name)
-    sub_ops = sorted(
-        [r for r in (pp.custom_process_planning or []) if r.work_type == "Subcontractor"],
-        key=lambda r: r.idx,
-    )
-    if not sub_ops:
+    all_ops = [
+        r for r in sorted(pp.custom_process_planning or [], key=lambda r: r.idx)
+        if r.get("create_operation") is None or cint(r.get("create_operation"))
+    ]
+    if not all_ops:
         return []
 
     transferred_weight = flt(sco.get("custom_transferred_weight_kg") or 0)
     created_soes = []
     prev_soe_name = None
 
-    for seq_idx, op_row in enumerate(sub_ops, start=1):
+    for seq_idx, op_row in enumerate(all_ops, start=1):
         existing = frappe.db.get_value(
             "Supplier Operation Entry",
             {"subcontracting_order": sco.name, "sequence_id": seq_idx, "docstatus": ["!=", 2]},
@@ -1344,15 +1363,17 @@ def _create_soes_for_sco(sco):
             available_to_consume = prev_consumed
 
         drawing_rows = _build_soe_drawing_rows(sco, seq_idx)
+        is_subcontractor = op_row.work_type == "Subcontractor"
 
         soe = frappe.get_doc({
             "doctype": "Supplier Operation Entry",
             "subcontracting_order": sco.name,
             "production_plan": pp_name,
             "operation": op_row.operation_name,
+            "custom_inspection_mandatory": 1 if cint(op_row.inspection_mandatory) else 0,
             "sequence_id": seq_idx,
-            "supplier": sco.supplier,
-            "supplier_warehouse": sco.supplier_warehouse or "",
+            "supplier": sco.supplier if is_subcontractor else "",
+            "supplier_warehouse": (sco.supplier_warehouse or "") if is_subcontractor else "",
             "status": "Open",
             "available_to_consume_kg": flt(available_to_consume, 3),
             "total_consumed_kg": 0,

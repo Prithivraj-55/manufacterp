@@ -11,6 +11,7 @@
   "production_plan",
   "column_break_main",
   "operation",
+  "custom_inspection_mandatory",
   "sequence_id",
   "supplier",
   "supplier_warehouse",
@@ -72,6 +73,14 @@
    "options": "Operation",
    "reqd": 1,
    "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "custom_inspection_mandatory",
+   "fieldtype": "Check",
+   "label": "Inspection Mandatory",
+   "read_only": 1,
+   "description": "Copied from the source Process Planning row's Inspection Mandatory checkbox when this Supplier Operation Entry was created."
   },
   {
    "fieldname": "sequence_id",
@@ -157,7 +166,7 @@
    "fieldname": "custom_inspection_tab",
    "fieldtype": "Tab Break",
    "label": "Inspection",
-   "depends_on": "eval:[\"Fitup Inspection\",\"Final Inspection\"].includes(doc.operation)"
+   "depends_on": "eval:doc.custom_inspection_mandatory"
   },
   {
    "fieldname": "custom_inspection_status",
@@ -167,19 +176,19 @@
    "default": "Open",
    "read_only": 1,
    "no_copy": 1,
-   "depends_on": "eval:[\"Fitup Inspection\",\"Final Inspection\"].includes(doc.operation)"
+   "depends_on": "eval:doc.custom_inspection_mandatory"
   },
   {
    "fieldname": "custom_inspection_call_date",
    "fieldtype": "Date",
    "label": "Inspection Call Date",
-   "depends_on": "eval:[\"Fitup Inspection\",\"Final Inspection\"].includes(doc.operation)"
+   "depends_on": "eval:doc.custom_inspection_mandatory"
   },
   {
    "fieldname": "custom_inspection_call_log_section",
    "fieldtype": "Section Break",
    "label": "Inspection Call Log",
-   "depends_on": "eval:[\"Fitup Inspection\",\"Final Inspection\"].includes(doc.operation)"
+   "depends_on": "eval:doc.custom_inspection_mandatory"
   },
   {
    "fieldname": "custom_inspection_call_log",

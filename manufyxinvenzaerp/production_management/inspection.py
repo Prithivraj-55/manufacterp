@@ -1,22 +1,54 @@
-"""Inspection Call / QC workflow shared by Job Card and Supplier Operation Entry
-for the two QC checkpoint operations: "Fitup Inspection" and "Final Inspection".
+"""Inspection Call / QC workflow shared by Job Card, Supplier Operation Entry, and
+Purchase Receipt.
 
-Manufacturing logs an Inspection Call Date on the Job Card/SOE (round-tracked in
-the `custom_inspection_call_log` child table); QC records the actual result on a
-separate "Inspection Entry" document. Unresolved (rework) qty keeps the parent's
-`custom_inspection_status` at "Working" until a later round fully clears it.
-# SHARED_JC_SOE_INSPECTION: every function below treats Job Card and Supplier
-# Operation Entry identically, per their shared 1:1 operation-per-document shape.
+For Supplier Operation Entry (one document = one operation instance), inspection
+applies when the source Process Planning row's Inspection Mandatory checkbox was
+set — copied onto the SOE at creation time as `custom_inspection_mandatory`
+(client change request Phase 4.3; supersedes the old hardcoded "Fitup
+Inspection"/"Final Inspection" operation-name check, which is kept only as
+Job Card's fallback below -- Job Card's own inspection hooks are disabled
+per Phase 0.4, so that branch is unreachable dead code, not a live path).
+Submitting an SOE ("operation completion") only requires that at least one
+Inspection Call has been logged for it -- not that the linked Inspection Entry
+has reached "Completed" -- since the client wants the QC team notified/engaged
+before an operation is marked done, not a full sign-off gate. For Purchase
+Receipt (one document = many item lines), inspection is opt-in per Item
+(`custom_inspection_required`) and results are recorded per line in Inspection
+Entry's `items` child table rather than as a single scalar result; its own gate
+is unchanged and still requires `custom_inspection_status == "Completed"`.
+
+Manufacturing/Purchasing logs an Inspection Call Date on the source document
+(round-tracked in the shared `custom_inspection_call_log` child table); QC
+records the actual result on a separate "Inspection Entry" document, including
+its own `status` (Open/Working/Completed) set manually by the inspector before
+submitting. On submit, the parent's `custom_inspection_status` simply mirrors
+that entry's `status` — it is not independently re-derived from rework/reject
+qty, since the inspector's own status choice is authoritative.
 """
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import flt, nowdate
 
 INSPECTION_OPERATIONS = ("Fitup Inspection", "Final Inspection")
 
 
-# ─── Job Card / SOE hooks ────────────────────────────────────────────────────
+# ─── Applicability ────────────────────────────────────────────────────────────
+
+def _inspection_applicable(doc):
+	"""Whether the Inspection Call workflow applies to this document at all."""
+	if doc.doctype == "Purchase Receipt":
+		return any(
+			frappe.db.get_value("Item", row.item_code, "custom_inspection_required")
+			for row in (doc.items or [])
+		)
+	if doc.doctype == "Supplier Operation Entry":
+		return bool(doc.get("custom_inspection_mandatory"))
+	# Job Card only -- dead code path, its inspection hooks are disabled (Phase 0.4).
+	return doc.operation in INSPECTION_OPERATIONS
+
+
+# ─── Job Card / SOE / Purchase Receipt hooks ─────────────────────────────────
 
 def validate_job_card_inspection(doc, method):
 	_validate_inspection_call_log(doc)
@@ -26,8 +58,12 @@ def validate_soe_inspection(doc, method):
 	_validate_inspection_call_log(doc)
 
 
+def validate_purchase_receipt_inspection(doc, method):
+	_validate_inspection_call_log(doc)
+
+
 def _validate_inspection_call_log(doc):
-	if doc.operation not in INSPECTION_OPERATIONS:
+	if not _inspection_applicable(doc):
 		return
 	for idx, row in enumerate(doc.get("custom_inspection_call_log") or [], start=1):
 		if not row.round_no:
@@ -43,7 +79,15 @@ def before_submit_soe_inspection_gate(doc, method):
 
 
 def _before_submit_inspection_gate(doc):
-	if doc.operation not in INSPECTION_OPERATIONS:
+	if not _inspection_applicable(doc):
+		return
+	if doc.doctype == "Supplier Operation Entry":
+		if not (doc.get("custom_inspection_call_log") or []):
+			frappe.throw(
+				_("At least one Inspection Call must be created before submitting this {0} for the "
+				  "<b>{1}</b> operation.").format(doc.doctype, doc.operation),
+				title=_("Inspection Call Required"),
+			)
 		return
 	if (doc.custom_inspection_status or "") != "Completed":
 		frappe.throw(
@@ -53,28 +97,29 @@ def _before_submit_inspection_gate(doc):
 		)
 
 
-# ─── Whitelisted API (called from job_card.js / supplier_operation_entry.js) ─
+# ─── Whitelisted API (called from job_card.js / supplier_operation_entry.js /
+#     purchase_receipt.js) ────────────────────────────────────────────────────
 
 @frappe.whitelist()
-def add_inspection_call(source_doctype, source_name):
-	"""Log a new inspection call round from the source doc's
-	`custom_inspection_call_date` field. Blocked while a round is already
-	pending (i.e. its Inspection Entry hasn't been submitted yet)."""
+def add_inspection_call(source_doctype, source_name, call_date=None):
+	"""Log a new inspection call round. `call_date` is normally passed in
+	directly (Purchase Receipt's popup-driven flow, which doesn't persist a
+	separate call-date field on the document); falls back to the source
+	doc's own `custom_inspection_call_date` field for Job Card/SOE. Blocked
+	while a round is already logged and not yet Completed."""
 	doc = _get_source_doc(source_doctype, source_name)
 
-	if not doc.custom_inspection_call_date:
-		frappe.throw(_("Set an Inspection Call Date first."))
+	call_date = call_date or doc.custom_inspection_call_date
+	if not call_date:
+		frappe.throw(_("Select an Inspection Call Date."))
 
 	existing = doc.get("custom_inspection_call_log") or []
-	if any(row.round_status == "Pending" for row in existing):
-		frappe.throw(
-			_("An inspection round is already pending. Create and submit its Inspection "
-			  "Entry before logging a new call.")
-		)
+	if any(row.round_status != "Completed" for row in existing):
+		frappe.throw(_("Inspection already in progress, complete it to create new inspection."))
 
 	doc.append("custom_inspection_call_log", {
 		"round_no": len(existing) + 1,
-		"call_date": doc.custom_inspection_call_date,
+		"call_date": call_date,
 		"round_status": "Pending",
 	})
 	if doc.custom_inspection_status == "Open":
@@ -82,6 +127,26 @@ def add_inspection_call(source_doctype, source_name):
 	doc.save()
 
 	return doc.name
+
+
+@frappe.whitelist()
+def update_inspection_call_date(source_doctype, source_name, call_date):
+	"""Update the call date of the most recently logged inspection round, and
+	propagate it onto the linked Inspection Entry (if one has been created)."""
+	if not call_date:
+		frappe.throw(_("Select a date."))
+
+	doc = _get_source_doc(source_doctype, source_name)
+	log = doc.get("custom_inspection_call_log") or []
+	if not log:
+		frappe.throw(_("No inspection call has been logged yet."))
+
+	last_row = log[-1]
+	frappe.db.set_value("Inspection Call Log", last_row.name, "call_date", call_date)
+	if last_row.inspection_entry:
+		frappe.db.set_value("Inspection Entry", last_row.inspection_entry, "call_date", call_date)
+
+	return call_date
 
 
 @frappe.whitelist()
@@ -97,39 +162,54 @@ def create_inspection_entry(source_doctype, source_name):
 			pending_row = row
 			break
 	if not pending_row:
-		frappe.throw(
-			_("Set an Inspection Call Date and click <b>Add Inspection Call</b> before "
-			  "creating an Inspection Entry.")
-		)
+		frappe.throw(_("Click <b>Create Inspection</b> to log a call before creating an Inspection Entry."))
 
 	sales_order, customer = _resolve_traceability(doc)
 
-	if source_doctype == "Job Card":
-		work_order = doc.work_order
-		production_plan = frappe.db.get_value("Work Order", work_order, "production_plan") if work_order else ""
-		subcontracting_order = ""
-		supplier = ""
-	else:
-		work_order = doc.work_order
-		production_plan = doc.production_plan
-		subcontracting_order = doc.subcontracting_order
-		supplier = doc.supplier
-
-	entry = frappe.get_doc({
+	entry_data = {
 		"doctype": "Inspection Entry",
 		"source_doctype": source_doctype,
-		"job_card": source_name if source_doctype == "Job Card" else None,
-		"supplier_operation_entry": source_name if source_doctype == "Supplier Operation Entry" else None,
-		"operation": doc.operation,
 		"round_no": pending_row.round_no,
 		"call_date": pending_row.call_date,
-		"work_order": work_order,
-		"subcontracting_order": subcontracting_order,
-		"production_plan": production_plan,
 		"sales_order": sales_order,
 		"customer": customer,
-		"supplier": supplier,
-	}).insert(ignore_mandatory=True)
+	}
+
+	if source_doctype == "Purchase Receipt":
+		entry_data["purchase_receipt"] = source_name
+		entry_data["supplier"] = doc.supplier
+		entry_data["items"] = [
+			{
+				"item_code": row.item_code,
+				"qty": row.qty,
+				"pr_item_row": row.name,
+			}
+			for row in doc.items
+			if frappe.db.get_value("Item", row.item_code, "custom_inspection_required")
+		]
+	else:
+		if source_doctype == "Job Card":
+			work_order = doc.work_order
+			production_plan = frappe.db.get_value("Work Order", work_order, "production_plan") if work_order else ""
+			subcontracting_order = ""
+			supplier = ""
+		else:
+			work_order = doc.work_order
+			production_plan = doc.production_plan
+			subcontracting_order = doc.subcontracting_order
+			supplier = doc.supplier
+
+		entry_data.update({
+			"job_card": source_name if source_doctype == "Job Card" else None,
+			"supplier_operation_entry": source_name if source_doctype == "Supplier Operation Entry" else None,
+			"operation": doc.operation,
+			"work_order": work_order,
+			"subcontracting_order": subcontracting_order,
+			"production_plan": production_plan,
+			"supplier": supplier,
+		})
+
+	entry = frappe.get_doc(entry_data).insert(ignore_mandatory=True)
 
 	frappe.db.set_value("Inspection Call Log", pending_row.name, "inspection_entry", entry.name)
 
@@ -137,11 +217,25 @@ def create_inspection_entry(source_doctype, source_name):
 
 
 def on_submit_inspection_entry(doc, method):
-	"""Propagate the QC result back to the parent Job Card/SOE: mark the
-	round Completed and set the overall Inspection Status — Completed once
-	fully cleared, otherwise Working (awaiting the next call/round)."""
+	"""Propagate the QC result back to the parent Job Card/SOE/Purchase Receipt:
+	mark the round Completed on the call log, and set the overall Inspection
+	Status to whatever the user manually set on this Inspection Entry's own
+	`status` field (Open/Working/Completed) — the parent mirrors the entry,
+	it does not re-derive Working/Completed on its own from reject/rework
+	qty, since the user's own status choice is authoritative. For a Purchase
+	Receipt, also push each line's accept/reject qty + remarks down onto
+	that Purchase Receipt Item row, and (client change request Phase 6.3) the
+	same per-row remarks onto the specific Batch that row's inspection was
+	actually about -- Job Card/SOE inspections have no batch concept (they
+	concern an in-progress manufacturing operation, not a specific purchased
+	material batch), so this only applies to the Purchase Receipt branch."""
 	parent_doctype = doc.source_doctype
-	parent_name = doc.job_card if parent_doctype == "Job Card" else doc.supplier_operation_entry
+	if parent_doctype == "Job Card":
+		parent_name = doc.job_card
+	elif parent_doctype == "Supplier Operation Entry":
+		parent_name = doc.supplier_operation_entry
+	else:
+		parent_name = doc.purchase_receipt
 	if not parent_name:
 		return
 
@@ -154,23 +248,70 @@ def on_submit_inspection_entry(doc, method):
 	if not rows:
 		return
 
+	if parent_doctype == "Purchase Receipt":
+		remarks = doc.overall_remarks or "; ".join(row.remarks for row in doc.items if row.remarks) or ""
+		for row in doc.items:
+			if not row.pr_item_row:
+				continue
+			frappe.db.set_value(
+				"Purchase Receipt Item",
+				row.pr_item_row,
+				{
+					"custom_inspection_accepted_qty": flt(row.accept_qty),
+					"custom_inspection_rejected_qty": flt(row.reject_qty),
+					"custom_inspection_remarks": row.remarks or "",
+				},
+			)
+			for row_batch_no in _resolve_pr_item_batch_nos(row.pr_item_row):
+				frappe.db.set_value("Batch", row_batch_no, "custom_batch_remarks", row.remarks or remarks)
+	else:
+		remarks = doc.overall_remarks or doc.rework_remarks or ""
+
+	new_status = doc.status or "Working"
+
 	frappe.db.set_value(
 		"Inspection Call Log",
 		rows[0].name,
-		{"round_status": "Completed", "remarks": doc.rework_remarks or ""},
+		{"round_status": "Completed", "remarks": remarks},
 	)
-	new_status = "Working" if flt(doc.rework_qty) > 0 else "Completed"
 	frappe.db.set_value(parent_doctype, parent_name, "custom_inspection_status", new_status)
+	frappe.db.set_value("Inspection Entry", doc.name, "inspection_complete_date", nowdate())
 
 
 # ─── Private helpers ─────────────────────────────────────────────────────────
 
+def _resolve_pr_item_batch_nos(pr_item_row):
+	"""Batch(es) a Purchase Receipt Item row actually received, for the Batch
+	Remarks propagation (client change request Phase 6.3). This site's
+	Purchase Receipt Items use the v15 Serial and Batch Bundle model, not the
+	older direct `batch_no` column on the row (confirmed empty in practice --
+	receiving goes through `serial_and_batch_bundle` -> Serial and Batch
+	Entry), so resolve via the bundle's own entries; falls back to the row's
+	own `batch_no` first in case a caller ever inserts one directly (e.g.
+	`use_serial_batch_fields`). A row can span more than one batch if the
+	bundle was split, so returns a list."""
+	row = frappe.db.get_value(
+		"Purchase Receipt Item", pr_item_row, ["batch_no", "serial_and_batch_bundle"], as_dict=True
+	)
+	if not row:
+		return []
+	if row.batch_no:
+		return [row.batch_no]
+	if row.serial_and_batch_bundle:
+		return frappe.get_all(
+			"Serial and Batch Entry", filters={"parent": row.serial_and_batch_bundle}, pluck="batch_no"
+		)
+	return []
+
+
 def _get_source_doc(source_doctype, source_name):
-	if source_doctype not in ("Job Card", "Supplier Operation Entry"):
+	if source_doctype not in ("Job Card", "Supplier Operation Entry", "Purchase Receipt"):
 		frappe.throw(_("Invalid source doctype {0}").format(source_doctype))
 
 	doc = frappe.get_doc(source_doctype, source_name)
-	if doc.operation not in INSPECTION_OPERATIONS:
+	if not _inspection_applicable(doc):
+		if source_doctype == "Purchase Receipt":
+			frappe.throw(_("None of the items on this Purchase Receipt require inspection."))
 		frappe.throw(
 			_("This action is only available for the <b>Fitup Inspection</b> and "
 			  "<b>Final Inspection</b> operations.")
@@ -181,7 +322,17 @@ def _get_source_doc(source_doctype, source_name):
 def _resolve_traceability(doc):
 	"""Sales Order + Customer for a Job Card/SOE, via its drawing details
 	(both already carry a per-row `sales_order`), falling back to the linked
-	Work Order's `sales_order` field."""
+	Work Order's `sales_order` field. For a Purchase Receipt, via the first
+	item row's `custom_sales_order`."""
+	if doc.doctype == "Purchase Receipt":
+		sales_order = ""
+		for row in doc.items or []:
+			if row.get("custom_sales_order"):
+				sales_order = row.custom_sales_order
+				break
+		customer = frappe.db.get_value("Sales Order", sales_order, "customer") if sales_order else ""
+		return sales_order, customer
+
 	drawing_rows = doc.get("custom_drawing_details") or doc.get("drawing_details") or []
 	sales_order = ""
 	for row in drawing_rows:
