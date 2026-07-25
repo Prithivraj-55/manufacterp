@@ -56,13 +56,19 @@ class TestMaterialRequestEdgeCases(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        _cancel_all_mrs()
-        cls.mr_name = _find_or_create_mr()
+        try:
+            _cancel_all_mrs()
+            cls.mr_name = _find_or_create_mr()
+        except frappe.DoesNotExistError:
+            cls.mr_name = None
 
     def tearDown(self):
         frappe.db.rollback()
-        _cancel_all_mrs()
-        self.__class__.mr_name = _find_or_create_mr()
+        try:
+            _cancel_all_mrs()
+            self.__class__.mr_name = _find_or_create_mr()
+        except frappe.DoesNotExistError:
+            self.__class__.mr_name = None
 
     def _get_unavailable_items(self):
         mp = frappe.get_doc("Material Planning", MP_NAME)
