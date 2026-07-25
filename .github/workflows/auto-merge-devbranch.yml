@@ -22,7 +22,7 @@ jobs:
       - name: Create or reuse PR from devbranch to main
         id: pr
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           set -e
           EXISTING_PR=$(gh pr list --base main --head devbranch --state open --json number --jq '.[0].number')
@@ -44,6 +44,6 @@ jobs:
 
       - name: Merge PR into main
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           gh pr merge ${{ steps.pr.outputs.pr_number }} --merge --delete-branch=false
