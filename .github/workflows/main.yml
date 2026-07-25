@@ -86,7 +86,7 @@ jobs:
           cd test-bench
           bench get-app erpnext --branch version-15
           bench get-app hrms --branch version-15
-          bench get-app india_compliance --branch version-15
+          bench get-app india_compliance https://github.com/resilient-tech/india-compliance.git --branch version-15
           bench get-app manufyxinvenzaerp "$GITHUB_WORKSPACE/manufyxinvenzaerp"
 
       - name: Configure site + install apps
