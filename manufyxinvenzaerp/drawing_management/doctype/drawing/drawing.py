@@ -2,6 +2,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
+from manufyxinvenzaerp.utils.dimension_formula import calculate_qty
 
 STRUCTURALS_REQUIRED = ["length", "unit_weight", "sec_qty"]
 PLATES_REQUIRED = ["length", "width", "thickness", "unit_weight", "sec_qty"]
@@ -60,18 +61,10 @@ class Drawing(Document):
 
 def _recalculate_row_qty(row):
     group = row.parent_item_group
-    if group == "Structurals":
-        if row.length and row.unit_weight and row.sec_qty:
-            row.qty = (row.length / 1000) * row.unit_weight * row.sec_qty
-    elif group == "Plates":
-        if all(getattr(row, f, None) for f in PLATES_REQUIRED):
-            row.qty = (
-                (row.length / 1000)
-                * (row.width / 1000)
-                * row.thickness
-                * row.unit_weight
-                * row.sec_qty
-            )
+    if group in ("Structurals", "Plates"):
+        qty = calculate_qty(group, row.length, row.width, row.thickness, row.unit_weight, row.sec_qty)
+        if qty is not None:
+            row.qty = qty
     elif group == "Nuts and Bolts":
         if row.qty and row.unit_weight:
             row.sec_qty = flt(row.qty * row.unit_weight, 3)
@@ -84,18 +77,9 @@ def _recalculate_row_totals(row, no_of_qty):
         row.total_sec_qty = flt(row.total_qty * flt(row.unit_weight), 3)
         return
     row.total_sec_qty = flt(row.sec_qty) * no_of_qty
-    if group == "Structurals":
-        if row.length and row.unit_weight and row.total_sec_qty:
-            row.total_qty = flt((row.length / 1000) * row.unit_weight * row.total_sec_qty, 3)
-        else:
-            row.total_qty = 0
-    elif group == "Plates":
-        if all([row.length, row.width, row.thickness, row.unit_weight, row.total_sec_qty]):
-            row.total_qty = flt(
-                (row.length / 1000) * (row.width / 1000) * row.thickness * row.unit_weight * row.total_sec_qty, 3
-            )
-        else:
-            row.total_qty = 0
+    if group in ("Structurals", "Plates"):
+        total_qty = calculate_qty(group, row.length, row.width, row.thickness, row.unit_weight, row.total_sec_qty)
+        row.total_qty = flt(total_qty, 3) if total_qty is not None else 0
     else:
         row.total_qty = 0
 

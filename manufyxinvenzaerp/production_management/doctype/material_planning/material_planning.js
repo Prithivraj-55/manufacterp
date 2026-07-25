@@ -314,11 +314,15 @@ frappe.ui.form.on("Material Planning", {
 			// Reserve / Unreserve on Available Raw Materials (Exact Match)
 			_add_exact_match_reservation_buttons(frm);
 
-			// Action buttons on Unavailable Items
-			let $mr_btn = frm.fields_dict["unavailable_items"].grid.add_custom_button(
-				frappe.utils.icon("buying", "xs") + " " + __("Create Material Request"),
-				function () { _show_material_request_dialog(frm); }
-			);
+			// Create Material Request — moved from Unavailable Items to Consolidate
+			// Item (client change request Phase 2.4): Consolidate Item is now the
+			// purchasing-facing table, deduped by item_code across every drawing.
+			if (frm.fields_dict["consolidate_items"]) {
+				frm.fields_dict["consolidate_items"].grid.add_custom_button(
+					frappe.utils.icon("buying", "xs") + " " + __("Create Material Request"),
+					function () { _show_consolidate_material_request_dialog(frm); }
+				);
+			}
 
 			// Auto Purchase section — visible only when Manufyxinvenza Settings enables it
 			frappe.db.get_single_value("Manufyxinvenza Settings", "auto_purchase_from_material_planning")
@@ -1089,29 +1093,32 @@ frappe.ui.form.on("Material Planning", {
 			return;
 		}
 
-		// Check for an active Material Request linked to this plan before confirming
+		// Check for active Material Requests linked to this plan before confirming --
+		// lists ALL of them, not just the first found (a Material Planning can now
+		// have multiple, one per supplier, from the multi-supplier consolidated
+		// purchase flow).
 		let has_unavail = (frm.doc.unavailable_items || []).length;
 		let _check_mr_then_confirm = function() {
 			if (!has_unavail || frm.doc.__islocal) {
 				_show_confirm();
 				return;
 			}
-			frappe.db.get_value(
+			frappe.db.get_list(
 				"Material Request",
-				{ custom_material_planning: frm.doc.name, docstatus: ["!=", 2] },
-				"name",
-				function(r) {
-					if (r && r.name) {
-						frappe.msgprint({
-							title: __("Cannot Refetch Raw Materials"),
-							indicator: "red",
-							message: __("Material Request <b>{0}</b> is already created against Unavailable Items.<br>Cancel it first before refetching raw materials.", [r.name]),
-						});
-						return;
-					}
-					_show_confirm();
+				{ filters: { custom_material_planning: frm.doc.name, docstatus: ["!=", 2] }, fields: ["name"] }
+			).then(function(rows) {
+				if (rows && rows.length) {
+					let links = rows.map((r) =>
+						'<a href="/app/material-request/' + encodeURIComponent(r.name) + '">' + r.name + "</a>").join(", ");
+					frappe.msgprint({
+						title: __("Cannot Refetch Raw Materials"),
+						indicator: "red",
+						message: __("Material Request(s) {0} are already created against Unavailable Items.<br>Cancel them first before refetching raw materials.", [links]),
+					});
+					return;
 				}
-			);
+				_show_confirm();
+			});
 		};
 
 		let _show_confirm = function() {
@@ -1523,6 +1530,87 @@ function _build_material_request_dialog(frm, items) {
 	d.show();
 }
 
+// Material Request creation dialog — Consolidate Item version (client change
+// request Phase 2.4). Mirrors _show_material_request_dialog/_build_material_request_dialog
+// above, but sources rows from the deduped-by-item_code consolidate_items table
+// and posts to make_material_request_from_consolidate instead.
+function _show_consolidate_material_request_dialog(frm) {
+	let items = (frm.doc.consolidate_items || []).filter(r => r.item_code);
+	if (!items.length) {
+		frappe.msgprint(__("No consolidated items to request."));
+		return;
+	}
+	if (frm.is_dirty()) {
+		frm.save()
+			.then(function() { _build_consolidate_material_request_dialog(frm, items); })
+			.catch(function() { frappe.msgprint(__("Please save the document successfully before creating a Material Request.")); });
+	} else {
+		_build_consolidate_material_request_dialog(frm, items);
+	}
+}
+
+function _build_consolidate_material_request_dialog(frm, items) {
+	let fields = [
+		{
+			fieldname: "items_section",
+			fieldtype: "Section Break",
+			label: __("Select Items to Request"),
+			description: __("Tick the items you want to include in the Material Request."),
+		},
+	];
+
+	items.forEach(function (row, idx) {
+		let qty = flt(row.purchase_kg) || flt(row.required_kg);
+		fields.push({
+			fieldname: "item_" + idx,
+			fieldtype: "Check",
+			label: `${row.item_code} — ${row.item_name || ""} | Qty: ${qty.toFixed(3)} Kg`,
+			default: 1,
+		});
+	});
+
+	let d = new frappe.ui.Dialog({
+		title: __("Create Material Request"),
+		fields: fields,
+		primary_action_label: __("Create"),
+		primary_action(values) {
+			let selected = [];
+			items.forEach(function (row, idx) {
+				if (values["item_" + idx]) {
+					selected.push(row.item_code);
+				}
+			});
+
+			if (!selected.length) {
+				frappe.msgprint(__("Select at least one item."));
+				return;
+			}
+
+			frappe.call({
+				method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.make_material_request_from_consolidate",
+				args: {
+					material_planning_name: frm.doc.name,
+					selected_items: JSON.stringify(selected),
+				},
+				freeze: true,
+				freeze_message: __("Creating Material Request…"),
+				callback(r) {
+					if (r.message) {
+						d.hide();
+						frappe.show_alert({
+							message: __("Material Request {0} created.", [r.message]),
+							indicator: "green",
+						}, 5);
+						frappe.set_route("Form", "Material Request", r.message);
+					}
+				},
+			});
+		},
+	});
+
+	d.show();
+}
+
 // ── Alternate dimension UI helpers ───────────────────────────────────────────
 
 function _apply_alternate_dim_ui(frm, cdt, cdn, group) {
@@ -1897,6 +1985,28 @@ frappe.ui.form.on("Material Planning Material Mapping", {
 		_calc_rwd_preview(frm, cdt, cdn);
 		frm.fields_dict["material_mapping"].grid.refresh_row(cdn);
 	},
+
+	unreserve_btn(frm, cdt, cdn) {
+		let row = locals[cdt][cdn];
+		if (!row.is_reserved) return;
+		frappe.confirm(
+			__("Unreserve batch <b>{0}</b> for item <b>{1}</b> (Row {2})? This clears the reservation on this row only.",
+				[row.batch || "", row.item_code, row.idx]),
+			function () {
+				frappe.call({
+					method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.unreserve_batches",
+					args: { material_planning_name: frm.doc.name, row_names: JSON.stringify([row.name]) },
+					freeze: true,
+					freeze_message: __("Unreserving…"),
+					callback(r) {
+						frm._grid_btns_added = false;
+						frm.reload_doc();
+						frappe.show_alert({ message: __("Row unreserved."), indicator: "orange" }, 4);
+					},
+				});
+			}
+		);
+	},
 });
 
 // Shared helper: build the partial-reservation warning table HTML
@@ -1925,6 +2035,28 @@ function _partial_reservation_html(partial) {
 				<th>${__("Required")}</th><th>${__("Total Stock")}</th>
 				<th>${__("Reserved by Others")}</th>
 				<th>${__("Reserved")}</th><th>${__("Shortfall")}</th>
+			</tr></thead>
+			<tbody>${lines}</tbody>
+		</table>`;
+}
+
+// Rows skipped entirely because the batch's source Purchase Receipt hasn't
+// completed inspection yet (client change request Phase 6.2) — a distinct
+// case from a partial/shortfall reservation: nothing at all was reserved for
+// these rows, they stay exactly as they were before this call.
+function _blocked_reservation_html(blocked) {
+	let lines = blocked.map(function(b) {
+		return `<tr>
+			<td>${b.item_code}</td>
+			<td>${b.item_name || ""}</td>
+			<td>${b.batch || ""}</td>
+			<td>${b.reason}</td>
+		</tr>`;
+	}).join("");
+	return `<p>${__("Some rows were skipped -- their batch's source Purchase Receipt hasn't completed inspection yet:")}</p>
+		<table class="table table-bordered table-condensed" style="font-size:12px">
+			<thead><tr>
+				<th>${__("Item Code")}</th><th>${__("Item Name")}</th><th>${__("Batch")}</th><th>${__("Reason")}</th>
 			</tr></thead>
 			<tbody>${lines}</tbody>
 		</table>`;
@@ -2006,11 +2138,15 @@ function _add_reservation_buttons(frm) {
 							frm._grid_btns_added = false;
 							frm.reload_doc();
 							let partial = r.message.partial || [];
-							if (partial.length) {
+							let blocked = r.message.blocked || [];
+							let html = "";
+							if (partial.length) html += _partial_reservation_html(partial);
+							if (blocked.length) html += _blocked_reservation_html(blocked);
+							if (html) {
 								frappe.msgprint({
-									title: __("Partial Reservation — Stock Shortfall"),
+									title: __("Reservation Notices"),
 									indicator: "orange",
-									message: _partial_reservation_html(partial),
+									message: html,
 								});
 							} else {
 								frappe.show_alert({ message: __("Batches reserved."), indicator: "green" }, 4);
@@ -2074,6 +2210,160 @@ function _add_reservation_buttons(frm) {
 			d.show();
 		}
 	);
+
+	grid.add_custom_button(
+		frappe.utils.icon("refresh", "xs") + " " + __("Excess Material Mapping"),
+		function () { _show_excess_material_mapping_dialog(frm); }
+	);
+}
+
+// ── Excess Material Mapping dialog (client change request Phase 2.3) ───────
+// Lists batches recovered via the excess-material-return flow (off-cuts from
+// another job, sitting in this MP's warehouse) and lets the user manually map
+// one into Material Mapping instead of buying fresh raw material.
+function _show_excess_material_mapping_dialog(frm) {
+	if (!frm.doc.for_warehouse) {
+		frappe.msgprint(__("Set 'Raw Materials Warehouse' before mapping excess material."));
+		return;
+	}
+	let unavailable = (frm.doc.unavailable_items || []).filter(r => r.item_code);
+
+	let d = new frappe.ui.Dialog({
+		title: __("Excess Material Mapping"),
+		size: "extra-large",
+		fields: [
+			{
+				fieldtype: "Select",
+				fieldname: "unavailable_item_row",
+				label: __("Link to Unavailable Item (optional)"),
+				options: [""].concat(unavailable.map((r, idx) =>
+					`${idx}::${r.item_code} — ${r.duno_mark_no || ""} (Reqd: ${flt(r.qty)} Kg)`)),
+				description: __("Pick one to auto-fill traceability and reduce that shortfall by the amount "
+					+ "mapped here; leave blank to add a standalone row not tied to a specific requirement."),
+			},
+			{ fieldtype: "Column Break" },
+			{
+				fieldtype: "Data",
+				fieldname: "item_filter",
+				label: __("Filter by Item Code"),
+			},
+			{ fieldtype: "Section Break" },
+			{ fieldtype: "HTML", fieldname: "excess_html" },
+			{ fieldtype: "Section Break" },
+			{
+				fieldtype: "Float",
+				fieldname: "sec_qty_to_use",
+				label: __("Sec Qty to Use"),
+			},
+			{ fieldtype: "Column Break" },
+			{
+				fieldtype: "Float",
+				fieldname: "kg_preview",
+				label: __("Kg (calculated)"),
+				read_only: 1,
+			},
+		],
+		primary_action_label: __("Add & Reserve"),
+		primary_action(values) {
+			if (!d._selected_batch) {
+				frappe.msgprint(__("Select a batch first."));
+				return;
+			}
+			let sec_qty = flt(values.sec_qty_to_use);
+			if (!sec_qty) {
+				frappe.msgprint(__("Enter Sec Qty to use."));
+				return;
+			}
+			let unavailable_row_name = null;
+			if (values.unavailable_item_row) {
+				let idx = parseInt(values.unavailable_item_row.split("::")[0], 10);
+				unavailable_row_name = unavailable[idx] && unavailable[idx].name;
+			}
+			frappe.call({
+				method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.add_excess_material_mapping",
+				args: {
+					mp_name: frm.doc.name,
+					batch_no: d._selected_batch.batch_no,
+					sec_qty: sec_qty,
+					unavailable_item_row: unavailable_row_name,
+				},
+				freeze: true,
+				freeze_message: __("Mapping and reserving…"),
+				callback(r) {
+					if (!r.message) return;
+					d.hide();
+					frm._grid_btns_added = false;
+					frm.reload_doc();
+					frappe.show_alert({ message: __("Excess material mapped and reserved."), indicator: "green" }, 4);
+				},
+			});
+		},
+	});
+
+	function _load(item_filter) {
+		frappe.call({
+			method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.get_available_excess_batches",
+			args: { mp_name: frm.doc.name, item_code: item_filter || null },
+			freeze: true,
+			freeze_message: __("Loading excess batches…"),
+			callback(r) { _render(r.message || []); },
+		});
+	}
+
+	function _render(rows) {
+		let $wrap = d.fields_dict.excess_html.$wrapper;
+		if (!rows.length) {
+			$wrap.html(`<div style="padding:20px;text-align:center;color:#888;">${__("No excess batches with free stock found in this warehouse.")}</div>`);
+			return;
+		}
+		let th = "white-space:nowrap;padding:6px 10px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;";
+		let td = "padding:5px 10px;white-space:nowrap;border-bottom:1px solid #f0f0f0;";
+		let cols = [__("Item Code"), __("Item Name"), __("Batch No"), __("L (mm)"), __("W (mm)"), __("T (mm)"), __("Batch Sec Qty"), __("Free Kg")];
+		let thead = "<tr>" + cols.map(c => `<th style="${th}">${c}</th>`).join("") + "</tr>";
+		let tbody = rows.map(r => `
+			<tr data-batch="${frappe.utils.escape_html(r.batch_no)}" style="cursor:pointer;">
+				<td style="${td}">${frappe.utils.escape_html(r.item_code)}</td>
+				<td style="${td}">${frappe.utils.escape_html(r.item_name || "")}</td>
+				<td style="${td}">${frappe.utils.escape_html(r.batch_no)}</td>
+				<td style="${td}">${format_number(flt(r.length), null, 1)}</td>
+				<td style="${td}">${format_number(flt(r.width), null, 1)}</td>
+				<td style="${td}">${format_number(flt(r.thickness), null, 1)}</td>
+				<td style="${td}">${format_number(flt(r.batch_sec_qty), null, 3)}</td>
+				<td style="${td}">${format_number(flt(r.free_qty), null, 3)}</td>
+			</tr>`).join("");
+		$wrap.html(`<div style="overflow-x:auto;max-height:32vh;overflow-y:auto;border:1px solid #e9ecef;border-radius:4px;">
+			<table style="font-size:12px;border-collapse:collapse;width:100%;min-width:700px;">
+				<thead style="position:sticky;top:0;">${thead}</thead>
+				<tbody>${tbody}</tbody>
+			</table></div>`);
+
+		$wrap.find("tr[data-batch]").on("click", function() {
+			let batch_no = $(this).data("batch");
+			let row = rows.find(x => x.batch_no === batch_no);
+			d._selected_batch = row;
+			let default_sec_qty = (row.batch_sec_qty && row.free_qty)
+				? Math.min(flt(row.batch_sec_qty), flt(row.free_qty))
+				: flt(row.batch_sec_qty);
+			d.set_value("sec_qty_to_use", default_sec_qty);
+			_update_kg_preview();
+			$wrap.find("tr").css("background", "");
+			$(this).css("background", "#e3f2fd");
+		});
+	}
+
+	function _update_kg_preview() {
+		let row = d._selected_batch;
+		if (!row) return;
+		let sec_qty = flt(d.get_value("sec_qty_to_use"));
+		let kg = _kg_per_nos(row.parent_item_group, row.length, row.width, row.thickness, row.unit_weight) * sec_qty;
+		d.set_value("kg_preview", flt(kg, 3));
+	}
+
+	d.fields_dict.sec_qty_to_use.df.onchange = _update_kg_preview;
+	d.fields_dict.item_filter.df.onchange = () => _load(d.get_value("item_filter"));
+
+	d.show();
+	_load();
 }
 
 // Column definitions for each table's View All popup
@@ -2264,6 +2554,28 @@ frappe.ui.form.on("Material Planning Available Raw Material", {
 			}, 4);
 		}
 	},
+
+	unreserve_btn(frm, cdt, cdn) {
+		let row = locals[cdt][cdn];
+		if (!row.is_reserved) return;
+		frappe.confirm(
+			__("Unreserve batch <b>{0}</b> for item <b>{1}</b> (Row {2})? This clears the reservation on this row only.",
+				[row.batch_no || "", row.item_code, row.idx]),
+			function () {
+				frappe.call({
+					method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.unreserve_exact_match_batches",
+					args: { material_planning_name: frm.doc.name, row_names: JSON.stringify([row.name]) },
+					freeze: true,
+					freeze_message: __("Unreserving…"),
+					callback(r) {
+						frm._grid_btns_added = false;
+						frm.reload_doc();
+						frappe.show_alert({ message: __("Row unreserved."), indicator: "orange" }, 4);
+					},
+				});
+			}
+		);
+	},
 });
 
 // Reserve / Unreserve toolbar buttons on the Available Raw Materials (Exact Match) grid
@@ -2291,6 +2603,8 @@ function _add_exact_match_reservation_buttons(frm) {
 							frm._grid_btns_added = false;
 							frm.reload_doc();
 							let partial = r.message.partial || [];
+							let blocked = r.message.blocked || [];
+							let html = "";
 							if (partial.length) {
 								let partial_codes = new Set(partial.map(p => p.item_code));
 								let already_in_mapping = (frm.doc.material_mapping || []).some(row => partial_codes.has(row.item_code));
@@ -2301,10 +2615,14 @@ function _add_exact_match_reservation_buttons(frm) {
 									: `<div style="margin-top:10px;padding:8px 12px;background:#fff8e1;border-left:4px solid #f9a825;border-radius:3px;font-size:12px;">
 											<b>${__("Tip:")}</b> ${__("Re-run <b>Check Stock Availability</b> to automatically add shortfall rows to Material Mapping.")}
 										</div>`;
+								html += _partial_reservation_html(partial) + note;
+							}
+							if (blocked.length) html += _blocked_reservation_html(blocked);
+							if (html) {
 								frappe.msgprint({
-									title: __("Partial Reservation — Stock Shortfall"),
+									title: __("Reservation Notices"),
 									indicator: "orange",
-									message: _partial_reservation_html(partial) + note,
+									message: html,
 								});
 							} else {
 								frappe.show_alert({ message: __("Batches reserved."), indicator: "green" }, 4);
@@ -2366,6 +2684,13 @@ function _add_exact_match_reservation_buttons(frm) {
 				},
 			});
 			d.show();
+		}
+	);
+
+	grid.add_custom_button(
+		frappe.utils.icon("edit", "xs") + " " + __("Reassign Batch"),
+		function () {
+			_show_exact_match_reassign_dialog(frm);
 		}
 	);
 }
@@ -2433,4 +2758,359 @@ function _do_auto_purchase(frm) {
 			}
 		},
 	});
+}
+
+// ── Consolidate Item: live Purchase Kg / Difference Kg calc ────────────────
+function _recalc_consolidate_item(frm, cdt, cdn) {
+	let row = locals[cdt][cdn];
+	// _kg_per_nos already returns 0 unless its own group's required dimensions are
+	// present, so multiplying by Sec Qty here reproduces the full Structurals/Plates/
+	// Nuts-and-Bolts formula without re-deriving the group branching.
+	let kg_per_nos = _kg_per_nos(row.parent_item_group, row.length, row.width, row.thickness, row.unit_weight);
+	let purchase_kg = flt(kg_per_nos * flt(row.sec_qty), 3);
+	frappe.model.set_value(cdt, cdn, "purchase_kg", purchase_kg);
+	frappe.model.set_value(cdt, cdn, "difference_kg", flt(flt(row.required_kg) - purchase_kg, 3));
+}
+
+frappe.ui.form.on("Material Planning Consolidate Item", {
+	length(frm, cdt, cdn) { _recalc_consolidate_item(frm, cdt, cdn); },
+	width(frm, cdt, cdn) { _recalc_consolidate_item(frm, cdt, cdn); },
+	thickness(frm, cdt, cdn) { _recalc_consolidate_item(frm, cdt, cdn); },
+	sec_qty(frm, cdt, cdn) { _recalc_consolidate_item(frm, cdt, cdn); },
+});
+
+// ── Reassign Batch dialog for Available Raw Materials (Exact Match) ────────
+// Adapted from Material Issue Plan's "Update Batch" dialog
+// (material_issue_plan.js:_show_update_batch_dialog / _mip_build_picker) — the
+// backend `reassign_batch` already supports this table as a source_table, only
+// the UI was missing. Unlike MIP's row shape, Available Raw Material rows live
+// directly on this doc (no source_table/source_row indirection, no "already
+// transferred" concept) but also carry no unit_weight of their own, so it's
+// fetched live from the Item whenever a row (or a cross-item batch) is picked.
+const _AM_ALLOC_FIELDS = [
+	"current_batch", "current_sec_qty", "current_qty",
+	"new_batch_no", "length", "width", "thickness", "sec_qty", "calculated_qty",
+	"reserve_without_dimensions", "allocate_based_on_sec_qty",
+];
+
+function _am_row_matches_filters(r, f) {
+	return (!f.cdn || String(r.customer_drawing_number || "").toLowerCase().includes(f.cdn))
+		&& (!f.duno || String(r.duno_mark_no || "").toLowerCase().includes(f.duno))
+		&& (!f.so || String(r.sales_order || "").toLowerCase().includes(f.so));
+}
+
+function _am_build_picker(dialog, all_rows, on_select) {
+	let $wrap = dialog.fields_dict.picker_html.$wrapper;
+	let selected_row_name = null;
+
+	let filter_bar = `
+		<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;padding:8px 10px;background:#f8f9fa;border:1px solid #e9ecef;border-radius:4px;">
+			<div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:140px;">
+				<label style="font-size:10px;font-weight:600;color:#6c757d;margin:0;">${__("Customer Drawing No")}</label>
+				<input id="_am_ub_cdn" type="text" placeholder="${__("Filter…")}"
+					style="border:1px solid #d1d8dd;border-radius:4px;padding:4px 8px;font-size:12px;width:100%;">
+			</div>
+			<div style="display:flex;flex-direction:column;gap:3px;min-width:100px;">
+				<label style="font-size:10px;font-weight:600;color:#6c757d;margin:0;">${__("DUNO / Mark No")}</label>
+				<input id="_am_ub_duno" type="text" placeholder="${__("Filter…")}"
+					style="border:1px solid #d1d8dd;border-radius:4px;padding:4px 8px;font-size:12px;width:100%;">
+			</div>
+			<div style="display:flex;flex-direction:column;gap:3px;min-width:120px;">
+				<label style="font-size:10px;font-weight:600;color:#6c757d;margin:0;">${__("Sales Order")}</label>
+				<input id="_am_ub_so" type="text" placeholder="${__("Filter…")}"
+					style="border:1px solid #d1d8dd;border-radius:4px;padding:4px 8px;font-size:12px;width:100%;">
+			</div>
+			<div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;justify-content:flex-end;padding-bottom:1px;">
+				<label style="font-size:10px;font-weight:600;color:#6c757d;margin:0;">&nbsp;</label>
+				<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+					<button class="btn btn-xs" id="_am_ub_clear"
+						style="background:#c62828;color:#fff;border-color:#c62828;">${__("Clear Filters")}</button>
+					<span id="_am_ub_count" style="font-size:12px;color:#6c757d;white-space:nowrap;"></span>
+				</div>
+			</div>
+		</div>`;
+
+	let th_style = "white-space:nowrap;padding:6px 10px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;";
+	let cols = [
+		["item_code", __("Item Code")],
+		["duno_mark_no", __("DUNO/Mark No")],
+		["customer_drawing_number", __("Cust Drawing No")],
+		["sales_order", __("Sales Order")],
+		["batch_no", __("Batch No")],
+		["sec_qty", __("Sec Qty")],
+		["required_qty", __("Required Qty (Kg)")],
+		["is_reserved", __("Reserved")],
+	];
+	let thead = "<tr>" + cols.map((c) => `<th style="${th_style}">${c[1]}</th>`).join("") + "</tr>";
+
+	let table_html = `<div style="overflow-x:auto;">
+		<table style="font-size:12px;border-collapse:collapse;width:100%;min-width:700px;">
+			<thead style="position:sticky;top:0;z-index:1;">${thead}</thead>
+			<tbody id="_am_ub_tbody"></tbody>
+		</table>
+	</div>`;
+
+	$wrap.html(filter_bar + `<div style="max-height:32vh;overflow-y:auto;border:1px solid #e9ecef;border-radius:4px;">${table_html}</div>`);
+
+	function _render_rows(rows) {
+		let $tbody = $wrap.find("#_am_ub_tbody");
+		$tbody.html(rows.map((r) => {
+			let is_selected = r.name === selected_row_name;
+			let row_style = `cursor:pointer;${is_selected ? "background:#e3f2fd;" : ""}`;
+			let cells = [
+				frappe.utils.escape_html(r.item_code || ""),
+				frappe.utils.escape_html(r.duno_mark_no || ""),
+				frappe.utils.escape_html(r.customer_drawing_number || ""),
+				frappe.utils.escape_html(r.sales_order || ""),
+				frappe.utils.escape_html(r.batch_no || "—"),
+				format_number(flt(r.sec_qty), null, 3),
+				format_number(flt(r.required_qty), null, 3),
+				r.is_reserved ? `<span style="color:#2e7d32;font-weight:600;">${__("Yes")}</span>` : __("No"),
+			];
+			return `<tr data-name="${frappe.utils.escape_html(r.name)}" style="${row_style}">`
+				+ cells.map((c) => `<td style="padding:5px 10px;white-space:nowrap;border-bottom:1px solid #f0f0f0;">${c}</td>`).join("")
+				+ "</tr>";
+		}).join(""));
+		$wrap.find("#_am_ub_count").text(__("{0} shown", [rows.length]));
+
+		$tbody.find("tr").on("click", function() {
+			let row = all_rows.find((r) => r.name === $(this).data("name"));
+			if (row) on_select(row);
+		});
+	}
+
+	function _get_filters() {
+		return {
+			cdn: (($wrap.find("#_am_ub_cdn").val()) || "").toLowerCase().trim(),
+			duno: (($wrap.find("#_am_ub_duno").val()) || "").toLowerCase().trim(),
+			so: (($wrap.find("#_am_ub_so").val()) || "").toLowerCase().trim(),
+		};
+	}
+
+	function _apply_filter() {
+		let f = _get_filters();
+		_render_rows(all_rows.filter((r) => _am_row_matches_filters(r, f)));
+	}
+
+	$wrap.find("#_am_ub_cdn, #_am_ub_duno, #_am_ub_so").on("input", _apply_filter);
+	$wrap.find("#_am_ub_clear").on("click", function() {
+		$wrap.find("#_am_ub_cdn, #_am_ub_duno, #_am_ub_so").val("");
+		_apply_filter();
+	});
+
+	_render_rows(all_rows);
+
+	return {
+		markSelected(row_name) {
+			selected_row_name = row_name;
+			_apply_filter();
+		},
+		setFilters(cdn, duno, so) {
+			$wrap.find("#_am_ub_cdn").val(cdn || "");
+			$wrap.find("#_am_ub_duno").val(duno || "");
+			$wrap.find("#_am_ub_so").val(so || "");
+			_apply_filter();
+		},
+	};
+}
+
+function _show_exact_match_reassign_dialog(frm, preselect_row_name) {
+	let all_rows = frm.doc.available_raw_materials || [];
+	if (!all_rows.length) {
+		frappe.msgprint(__("No rows in Available Raw Materials (Exact Match)."));
+		return;
+	}
+
+	let selected_row = null;
+	let selected_group = null;
+	let selected_unit_weight = 0;
+
+	let dialog = new frappe.ui.Dialog({
+		title: __("Reassign Batch — Available Raw Materials (Exact Match)"),
+		size: "extra-large",
+		fields: [
+			{ fieldtype: "HTML", fieldname: "picker_html" },
+			{ fieldtype: "HTML", fieldname: "no_selection_html" },
+			{ fieldtype: "Section Break", label: __("Current Allocation") },
+			{ fieldname: "current_batch", fieldtype: "Data", label: __("Current Batch"), read_only: 1 },
+			{ fieldname: "current_sec_qty", fieldtype: "Float", label: __("Current Sec Qty (Nos)"), read_only: 1 },
+			{ fieldtype: "Column Break" },
+			{ fieldname: "current_qty", fieldtype: "Float", label: __("Current Required Qty (Kg)"), read_only: 1 },
+			{ fieldtype: "HTML", fieldname: "cross_item_notice_html" },
+			{ fieldtype: "Section Break", label: __("New Allocation"), fieldname: "new_alloc_section" },
+			{ fieldname: "new_batch_no", fieldtype: "Link", options: "Batch", label: __("New Batch"), reqd: 1,
+				description: __("Length/Width/Thickness are fetched from the batch automatically.") },
+			{ fieldname: "length", fieldtype: "Float", label: __("Length (mm)"), read_only: 1 },
+			{ fieldtype: "Column Break" },
+			{ fieldname: "width", fieldtype: "Float", label: __("Width (mm)"), read_only: 1 },
+			{ fieldname: "thickness", fieldtype: "Float", label: __("Thickness (mm)"), read_only: 1 },
+			{ fieldname: "sec_qty", fieldtype: "Float", label: __("Sec Qty (Nos)") },
+			{ fieldname: "calculated_qty", fieldtype: "Float", label: __("Calculated Qty (Kg)"), read_only: 1 },
+			{ fieldname: "reserve_without_dimensions", fieldtype: "Check", label: __("Reserve Without Dimensions") },
+			{ fieldname: "allocate_based_on_sec_qty", fieldtype: "Check", label: __("Allocate based on Sec Nos"), default: "1" },
+		],
+		primary_action_label: __("Reassign Batch"),
+		primary_action(values) {
+			if (!selected_row) {
+				frappe.msgprint(__("Select a row first."));
+				return;
+			}
+			if (!values.new_batch_no) {
+				frappe.msgprint(__("Select a New Batch."));
+				return;
+			}
+			frappe.call({
+				method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.reassign_batch",
+				args: {
+					material_planning_name: frm.doc.name,
+					source_table: "Material Planning Available Raw Material",
+					row_name: selected_row.name,
+					new_batch_no: values.new_batch_no,
+					dimensions: JSON.stringify({ length: values.length, width: values.width, thickness: values.thickness }),
+					sec_qty: values.sec_qty,
+					reserve_without_dimensions: values.reserve_without_dimensions ? 1 : 0,
+					allocate_based_on_sec_qty: values.allocate_based_on_sec_qty ? 1 : 0,
+				},
+				freeze: true,
+				freeze_message: __("Reassigning batch…"),
+				callback(r) {
+					let warnings = (r.message && r.message.warnings) || [];
+					if (warnings.length) {
+						frappe.msgprint({
+							title: __("Reallocation Warnings"),
+							indicator: "orange",
+							message: warnings.map((w) =>
+								w.reason || `${w.item_code} (${w.batch}): ${__("short by")} ${w.shortfall_qty}`
+							).join("<br>"),
+						});
+					}
+					let reassigned_row_name = selected_row.name;
+					frm._grid_btns_added = false;
+					frm.reload_doc().then(() => {
+						all_rows.splice(0, all_rows.length, ...(frm.doc.available_raw_materials || []));
+						let updated_row = all_rows.find((r) => r.name === reassigned_row_name);
+						if (updated_row) {
+							_select_row(updated_row);
+						} else {
+							picker.markSelected(null);
+							_toggle_allocation_fields(false);
+							frappe.msgprint({
+								title: __("Moved to Material Mapping"),
+								indicator: "blue",
+								message: __("The new batch belongs to a different item — this row moved to Material Mapping (Alternate Stock)."),
+							});
+						}
+					});
+				},
+			});
+		},
+	});
+
+	dialog.fields_dict.no_selection_html.$wrapper.html(
+		`<div style="color:#8d99a6;padding:8px 4px;font-size:12px;">`
+		+ __("Select a row above to review its current allocation and reassign a new batch.")
+		+ `</div>`
+	);
+	dialog.fields_dict.cross_item_notice_html.$wrapper.html("");
+
+	function _toggle_allocation_fields(show) {
+		_AM_ALLOC_FIELDS.forEach((f) => dialog.fields_dict[f].toggle(show));
+		dialog.fields_dict.no_selection_html.toggle(!show);
+	}
+
+	function _calc_new_qty() {
+		if (!selected_row) return;
+		let kg_per_nos = _kg_per_nos(selected_group, dialog.get_value("length"), dialog.get_value("width"), dialog.get_value("thickness"), selected_unit_weight);
+		dialog.set_value("calculated_qty", flt(kg_per_nos * flt(dialog.get_value("sec_qty")), 3));
+	}
+
+	function _fetch_batch_dims_and_item(batch_no) {
+		if (!batch_no) {
+			dialog.set_value("length", 0);
+			dialog.set_value("width", 0);
+			dialog.set_value("thickness", 0);
+			dialog.set_value("calculated_qty", 0);
+			dialog.fields_dict.cross_item_notice_html.$wrapper.html("");
+			return;
+		}
+		frappe.db.get_value("Batch", batch_no, ["item", "custom_length", "custom_width", "custom_thickness"]).then((r) => {
+			let d = r.message || {};
+			dialog.set_value("length", flt(d.custom_length));
+			dialog.set_value("width", flt(d.custom_width));
+			dialog.set_value("thickness", flt(d.custom_thickness));
+
+			let batch_item = d.item;
+			let is_cross_item = selected_row && batch_item && batch_item !== selected_row.item_code;
+			dialog.fields_dict.cross_item_notice_html.$wrapper.html(
+				is_cross_item
+					? `<div style="background:#e3f2fd;border:1px solid #2490ef;border-radius:4px;padding:8px 12px;margin:6px 0;color:#0d47a1;font-size:12px;">`
+						+ __("This batch belongs to a different item ({0}) — on save this row will move to Material Mapping (Alternate Stock).", [batch_item])
+						+ `</div>`
+					: ""
+			);
+
+			if (batch_item) {
+				frappe.db.get_value("Item", batch_item, ["custom_unit_weight", "custom_parent_item_group"]).then((r2) => {
+					let id = r2.message || {};
+					selected_unit_weight = flt(id.custom_unit_weight);
+					selected_group = id.custom_parent_item_group || (selected_row && selected_row.parent_item_group);
+					_calc_new_qty();
+				});
+			} else {
+				_calc_new_qty();
+			}
+		});
+	}
+	dialog.fields_dict.new_batch_no.df.onchange = () => _fetch_batch_dims_and_item(dialog.get_value("new_batch_no"));
+	dialog.fields_dict.sec_qty.df.onchange = () => _calc_new_qty();
+	dialog.fields_dict.sec_qty.$input && dialog.fields_dict.sec_qty.$input.on("input", _calc_new_qty);
+
+	function _toggle_rwd(checked) {
+		dialog.fields_dict.allocate_based_on_sec_qty.toggle(!!checked);
+		dialog.fields_dict.sec_qty.df.read_only = checked ? 1 : 0;
+		dialog.fields_dict.sec_qty.refresh();
+		if (checked) {
+			dialog.set_value("allocate_based_on_sec_qty", 1);
+			dialog.set_value("sec_qty", 0);
+		}
+	}
+	dialog.fields_dict.reserve_without_dimensions.df.onchange = () =>
+		_toggle_rwd(dialog.get_value("reserve_without_dimensions"));
+
+	function _select_row(row) {
+		selected_row = row;
+		selected_group = row.parent_item_group;
+		selected_unit_weight = 0;
+		frappe.db.get_value("Item", row.item_code, "custom_unit_weight").then((r) => {
+			selected_unit_weight = flt((r.message || {}).custom_unit_weight);
+		});
+		dialog.set_value("current_batch", row.batch_no || __("(none)"));
+		dialog.set_value("current_sec_qty", flt(row.sec_qty));
+		dialog.set_value("current_qty", flt(row.overall_required_qty || row.required_qty));
+		dialog.set_value("new_batch_no", "");
+		dialog.set_value("length", 0);
+		dialog.set_value("width", 0);
+		dialog.set_value("thickness", 0);
+		dialog.set_value("sec_qty", 0);
+		dialog.set_value("calculated_qty", 0);
+		dialog.set_value("reserve_without_dimensions", 0);
+		dialog.set_value("allocate_based_on_sec_qty", 1);
+		dialog.fields_dict.cross_item_notice_html.$wrapper.html("");
+		_toggle_allocation_fields(true);
+		_toggle_rwd(0);
+		picker.markSelected(row.name);
+	}
+
+	_toggle_allocation_fields(false);
+	let picker = _am_build_picker(dialog, all_rows, _select_row);
+
+	if (preselect_row_name) {
+		let row = all_rows.find((r) => r.name === preselect_row_name);
+		if (row) {
+			picker.setFilters(row.customer_drawing_number, row.duno_mark_no, row.sales_order);
+			_select_row(row);
+		}
+	}
+
+	dialog.show();
 }

@@ -20,6 +20,9 @@ from manufyxinvenzaerp.subcontracting_management.subcontracting import _get_mp_r
 from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
     get_target_context,
 )
+from manufyxinvenzaerp.utils.dimension_formula import calculate_qty
+
+_DIMENSION_DRIVEN_GROUPS = {"Structurals", "Plates"}
 
 
 def _linked_mp_names(mip):
@@ -57,6 +60,22 @@ def get_mip_pending_items(mip_name):
     raw_items = []
     for mp_name in _linked_mp_names(mip):
         raw_items.extend(_get_mp_reserved_batches(mp_name, source_warehouse, primary_warehouse))
+
+    # Cut Sheet (client change request Phase 5.2): a row flagged Cut Sheet only
+    # ever offers its To Use (W1) qty for transfer -- the Balance (W2) portion
+    # is what the same batch gets resized down to on submit, not more material
+    # to send onward. Capping here (rather than after the primary_done/cnc_done
+    # netting below) means once W1 has been fully transferred, this row simply
+    # stops appearing as pending -- the untransferred remainder is never offered.
+    cut_sheet_qty_by_key = {
+        (r.item_code, r.batch_no): flt(r.use_calc_qty)
+        for r in (mip.raw_materials or [])
+        if r.cut_sheet and r.batch_no
+    }
+    for item in raw_items:
+        cap = cut_sheet_qty_by_key.get((item["item_code"], item.get("batch_no")))
+        if cap is not None:
+            item["qty"] = flt(min(flt(item["qty"]), cap), 3)
 
     if not raw_items:
         return []
@@ -290,7 +309,18 @@ def get_mip_readiness_check(mip_name):
 @frappe.whitelist()
 def create_mip_transfer_entry(mip_name):
     """Transfer ALL pending non-CNC reserved material to the primary (Supplier/WIP)
-    warehouse. CNC items are intentionally excluded — use 'To CNC Warehouse' for those."""
+    warehouse. CNC items are intentionally excluded — use 'To CNC Warehouse' for those.
+
+    WARNING (Phase 1 H-07 / Report 3 Finding H-07): the frappe.db.commit()
+    below ends the request's transaction early on purpose, to release
+    read-locks before the Stock Entry insert and avoid a MySQL gap-lock
+    deadlock. This means everything before that line is permanently committed
+    regardless of what happens afterward -- there is no rollback path if a
+    later step in this function fails. Do NOT add a write above the
+    frappe.db.commit() line without re-reading this warning: a write
+    introduced there would no longer be all-or-nothing with the rest of this
+    function.
+    """
     mip = frappe.get_doc("Material Issue Plan", mip_name)
     ctx = get_target_context(mip)
     pending = get_mip_pending_items(mip_name)
@@ -300,6 +330,15 @@ def create_mip_transfer_entry(mip_name):
     primary_rows = [p for p in pending if not p["cnc_process"]]
     if not primary_rows:
         frappe.throw(_("No pending items for the primary warehouse. CNC items can be transferred using 'To CNC Warehouse'."))
+
+    # get_mip_pending_items() returns unprefixed keys (duno_mark_no/drawing/sales_order/
+    # customer_drawing_number) for the transfer-picker dialog's own filters -- map them onto
+    # Stock Entry Detail's custom_* fieldnames here (client change request Phase 1.3).
+    for row in primary_rows:
+        row["custom_drawing"] = row.get("drawing") or ""
+        row["custom_duno_mark_no"] = row.get("duno_mark_no") or ""
+        row["custom_customer_drawing_number"] = row.get("customer_drawing_number") or ""
+        row["custom_sales_order"] = row.get("sales_order") or ""
 
     se = frappe.get_doc(_tag_stock_entry({
         "doctype": "Stock Entry",
@@ -319,6 +358,12 @@ def create_mip_partial_transfer(mip_name, selected_items_json, transfer_type):
     transfer_type: "primary" -> Send to Subcontractor/Material Transfer to the
                                 supplier/WIP warehouse
                    "cnc"     -> Material Transfer to the CNC warehouse
+
+    WARNING (Phase 1 H-07 / Report 3 Finding H-07): same manual mid-request
+    frappe.db.commit() pattern as create_mip_transfer_entry above (releases
+    read-locks before the Stock Entry insert to avoid a gap-lock deadlock) --
+    do NOT add a write above that commit() call without re-reading its
+    warning there first.
     """
     selected = _json.loads(selected_items_json) if isinstance(selected_items_json, str) else selected_items_json
     if not selected:
@@ -355,6 +400,10 @@ def create_mip_partial_transfer(mip_name, selected_items_json, transfer_type):
             "custom_thickness": flt(item.get("custom_thickness") or 0),
             "custom_unit_weight": flt(item.get("custom_unit_weight") or 0),
             "custom_parent_item_group": item.get("custom_parent_item_group") or "",
+            "custom_drawing": item.get("drawing") or "",
+            "custom_duno_mark_no": item.get("duno_mark_no") or "",
+            "custom_customer_drawing_number": item.get("customer_drawing_number") or "",
+            "custom_sales_order": item.get("sales_order") or "",
         })
 
     se = frappe.get_doc(_tag_stock_entry({
@@ -371,7 +420,13 @@ def create_mip_partial_transfer(mip_name, selected_items_json, transfer_type):
 @frappe.whitelist()
 def create_mip_cnc_forward_entry(mip_name):
     """Forward material currently sitting in the CNC warehouse on to the
-    supplier/WIP warehouse — nets already-forwarded qty against what was sent."""
+    supplier/WIP warehouse — nets already-forwarded qty against what was sent.
+
+    WARNING (Phase 1 H-07 / Report 3 Finding H-07): same manual mid-request
+    frappe.db.commit() pattern as create_mip_transfer_entry above -- do NOT
+    add a write above that commit() call without re-reading its warning there
+    first.
+    """
     mip = frappe.get_doc("Material Issue Plan", mip_name)
     ctx = get_target_context(mip)
     cnc_warehouse = mip.cnc_warehouse
@@ -389,7 +444,11 @@ def create_mip_cnc_forward_entry(mip_name):
                MAX(sed.custom_width) AS custom_width,
                MAX(sed.custom_thickness) AS custom_thickness,
                MAX(sed.custom_unit_weight) AS custom_unit_weight,
-               MAX(sed.custom_parent_item_group) AS custom_parent_item_group
+               MAX(sed.custom_parent_item_group) AS custom_parent_item_group,
+               MAX(sed.custom_drawing) AS custom_drawing,
+               MAX(sed.custom_duno_mark_no) AS custom_duno_mark_no,
+               MAX(sed.custom_customer_drawing_number) AS custom_customer_drawing_number,
+               MAX(sed.custom_sales_order) AS custom_sales_order
         FROM `tabStock Entry Detail` sed
         JOIN `tabStock Entry` se ON se.name = sed.parent
         WHERE se.custom_mip_ref = %s
@@ -443,6 +502,10 @@ def create_mip_cnc_forward_entry(mip_name):
             "custom_thickness": flt(r.custom_thickness, 3),
             "custom_unit_weight": flt(r.custom_unit_weight, 4),
             "custom_parent_item_group": r.custom_parent_item_group or "",
+            "custom_drawing": r.custom_drawing or "",
+            "custom_duno_mark_no": r.custom_duno_mark_no or "",
+            "custom_customer_drawing_number": r.custom_customer_drawing_number or "",
+            "custom_sales_order": r.custom_sales_order or "",
         })
 
     if not se_items:
@@ -460,21 +523,75 @@ def create_mip_cnc_forward_entry(mip_name):
 
 
 @frappe.whitelist()
-def create_mip_excess_return_entry(mip_name):
+def create_mip_excess_return_entry(mip_name, rows_json=None):
     """Receive unconsumed/off-cut material back into stock as fresh Material
-    Receipt stock (new batches, new dimensions) from mip.excess_return_items."""
+    Receipt stock (new batches, new dimensions) from mip.excess_return_items.
+
+    `rows_json` (client change request Phase 5.6): an optional JSON list of
+    {"name": <excess_return_items row name>, "return_reason": <text>, plus
+    either "length"/"width"/"sec_qty" (Structurals/Plates rows) or "qty"
+    (every other item group, e.g. Nuts and Bolts) } -- lets the "Return
+    Excess Entry" dialog let the user edit the planned Qty and record why,
+    right before this actually creates the Stock Entry, without re-opening
+    the form first.
+
+    Structurals/Plates rows take dimension overrides (Length/Width/Sec Qty),
+    NOT a direct Qty override, and Qty is recomputed here via the same shared
+    utils.dimension_formula.calculate_qty used everywhere else in this app --
+    Stock Entry's own validate_stock_entry hook unconditionally recalculates
+    Qty from custom_length/custom_sec_qty/custom_unit_weight for these two
+    groups on Material Receipt entries, so a directly-set Qty override would
+    otherwise be silently discarded the moment the Stock Entry is inserted.
+
+    A Return Reason is mandatory for every row being processed -- either
+    supplied fresh here or already saved on the row from a previous edit --
+    so a direct/scripted call with no rows_json still enforces it against
+    whatever the row itself already carries.
+
+    WARNING (Phase 1 H-07 / Report 3 Finding H-07): same manual mid-request
+    frappe.db.commit() pattern as create_mip_transfer_entry above -- do NOT
+    add a write above that commit() call without re-reading its warning there
+    first. (The mip.excess_return_items flag updates and mip.save() further
+    down in this function run AFTER the commit, which is fine -- the warning
+    is specifically about writes introduced ABOVE the commit() line.)
+    """
     mip = frappe.get_doc("Material Issue Plan", mip_name)
     if not mip.excess_return_warehouse:
         frappe.throw(_("Please set the Excess/Return Warehouse on this Material Issue Plan first."))
+
+    overrides = {o.get("name"): o for o in _json.loads(rows_json)} if rows_json else {}
 
     se_items = []
     new_row_names = []
     for r in (mip.excess_return_items or []):
         if r.get("stock_entry_created"):
             continue
+
+        override = overrides.get(r.name)
+        if override:
+            group = r.parent_item_group
+            if group in _DIMENSION_DRIVEN_GROUPS:
+                if override.get("length") not in (None, ""):
+                    r.length = flt(override.get("length"), 3)
+                if override.get("width") not in (None, ""):
+                    r.width = flt(override.get("width"), 3)
+                if override.get("sec_qty") not in (None, ""):
+                    r.sec_qty = flt(override.get("sec_qty"), 3)
+                calc_qty = calculate_qty(group, r.length, r.width, r.thickness, r.unit_weight, r.sec_qty)
+                if calc_qty is not None:
+                    r.qty = flt(calc_qty, 3)
+            elif override.get("qty") not in (None, ""):
+                r.qty = flt(override.get("qty"), 3)
+            if (override.get("return_reason") or "").strip():
+                r.return_reason = override.get("return_reason").strip()
+
         qty = flt(r.qty, 3)
         if not r.item_code or qty <= 0:
             continue
+        if not (r.return_reason or "").strip():
+            frappe.throw(_("Row {0} ({1}): a Return Reason is required before creating the return entry.")
+                         .format(r.idx, r.item_code))
+
         new_row_names.append(r.name)
         se_items.append({
             "item_code": r.item_code,
@@ -488,7 +605,6 @@ def create_mip_excess_return_entry(mip_name):
             "custom_length": flt(r.get("length"), 3),
             "custom_width": flt(r.get("width"), 3),
             "custom_thickness": flt(r.get("thickness"), 3),
-            "custom_mip_ref": mip_name,
         })
 
     if not se_items:
@@ -499,14 +615,36 @@ def create_mip_excess_return_entry(mip_name):
         "doctype": "Stock Entry",
         "stock_entry_type": "Material Receipt",
         "company": mip.company,
+        "custom_mip_ref": mip_name,
         "items": se_items,
     })
     frappe.db.commit()
     se.insert(ignore_permissions=True)
 
+    # Push the finalized (possibly user-edited) return dimensions back onto
+    # the source raw_materials row's own Excess Length/Width/Sec Qty, so the
+    # Reqd/Issued/Excess Qty figures (Phase 5.3) reflect what was ACTUALLY
+    # returned rather than only the originally auto-suggested value.
+    #
+    # This pushes the DIMENSIONS, not excess_calc_qty directly: validate()'s
+    # own _sync_excess_return_from_raw_materials unconditionally recomputes
+    # every raw_materials row's excess_calc_qty from its OWN excess_length/
+    # width/sec_qty on every save (Structurals/Plates only -- see
+    # calculate_qty), regardless of stock_entry_created, so setting
+    # excess_calc_qty directly here would just get silently overwritten the
+    # moment mip.save() below runs validate(). Updating the dimensions lets
+    # that same recompute produce the correct answer instead of fighting it.
+    raw_material_by_row = {row.name: row for row in (mip.raw_materials or [])}
     for r in mip.excess_return_items:
-        if r.name in new_row_names:
-            r.stock_entry_created = 1
+        if r.name not in new_row_names:
+            continue
+        r.stock_entry_created = 1
+        src = raw_material_by_row.get(r.source_mip_raw_material_row)
+        if src and (r.parent_item_group or "") in _DIMENSION_DRIVEN_GROUPS:
+            src.excess_length = r.length
+            src.excess_width = r.width
+            src.excess_sec_qty = r.sec_qty
+
     mip.save(ignore_permissions=True)
 
     return se.name

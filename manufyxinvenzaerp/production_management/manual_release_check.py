@@ -1,3 +1,13 @@
+# Manual one-off debug script (not an automated test) -- run deliberately via
+# `bench execute manufyxinvenzaerp.production_management.manual_release_check`
+# against a site that actually has MP-2026-00021 / ISMBS-L5000-R001. Renamed
+# from test_release.py (it previously matched pytest/unittest's `test_*.py`
+# discovery pattern despite living outside tests/ and not being a real test --
+# it executes side-effecting code, including a raw frappe.db.commit(), at
+# import time), which was crashing `bench run-tests` outright before any real
+# test could run, since it references hardcoded document names and a
+# stock_entry.py call shape that has since changed. See Phase 1 HP-08 / Phase
+# 3 LP-04 in PROJ001 CLAUDE FILES/.
 import frappe
 from manufyxinvenzaerp.production_management.stock_entry import _release_material_planning_reservations
 

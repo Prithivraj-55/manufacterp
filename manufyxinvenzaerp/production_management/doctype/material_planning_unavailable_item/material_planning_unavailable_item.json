@@ -34,7 +34,8 @@
   "alternate_unit_weight",
   "alternate_quantity",
   "alternate_parent_item_group",
-  "store_location"
+  "store_location",
+  "consolidated_into"
  ],
  "fields": [
   {
@@ -231,6 +232,14 @@
    "label": "Store Location",
    "options": "Store Location",
    "read_only": 1
+  },
+  {
+   "fieldname": "consolidated_into",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Consolidated Into",
+   "read_only": 1,
+   "description": "Item Code of the Material Planning Consolidate Item row this row was grouped into (unique per Material Planning), for traceability when a consolidated purchase is later allocated back."
   }
  ],
  "istable": 1,

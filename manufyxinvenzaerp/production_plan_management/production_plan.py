@@ -6,6 +6,7 @@ from collections import defaultdict
 from frappe.query_builder.functions import IfNull, Sum
 from erpnext.stock.get_item_details import get_conversion_factor
 from erpnext.setup.doctype.item_group.item_group import get_item_group_defaults
+from frappe.model.naming import make_autoname
 from frappe.utils import (
 	add_days,
 	ceil,
@@ -21,17 +22,49 @@ from frappe.utils import (
 def get_sbb_available_qty(item_code, warehouse, dimensions, location=None):
 	"""
 	Fetch available qty per batch for an item in a warehouse, optionally filtered
-	by Store Location (Inventory Dimension: store_location on Stock Ledger Entry).
+	by location.
+
+	NOTE (Phase 1 HP-05 / Report 7 SS4): this filters Stock Ledger Entry's
+	`storage_location` field -- confirmed live via `DESCRIBE tabStock Ledger
+	Entry` to be the only location-shaped column that actually exists on SLE,
+	linked to the "Storage Location" doctype (the real, widely-wired ERPNext
+	Inventory Dimension -- 32 Link fields across the app). Material Planning's
+	own `store_location` field (the argument's usual caller) links to a
+	*different* doctype, "Store Location", which has zero records and zero
+	Material Planning documents that have ever set it in this site's real
+	data -- i.e. this location-filtering feature has never actually been
+	exercised in practice. Before this fix, passing a location value here
+	produced a hard `OperationalError: Unknown column
+	'tabStock Ledger Entry.store_location'` (confirmed live), since that
+	column has never existed -- this was silently masked only because the
+	feature has never been used. This fix stops the crash by querying the
+	column that actually exists; it does NOT resolve the deeper product
+	question of whether Material Planning's `store_location` field should
+	instead link to "Storage Location" so this filter is ever meaningfully
+	populated -- that needs a business decision, not a code fix.
 
 	Flow when location is given:
-	  SLE (item + warehouse + store_location) → SBB → SBE → aggregate by batch_no
+	  SLE (item + warehouse + storage_location) → SBB → SBE → aggregate by batch_no
 	Flow without location:
 	  SBB (item + warehouse) → SBE → aggregate by batch_no
 
 	Returns (total_qty, matched_batches) where each matched_batch includes
 	batch_no, qty (Kg), custom_sec_qty (NOS), custom_sec_uom.
 	Only batches whose dimensions exactly match the required dimensions are returned.
+
+	Client change request Phase 6.2: a batch whose item requires inspection
+	(Item.custom_inspection_required) and whose source Purchase Receipt hasn't
+	completed inspection yet is excluded from matched_batches entirely -- not
+	offered as an Exact Match candidate at all, rather than only failing later
+	at actual reservation time (reserve_exact_match_batches carries the same
+	gate, via material_planning._get_batch_inspection_block_reason, imported
+	locally here to avoid a circular import -- material_planning.py already
+	imports from this module the same way, function-local, for this reason).
 	"""
+	from manufyxinvenzaerp.production_management.doctype.material_planning.material_planning import (
+		_get_batch_inspection_block_reason,
+	)
+
 	total_qty = 0
 	matched_batches = []
 
@@ -41,7 +74,7 @@ def get_sbb_available_qty(item_code, warehouse, dimensions, location=None):
 			"item_code": item_code,
 			"warehouse": warehouse,
 			"is_cancelled": 0,
-			"store_location": location,
+			"storage_location": location,
 			"serial_and_batch_bundle": ("is", "set"),
 		}
 		sle_list = frappe.get_all(
@@ -94,6 +127,8 @@ def get_sbb_available_qty(item_code, warehouse, dimensions, location=None):
 		batch = batch_map.get(batch_no)
 		if not batch:
 			continue
+		if _get_batch_inspection_block_reason(batch_no):
+			continue
 
 		if (
 			flt(batch.custom_length) == flt(dimensions.get("custom_length"))
@@ -109,6 +144,140 @@ def get_sbb_available_qty(item_code, warehouse, dimensions, location=None):
 			})
 
 	return total_qty, matched_batches
+
+
+def get_sbb_batches_bulk(item_codes, warehouse, location=None):
+	"""Batched variant of get_sbb_available_qty -- fetches every batch-level
+	stock entry for a *set* of items in one warehouse (optionally filtered by
+	Store Location) via 3 queries total, instead of 3 queries per item_code
+	(Report 4 Finding D-02). Unlike get_sbb_available_qty, this does NOT
+	filter by dimensions -- callers apply the same per-row dimension match
+	get_sbb_available_qty performs itself, via match_batches_by_dimension()
+	below, against the returned per-item batch list.
+
+	Returns {item_code: [{batch_no, qty, custom_length, custom_thickness,
+	custom_width, custom_sec_qty, custom_sec_uom}, ...]}. Only batches with
+	positive net qty and an existing Batch record are included, mirroring
+	get_sbb_available_qty's own `if qty <= 0: continue` / `if not batch:
+	continue` guards.
+	"""
+	item_codes = list({c for c in item_codes if c})
+	if not item_codes:
+		return {}
+
+	ph = ", ".join(["%s"] * len(item_codes))
+	sbb_to_item = {}
+
+	if location:
+		# See get_sbb_available_qty's docstring above for why this queries
+		# `storage_location` and not `store_location` (Phase 1 HP-05).
+		sle_list = frappe.db.sql(
+			f"""
+			SELECT item_code, serial_and_batch_bundle
+			FROM `tabStock Ledger Entry`
+			WHERE item_code IN ({ph}) AND warehouse = %s AND is_cancelled = 0
+			  AND storage_location = %s AND serial_and_batch_bundle IS NOT NULL
+			  AND serial_and_batch_bundle != ''
+			""",
+			[*item_codes, warehouse, location],
+			as_dict=True,
+		)
+		for s in sle_list:
+			if s.serial_and_batch_bundle:
+				sbb_to_item[s.serial_and_batch_bundle] = s.item_code
+	else:
+		sbb_list = frappe.db.sql(
+			f"""
+			SELECT name, item_code
+			FROM `tabSerial and Batch Bundle`
+			WHERE item_code IN ({ph}) AND warehouse = %s AND docstatus = 1
+			""",
+			[*item_codes, warehouse],
+			as_dict=True,
+		)
+		for s in sbb_list:
+			sbb_to_item[s.name] = s.item_code
+
+	if not sbb_to_item:
+		return {}
+
+	sbb_names = list(sbb_to_item.keys())
+	ph_sbb = ", ".join(["%s"] * len(sbb_names))
+	entries = frappe.db.sql(
+		f"""
+		SELECT parent, batch_no, qty
+		FROM `tabSerial and Batch Entry`
+		WHERE parent IN ({ph_sbb})
+		""",
+		sbb_names,
+		as_dict=True,
+	)
+	if not entries:
+		return {}
+
+	batch_nos = list({e.batch_no for e in entries if e.batch_no})
+	batch_map = {}
+	if batch_nos:
+		ph_batch = ", ".join(["%s"] * len(batch_nos))
+		batch_data = frappe.db.sql(
+			f"""
+			SELECT name, custom_length, custom_thickness, custom_width,
+			       custom_sec_qty, custom_sec_uom
+			FROM `tabBatch`
+			WHERE name IN ({ph_batch})
+			""",
+			batch_nos,
+			as_dict=True,
+		)
+		batch_map = {b.name: b for b in batch_data}
+
+	# Net qty per (item_code, batch_no) across all SBB entries for that item
+	# (outgoing SBEs have negative qty) -- same aggregation get_sbb_available_qty
+	# performs per-item, just grouped across every requested item at once.
+	batch_qty_map = defaultdict(float)
+	for row in entries:
+		if not row.batch_no:
+			continue
+		item_code = sbb_to_item.get(row.parent)
+		if not item_code:
+			continue
+		batch_qty_map[(item_code, row.batch_no)] += flt(row.qty)
+
+	result = defaultdict(list)
+	for (item_code, batch_no), qty in batch_qty_map.items():
+		if qty <= 0:
+			continue
+		batch = batch_map.get(batch_no)
+		if not batch:
+			continue
+		result[item_code].append({
+			"batch_no": batch_no,
+			"qty": qty,
+			"custom_length": flt(batch.custom_length),
+			"custom_thickness": flt(batch.custom_thickness),
+			"custom_width": flt(batch.custom_width),
+			"custom_sec_qty": flt(batch.custom_sec_qty),
+			"custom_sec_uom": batch.custom_sec_uom,
+		})
+
+	return dict(result)
+
+
+def match_batches_by_dimension(batches, dimensions):
+	"""Filter a get_sbb_batches_bulk()-style batch list down to only the ones
+	whose recorded dimensions exactly match `dimensions` -- the same
+	dimension-equality check get_sbb_available_qty performs itself. Returns
+	(total_qty, matched_batches) in the same shape get_sbb_available_qty
+	returns, so this is a drop-in per-row replacement once the bulk fetch has
+	already happened."""
+	matched = [
+		b for b in batches
+		if flt(b["custom_length"]) == flt(dimensions.get("custom_length"))
+		and flt(b["custom_thickness"]) == flt(dimensions.get("custom_thickness"))
+		and flt(b["custom_width"]) == flt(dimensions.get("custom_width"))
+	]
+	total_qty = sum(flt(b["qty"]) for b in matched)
+	return total_qty, matched
 
 
 @frappe.whitelist()
@@ -783,6 +952,23 @@ def make_material_request(doc, submit):
 		frappe.msgprint(_("{0} created").format(comma_and(material_request_list)))
 	else:
 		frappe.msgprint(_("No material request created"))
+
+
+PP_TYPE_ABBR = {
+	"Internal Job": "INT",
+	"Supplier Job": "SUP",
+	"Supplier with Material": "SUPWM",
+}
+
+
+def autoname_production_plan(doc, method):
+	"""Name as PP-<abbr>-<year>-<running>, e.g. PP-INT-2026-00001, based on the
+	Type field — resets the running number every year since the year is baked
+	into the series prefix. Overrides the core naming_series-based naming."""
+	abbr = PP_TYPE_ABBR.get(doc.custom_type)
+	if not abbr:
+		frappe.throw(_("Set Type before saving (Internal Job / Supplier Job / Supplier with Material)."))
+	doc.name = make_autoname(f"PP-{abbr}-.YYYY.-.#####", doc.doctype, doc)
 
 
 def after_save_production_plan(doc, method):

@@ -1,6 +1,7 @@
 import frappe
 from frappe import _
 from frappe.utils import flt, now as frappe_now, generate_hash
+from manufyxinvenzaerp.utils.dimension_formula import calculate_qty as _shared_calculate_qty
 
 
 # ---------------------------------------------------------------------------
@@ -9,15 +10,10 @@ from frappe.utils import flt, now as frappe_now, generate_hash
 
 def _calc_qty(pig, length, width, thickness, unit_wt, sec_qty):
     """Return per-unit primary weight using the same formula as Drawing controller."""
-    if pig == "Structurals":
-        if length and unit_wt and sec_qty:
-            return (length / 1000.0) * unit_wt * sec_qty
-    elif pig == "Plates":
-        if length and width and thickness and unit_wt and sec_qty:
-            return (length / 1000.0) * (width / 1000.0) * thickness * unit_wt * sec_qty
-    else:
-        return flt(sec_qty)
-    return 0.0
+    if pig in ("Structurals", "Plates"):
+        qty = _shared_calculate_qty(pig, length, width, thickness, unit_wt, sec_qty)
+        return qty if qty is not None else 0.0
+    return flt(sec_qty)
 
 
 def _get_file_path(file_url):

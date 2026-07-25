@@ -64,7 +64,9 @@
    "fieldname": "total_weight",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Customer Provided Weight (Kg)"
+   "label": "Customer Provided Weight (Kg)",
+   "allow_on_submit": 1,
+   "description": "Weight per Qty"
   },
   {
    "fieldname": "difference_kg",

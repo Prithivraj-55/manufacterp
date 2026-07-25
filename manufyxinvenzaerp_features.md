@@ -1,6 +1,6 @@
 # Manufyxinvenzaerp — Implemented Features
 **App:** manufyxinvenzaerp | **Platform:** Frappe v15 / ERPNext v15 | **Site:** manufact
-**Date:** 2026-07-11
+**Date:** 2026-07-16
 
 ---
 
@@ -100,7 +100,7 @@ The largest and most complex module. Drives all raw material identification, sto
 | **Material Mapping** | Batch item: no exact-dimension batch found (needs alternate/different-dimension batch); also partial-stock shortfall rows |
 | **Unavailable Items** | Non-batch item: stock < required (needs purchase) |
 
-- Uses `Store Location` (inventory dimension) for location-filtered stock queries.
+- Has a `Store Location` field intended for location-filtered stock queries, but as of this writing this is not a working, populated feature in practice: `Store Location` (a doctype scoped only to the Material Planning child tables) has **zero records** and no Material Planning document has ever set it — the query path it feeds (`get_sbb_available_qty`'s `location` filter) previously raised a hard SQL error whenever a location value *was* supplied, since it queried a `store_location` column that has never existed on Stock Ledger Entry (fixed in Phase 1 HP-05 to query the correct existing column instead, `storage_location`; see the Storage Location / Store Location note in §16 below). Whether Material Planning's location filtering should instead key off `Storage Location` — the separate, real, heavily-used ERPNext Inventory Dimension already wired onto Stock Ledger Entry and 30+ other doctypes across this app — is an open product question, not yet decided.
 - Accounts for reservations made by other Material Planning documents (cross-MP awareness).
 
 ### 4.3 Batch Dimension Matching (SBB/SBE)
@@ -323,11 +323,15 @@ Custom fields are exported as fixtures and applied across the following standard
 | Job Card Consumption Log | subcontracting_management | Child table on Job Card — drawing-level Nos/Kg consumption log, with Employee/From Time/To Time |
 | Process Planning | production_management | Child table on Production Plan — operation routing |
 | Production Plan Available Raw Material | production_management | Child table |
-| Storage Location / Store Location | production_management | Master doctypes for inventory dimension |
+| Storage Location / Store Location | production_management | See distinction note directly below — these are two separate doctypes, not a naming variant of one |
 | Inspection Entry | production_management | Submittable QC sign-off record for Fitup Inspection / Final Inspection rounds |
 | Inspection Call Log | production_management | Child table on Job Card/SOE — one row per inspection call round |
 | Supplier Operation Entry | subcontracting_management | Per-operation subcontractor material consumption |
 | Supplier Operation Item | subcontracting_management | Child table |
+
+**`Storage Location` vs. `Store Location` — these are genuinely two different doctypes, not a typo:**
+- **`Storage Location`** is the real, heavily-wired ERPNext Inventory Dimension — registered via `setup.py`'s `setup_storage_location()`, referenced by 32 Link-type custom fields across Stock Ledger Entry, Job Card, Purchase/Sales/Delivery/Subcontracting documents, Drawing Item, Supplier Operation Item, and Production Plan's own child tables. It has active seed data (`A-1`, `A-2`, plus site-specific locations like `B-1`/`B-2`/`B-3`/`B-5`/`CNCSET`/`CNC`).
+- **`Store Location`** is a narrower doctype scoped only to the Material Planning family (6 Link fields, all within Material Planning's own child tables). As of this writing it has **zero records** in this site's real data, and no Material Planning document has ever set its `store_location` field — see §4.2 above for the related `get_sbb_available_qty` fix this ambiguity caused (Phase 1 HP-05).
 
 ---
 
@@ -365,6 +369,46 @@ New Script Report showing **one row per inspection round** (full rework history,
 Inspection Entry create/write/submit access: System Manager, Manufacturing Manager, Manufacturing User, and **Quality Manager** (ERPNext's existing QC role — reused rather than creating a new one).
 
 *Design note: ERPNext's standard Quality Inspection doctype was evaluated as an alternative and rejected — it has no accepted/rejected quantity tracking at all (purely parameter/reading-based), mandatory `item_code`/`sample_size` fields that don't map to this use case, only a single Quality Inspection Link per Job Card (no multi-round support), and no support for Supplier Operation Entry as a reference type without patching core ERPNext code.*
+
+---
+
+## 18. Security, Performance & Reliability Remediation (Phase 1 Audit Pass, 2026-07-16)
+
+A ten-report internal audit (functional/BRD, architecture, bugs, performance, code quality, refactoring, dead code, security, testing, action plan) was run against this app and reorganized into a three-phase remediation plan (`PROJ001 CLAUDE FILES/PHASE_1_Critical.md`, `PHASE_2_Medium.md`, `PHASE_3_Low.md`). Most of Phase 1 (the Critical tier) has since been implemented, verified against the live site, and is summarized here. Every fix below was checked for behavior parity before/after (numeric output diffs, test-suite pass/fail signature comparisons via `git stash`, or both) — none of it changes what the app produces, only how fast/safely it gets there, except where explicitly noted as a bug fix.
+
+### 18.1 Security
+- **Removed a hardcoded production Administrator credential** from `pull_live.py` — now reads `MANUFYX_LIVE_URL`/`MANUFYX_LIVE_USER`/`MANUFYX_LIVE_PASS` from the environment and refuses to run if unset. **The credential was also found in this repo's git history** (already merged, and this repo has a live GitHub `upstream` remote) — rotating the live password and deciding whether to scrub history is an ops action outside what a code change can fix; not yet done as of this writing.
+- **Duplicate-creation guard** added to `create_sco_from_production_plan` / `create_work_order_from_pp` (`subcontracting_management/subcontracting.py`) — a double-click or retry no longer creates a second Subcontracting Order / Work Order against the same Production Plan.
+- **BOM-active check now runs at creation time** for the same two functions, instead of being silently skipped by the blanket `ignore_validate` flag used to insert the draft document.
+- **Permission checks added** to whitelisted endpoints that previously trusted any authenticated caller:
+  - Read: `get_batch_reservation_summary`, `get_batch_cross_table_usage` (`material_planning.py`), `get_mp_for_pr`, `get_pr_mp_allocations` (`purchase_receipt.py`) — now require Material Planning read permission.
+  - Write: `reserve_batches`, `finalize_mapping`, `auto_purchase_from_mp` (`material_planning.py`), `create_sco_from_production_plan`, `create_work_order_from_pp`, `create_supplier_operation_entries` (`subcontracting.py`) — now require the relevant create/write permission.
+- **Stored XSS fixed**: `drawing_management/doctype/drawing/drawing.js`'s Drawing Items summary table and `public/js/purchase_receipt.js`'s post-submit allocation popup now escape every interpolated Item/Batch/Material-Planning field via `frappe.utils.escape_html`, matching the pattern already used correctly in `batch.js`.
+
+### 18.2 Performance
+- **New shared formula module** `manufyxinvenzaerp/utils/dimension_formula.py` (`calculate_qty`, `calculate_sec_qty_from_qty`, `check_missing_fields`) replaces 8 independently-maintained copies of the Structurals/Plates/Nuts-and-Bolts formula across `material_request.py`, `purchase_order.py`, `purchase_receipt.py`, `supplier_quotation.py`, `sales_order.py`, `so_drawing_import.py`, `drawing_utils.py`, and the Drawing controller. Verified numerically identical to the previous per-file implementations across normal values and every edge case (missing dimensions, each item group, blank group).
+- **New shared reference-copy module** `manufyxinvenzaerp/utils/reference_copy.py` (`copy_reference_fields_if_blank`, `fetch_fields`) replaces the near-identical copy-from-parent-transaction logic in `purchase_order.py`, `purchase_receipt.py`, and `request_for_quotation.py`.
+- **Query batching** (the direct fix for "large document slow to save/submit"):
+  - `get_raw_materials` (`material_planning.py`) — the per-row `custom_secondary_uom` Item lookup is now one batched query.
+  - `check_stock_availability` (`material_planning.py`) — the whole stock-classification loop now reads from pre-fetched bulk lookups (new `get_sbb_batches_bulk` / `match_batches_by_dimension` in `production_plan.py`; new `_get_batch_reserved_by_others_bulk`, `_get_non_batch_stock_bulk`, `_get_non_batch_reserved_by_others_bulk` in `material_planning.py`) instead of issuing several queries per raw-material row.
+  - `allocate_pr_stock_to_mp` (`purchase_receipt.py`) — the Purchase Order Item → Material Request Item → Material Request trace is now 3 batched queries total instead of up to 3 per PR line.
+  - Added `search_index` to `item_code`, `batch`/`batch_no`, `is_reserved` on `Material Planning Material Mapping` and `Material Planning Available Raw Material` — confirmed present on the live DB after `bench migrate`.
+- **Stock Entry submit-time weight refresh** — `refresh_weight_summary` (Material Issue Plan), `_refresh_wo_drawing_transferred_weights`, and `_refresh_sco_drawing_transferred_weights` (`subcontracting.py`) now set `flags.ignore_links = True` before saving, skipping Frappe's redundant Link-field re-validation on child-table rows the function never touches (none of these narrow numeric-field updates change any Link field's value). Also added `_get_mp_drawing_weights_by_duno`, a batched per-Material-Planning replacement for the old per-drawing-row `_get_mp_drawing_weight` call, now used by `refresh_weight_summary` and both SCO/WO creation functions. Measured on a real 98-row Stock Entry: the two custom submit hooks dropped from ~1.1s to ~0.56s; full end-to-end submission (including ERPNext core's own processing, which this app's code doesn't control) on a comparable 100-row entry was ~13.3s — most of the remaining time sits outside this app's own hooks and hasn't been profiled yet.
+- **CI/CD test gate**: `.github/workflows/main.yml` now runs a `test` job (fresh site, full `bench run-tests`) that the `deploy` job depends on — previously the pipeline had no test-execution step at all before pushing to production.
+
+### 18.3 Bug fixes
+- **`store_location`/`storage_location` fieldname mismatch, confirmed live**: `get_sbb_available_qty` (and the new `get_sbb_batches_bulk`) filtered Stock Ledger Entry on a `store_location` column that has never existed — confirmed via `DESCRIBE` and a direct call that reproduced `OperationalError: Unknown column 'tabStock Ledger Entry.store_location'`. Fixed to query the column that actually exists, `storage_location`. Also discovered: `Store Location` (the doctype this filter was meant to key off) has **zero records** in this site's data and no Material Planning document has ever set it — this code path had essentially never been exercised.
+- **Purchase Receipt submission was crashing on every submit**: `on_submit_purchase_receipt` had a wrong import path for `refresh_mip_raw_materials` (`...subcontracting_management.material_issue_plan` instead of `...subcontracting_management.doctype.material_issue_plan.material_issue_plan`), raising `ModuleNotFoundError` unconditionally, outside any try/except. Fixed and confirmed live (PR-26-00008 submitted successfully afterward, with correct Material Planning allocation across all 100 line items).
+- **Silent failures now surfaced to the user**: `on_submit_purchase_receipt`'s Material Planning allocation and `_refresh_linked_mip_weight` (`stock_entry.py`) now show an orange `msgprint` when they fail, in addition to the existing `frappe.log_error` — previously a failure here was invisible until someone noticed stale data much later.
+- **Stray script no longer breaks test discovery**: `production_management/test_release.py` (a one-off manual debug script, not a real test, but named so `bench run-tests` tried to import it as one and crashed before any real test could run) renamed to `manual_release_check.py`.
+
+### 18.4 New feature — Material Issue Plan warehouse fields filtered by Company
+`source_warehouse`, `supplier_warehouse`, `cnc_warehouse`, `excess_return_warehouse` on Material Issue Plan (`subcontracting_management/doctype/material_issue_plan/material_issue_plan.js`) now filter to the document's own Company via `frm.set_query`, matching the same pattern already used for `subcontracting_order`/`work_order` in this file. Previously showed every warehouse across every company in the system (62 across 10 companies on this site); now shows only the ~7 belonging to the document's own company.
+
+### 18.5 Not yet done (flagged, not silently dropped)
+- Rotating the leaked production credential and deciding on a git-history scrub (§18.1) — ops action, not a code change.
+- Profiling the *rest* of Stock Entry submission time beyond this app's own two custom hooks (ERPNext core's own Stock Ledger/GL/valuation/Serial-and-Batch-Bundle processing) — the current fix only addresses this app's own custom-code overhead.
+- The remaining Phase 1 items requiring business sign-off (Drawing's "All"-role grant, the RFQ/Sales Order missing-dimension gate) or a dedicated design/regression-suite effort first (the batch-matching heuristic redesign, the `bom_class_override.py` fork reduction) — see `PROJ001 CLAUDE FILES/PHASE_1_Critical.md` for the full detail on each.
 
 ---
 

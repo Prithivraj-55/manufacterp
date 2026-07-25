@@ -58,15 +58,20 @@ manufyxinvenzaerp/
 ├── sq_management/
 ├── production_management/     # Job Card, Stock Entry hooks; Material Planning doctype
 ├── production_plan_management/
-├── subcontracting_management/ # SCO override; Supplier Operation Entry
+├── subcontracting_management/ # SCO override; Supplier Operation Entry; Material Issue Plan
+├── utils/                     # Shared pure-function modules (added 2026-07-16 remediation pass):
+│                               #   dimension_formula.py (qty formula, missing-field check),
+│                               #   reference_copy.py (copy-from-parent-transaction helper) —
+│                               #   consolidates logic that was previously duplicated across
+│                               #   6-8 doctype-specific files each; see manufyxinvenzaerp_features.md §18.2
 ├── fixtures/                  # custom_field.json, property_setter.json
 ├── public/js/                 # Client-side JS injected into core ERPNext doctypes
 ├── patches/                   # Data migration patches
-└── tests/                     # pytest test suite (run via bench)
+└── tests/                     # pytest test suite (run via bench; gated in CI as of 2026-07-16 — see below)
 ```
 
 **Conventions:**
-- ERPNext standard doctypes are extended through `doc_events` hooks only — no Document subclasses, except for `BOM` and `Subcontracting Order` which require method overrides.
+- ERPNext standard doctypes are extended through `doc_events` hooks only — no Document subclasses, except for `BOM`, `Subcontracting Order`, and `Stock Entry` (see the ERPNext Overrides table below), which require method overrides.
 - All whitelisted API functions follow the path `manufyxinvenzaerp.<module>.<file>.<function>` and are called from JS via `frappe.call()`.
 - Private helper functions are prefixed with `_` consistently across all modules.
 
@@ -333,6 +338,34 @@ Client-side JS is injected into these ERPNext doctypes via `app_include_js` / `d
 - **Purchase Order** — weight UOM field and recalculation
 - **Purchase Receipt** — weight UOM field and MP allocation button
 - **Batch** — secondary qty display
+- **Job Card** — raw material consumption grid, Inspection tab controls
+- **Inspection Entry** — Ok/Not Ok, Rework Qty field behavior
+- **Supplier Operation Entry** — consumption grid, Inspection tab controls
+
+### A second, parallel client-side delivery mechanism: `setup.py` Client Scripts
+
+**This app ships client-side JS through two independent mechanisms, not one** — a gap in this document until now (Phase 1 HP-03 / Report 2 §3.6, Report 4 of the internal audit series). Alongside the `public/js/*.js` files above (loaded via `hooks.py`'s `doctype_js`), `setup.py` also *installs Client Script database records* on every `after_install`/`after_migrate`, via ~17 `create_*_client_script()` functions (e.g. `create_purchase_order_client_script`, `create_production_plan_client_script`). These are force-synced (updated if they already exist, created if not) every time the app is installed or migrated — they are not fixtures, and `fixtures = ["Custom Field", "Property Setter"]` in `hooks.py` does not cover them.
+
+**Doctypes driven by a `setup.py` Client Script:**
+
+| Doctype | Also has a `public/js/*.js` file? |
+|---|---|
+| Item | Yes — `item.js` |
+| Purchase Order | Yes — `purchase_order.js` |
+| Purchase Receipt | Yes — `purchase_receipt.js` |
+| BOM | Yes — `bom.js` |
+| Production Plan | Yes — `production_plan.js` |
+| Job Card (×2 scripts — consumption logic + drawing consumption) | Yes — `job_card.js` |
+| Subcontracting Order (×2 scripts — main + ops) | No |
+| Supplier Operation Entry | Yes — `supplier_operation_entry.js` |
+| Work Order (×2 scripts — main + ops) | No |
+| Material Request | No |
+| Request for Quotation | No |
+| Supplier Quotation | No |
+| Sales Order | No |
+| Stock Entry | No |
+
+**Why this matters:** for the doctypes in the "Yes" column, **both** mechanisms are live for the same form at the same time — a developer editing the seemingly-complete `public/js/purchase_order.js` may not realize that some of the live dimension-recalculation/field-toggle behavior on that same form actually comes from `setup.py`'s embedded `PO_CLIENT_SCRIPT` string instead (or in addition). For the doctypes in the "No" column (Material Request, RFQ, Supplier Quotation, Sales Order, Stock Entry, Subcontracting Order, Work Order), `setup.py` is the **only** client-side delivery path — there is no `public/js/` file to look in at all. Before editing client-side behavior for any of these doctypes, check both `public/js/` and the corresponding `*_CLIENT_SCRIPT` string in `setup.py` (search for the doctype's `*_CLIENT_SCRIPT_NAME` constant near the top of the file).
 
 ---
 
@@ -376,6 +409,12 @@ Run a single file:
 ```bash
 bench --site manufact run-tests --module manufyxinvenzaerp.tests.test_material_planning
 ```
+
+**CI gate (added 2026-07-16):** `.github/workflows/main.yml` now runs a `test` job — a fresh site, `bench run-tests --app manufyxinvenzaerp` — that the production `deploy` job depends on (`needs: test`). Previously the pipeline had no test-execution step at all; a failing test could not block a deploy. If `test` fails, `deploy` is skipped entirely and production is left untouched.
+
+Two stray test-shaped files exist outside this convention, worth knowing about if `bench run-tests` behaves unexpectedly:
+- `production_management/doctype/material_planning/test_material_planning.py` — a real (currently empty/placeholder) `FrappeTestCase`, just misplaced.
+- `production_management/manual_release_check.py` — **not a real test** despite formerly being named `test_release.py` (renamed 2026-07-16). It's a one-off manual debug script with hardcoded document names and its own `frappe.db.commit()`, meant to be run deliberately via `bench execute manufyxinvenzaerp.production_management.manual_release_check.run` against a site that has the specific records it references — not picked up by `bench run-tests` anymore now that it no longer matches the `test_*.py` pattern.
 
 ---
 

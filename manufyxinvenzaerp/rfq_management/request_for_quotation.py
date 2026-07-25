@@ -1,4 +1,5 @@
 import frappe
+from manufyxinvenzaerp.utils.reference_copy import copy_reference_fields_if_blank
 
 CUSTOM_FIELDS = [
     "custom_parent_item_group",
@@ -18,15 +19,9 @@ def validate_rfq(doc, method):
 
 
 def _copy_from_mr_item(row):
-    if not row.material_request_item:
-        return
-    mr_item = frappe.db.get_value(
-        "Material Request Item",
-        row.material_request_item,
-        CUSTOM_FIELDS,
-        as_dict=True,
+    # blank_check_fields=False: always copy, matching this function's existing
+    # unconditional every-validate overwrite behavior (unlike PO/PR's
+    # copy-only-if-blank pattern).
+    copy_reference_fields_if_blank(
+        row, "Material Request Item", "material_request_item", CUSTOM_FIELDS, blank_check_fields=False
     )
-    if not mr_item:
-        return
-    for field in CUSTOM_FIELDS:
-        row.set(field, mr_item.get(field))

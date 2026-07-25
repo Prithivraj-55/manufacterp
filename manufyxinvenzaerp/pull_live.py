@@ -1,14 +1,28 @@
 """
 Pull all data from live site via Frappe REST API and restore to fl.local.
 Run with: bench --site fl.local execute manufyxinvenzaerp.pull_live.run
+
+Requires the live-site credential to be supplied out-of-band — never hardcode it here:
+    export MANUFYX_LIVE_URL="https://erp.manufyx.co.in"
+    export MANUFYX_LIVE_USER="Administrator"
+    export MANUFYX_LIVE_PASS="..."
+    bench --site fl.local execute manufyxinvenzaerp.pull_live.run
 """
+import os
 import frappe
 from frappe.utils import flt, cint
 import requests
 
-LIVE_URL = "https://erp.manufyx.co.in"
-LIVE_USER = "Administrator"
-LIVE_PASS = "M@nufYx@0154"
+LIVE_URL = os.environ.get("MANUFYX_LIVE_URL")
+LIVE_USER = os.environ.get("MANUFYX_LIVE_USER")
+LIVE_PASS = os.environ.get("MANUFYX_LIVE_PASS")
+
+if not (LIVE_URL and LIVE_USER and LIVE_PASS):
+    raise RuntimeError(
+        "Set MANUFYX_LIVE_URL, MANUFYX_LIVE_USER, and MANUFYX_LIVE_PASS in the "
+        "environment before running pull_live.py — the live credential must never "
+        "be hardcoded in source control."
+    )
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 

@@ -54,6 +54,7 @@ Ask first, every time, going forward.)
 | `.claude/references/hooks.md`       | Touching doc_events, override_doctype_class, fixtures, or app lifecycle hooks     |
 | `.claude/references/api.md`         | Adding or calling a `@frappe.whitelist()` method; checking existing API surface   |
 | `.claude/references/deployment.md`  | Running bench commands, migrating, exporting fixtures, restarting                 |
+| `.claude/references/client_change_request_progress.md` | Continuing the in-progress client change request — status of every phase, what's done, what's next |
 
 ## App architecture overview
 

@@ -8,6 +8,7 @@
   "item_code",
   "update_batch_btn",
   "item_name",
+  "description",
   "planned_item",
   "source_table",
   "source_row",
@@ -17,6 +18,7 @@
   "customer_drawing_number",
   "sales_order",
   "batch_no",
+  "batch_remarks",
   "purchase_receipt",
   "parent_item_group",
   "section_dims",
@@ -27,12 +29,35 @@
   "col_break_2",
   "sec_qty",
   "sec_uom",
+  "uom",
   "qty",
   "transferred_qty",
+  "drawing_planned_weight",
+  "excess_qty",
   "section_flags",
   "is_reserved",
   "is_unavailable",
-  "cnc_process"
+  "cnc_process",
+  "section_excess_return",
+  "excess_return_applicable",
+  "col_break_excess_return",
+  "excess_length",
+  "excess_width",
+  "excess_sec_qty",
+  "excess_calc_qty",
+  "excess_return_date",
+  "section_cut_sheet",
+  "cut_sheet",
+  "col_break_cut_sheet_use",
+  "use_length",
+  "use_width",
+  "use_sec_qty",
+  "use_calc_qty",
+  "col_break_cut_sheet_balance",
+  "balance_length",
+  "balance_width",
+  "balance_sec_qty",
+  "balance_calc_qty"
  ],
  "fields": [
   {
@@ -55,6 +80,13 @@
    "fieldname": "item_name",
    "fieldtype": "Data",
    "label": "Item Name",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "item_code.description",
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description",
    "read_only": 1
   },
   {
@@ -121,6 +153,13 @@
    "read_only": 1
   },
   {
+   "description": "Synced from the batch's own Batch Remarks on every save (client change request Phase 6.3).",
+   "fieldname": "batch_remarks",
+   "fieldtype": "Small Text",
+   "label": "Batch Remarks",
+   "read_only": 1
+  },
+  {
    "fieldname": "purchase_receipt",
    "fieldtype": "Link",
    "label": "Purchase Receipt",
@@ -182,18 +221,44 @@
    "read_only": 1
   },
   {
+   "fetch_from": "item_code.stock_uom",
+   "fieldname": "uom",
+   "fieldtype": "Link",
+   "label": "UOM",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
    "fieldname": "qty",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Weight (Primary UOM)",
-   "read_only": 1
+   "label": "Reqd Qty",
+   "read_only": 1,
+   "description": "Weight of the batch actually mapped/reserved against this requirement — required to transfer."
   },
   {
    "fieldname": "transferred_qty",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Transferred Qty",
-   "read_only": 1
+   "label": "Issued Qty",
+   "read_only": 1,
+   "description": "Cumulative qty transferred so far across all Stock Entries issued from this plan."
+  },
+  {
+   "fieldname": "drawing_planned_weight",
+   "fieldtype": "Float",
+   "hidden": 1,
+   "label": "Drawing Planned Weight",
+   "read_only": 1,
+   "description": "Engineering weight for this raw material off the drawing (Sales Order Drawing Raw Material's Total Weight) — the basis Excess Qty is measured against."
+  },
+  {
+   "fieldname": "excess_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Excess Qty",
+   "read_only": 1,
+   "description": "Reqd Qty minus the drawing's planned raw material weight — the surplus this mapped batch carries beyond what the drawing actually needs."
   },
   {
    "fieldname": "section_flags",
@@ -219,6 +284,128 @@
    "fieldtype": "Check",
    "label": "CNC Process",
    "read_only": 1
+  },
+  {
+   "fieldname": "section_excess_return",
+   "fieldtype": "Section Break",
+   "label": "Excess Return"
+  },
+  {
+   "fieldname": "excess_return_applicable",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Excess Return Applicable",
+   "description": "Enable to record off-cut dimensions for this row -- on save, a matching row is auto-populated (and kept editable) in the plan's Excess Material Return table."
+  },
+  {
+   "fieldname": "col_break_excess_return",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "excess_length",
+   "fieldtype": "Float",
+   "label": "Excess Length (mm)",
+   "depends_on": "eval:doc.excess_return_applicable && ['Structurals','Plates'].includes(doc.parent_item_group)"
+  },
+  {
+   "fieldname": "excess_width",
+   "fieldtype": "Float",
+   "label": "Excess Width (mm)",
+   "depends_on": "eval:doc.excess_return_applicable && doc.parent_item_group === 'Plates'"
+  },
+  {
+   "fieldname": "excess_sec_qty",
+   "fieldtype": "Float",
+   "label": "Excess Sec Qty",
+   "depends_on": "eval:doc.excess_return_applicable && ['Structurals','Plates'].includes(doc.parent_item_group)"
+  },
+  {
+   "fieldname": "excess_calc_qty",
+   "fieldtype": "Float",
+   "label": "Excess Calc Qty (Kg)",
+   "read_only": 1,
+   "depends_on": "eval:doc.excess_return_applicable",
+   "description": "Auto-calculated from Excess Length/Width/Sec Qty (Thickness reuses this row's own batch Thickness)."
+  },
+  {
+   "fieldname": "excess_return_date",
+   "fieldtype": "Date",
+   "label": "Excess Return Date",
+   "depends_on": "eval:doc.excess_return_applicable"
+  },
+  {
+   "fieldname": "section_cut_sheet",
+   "fieldtype": "Section Break",
+   "label": "Cut Sheet"
+  },
+  {
+   "fieldname": "cut_sheet",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Cut Sheet",
+   "description": "Enable to transfer only part of this batch (To Use / W1) and keep the rest (Balance / W2) as the same batch, resized -- no new batch is created. On the transfer Stock Entry's submit, the batch's own Length/Width/Sec Qty update to the Balance dimensions."
+  },
+  {
+   "fieldname": "col_break_cut_sheet_use",
+   "fieldtype": "Column Break",
+   "label": "To Use (W1 — Transferred)"
+  },
+  {
+   "fieldname": "use_length",
+   "fieldtype": "Float",
+   "label": "To Use Length (mm)",
+   "depends_on": "eval:doc.cut_sheet && ['Structurals','Plates'].includes(doc.parent_item_group)"
+  },
+  {
+   "fieldname": "use_width",
+   "fieldtype": "Float",
+   "label": "To Use Width (mm)",
+   "depends_on": "eval:doc.cut_sheet && doc.parent_item_group === 'Plates'"
+  },
+  {
+   "fieldname": "use_sec_qty",
+   "fieldtype": "Float",
+   "label": "To Use Sec Qty",
+   "depends_on": "eval:doc.cut_sheet && ['Structurals','Plates'].includes(doc.parent_item_group)"
+  },
+  {
+   "fieldname": "use_calc_qty",
+   "fieldtype": "Float",
+   "label": "To Use Calc Qty (Kg) — W1",
+   "read_only": 1,
+   "depends_on": "eval:doc.cut_sheet",
+   "description": "Auto-calculated from To Use Length/Width/Sec Qty (Thickness reuses this row's own batch Thickness). This is the qty actually transferred."
+  },
+  {
+   "fieldname": "col_break_cut_sheet_balance",
+   "fieldtype": "Column Break",
+   "label": "Balance (W2 — Remains)"
+  },
+  {
+   "fieldname": "balance_length",
+   "fieldtype": "Float",
+   "label": "Balance Length (mm)",
+   "depends_on": "eval:doc.cut_sheet && ['Structurals','Plates'].includes(doc.parent_item_group)"
+  },
+  {
+   "fieldname": "balance_width",
+   "fieldtype": "Float",
+   "label": "Balance Width (mm)",
+   "depends_on": "eval:doc.cut_sheet && doc.parent_item_group === 'Plates'"
+  },
+  {
+   "fieldname": "balance_sec_qty",
+   "fieldtype": "Float",
+   "label": "Balance Sec Qty",
+   "depends_on": "eval:doc.cut_sheet && ['Structurals','Plates'].includes(doc.parent_item_group)"
+  },
+  {
+   "fieldname": "balance_calc_qty",
+   "fieldtype": "Float",
+   "label": "Balance Calc Qty (Kg) — W2",
+   "read_only": 1,
+   "depends_on": "eval:doc.cut_sheet",
+   "description": "Auto-calculated from Balance Length/Width/Sec Qty. This is what the SAME batch's own dimensions get resized to once the transfer Stock Entry submits."
   }
  ],
  "grid_page_length": 50,

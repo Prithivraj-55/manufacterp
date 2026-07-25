@@ -2,7 +2,7 @@ from collections import defaultdict
 
 import frappe
 from frappe import _
-from frappe.utils import flt, today
+from frappe.utils import cint, flt, today
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -26,13 +26,35 @@ def get_sco_dashboard_data(data):
 def create_sco_from_production_plan(pp_name):
     """Create a Draft Subcontracting Order from a submitted Production Plan.
     Populates drawing items and total weight from Material Planning reservations.
+
+    Subcontracting Order is the single production-execution doctype for all three
+    Production Plan Types (Internal Job / Supplier Job / Supplier with Material) --
+    Work Order is no longer created from Production Plan at all (client change
+    request Phase 0.4/4.1). Process Planning rows can be Subcontractor and/or
+    Internal Jobcard in any mix; Supplier Operation Entry is the universal
+    one-row-per-operation execution document regardless of who performs it.
     """
+    if not frappe.has_permission("Subcontracting Order", "create"):
+        frappe.throw(_("Not permitted to create Subcontracting Orders"), frappe.PermissionError)
+
+    existing = frappe.db.get_value(
+        "Subcontracting Order", {"custom_production_plan": pp_name, "docstatus": ["!=", 2]}, "name"
+    )
+    if existing:
+        frappe.throw(
+            _(
+                "A Subcontracting Order ({0}) already exists for this Production Plan. "
+                "Open the existing Subcontracting Order from the connections panel."
+            ).format(existing)
+        )
+
     pp = frappe.get_doc("Production Plan", pp_name)
 
-    sub_ops = [r for r in (pp.custom_process_planning or []) if r.work_type == "Subcontractor"]
-    if not sub_ops:
-        frappe.throw(_("No Subcontractor operations found in the Process Planning table."))
-    if not pp.custom_vendor_contractor:
+    all_ops = pp.custom_process_planning or []
+    if not all_ops:
+        frappe.throw(_("No operations found in the Process Planning table."))
+    has_sub = any(r.work_type == "Subcontractor" for r in all_ops)
+    if has_sub and not pp.custom_vendor_contractor:
         frappe.throw(_("Please set the Vendor/Contractor on the Production Plan before creating a Subcontracting Order."))
 
     wo_list = frappe.get_all("Work Order", filters={"production_plan": pp_name}, limit=1, pluck="name")
@@ -71,6 +93,7 @@ def create_sco_from_production_plan(pp_name):
     total_customer = total_planned = total_mapped = total_excess = 0.0
     _mapped_cache = {}   # mp_name -> {duno_mark_no: mapped_kg}
     _excess_cache = {}   # mp_name -> {duno_mark_no: excess_kg}
+    _drawing_weight_cache = {}  # mp_name -> {duno_mark_no: planned_kg}
     for pi in pp.po_items:
         mp_name = pi.get("custom_material_planning")
         duno    = pi.get("custom_duno_mark_no") or ""
@@ -78,13 +101,16 @@ def create_sco_from_production_plan(pp_name):
         if mp_name not in _mapped_cache:
             _mapped_cache[mp_name] = _get_mp_mapped_weight_by_duno(mp_name)
             _excess_cache[mp_name] = _get_mp_excess_by_duno(mp_name)
+        if mp_name not in _drawing_weight_cache:
+            _drawing_weight_cache[mp_name] = _get_mp_drawing_weights_by_duno(mp_name)
 
-        planned = _get_mp_drawing_weight(mp_name, duno)
         if duno:
+            planned = _drawing_weight_cache[mp_name].get(duno, 0.0)
             mapped = _mapped_cache[mp_name].get(duno, 0.0)
             excess = _excess_cache[mp_name].get(duno, 0.0)
         else:
             # No DUNO on the PP item — take the whole Material Planning's totals.
+            planned = _get_mp_total_weight(mp_name)
             mapped = _get_mp_total_weight(mp_name)
             excess = sum(_excess_cache[mp_name].values())
 
@@ -113,7 +139,7 @@ def create_sco_from_production_plan(pp_name):
         "company": company,
         "currency": currency,
         "conversion_rate": 1,
-        "supplier": pp.custom_vendor_contractor,
+        "supplier": pp.custom_vendor_contractor or "",
         "schedule_date": today(),
         "items": [{
             "item_code": fg_item,
@@ -131,6 +157,12 @@ def create_sco_from_production_plan(pp_name):
         "custom_mapped_weight_kg": flt(total_mapped, 3),
         "custom_excess_weight_kg": flt(total_excess, 3),
     })
+    # Run the app's own BOM-active check explicitly rather than letting the
+    # blanket ignore_validate below skip it — this is the one check from
+    # CustomSubcontractingOrder.validate() that must still fire at creation
+    # time, so an inactive/missing BOM is caught here, not deferred to the
+    # next unrelated-looking save (see IMM-03 / Report 3 Finding C-02).
+    sco._pp_validate_items()
     sco.flags.ignore_validate = True
     sco.insert(ignore_permissions=True, ignore_mandatory=True)
 
@@ -153,6 +185,20 @@ def create_work_order_from_pp(pp_name):
     Populates custom_drawing_items and weight summary fields (mirrors create_sco_from_production_plan).
     # SHARED_SCO_JC: mirrors create_sco_from_production_plan
     """
+    if not frappe.has_permission("Work Order", "create"):
+        frappe.throw(_("Not permitted to create Work Orders"), frappe.PermissionError)
+
+    existing = frappe.get_all(
+        "Work Order", filters={"production_plan": pp_name, "docstatus": ["!=", 2]}, limit=1, pluck="name"
+    )
+    if existing:
+        frappe.throw(
+            _(
+                "A Work Order ({0}) already exists for this Production Plan. "
+                "Open the existing Work Order from the connections panel."
+            ).format(existing[0])
+        )
+
     pp = frappe.get_doc("Production Plan", pp_name)
 
     internal_ops = [r for r in (pp.custom_process_planning or []) if r.work_type == "Internal Jobcard"]
@@ -165,6 +211,13 @@ def create_work_order_from_pp(pp_name):
     bom_no = pp_item.bom_no
     if not bom_no:
         frappe.throw(_("No BOM set on the Production Plan item."))
+    # Same BOM-active check create_sco_from_production_plan's _pp_validate_items
+    # runs for the SCO side — run it explicitly here too, since the
+    # ignore_validate flag below would otherwise skip ERPNext core's own
+    # BOM-active checks for this Work Order at the one moment it matters most
+    # (see IMM-03 / Report 3 Finding C-02).
+    if not frappe.db.get_value("BOM", bom_no, "is_active"):
+        frappe.throw(_("BOM {0} is not active.").format(bom_no))
 
     company = (
         frappe.defaults.get_user_default("Company")
@@ -177,6 +230,7 @@ def create_work_order_from_pp(pp_name):
     total_customer = total_planned = total_mapped = total_excess = 0.0
     _mapped_cache = {}
     _excess_cache = {}
+    _drawing_weight_cache = {}  # mp_name -> {duno_mark_no: planned_kg}
     for pi in pp.po_items:
         mp_name = pi.get("custom_material_planning")
         duno    = pi.get("custom_duno_mark_no") or ""
@@ -184,12 +238,15 @@ def create_work_order_from_pp(pp_name):
         if mp_name not in _mapped_cache:
             _mapped_cache[mp_name] = _get_mp_mapped_weight_by_duno(mp_name)
             _excess_cache[mp_name] = _get_mp_excess_by_duno(mp_name)
+        if mp_name not in _drawing_weight_cache:
+            _drawing_weight_cache[mp_name] = _get_mp_drawing_weights_by_duno(mp_name)
 
-        planned = _get_mp_drawing_weight(mp_name, duno)
         if duno:
+            planned = _drawing_weight_cache[mp_name].get(duno, 0.0)
             mapped = _mapped_cache[mp_name].get(duno, 0.0)
             excess = _excess_cache[mp_name].get(duno, 0.0)
         else:
+            planned = _get_mp_total_weight(mp_name)
             mapped = _get_mp_total_weight(mp_name)
             excess = sum(_excess_cache[mp_name].values())
 
@@ -288,6 +345,9 @@ def create_supplier_operation_entries(sco_name):
     Op 1 available_to_consume = SCO's transferred weight (0 if not yet transferred).
     Op 2+ available_to_consume = previous SOE's total_consumed_kg.
     """
+    if not frappe.has_permission("Supplier Operation Entry", "create"):
+        frappe.throw(_("Not permitted to create Supplier Operation Entries"), frappe.PermissionError)
+
     sco = frappe.get_doc("Subcontracting Order", sco_name)
     if sco.docstatus != 1:
         frappe.throw(_("Subcontracting Order must be submitted before creating Supplier Operation Entries."))
@@ -1251,29 +1311,40 @@ def _build_soe_drawing_rows(sco, seq_idx):
 
 
 def _create_soes_for_sco(sco):
-    """Create one SOE per Subcontractor operation in the linked Production Plan.
+    """Create one SOE per operation (Subcontractor or Internal Jobcard) in the linked
+    Production Plan -- Supplier Operation Entry is the universal one-row-per-operation
+    execution document regardless of who performs it (client change request Phase
+    0.4/4.1: Work Order/Job Card no longer used for internal operations at all).
     Idempotent — skips any sequence_id that already has a live SOE.
     Op-1 gets available_to_consume_kg from custom_transferred_weight_kg (0 if not yet
     transferred). Each SOE is populated with drawing_details rows so drawing-level
-    Nos tracking is available from the start.
+    Nos tracking is available from the start. Internal Jobcard rows get no
+    supplier/supplier_warehouse (executed by the internal team, not a supplier).
+
+    Process Planning rows with Create Operation unchecked (client change request
+    Phase 4.2) are dropped entirely before numbering -- they never get an SOE and
+    are treated as if they don't exist for sequencing purposes, so the
+    available-to-consume chain correctly skips straight from the operation before
+    to the operation after. Create Operation defaults to enabled; only an explicit
+    uncheck (0) disables a row -- unset/None is treated as enabled.
     """
     pp_name = sco.custom_production_plan if hasattr(sco, "custom_production_plan") else sco.get("custom_production_plan")
     if not pp_name:
         return []
 
     pp = frappe.get_doc("Production Plan", pp_name)
-    sub_ops = sorted(
-        [r for r in (pp.custom_process_planning or []) if r.work_type == "Subcontractor"],
-        key=lambda r: r.idx,
-    )
-    if not sub_ops:
+    all_ops = [
+        r for r in sorted(pp.custom_process_planning or [], key=lambda r: r.idx)
+        if r.get("create_operation") is None or cint(r.get("create_operation"))
+    ]
+    if not all_ops:
         return []
 
     transferred_weight = flt(sco.get("custom_transferred_weight_kg") or 0)
     created_soes = []
     prev_soe_name = None
 
-    for seq_idx, op_row in enumerate(sub_ops, start=1):
+    for seq_idx, op_row in enumerate(all_ops, start=1):
         existing = frappe.db.get_value(
             "Supplier Operation Entry",
             {"subcontracting_order": sco.name, "sequence_id": seq_idx, "docstatus": ["!=", 2]},
@@ -1292,15 +1363,17 @@ def _create_soes_for_sco(sco):
             available_to_consume = prev_consumed
 
         drawing_rows = _build_soe_drawing_rows(sco, seq_idx)
+        is_subcontractor = op_row.work_type == "Subcontractor"
 
         soe = frappe.get_doc({
             "doctype": "Supplier Operation Entry",
             "subcontracting_order": sco.name,
             "production_plan": pp_name,
             "operation": op_row.operation_name,
+            "custom_inspection_mandatory": 1 if cint(op_row.inspection_mandatory) else 0,
             "sequence_id": seq_idx,
-            "supplier": sco.supplier,
-            "supplier_warehouse": sco.supplier_warehouse or "",
+            "supplier": sco.supplier if is_subcontractor else "",
+            "supplier_warehouse": (sco.supplier_warehouse or "") if is_subcontractor else "",
             "status": "Open",
             "available_to_consume_kg": flt(available_to_consume, 3),
             "total_consumed_kg": 0,
@@ -1424,6 +1497,12 @@ def _refresh_wo_drawing_transferred_weights(wo):
 
     if changed:
         jc_doc.flags.ignore_validate = True
+        # Perf: only row.transferred_weight_kg (a Float) changes here -- no Link
+        # field's VALUE is touched, so re-validating that every Link on every
+        # child row still points to a real document is pure redundant work on
+        # top of the validate() this already skips. Found while investigating
+        # slow Stock Entry submission (this runs from _update_wo_transferred_weight).
+        jc_doc.flags.ignore_links = True
         jc_doc.save(ignore_permissions=True)
 
 
@@ -1486,6 +1565,11 @@ def _refresh_sco_drawing_transferred_weights(sco):
 
     if changed:
         soe_doc.flags.ignore_validate = True
+        # Perf: same reasoning as _refresh_wo_drawing_transferred_weights above --
+        # only row.transferred_weight_kg (a Float) changes, no Link field VALUE
+        # is touched, so skip the redundant re-validation of every Link on every
+        # child row on top of the validate() this already skips.
+        soe_doc.flags.ignore_links = True
         soe_doc.save(ignore_permissions=True)
 
 
@@ -1504,6 +1588,32 @@ def _get_mp_drawing_weight(mp_name, duno_mark_no):
         )[0][0] or 0
         return flt(wt)
     return _get_mp_total_weight(mp_name)
+
+
+def _get_mp_drawing_weights_by_duno(mp_name):
+    """Batched variant of _get_mp_drawing_weight's duno_mark_no branch -- one grouped
+    query per Material Planning instead of one query per drawing row sharing that MP
+    (the same N+1 shape already fixed elsewhere in this app; this one was found while
+    investigating slow Stock Entry submission via refresh_weight_summary).
+
+    Returns {duno_mark_no: planned_qty}. Callers still fall back to
+    _get_mp_total_weight(mp_name) for a blank/falsy duno_mark_no, exactly as
+    _get_mp_drawing_weight itself does -- this only replaces the per-duno lookup."""
+    weights = defaultdict(float)
+    if not mp_name:
+        return weights
+    for r in frappe.db.sql(
+        """
+        SELECT duno_mark_no, COALESCE(SUM(qty), 0) AS qty
+        FROM `tabMaterial Planning Raw Material`
+        WHERE parent = %s
+        GROUP BY duno_mark_no
+        """,
+        mp_name,
+        as_dict=True,
+    ):
+        weights[r.duno_mark_no or ""] += flt(r.qty)
+    return weights
 
 
 def _get_mp_mapped_weight_by_duno(mp_name):

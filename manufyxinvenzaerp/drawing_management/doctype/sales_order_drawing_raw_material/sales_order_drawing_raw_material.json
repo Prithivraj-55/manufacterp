@@ -133,7 +133,8 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Total Sec Qty",
-   "read_only": 1
+   "read_only": 1,
+   "allow_on_submit": 1
   },
   {
    "fetch_from": "material_code.custom_unit_weight",
@@ -149,7 +150,8 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Weight (Primary UOM)",
-   "read_only": 1
+   "read_only": 1,
+   "allow_on_submit": 1
   },
   {
    "fetch_from": "material_code.stock_uom",
@@ -166,7 +168,8 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Total Weight",
-   "read_only": 1
+   "read_only": 1,
+   "allow_on_submit": 1
   },
   {
    "default": "0",

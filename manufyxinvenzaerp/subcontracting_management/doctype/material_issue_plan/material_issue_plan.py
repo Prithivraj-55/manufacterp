@@ -3,6 +3,8 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
 
+from manufyxinvenzaerp.utils.dimension_formula import calculate_qty
+
 
 class MaterialIssuePlan(Document):
     def after_insert(self):
@@ -11,6 +13,20 @@ class MaterialIssuePlan(Document):
         immediately at creation rather than requiring a separate manual step."""
         if self.production_plan:
             populate_from_production_plan(self.name)
+
+    def validate(self):
+        """Recompute Cut Sheet's To Use (W1) / Balance (W2) Calc Qty (Phase 5.2),
+        auto-suggest an Excess Return row from a Cut Sheet row's Balance once
+        it's calculated (Phase 5.5), then recompute Excess Calc Qty for every
+        raw_materials row flagged Excess Return Applicable and sync (create/
+        update, never duplicate) a matching row in excess_return_items for each
+        (Phase 5.3). Order matters: the auto-suggestion must run before the
+        excess-return sync so a freshly-suggested row gets picked up in the
+        same save. Also mirrors each row's batch Remarks (Phase 6.3)."""
+        _sync_cut_sheet_calc(self)
+        _auto_suggest_excess_from_cut_sheet(self)
+        _sync_excess_return_from_raw_materials(self)
+        _sync_batch_remarks(self)
 
     def on_trash(self):
         """Remove Batch Change Log rows referencing this MIP from all linked
@@ -126,11 +142,31 @@ def populate_from_production_plan(mip_name):
     return mip.name
 
 
+# Fields the user edits directly on an otherwise-rebuilt-from-scratch raw_materials
+# row (Excess Return in Phase 5.3, Cut Sheet in Phase 5.2) -- refresh_mip_raw_materials
+# fully clears and rebuilds this table from the source Material Planning on every
+# call, so anything the user typed here must be explicitly carried forward onto the
+# freshly-rebuilt row or it would silently vanish the next time a Purchase Receipt
+# (or anything else) triggers a refresh.
+_RAW_MATERIAL_EDITABLE_FIELDS = [
+    "excess_return_applicable", "excess_length", "excess_width", "excess_sec_qty",
+    "excess_calc_qty", "excess_return_date",
+    "cut_sheet", "use_length", "use_width", "use_sec_qty", "use_calc_qty",
+    "balance_length", "balance_width", "balance_sec_qty", "balance_calc_qty",
+]
+
+
 @frappe.whitelist()
 def refresh_mip_raw_materials(mip_name):
     """Rebuild the raw-material snapshot fresh from every Material Planning linked to
     this plan's drawings. Material Planning's own child tables remain the source of
-    truth for reservation state — this only refreshes MIP's read-only display copy."""
+    truth for reservation state — this only refreshes MIP's read-only display copy.
+
+    User-editable fields (Excess Return / Cut Sheet — see _RAW_MATERIAL_EDITABLE_FIELDS)
+    are carried forward from the row being replaced, matched by (source_table,
+    source_row), since those two together uniquely identify "the same underlying
+    Material Planning row" across a rebuild -- item_code/batch alone isn't enough
+    when the same item appears in more than one row."""
     from manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer import (
         _get_already_transferred_batches,
     )
@@ -140,6 +176,12 @@ def refresh_mip_raw_materials(mip_name):
 
     transferred_batches = _get_already_transferred_batches(mip)
 
+    old_rows_by_key = {
+        (r.source_table, r.source_row): r
+        for r in (mip.raw_materials or [])
+        if r.source_row
+    }
+
     mip.set("raw_materials", [])
 
     for mp_name in mp_names:
@@ -148,7 +190,8 @@ def refresh_mip_raw_materials(mip_name):
         for row in (mp.material_mapping or []):
             qty = row.batch_calc_qty if row.batch else row.qty
             sec_qty = row.batch_sec_qty if row.batch else row.sec_qty
-            mip.append("raw_materials", {
+            planned_weight = _lookup_drawing_planned_weight(row.sales_order, row.customer_drawing_number, row.item_code)
+            new_row = mip.append("raw_materials", {
                 "material_planning": mp_name,
                 "source_table": "Material Planning Material Mapping",
                 "source_row": row.name,
@@ -169,13 +212,17 @@ def refresh_mip_raw_materials(mip_name):
                 "sec_uom": row.sec_uom,
                 "qty": qty,
                 "transferred_qty": qty if row.batch and row.batch in transferred_batches else 0,
+                "drawing_planned_weight": planned_weight,
+                "excess_qty": flt(flt(qty) - planned_weight, 3) if planned_weight is not None else 0,
                 "is_reserved": row.is_reserved,
                 "is_unavailable": 0,
                 "cnc_process": row.cnc_process,
             })
+            _carry_forward_editable_fields(new_row, old_rows_by_key, "Material Planning Material Mapping", row.name)
 
         for row in (mp.available_raw_materials or []):
-            mip.append("raw_materials", {
+            planned_weight = _lookup_drawing_planned_weight(row.sales_order, row.customer_drawing_number, row.item_code)
+            new_row = mip.append("raw_materials", {
                 "material_planning": mp_name,
                 "source_table": "Material Planning Available Raw Material",
                 "source_row": row.name,
@@ -194,13 +241,16 @@ def refresh_mip_raw_materials(mip_name):
                 "sec_uom": row.sec_uom,
                 "qty": row.required_qty,
                 "transferred_qty": row.required_qty if row.batch_no and row.batch_no in transferred_batches else 0,
+                "drawing_planned_weight": planned_weight,
+                "excess_qty": flt(flt(row.required_qty) - planned_weight, 3) if planned_weight is not None else 0,
                 "is_reserved": row.is_reserved,
                 "is_unavailable": 0,
                 "cnc_process": row.cnc_process,
             })
+            _carry_forward_editable_fields(new_row, old_rows_by_key, "Material Planning Available Raw Material", row.name)
 
         for row in (mp.unavailable_items or []):
-            mip.append("raw_materials", {
+            new_row = mip.append("raw_materials", {
                 "material_planning": mp_name,
                 "source_table": "Material Planning Unavailable Item",
                 "source_row": row.name,
@@ -220,10 +270,167 @@ def refresh_mip_raw_materials(mip_name):
                 "is_reserved": 0,
                 "is_unavailable": 1,
             })
+            _carry_forward_editable_fields(new_row, old_rows_by_key, "Material Planning Unavailable Item", row.name)
 
     mip.save(ignore_permissions=True)
     refresh_weight_summary(mip_name)
     return mip.name
+
+
+def _carry_forward_editable_fields(new_row, old_rows_by_key, source_table, source_row):
+    """Copy the Excess Return / Cut Sheet fields a user may have entered directly
+    onto the raw_materials row being replaced, matched by (source_table, source_row)
+    -- see _RAW_MATERIAL_EDITABLE_FIELDS. No-op if no matching old row existed."""
+    old_row = old_rows_by_key.get((source_table, source_row))
+    if not old_row:
+        return
+    for fieldname in _RAW_MATERIAL_EDITABLE_FIELDS:
+        new_row.set(fieldname, old_row.get(fieldname))
+
+
+def _lookup_drawing_planned_weight(sales_order, customer_drawing_number, item_code):
+    """Engineering/planned raw material weight for this (sales_order,
+    customer_drawing_number, item_code) from Sales Order Drawing Raw Material's
+    own Total Weight -- the "Drawing/planned RM weight" Excess Qty is measured
+    against (client change request Phase 5.3's worked example: 14 Kg mapped
+    batch − 13 Kg drawing-planned = 1 Kg excess). Matched on the same key
+    fields Material Issue Plan Raw Material actually carries (no item_number
+    field exists on that row, unlike the stricter match used elsewhere in this
+    app) -- returns None (not 0) when no match exists, so callers can tell
+    "genuinely 0 Kg planned" apart from "no comparison available yet"."""
+    if not sales_order or not item_code:
+        return None
+    return frappe.db.get_value(
+        "Sales Order Drawing Raw Material",
+        {
+            "parent": sales_order,
+            "material_code": item_code,
+            "customer_drawing_number": customer_drawing_number or "",
+        },
+        "total_weight",
+    )
+
+
+def _sync_excess_return_from_raw_materials(mip):
+    """For every raw_materials row flagged Excess Return Applicable, recompute
+    Excess Calc Qty (Kg) from its Excess Length/Width/Sec Qty (Thickness reuses
+    the row's own batch Thickness), then find-or-create a matching row in
+    excess_return_items -- keyed by source_mip_raw_material_row so re-saving
+    the plan updates the same row instead of duplicating it, and a row the
+    user has since edited by hand (or that already has its own Stock Entry)
+    is left alone rather than silently overwritten (client change request
+    Phase 5.3)."""
+    by_source = {
+        r.source_mip_raw_material_row: r
+        for r in (mip.excess_return_items or [])
+        if r.source_mip_raw_material_row
+    }
+
+    for row in (mip.raw_materials or []):
+        if not row.excess_return_applicable:
+            continue
+
+        calc_qty = calculate_qty(
+            row.parent_item_group, row.excess_length, row.excess_width,
+            row.thickness, row.unit_weight, row.excess_sec_qty,
+        )
+        row.excess_calc_qty = flt(calc_qty, 3) if calc_qty is not None else 0
+
+        target = by_source.get(row.name)
+        if target and target.stock_entry_created:
+            # Already returned to stock -- leave the historical entry alone.
+            continue
+
+        if not target:
+            target = mip.append("excess_return_items", {"source_mip_raw_material_row": row.name})
+            by_source[row.name] = target
+
+        target.item_code = row.item_code
+        # parent_item_group/unit_weight/sec_uom/uom are `fetch_from` fields on
+        # SCO Excess Material Item, which Frappe only auto-populates via the
+        # CLIENT-SIDE fetch_and_set_docfield when a user types/selects
+        # item_code in the browser (see the item_code handler on "SCO Excess
+        # Material Item" in material_issue_plan.js) -- appending this row
+        # purely server-side, as this sync does, never triggers that, so
+        # without setting them explicitly here every auto-populated row was
+        # silently left with parent_item_group blank and unit_weight 0 (a
+        # pre-existing bug predating Phase 5.6, found while adding the
+        # dimension-aware qty recompute to create_mip_excess_return_entry,
+        # which depends on both being correct).
+        target.parent_item_group = row.parent_item_group
+        target.unit_weight = row.unit_weight
+        target.sec_uom = row.sec_uom
+        target.uom = row.uom
+        target.length = row.excess_length
+        target.width = row.excess_width
+        target.thickness = row.thickness
+        target.sec_qty = row.excess_sec_qty
+        target.qty = row.excess_calc_qty
+
+
+def _sync_cut_sheet_calc(mip):
+    """For every raw_materials row flagged Cut Sheet, recompute To Use Calc Qty
+    (W1 -- the qty actually transferred) and Balance Calc Qty (W2 -- what the
+    same batch's own dimensions get resized to once the transfer submits), both
+    via the same shared Structurals/Plates formula as everywhere else in this
+    app (client change request Phase 5.2). Purely a display/preview recompute
+    here -- the actual transferred qty override and post-submit batch resize
+    happen in material_issue_plan_transfer.py / stock_entry.py, reading these
+    same Cut Sheet fields directly off this row at the time a transfer is made."""
+    for row in (mip.raw_materials or []):
+        if not row.cut_sheet:
+            continue
+
+        use_qty = calculate_qty(
+            row.parent_item_group, row.use_length, row.use_width,
+            row.thickness, row.unit_weight, row.use_sec_qty,
+        )
+        row.use_calc_qty = flt(use_qty, 3) if use_qty is not None else 0
+
+        balance_qty = calculate_qty(
+            row.parent_item_group, row.balance_length, row.balance_width,
+            row.thickness, row.unit_weight, row.balance_sec_qty,
+        )
+        row.balance_calc_qty = flt(balance_qty, 3) if balance_qty is not None else 0
+
+
+def _sync_batch_remarks(mip):
+    """Mirror each raw_materials row's assigned batch's own Batch Remarks
+    (client change request Phase 6.3) onto its own batch_remarks field. Not a
+    fetch_from field -- raw_materials rows are entirely rebuilt server-side by
+    refresh_mip_raw_materials, which never triggers Frappe's client-only
+    fetch_from auto-populate (same reasoning as material_planning.py's own
+    _sync_batch_remarks). One bulk query regardless of row count."""
+    batch_nos = {r.batch_no for r in (mip.raw_materials or []) if r.batch_no}
+    if not batch_nos:
+        return
+    remarks_by_batch = dict(frappe.get_all(
+        "Batch", filters={"name": ["in", list(batch_nos)]},
+        fields=["name", "custom_batch_remarks"], as_list=True,
+    ))
+    for row in (mip.raw_materials or []):
+        if row.batch_no:
+            row.batch_remarks = remarks_by_batch.get(row.batch_no) or ""
+
+
+def _auto_suggest_excess_from_cut_sheet(mip):
+    """Once a Cut Sheet row's Balance (W2) is calculated, auto-suggest it as an
+    Excess Return row: seed excess_return_applicable + Excess Length/Width/Sec
+    Qty from the Balance dimensions (client change request Phase 5.5). Only
+    fires the FIRST time -- i.e. while excess_return_applicable is not yet set
+    -- so a later manual edit to the excess fields (or an intentional uncheck)
+    is never silently overwritten on a subsequent save; the plan's own spec
+    calls for the suggestion to be "left editable", not re-forced every time."""
+    for row in (mip.raw_materials or []):
+        if not row.cut_sheet or not row.balance_calc_qty:
+            continue
+        if row.excess_return_applicable:
+            continue
+
+        row.excess_return_applicable = 1
+        row.excess_length = row.balance_length
+        row.excess_width = row.balance_width
+        row.excess_sec_qty = row.balance_sec_qty
 
 
 @frappe.whitelist()
@@ -237,9 +444,10 @@ def refresh_weight_summary(mip_name):
     status, so it stays accurate after SE submission clears is_reserved.
     """
     from manufyxinvenzaerp.subcontracting_management.subcontracting import (
-        _get_mp_drawing_weight,
+        _get_mp_drawing_weights_by_duno,
         _get_mp_mapped_weight_by_duno,
         _get_mp_excess_by_duno,
+        _get_mp_total_weight,
     )
 
     mip = frappe.get_doc("Material Issue Plan", mip_name)
@@ -262,6 +470,11 @@ def refresh_weight_summary(mip_name):
 
     mapped_by_mp = {}
     excess_by_mp = {}
+    drawing_weight_by_mp = {}  # mp_name -> {duno_mark_no: planned_kg} (Phase 1 perf fix:
+                                # was one live query per drawing_items row via
+                                # _get_mp_drawing_weight; now one grouped query per
+                                # unique mp_name, mirroring mapped_by_mp/excess_by_mp
+                                # right above, which were already memoized this way.)
 
     total_planned = 0.0
     allocated = 0.0
@@ -274,8 +487,17 @@ def refresh_weight_summary(mip_name):
         if mp_name not in mapped_by_mp:
             mapped_by_mp[mp_name] = _get_mp_mapped_weight_by_duno(mp_name)
             excess_by_mp[mp_name] = _get_mp_excess_by_duno(mp_name)
+        if mp_name not in drawing_weight_by_mp:
+            drawing_weight_by_mp[mp_name] = _get_mp_drawing_weights_by_duno(mp_name)
 
-        d.total_weight_kg = flt(_get_mp_drawing_weight(mp_name, d.duno_mark_no), 3)
+        # Mirrors _get_mp_drawing_weight(mp_name, d.duno_mark_no) exactly: grouped
+        # lookup for a real DUNO/Mark No, falling back to the MP's total weight
+        # when it's blank -- same fallback _get_mp_drawing_weight itself uses.
+        if d.duno_mark_no:
+            planned_weight = drawing_weight_by_mp[mp_name].get(d.duno_mark_no, 0.0)
+        else:
+            planned_weight = _get_mp_total_weight(mp_name)
+        d.total_weight_kg = flt(planned_weight, 3)
         d.mapped_weight_kg = flt(mapped_by_mp[mp_name].get(d.duno_mark_no), 3)
         d.excess_weight_kg = flt(excess_by_mp[mp_name].get(d.duno_mark_no), 3)
 
@@ -298,6 +520,17 @@ def refresh_weight_summary(mip_name):
     mip.allocated_weight_kg = flt(allocated, 3)
     mip.transferred_weight_kg = flt(transferred, 3)
     mip.excess_weight_kg = flt(excess, 3)
+    # Perf: this function only ever changes the 4 header weight fields above and
+    # per-row weight fields on drawing_items -- it never touches any Link field's
+    # VALUE (Material Issue Plan has no validate() of its own and no doc_events
+    # registered in hooks.py, so nothing else runs here either way). A plain
+    # .save() still re-validates every Link field on every row of every child
+    # table, including raw_materials, which this function never touches -- on a
+    # ~100-row Material Issue Plan that redundant check alone measured at ~0.35s
+    # of a ~1.1s Stock Entry submission. ignore_links skips only that
+    # re-validation; every other part of the normal save (timestamps, the
+    # Version/track_changes log, child-table diffing) is unaffected.
+    mip.flags.ignore_links = True
     mip.save(ignore_permissions=True)
     return mip.name
 

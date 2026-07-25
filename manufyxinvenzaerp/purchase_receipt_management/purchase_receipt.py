@@ -6,16 +6,9 @@ from manufyxinvenzaerp.production_management.doctype.material_planning.material_
     _get_batch_reserved_by_others,
     _get_batch_total_stock,
 )
+from manufyxinvenzaerp.utils.dimension_formula import calculate_qty, calculate_sec_qty_from_qty, check_missing_fields
+from manufyxinvenzaerp.utils.reference_copy import copy_reference_fields_if_blank
 
-STRUCTURALS_REQUIRED = ["custom_length", "custom_unit_weight", "custom_sec_qty"]
-PLATES_REQUIRED = ["custom_length", "custom_width", "custom_thickness", "custom_unit_weight", "custom_sec_qty"]
-FIELD_LABELS = {
-    "custom_length": "Length",
-    "custom_width": "Width",
-    "custom_thickness": "Thickness",
-    "custom_unit_weight": "Unit Weight",
-    "custom_sec_qty": "Sec Qty",
-}
 REFERENCE_FIELDS = ["custom_drawing", "custom_duno_mark_no", "custom_customer_drawing_number", "custom_sales_order"]
 
 
@@ -216,54 +209,27 @@ def _get_se_suffix(se_name):
 
 def _copy_from_po_item(row):
     """Copy dimension + reference fields from the linked PO Item when a PR is created from a PO."""
-    if not row.purchase_order_item:
-        return
     fields = ["custom_length", "custom_width", "custom_thickness", "custom_sec_qty", *REFERENCE_FIELDS]
-    if any(row.get(f) for f in fields):
-        return
-    po_item = frappe.db.get_value("Purchase Order Item", row.purchase_order_item, fields, as_dict=True)
-    if not po_item:
-        return
-    for field in fields:
-        row.set(field, po_item.get(field))
+    copy_reference_fields_if_blank(row, "Purchase Order Item", "purchase_order_item", fields)
 
 
 def _recalculate_qty(row):
     group = row.custom_parent_item_group
-    if group == "Structurals":
-        if row.custom_length and row.custom_unit_weight and row.custom_sec_qty:
-            row.qty = (row.custom_length / 1000) * row.custom_unit_weight * row.custom_sec_qty
-    elif group == "Plates":
-        if all(getattr(row, f, None) for f in PLATES_REQUIRED):
-            row.qty = (
-                (row.custom_length / 1000)
-                * (row.custom_width / 1000)
-                * row.custom_thickness
-                * row.custom_unit_weight
-                * row.custom_sec_qty
-            )
+    if group in ("Structurals", "Plates"):
+        qty = calculate_qty(
+            group, row.custom_length, row.custom_width, row.custom_thickness,
+            row.custom_unit_weight, row.custom_sec_qty,
+        )
+        if qty is not None:
+            row.qty = qty
     elif group == "Nuts and Bolts":
-        if row.qty and row.custom_unit_weight:
-            row.custom_sec_qty = row.qty * row.custom_unit_weight
+        sec_qty = calculate_sec_qty_from_qty(row.custom_unit_weight, row.qty)
+        if sec_qty is not None:
+            row.custom_sec_qty = sec_qty
 
 
 def _check_missing_fields(row, throw):
-    group = row.custom_parent_item_group
-    if group == "Structurals":
-        required = STRUCTURALS_REQUIRED
-    elif group == "Plates":
-        required = PLATES_REQUIRED
-    else:
-        return
-    missing = [FIELD_LABELS[f] for f in required if not getattr(row, f, None)]
-    if missing:
-        msg = _("Row {0}: {1} required for {2} formula").format(
-            row.idx, ", ".join(missing), group
-        )
-        if throw:
-            frappe.throw(msg)
-        else:
-            frappe.msgprint(msg, indicator="orange", title=_("Missing Fields"))
+    check_missing_fields(row, throw)
 
 
 # ── Material Planning auto-allocation ────────────────────────────────────────
@@ -285,6 +251,8 @@ def _resolve_pr_batch_no(pr_item):
 @frappe.whitelist()
 def get_mp_for_pr(pr_name):
     """Trace PR → PO → MR → Material Planning. Returns list of MP names linked to this PR."""
+    if not frappe.has_permission("Material Planning", "read"):
+        frappe.throw(_("Not permitted to view Material Planning links"), frappe.PermissionError)
     rows = frappe.db.sql(
         """
         SELECT DISTINCT mr.custom_material_planning
@@ -350,20 +318,75 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
         else:
             remaining_qty_by_row[mp_row.name] = remaining
 
+    def _split_allocation(matched_rows, received_qty, sequential):
+        """Client change request Phase 2.5: a consolidated purchase line (no
+        DUNO to disambiguate — e.g. one bought via a Material Planning
+        Consolidate Item row that summed several drawings' requirements for
+        the same item_code) matching MORE THAN ONE Unavailable Item row must
+        split its received qty SEQUENTIALLY across those rows — fill the
+        first (by original document order/idx) fully, then the next, and so
+        on — rather than crediting the full received qty to every matched row
+        independently (which double/triple-counts the same physical receipt).
+        Any dimension-driven shortfall naturally lands on the last row(s) in
+        the sequence, since earlier rows are always filled first. A single
+        match, or a precise item+DUNO match, is unaffected — same behavior as
+        before (the full received qty applies to that one row)."""
+        if not sequential or len(matched_rows) <= 1:
+            return [(mp_row, flt(received_qty)) for mp_row in matched_rows]
+
+        allocations = []
+        remaining_receipt = flt(received_qty)
+        for mp_row in sorted(matched_rows, key=lambda r: r.idx):
+            if remaining_receipt <= QTY_EPSILON:
+                break
+            row_requirement = flt(remaining_qty_by_row.get(mp_row.name, mp_row.qty))
+            alloc_qty = flt(min(remaining_receipt, row_requirement), 3)
+            if alloc_qty <= 0:
+                continue
+            allocations.append((mp_row, alloc_qty))
+            remaining_receipt = flt(remaining_receipt - alloc_qty, 3)
+        return allocations
+
+    # Batch-resolve the PO Item -> MR Item -> MR chain for every PR row up
+    # front (3 queries total) instead of 3 frappe.db.get_value calls per row
+    # (Report 4 Finding D-04) -- the loop below does the same lookups as
+    # before, just against these pre-fetched dicts.
+    poi_names = list({pr_item.purchase_order_item for pr_item in pr.items if pr_item.purchase_order_item})
+    poi_to_mri = {}
+    if poi_names:
+        for rec in frappe.get_all(
+            "Purchase Order Item", filters={"name": ["in", poi_names]}, fields=["name", "material_request_item"]
+        ):
+            poi_to_mri[rec.name] = rec.material_request_item
+
+    mri_names = list({v for v in poi_to_mri.values() if v})
+    mri_to_mr = {}
+    if mri_names:
+        for rec in frappe.get_all(
+            "Material Request Item", filters={"name": ["in", mri_names]}, fields=["name", "parent"]
+        ):
+            mri_to_mr[rec.name] = rec.parent
+
+    mr_names = list({v for v in mri_to_mr.values() if v})
+    mr_to_mp = {}
+    if mr_names:
+        for rec in frappe.get_all(
+            "Material Request", filters={"name": ["in", mr_names]}, fields=["name", "custom_material_planning"]
+        ):
+            mr_to_mp[rec.name] = rec.custom_material_planning
+
     for pr_item in pr.items:
         if not pr_item.purchase_order_item:
             continue
 
         # Confirm this PR item traces back to our MP
-        mr_item_name = frappe.db.get_value(
-            "Purchase Order Item", pr_item.purchase_order_item, "material_request_item"
-        )
+        mr_item_name = poi_to_mri.get(pr_item.purchase_order_item)
         if not mr_item_name:
             continue
-        mr_name = frappe.db.get_value("Material Request Item", mr_item_name, "parent")
+        mr_name = mri_to_mr.get(mr_item_name)
         if not mr_name:
             continue
-        item_mp = frappe.db.get_value("Material Request", mr_name, "custom_material_planning")
+        item_mp = mr_to_mp.get(mr_name)
         if item_mp != mp_name:
             continue
 
@@ -374,8 +397,12 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
         # When the PR item knows its DUNO, only allocate against that exact drawing's
         # row — no fallback fan-out (a miss here should surface as unallocated, not
         # mis-allocated to a different drawing's shortage). Only fall back to matching
-        # by item_code alone when the PR item has no DUNO reference at all (in-flight
-        # PRs created before this field existed).
+        # by item_code alone when the PR item has no DUNO reference at all -- either an
+        # in-flight PR created before this field existed, or (client change request
+        # Phase 2.5) a consolidated purchase line that intentionally spans several
+        # drawings' worth of the same item_code and must split sequentially across them.
+        sequential = not pr_duno
+
         if pr_duno:
             matched_alternate = by_alternate.get((item_code, pr_duno), [])
             matched_original  = by_original.get((item_code, pr_duno), [])
@@ -394,13 +421,15 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
             ) or {}
             batch_total_qty    = _get_batch_total_stock(batch_no, mp.for_warehouse) if batch_no else 0.0
             batch_reserved_qty = _get_batch_reserved_by_others(batch_no, mp_name) if batch_no else 0.0
+            received_qty = flt(pr_item.qty)
 
-            for mp_row in matched_alternate:
-                _consume(mp_row, flt(pr_item.qty))
+            for mp_row, alloc_qty in _split_allocation(matched_alternate, received_qty, sequential):
+                _consume(mp_row, alloc_qty)
                 key = (mp_row.item_code, batch_no, mp_row.duno_mark_no or "")
                 if key in existing_mapping:
                     continue
                 existing_mapping.add(key)
+                ratio = (alloc_qty / received_qty) if received_qty else 0.0
                 mp.append("material_mapping", {
                     "item_number":            mp_row.item_number,
                     "sales_order":            mp_row.sales_order,
@@ -427,8 +456,8 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
                     "batch_width":            flt(pr_item.custom_width),
                     "batch_thickness":        flt(pr_item.custom_thickness),
                     "batch_unit_weight":      flt(alt_item_data.get("custom_unit_weight")),
-                    "batch_sec_qty":          flt(pr_item.custom_sec_qty),
-                    "batch_calc_qty":         flt(pr_item.qty),
+                    "batch_sec_qty":          flt(flt(pr_item.custom_sec_qty) * ratio, 3),
+                    "batch_calc_qty":         flt(alloc_qty, 3),
                     "batch_total_qty":        flt(batch_total_qty, 3),
                     "batch_reserved_qty":     flt(batch_reserved_qty, 3),
                     "batch_free_qty":         flt(max(0.0, batch_total_qty - batch_reserved_qty), 3),
@@ -443,12 +472,15 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
                 ["stock_uom", "custom_secondary_uom"],
                 as_dict=True,
             ) or {}
-            for mp_row in matched_original:
-                _consume(mp_row, flt(pr_item.qty))
+            received_qty = flt(pr_item.qty)
+
+            for mp_row, alloc_qty in _split_allocation(matched_original, received_qty, sequential):
+                _consume(mp_row, alloc_qty)
                 key = (item_code, batch_no, mp_row.duno_mark_no or "")
                 if key in existing_exact:
                     continue
                 existing_exact.add(key)
+                ratio = (alloc_qty / received_qty) if received_qty else 0.0
                 mp.append("available_raw_materials", {
                     "item_number":            mp_row.item_number,
                     "sales_order":            mp_row.sales_order,
@@ -462,9 +494,9 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
                     "width":                  flt(pr_item.custom_width)     or mp_row.width,
                     "thickness":              flt(pr_item.custom_thickness) or mp_row.thickness,
                     "overall_required_qty":   flt(mp_row.qty, 3),
-                    "required_qty":           flt(min(flt(pr_item.qty), flt(mp_row.qty)), 3),
-                    "available_qty":          flt(pr_item.qty, 3),
-                    "sec_qty":                flt(pr_item.custom_sec_qty)   or mp_row.sec_qty,
+                    "required_qty":           flt(min(alloc_qty, flt(mp_row.qty)), 3),
+                    "available_qty":          flt(alloc_qty, 3),
+                    "sec_qty":                flt(flt(pr_item.custom_sec_qty) * ratio, 3) or mp_row.sec_qty,
                     "sec_uom":                item_data.get("custom_secondary_uom") or mp_row.sec_uom,
                     "uom":                    item_data.get("stock_uom")    or mp_row.uom,
                     "warehouse":              pr_item.warehouse or mp.for_warehouse,
@@ -503,7 +535,9 @@ def on_submit_purchase_receipt(doc, method):
     """Auto-allocate received batches back to every Material Planning this PR traces to,
     then refresh any Material Issue Plans that link to those MPs so their raw-material
     snapshot stays current for the transfer popup."""
-    from manufyxinvenzaerp.subcontracting_management.material_issue_plan import refresh_mip_raw_materials
+    from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
+        refresh_mip_raw_materials,
+    )
 
     affected_mps = get_mp_for_pr(doc.name)
     for mp_name in affected_mps:
@@ -513,6 +547,23 @@ def on_submit_purchase_receipt(doc, method):
             frappe.log_error(
                 title=f"Material Planning auto-allocation failed for {doc.name} -> {mp_name}",
                 message=frappe.get_traceback(),
+            )
+            # Report 3 Finding H-01 / Phase 1 HP-04: this failure previously
+            # had zero user-visible signal -- the PR submit still succeeds
+            # (intentionally, so a downstream planning-sync problem never
+            # blocks the stock-affecting document), but the submitting user
+            # now sees that the automatic allocation into mp_name did not
+            # happen, instead of only discovering it much later when
+            # Material Planning still shows the item as unavailable.
+            frappe.msgprint(
+                _(
+                    "Automatic batch allocation into Material Planning {0} failed for this "
+                    "receipt. The Purchase Receipt has still been submitted; a Manufacturing "
+                    "Manager will need to check the Error Log and, if appropriate, retry the "
+                    "allocation manually from the Material Planning document."
+                ).format(mp_name),
+                indicator="orange",
+                title=_("Material Planning Allocation Failed"),
             )
 
     # Refresh MIP raw-material snapshots for any MIPs linked to affected MPs
@@ -531,6 +582,17 @@ def on_submit_purchase_receipt(doc, method):
                     title=f"MIP raw-material refresh failed for {row.parent} after {doc.name}",
                     message=frappe.get_traceback(),
                 )
+                # Report 3 Finding H-01 / Phase 1 HP-04: same "surface it, don't
+                # just log it" treatment as the allocation failure above.
+                frappe.msgprint(
+                    _(
+                        "Refreshing the raw-material snapshot for Material Issue Plan {0} failed "
+                        "after this receipt. Its displayed transferred/allocated weight may be "
+                        "stale until it is manually refreshed."
+                    ).format(row.parent),
+                    indicator="orange",
+                    title=_("Material Issue Plan Refresh Failed"),
+                )
 
 
 @frappe.whitelist()
@@ -538,6 +600,8 @@ def get_pr_mp_allocations(pr_name):
     """Return which Material Planning documents have batches from this PR allocated,
     so the client can show a post-submit popup. Only returns data if at least one
     batch from this PR appears in a reserved row of any MP."""
+    if not frappe.has_permission("Material Planning", "read"):
+        frappe.throw(_("Not permitted to view Material Planning allocations"), frappe.PermissionError)
     pr = frappe.get_doc("Purchase Receipt", pr_name)
     pr_batches = {}
     for item in (pr.items or []):

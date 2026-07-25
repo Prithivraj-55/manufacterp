@@ -37,8 +37,10 @@
   {
    "fieldname": "weight_kg",
    "fieldtype": "Float",
-   "hidden": 1,
-   "label": "Weight (Kg)"
+   "in_list_view": 1,
+   "read_only": 1,
+   "label": "Weight (Kg)",
+   "description": "Auto-calculated: Qty (Nos) x the linked Drawing's per-piece weight (Total Weight / No of Qty to Manufacture)."
   },
   {
    "fieldname": "remark",

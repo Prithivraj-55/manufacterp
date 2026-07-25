@@ -1,0 +1,49 @@
+name: Auto Merge devbranch to main
+
+on:
+  push:
+    branches:
+      - devbranch
+
+jobs:
+  auto-merge:
+    if: contains(github.event.head_commit.message, '[autodeploy]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create or reuse PR from devbranch to main
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          EXISTING_PR=$(gh pr list --base main --head devbranch --state open --json number --jq '.[0].number')
+
+          if [ -n "$EXISTING_PR" ]; then
+            echo "Reusing existing open PR #$EXISTING_PR"
+            PR_NUMBER="$EXISTING_PR"
+          else
+            PR_URL=$(gh pr create \
+              --base main \
+              --head devbranch \
+              --title "Auto-deploy: ${{ github.event.head_commit.message }}" \
+              --body "Auto-created by the [autodeploy] tag on commit ${{ github.sha }}.")
+            PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+            echo "Created PR #$PR_NUMBER"
+          fi
+
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Merge PR into main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr merge ${{ steps.pr.outputs.pr_number }} --merge --delete-branch=false

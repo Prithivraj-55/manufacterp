@@ -1,15 +1,7 @@
 import frappe
 from frappe import _
-
-STRUCTURALS_REQUIRED = ["custom_length", "custom_unit_weight", "custom_sec_qty"]
-PLATES_REQUIRED = ["custom_length", "custom_width", "custom_thickness", "custom_unit_weight", "custom_sec_qty"]
-FIELD_LABELS = {
-    "custom_length": "Length",
-    "custom_width": "Width",
-    "custom_thickness": "Thickness",
-    "custom_unit_weight": "Unit Weight",
-    "custom_sec_qty": "Sec Qty",
-}
+from manufyxinvenzaerp.utils.dimension_formula import calculate_qty, calculate_sec_qty_from_qty, check_missing_fields
+from manufyxinvenzaerp.utils.reference_copy import fetch_fields
 
 CUSTOM_FIELDS = [
     "custom_parent_item_group",
@@ -57,24 +49,14 @@ def _copy_from_rfq_item_if_blank(row):
         return
 
     if row.request_for_quotation_item:
-        source = frappe.db.get_value(
-            "Request for Quotation Item",
-            row.request_for_quotation_item,
-            CUSTOM_FIELDS,
-            as_dict=True,
-        )
+        source = fetch_fields("Request for Quotation Item", row.request_for_quotation_item, CUSTOM_FIELDS)
         if source and any(source.get(f) for f in CUSTOM_FIELDS):
             for field in CUSTOM_FIELDS:
                 row.set(field, source.get(field))
             return
 
     if row.material_request_item:
-        source = frappe.db.get_value(
-            "Material Request Item",
-            row.material_request_item,
-            CUSTOM_FIELDS,
-            as_dict=True,
-        )
+        source = fetch_fields("Material Request Item", row.material_request_item, CUSTOM_FIELDS)
         if source:
             for field in CUSTOM_FIELDS:
                 row.set(field, source.get(field))
@@ -87,37 +69,18 @@ def _has_custom_data(row):
 
 def _recalculate_qty(row):
     group = row.custom_parent_item_group
-    if group == "Structurals":
-        if row.custom_length and row.custom_unit_weight and row.custom_sec_qty:
-            row.qty = (row.custom_length / 1000) * row.custom_unit_weight * row.custom_sec_qty
-    elif group == "Plates":
-        if all(getattr(row, f, None) for f in PLATES_REQUIRED):
-            row.qty = (
-                (row.custom_length / 1000)
-                * (row.custom_width / 1000)
-                * row.custom_thickness
-                * row.custom_unit_weight
-                * row.custom_sec_qty
-            )
+    if group in ("Structurals", "Plates"):
+        qty = calculate_qty(
+            group, row.custom_length, row.custom_width, row.custom_thickness,
+            row.custom_unit_weight, row.custom_sec_qty,
+        )
+        if qty is not None:
+            row.qty = qty
     elif group == "Nuts and Bolts":
-        if row.qty and row.custom_unit_weight:
-            row.custom_sec_qty = row.qty * row.custom_unit_weight
+        sec_qty = calculate_sec_qty_from_qty(row.custom_unit_weight, row.qty)
+        if sec_qty is not None:
+            row.custom_sec_qty = sec_qty
 
 
 def _check_missing_fields(row, throw):
-    group = row.custom_parent_item_group
-    if group == "Structurals":
-        required = STRUCTURALS_REQUIRED
-    elif group == "Plates":
-        required = PLATES_REQUIRED
-    else:
-        return
-    missing = [FIELD_LABELS[f] for f in required if not getattr(row, f, None)]
-    if missing:
-        msg = _("Row {0}: {1} required for {2} formula").format(
-            row.idx, ", ".join(missing), group
-        )
-        if throw:
-            frappe.throw(msg)
-        else:
-            frappe.msgprint(msg, indicator="orange", title=_("Missing Fields"))
+    check_missing_fields(row, throw)
