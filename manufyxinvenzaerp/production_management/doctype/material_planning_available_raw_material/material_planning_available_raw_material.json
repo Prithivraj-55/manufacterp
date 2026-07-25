@@ -12,6 +12,7 @@
   "duno_mark_no",
   "customer_drawing_number",
   "batch_no",
+  "batch_remarks",
   "parent_item_group",
   "length",
   "width",
@@ -26,6 +27,7 @@
   "purchase_receipt",
   "col_break_status",
   "is_reserved",
+  "unreserve_btn",
   "reserved_qty",
   "shortfall_qty",
   "reserved_on",
@@ -94,6 +96,13 @@
    "options": "Batch",
    "read_only": 1,
    "search_index": 1
+  },
+  {
+   "description": "Synced from the batch's own Batch Remarks on every save (client change request Phase 6.3).",
+   "fieldname": "batch_remarks",
+   "fieldtype": "Small Text",
+   "label": "Batch Remarks",
+   "read_only": 1
   },
   {
    "fieldname": "parent_item_group",
@@ -198,6 +207,13 @@
    "label": "Reserved",
    "read_only": 1,
    "search_index": 1
+  },
+  {
+   "depends_on": "eval:doc.is_reserved",
+   "fieldname": "unreserve_btn",
+   "fieldtype": "Button",
+   "in_list_view": 1,
+   "label": "Unreserve"
   },
   {
    "fieldname": "reserved_qty",

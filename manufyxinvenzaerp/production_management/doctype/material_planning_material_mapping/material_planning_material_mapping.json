@@ -27,6 +27,7 @@
   "section_batch",
   "batch_mapped",
   "batch",
+  "batch_remarks",
   "reserve_without_dimensions",
   "allocate_based_on_sec_qty",
   "planned_item",
@@ -36,6 +37,7 @@
   "batch_reserved_qty",
   "batch_free_qty",
   "is_reserved",
+  "unreserve_btn",
   "reserved_qty",
   "shortfall_qty",
   "reserved_on",
@@ -198,6 +200,13 @@
    "search_index": 1
   },
   {
+   "description": "Synced from the batch's own Batch Remarks on every save (client change request Phase 6.3) -- not a fetch_from field, since this row's batch is set server-side (dialogs / reassign_batch), which never triggers Frappe's client-only fetch_from auto-populate.",
+   "fieldname": "batch_remarks",
+   "fieldtype": "Small Text",
+   "label": "Batch Remarks",
+   "read_only": 1
+  },
+  {
    "default": "0",
    "fieldname": "reserve_without_dimensions",
    "fieldtype": "Check",
@@ -320,6 +329,13 @@
    "label": "Reserved",
    "read_only": 1,
    "search_index": 1
+  },
+  {
+   "depends_on": "eval:doc.is_reserved",
+   "fieldname": "unreserve_btn",
+   "fieldtype": "Button",
+   "in_list_view": 1,
+   "label": "Unreserve"
   },
   {
    "fieldname": "reserved_qty",

@@ -45,6 +45,8 @@
   "section_unavailable_items",
   "update_exact_match_btn",
   "unavailable_items",
+  "section_consolidate_items",
+  "consolidate_items",
   "tab_batch_change_log",
   "section_batch_change_log",
   "batch_change_log"
@@ -237,6 +239,18 @@
    "fieldtype": "Table",
    "label": "Unavailable Items",
    "options": "Material Planning Unavailable Item"
+  },
+  {
+   "description": "One consolidated line per raw material item, deduped by Item Code across all Unavailable Items rows (regardless of drawing/sales order) — used to purchase in bulk. Enter Length/Width/Thickness/Sec Qty to auto-calculate Purchase Kg. Fully editable.",
+   "fieldname": "section_consolidate_items",
+   "fieldtype": "Section Break",
+   "label": "Consolidate Item"
+  },
+  {
+   "fieldname": "consolidate_items",
+   "fieldtype": "Table",
+   "label": "Consolidate Item",
+   "options": "Material Planning Consolidate Item"
   },
   {
    "fieldname": "tab_batch_change_log",
