@@ -21,22 +21,56 @@ _RAW = [
 ]
 
 
-def _mock_sbb(item_code, warehouse, dimensions):
-    """ITEM-A gets exact match, ITEM-B and ITEM-C get nothing."""
-    if item_code == "ITEM-A":
-        return 15.0, [{"batch_no": "BATCH-001", "qty": 15.0, "custom_sec_qty": 0, "custom_sec_uom": ""}]
-    return 0.0, []
+def _mock_sbb_batches_bulk(item_codes, warehouse, location=None):
+    """ITEM-A gets an exact-dimension-matching batch; ITEM-B/ITEM-C get none.
+
+    check_stock_availability calls the bulk fetch (get_sbb_batches_bulk), not
+    the older per-item get_sbb_available_qty this used to mock -- see
+    get_sbb_batches_bulk's own docstring ("Batched variant of
+    get_sbb_available_qty", Report 4 Finding D-02) for why the code moved to
+    this shape."""
+    return {
+        "ITEM-A": [{
+            "batch_no": "BATCH-001", "qty": 15.0,
+            "custom_length": 100, "custom_thickness": 5, "custom_width": 50,
+            "custom_sec_qty": 0, "custom_sec_uom": "",
+        }],
+    }
+
+
+def _ensure_batch_items():
+    # check_stock_availability looks up has_batch_no from real Item records to
+    # route each row; without real Items here that lookup finds nothing, so
+    # every row falls into the non-batch branch instead of the batch branch
+    # this test (and its get_sbb_available_qty mock) is meant to exercise.
+    for row in _RAW:
+        item_code = row["item_code"]
+        if not frappe.db.exists("Item", item_code):
+            frappe.get_doc({
+                "doctype": "Item",
+                "item_code": item_code,
+                "item_name": row["item_name"],
+                "stock_uom": row["uom"],
+                "has_batch_no": 1,
+                "is_stock_item": 1,
+                "is_sales_item": 0,
+            }).insert(ignore_permissions=True, ignore_if_duplicate=True)
+    frappe.db.commit()
 
 
 class TestClassificationLogic(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        _ensure_batch_items()
 
     # CL1 — Exact match → T2; everything else → T3; T4 empty after Check Stock
     def test_cl1_no_stock_goes_to_mapping_not_unavailable(self):
         doc = frappe._dict({"for_warehouse": "Stores - M", "raw_materials": _RAW})
 
         with patch(
-            "manufyxinvenzaerp.production_plan_management.production_plan.get_sbb_available_qty",
-            side_effect=_mock_sbb,
+            "manufyxinvenzaerp.production_plan_management.production_plan.get_sbb_batches_bulk",
+            side_effect=_mock_sbb_batches_bulk,
         ):
             result = check_stock_availability(doc)
 

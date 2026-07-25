@@ -26,7 +26,7 @@ _UNAVAILABLE = [
 ]
 
 
-def _mock_sbb(item_code, warehouse, dimensions):
+def _mock_sbb(item_code, warehouse, dimensions, location=None):
     if item_code == "ITEM-HAS-MATCH":
         return 15.0, [{"batch_no": "BATCH-X", "qty": 15.0, "custom_sec_qty": 0, "custom_sec_uom": ""}]
     return 0.0, []
@@ -35,7 +35,33 @@ def _mock_sbb(item_code, warehouse, dimensions):
 _DOC = frappe._dict({"for_warehouse": _WAREHOUSE, "unavailable_items": _UNAVAILABLE})
 
 
+def _ensure_batch_items():
+    # move_to_exact_match looks up has_batch_no from real Item records to decide
+    # whether to take the batch-matching branch (the one that calls
+    # get_sbb_available_qty, which these tests mock). Without real Items here,
+    # that lookup finds nothing, has_batch defaults to falsy for every row, and
+    # the function silently takes the non-batch branch instead -- the mock is
+    # never even called.
+    for row in _UNAVAILABLE:
+        item_code = row["item_code"]
+        if not frappe.db.exists("Item", item_code):
+            frappe.get_doc({
+                "doctype": "Item",
+                "item_code": item_code,
+                "item_name": row["item_name"],
+                "stock_uom": row["uom"],
+                "has_batch_no": 1,
+                "is_stock_item": 1,
+                "is_sales_item": 0,
+            }).insert(ignore_permissions=True, ignore_if_duplicate=True)
+    frappe.db.commit()
+
+
 class TestUnavailableActions(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        _ensure_batch_items()
 
     # UA1 — Item with exact match: appears in matched, not in failed
     def test_ua1_item_with_exact_match(self):
