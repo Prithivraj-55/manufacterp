@@ -1249,8 +1249,12 @@ def after_install():
     create_bom_client_script()
     create_production_plan_custom_fields()
     create_production_plan_client_script()
-    create_job_card_custom_fields()
-    create_job_card_client_script()
+    # --- DISABLED (client change request Phase 0.4): Work Order & Job Card reverted to
+    # standard ERPNext, all app customizations removed from the live app. Function bodies
+    # kept below for reference -- re-enable by uncommenting these calls and re-running
+    # migrate if this ever needs to come back.
+    # create_job_card_custom_fields()
+    # create_job_card_client_script()
     create_stock_entry_custom_fields()
     create_stock_entry_client_script()
     remove_sco_purchase_order_mandatory()
@@ -1259,14 +1263,14 @@ def after_install():
     create_sco_client_script()
     create_sco_ops_client_script()
     create_soe_client_script()
-    create_work_order_custom_fields()
-    layout_work_order_fields()
-    create_wo_client_script()
-    create_wo_ops_client_script()
-    create_job_card_drawing_fields()
-    layout_job_card_fields()
-    create_jc_drawing_client_script()
-    create_job_card_inspection_fields()
+    # create_work_order_custom_fields()
+    # layout_work_order_fields()
+    # create_wo_client_script()
+    # create_wo_ops_client_script()
+    # create_job_card_drawing_fields()
+    # layout_job_card_fields()
+    # create_jc_drawing_client_script()
+    # create_job_card_inspection_fields()
     create_material_planning_auto_purchase_fields()
     create_manufacturing_settings_custom_fields()
     from manufyxinvenzaerp.production_management.production_utils import (
@@ -1296,8 +1300,12 @@ def after_migrate():
     create_bom_client_script()
     create_production_plan_custom_fields()
     create_production_plan_client_script()
-    create_job_card_custom_fields()
-    create_job_card_client_script()
+    # --- DISABLED (client change request Phase 0.4): Work Order & Job Card reverted to
+    # standard ERPNext, all app customizations removed from the live app. Function bodies
+    # kept below for reference -- re-enable by uncommenting these calls and re-running
+    # migrate if this ever needs to come back.
+    # create_job_card_custom_fields()
+    # create_job_card_client_script()
     create_stock_entry_custom_fields()
     create_stock_entry_client_script()
     remove_sco_purchase_order_mandatory()
@@ -1306,14 +1314,14 @@ def after_migrate():
     create_sco_client_script()
     create_sco_ops_client_script()
     create_soe_client_script()
-    create_work_order_custom_fields()
-    layout_work_order_fields()
-    create_wo_client_script()
-    create_wo_ops_client_script()
-    create_job_card_drawing_fields()
-    layout_job_card_fields()
-    create_jc_drawing_client_script()
-    create_job_card_inspection_fields()
+    # create_work_order_custom_fields()
+    # layout_work_order_fields()
+    # create_wo_client_script()
+    # create_wo_ops_client_script()
+    # create_job_card_drawing_fields()
+    # layout_job_card_fields()
+    # create_jc_drawing_client_script()
+    # create_job_card_inspection_fields()
     create_material_planning_auto_purchase_fields()
     create_manufacturing_settings_custom_fields()
     from manufyxinvenzaerp.production_management.production_utils import (
@@ -1411,6 +1419,14 @@ def create_item_custom_fields():
                 "insert_after": "has_batch_no",
                 "depends_on": "eval:doc.has_batch_no",
                 "description": "Batch prefix for custom naming (e.g., ISMB150)",
+            },
+            {
+                "fieldname": "custom_inspection_required",
+                "label": "Inspection Required (Purchase Receipt)",
+                "fieldtype": "Check",
+                "insert_after": "custom_batch_prefix",
+                "description": "If checked, receipts of this item require an Inspection Call "
+                "before their batches can be reserved in Material Planning.",
             },
         ],
         "Item Group": [
@@ -1677,6 +1693,76 @@ def create_purchase_receipt_custom_fields():
                 "insert_after": "custom_customer_drawing_number",
                 "in_list_view": 0,
             },
+            {
+                "fieldname": "custom_inspection_accepted_qty",
+                "label": "Inspection Accepted Qty",
+                "fieldtype": "Float",
+                "read_only": 1,
+                "insert_after": "custom_sales_order",
+                "in_list_view": 0,
+            },
+            {
+                "fieldname": "custom_inspection_rejected_qty",
+                "label": "Inspection Rejected Qty",
+                "fieldtype": "Float",
+                "read_only": 1,
+                "insert_after": "custom_inspection_accepted_qty",
+                "in_list_view": 0,
+            },
+            {
+                "fieldname": "custom_inspection_remarks",
+                "label": "Inspection Remarks",
+                "fieldtype": "Small Text",
+                "read_only": 1,
+                "insert_after": "custom_inspection_rejected_qty",
+            },
+        ],
+        "Purchase Receipt": [
+            {
+                "fieldname": "custom_inspection_tab",
+                "label": "Inspection",
+                "fieldtype": "Tab Break",
+                "insert_after": "amended_from",
+            },
+            {
+                "fieldname": "custom_create_inspection_btn",
+                "label": "Create Inspection",
+                "fieldtype": "Button",
+                "insert_after": "custom_inspection_tab",
+            },
+            {
+                "fieldname": "custom_update_inspection_call_date_btn",
+                "label": "Update Inspection Call Date",
+                "fieldtype": "Button",
+                "depends_on": "eval:doc.custom_inspection_call_log && doc.custom_inspection_call_log.length",
+                "insert_after": "custom_create_inspection_btn",
+            },
+            {
+                "fieldname": "custom_inspection_status",
+                "label": "Inspection Status",
+                "fieldtype": "Select",
+                "options": "Open\nWorking\nCompleted",
+                "default": "Open",
+                "read_only": 1,
+                "no_copy": 1,
+                "allow_on_submit": 1,
+                "insert_after": "custom_update_inspection_call_date_btn",
+            },
+            {
+                "fieldname": "custom_inspection_call_log_section",
+                "label": "Inspection Call Log",
+                "fieldtype": "Section Break",
+                "insert_after": "custom_inspection_status",
+            },
+            {
+                "fieldname": "custom_inspection_call_log",
+                "label": "Inspection Call Log",
+                "fieldtype": "Table",
+                "options": "Inspection Call Log",
+                "read_only": 1,
+                "allow_on_submit": 1,
+                "insert_after": "custom_inspection_call_log_section",
+            },
         ],
     }
     create_custom_fields(custom_fields, update=True)
@@ -1742,6 +1828,15 @@ def create_batch_custom_fields():
                 "read_only": 1,
                 "insert_after": "custom_existing_invoice_wt",
             },
+            {
+                "fieldname": "custom_batch_remarks",
+                "label": "Batch Remarks",
+                "fieldtype": "Small Text",
+                "read_only": 1,
+                "insert_after": "custom_existing_inward_date",
+                "description": "Populated from the Inspection Call's remarks for this batch's source "
+                                "Purchase Receipt item, once inspected (client change request Phase 6.3).",
+            },
         ],
     }
     create_custom_fields(custom_fields, update=True)
@@ -1771,9 +1866,14 @@ def create_material_request_custom_fields():
                 "label": "Material Planning",
                 "fieldtype": "Link",
                 "options": "Material Planning",
-                "read_only": 1,
+                "read_only": 0,
                 "insert_after": "amended_from",
-                "in_list_view": 0,
+                "in_list_view": 1,
+                "description": "Set automatically when created via a Material Planning's own Create "
+                               "Material Request button; editable here too, so a Material Request "
+                               "built manually (e.g. splitting one consolidated requirement across "
+                               "several suppliers into separate requests) can still be traced back "
+                               "to its source Material Planning for automatic Purchase Receipt allocation.",
             },
         ],
         "Material Request Item": [
@@ -2330,6 +2430,18 @@ def create_production_plan_custom_fields():
             ],
             "Production Plan": [
                 {
+                    "fieldname": "custom_type",
+                    "fieldtype": "Select",
+                    "label": "Type",
+                    "options": "\nInternal Job\nSupplier Job\nSupplier with Material",
+                    "reqd": 1,
+                    "insert_after": "naming_series",
+                    "read_only_depends_on": "eval:!doc.__islocal",
+                    "in_list_view": 1,
+                    "in_standard_filter": 1,
+                    "translatable": 0,
+                },
+                {
                     "fieldname": "custom_raw_material_warehouse",
                     "fieldtype": "Link",
                     "label": "Raw Material Warehouse",
@@ -2385,29 +2497,25 @@ frappe.ui.form.on("Production Plan", {
 		if (frm.doc.docstatus !== 1) return;
 
 		var ops = frm.doc.custom_process_planning || [];
-		var has_sub      = ops.some(function(r) { return r.work_type === "Subcontractor"; });
-		var has_internal = ops.some(function(r) { return r.work_type === "Internal Jobcard"; });
-
-		if (!has_sub && !has_internal) {
+		if (!ops.length) {
 			frm.page.set_inner_btn_group_as_primary(__("Create"));
 			return;
 		}
 
-		// Single unified button handles all 3 scenarios:
-		//   all-sub → SCO only | all-internal → WO only | mixed → both SCO + WO
-		frm.remove_custom_button(__("Work Order / Subcontract PO"), __("Create"));
-		frm.add_custom_button(__("Work Order / Subcontract PO"), function() {
+		// Subcontracting Order is the single production-execution doctype for every
+		// Production Plan Type (Internal Job / Supplier Job / Supplier with Material)
+		// -- Work Order is no longer created from here at all (client change request
+		// Phase 0.4/4.1). Process Planning rows can mix Subcontractor and Internal
+		// Jobcard freely; Supplier Operation Entry executes each one regardless.
+		var has_sub = ops.some(function(r) { return r.work_type === "Subcontractor"; });
+
+		frm.remove_custom_button(__("Subcontracting Order"), __("Create"));
+		frm.add_custom_button(__("Subcontracting Order"), function() {
 			if (has_sub && !frm.doc.custom_vendor_contractor) {
 				frappe.msgprint(__("Please set Vendor/Contractor on this Production Plan before creating a Subcontracting Order."));
 				return;
 			}
-			if (has_sub && has_internal) {
-				_pp_create_both(frm);
-			} else if (has_sub) {
-				_pp_create_sco(frm);
-			} else {
-				_pp_create_wo(frm);
-			}
+			_pp_create_sco(frm);
 		}, __("Create"));
 
 		frm.page.set_inner_btn_group_as_primary(__("Create"));
@@ -2455,6 +2563,9 @@ function _pp_create_sco(frm) {
 	});
 }
 
+/* --- DISABLED (client change request Phase 0.4/4.1): Work Order is no longer created
+   from Production Plan -- Subcontracting Order handles every Type now. Kept for
+   reference only; not called anywhere above.
 function _pp_create_wo(frm) {
 	frappe.db.get_value("Work Order", {"production_plan": frm.doc.name}, "name", function(r) {
 		if (r && r.name) {
@@ -2528,6 +2639,7 @@ function _pp_create_both(frm) {
 		});
 	});
 }
+*/
 """.strip()
 
 
@@ -2553,6 +2665,7 @@ def create_production_plan_client_script():
 # Job Card — Raw Material Consumption tab
 # ─────────────────────────────────────────────────────────────────────────────
 
+# --- DISABLED (client change request Phase 0.4): kept for reference only, not called from after_install/after_migrate anymore.
 def create_job_card_custom_fields():
     create_custom_fields(
         {
@@ -2820,6 +2933,7 @@ function se_warn_missing_fields(row, group) {
 """.strip()
 
 
+# --- DISABLED (client change request Phase 0.4): kept for reference only, not called from after_install/after_migrate anymore.
 def create_job_card_client_script():
     if frappe.db.exists("Client Script", JOB_CARD_CLIENT_SCRIPT_NAME):
         frappe.db.set_value(
@@ -2931,6 +3045,45 @@ def create_stock_entry_custom_fields():
                     "insert_after": "custom_existing_inward_date",
                     "description": "Mark this row as a consumable (welding rods, paint, etc.). "
                                    "Stock is deducted from the source warehouse on submission.",
+                },
+                {
+                    "fieldname": "custom_drawing",
+                    "label": "Drawing",
+                    "fieldtype": "Link",
+                    "options": "Drawing",
+                    "insert_after": "custom_is_consumable",
+                    "in_list_view": 0,
+                },
+                {
+                    "fieldname": "custom_duno_mark_no",
+                    "label": "DUNO/Mark No",
+                    "fieldtype": "Data",
+                    "insert_after": "custom_drawing",
+                    "in_list_view": 0,
+                },
+                {
+                    "fieldname": "custom_customer_drawing_number",
+                    "label": "Customer Drawing Number",
+                    "fieldtype": "Data",
+                    "insert_after": "custom_duno_mark_no",
+                    "in_list_view": 0,
+                },
+                {
+                    "fieldname": "custom_sales_order",
+                    "label": "Sales Order",
+                    "fieldtype": "Link",
+                    "options": "Sales Order",
+                    "insert_after": "custom_customer_drawing_number",
+                    "in_list_view": 0,
+                },
+                {
+                    "fieldname": "custom_batch_remarks",
+                    "label": "Batch Remarks",
+                    "fieldtype": "Small Text",
+                    "read_only": 1,
+                    "insert_after": "custom_sales_order",
+                    "description": "Synced from the batch's own Batch Remarks on every save "
+                                   "(client change request Phase 6.3).",
                 },
             ],
             "Stock Entry": [
@@ -3370,11 +3523,13 @@ function show_drawing_popup(soe) {
 
 SOE_CLIENT_SCRIPT = """
 frappe.ui.form.on("SOE Consumption Log", {
-\tdrawing: function(frm) {
+\tdrawing: function(frm, cdt, cdn) {
 \t\t_sync_drawing_nos(frm);
+\t\t_calc_consumption_weight_kg(frm, cdt, cdn);
 \t},
-\tqty_nos: function(frm) {
+\tqty_nos: function(frm, cdt, cdn) {
 \t\t_sync_drawing_nos(frm);
+\t\t_calc_consumption_weight_kg(frm, cdt, cdn);
 \t},
 \tconsumption_log_remove: function(frm) {
 \t\t_sync_drawing_nos(frm);
@@ -3440,6 +3595,25 @@ function _sync_drawing_nos(frm) {
 \t\t\t}, 8);
 \t\t}
 \t}
+}
+
+function _calc_consumption_weight_kg(frm, cdt, cdn) {
+\t// Weight (Kg) for a consumption log row = Qty (Nos) x the linked Drawing's
+\t// per-piece weight (Drawing.total_weight / Drawing.no_of_qty_to_manufacture).
+\t// This feeds total_consumed_kg (see subcontracting.py's Op-1 over-consume
+\t// guard), which in turn seeds the NEXT operation's available_to_consume_kg --
+\t// so it must be auto-derived, not left for the inspector to type by hand.
+\tvar row = locals[cdt][cdn];
+\tif (!row.drawing || !flt(row.qty_nos)) {
+\t\tfrappe.model.set_value(cdt, cdn, "weight_kg", 0);
+\t\treturn;
+\t}
+\tfrappe.db.get_value("Drawing", row.drawing, ["total_weight", "no_of_qty_to_manufacture"]).then(function(r) {
+\t\tvar d = r.message || {};
+\t\tvar total_qty = flt(d.no_of_qty_to_manufacture);
+\t\tvar weight_per_nos = total_qty ? flt(d.total_weight) / total_qty : 0;
+\t\tfrappe.model.set_value(cdt, cdn, "weight_kg", flt(weight_per_nos * flt(row.qty_nos), 3));
+\t});
 }
 """.strip()
 
@@ -3519,6 +3693,7 @@ def create_manufacturing_settings_custom_fields():
 # Work Order custom fields + client scripts  (SHARED_SCO_JC mirror)
 # ─────────────────────────────────────────────────────────────────────────────
 
+# --- DISABLED (client change request Phase 0.4): kept for reference only, not called from after_install/after_migrate anymore.
 def create_work_order_custom_fields():
     """Custom fields on Work Order that mirror SCO drawing/weight/transfer fields.
     # SHARED_SCO_JC: mirrors create_sco_custom_fields()
@@ -3631,6 +3806,7 @@ def create_work_order_custom_fields():
     )
 
 
+# --- DISABLED (client change request Phase 0.4): kept for reference only, not called from after_install/after_migrate anymore.
 def layout_work_order_fields():
     """Hide/un-mandate noisy core fields and consolidate the custom drawing/
     weight/warehouse fields into the "Production Item" tab so the Work Order
@@ -3726,6 +3902,7 @@ def layout_work_order_fields():
     frappe.db.commit()
 
 
+# --- DISABLED (client change request Phase 0.4): kept for reference only, not called from after_install/after_migrate anymore.
 def create_job_card_drawing_fields():
     """Custom fields on Job Card that mirror SOE drawing/consumption fields.
     # SHARED_SCO_JC: mirrors SOE's drawing_details + consumption_log fields
@@ -3798,6 +3975,7 @@ INSPECTION_OPERATIONS = ["Fitup Inspection", "Final Inspection"]
 INSPECTION_DEPENDS_ON = 'eval:["Fitup Inspection","Final Inspection"].includes(doc.operation)'
 
 
+# --- DISABLED (client change request Phase 0.4): kept for reference only, not called from after_install/after_migrate anymore.
 def create_job_card_inspection_fields():
     """Inspection Call / QC tab on Job Card — only relevant for the two QC
     checkpoint operations (Fitup Inspection, Final Inspection).
@@ -3853,6 +4031,7 @@ def create_job_card_inspection_fields():
     )
 
 
+# --- DISABLED (client change request Phase 0.4): kept for reference only, not called from after_install/after_migrate anymore.
 def layout_job_card_fields():
     """Hide noisy core Job Card fields/tabs that duplicate the custom drawing/
     consumption tracking, and surface Sequence Id as a quick filter/list column.
@@ -4138,6 +4317,7 @@ function _jc_sync_drawing_nos(frm) {
 """.strip()
 
 
+# --- DISABLED (client change request Phase 0.4): kept for reference only, not called from after_install/after_migrate anymore.
 def create_wo_client_script():
     # SHARED_SCO_JC: mirrors create_sco_client_script()
     if frappe.db.exists("Client Script", WO_CLIENT_SCRIPT_NAME):
@@ -4155,6 +4335,7 @@ def create_wo_client_script():
     frappe.db.commit()
 
 
+# --- DISABLED (client change request Phase 0.4): kept for reference only, not called from after_install/after_migrate anymore.
 def create_wo_ops_client_script():
     # SHARED_SCO_JC: mirrors create_sco_ops_client_script()
     if frappe.db.exists("Client Script", WO_OPS_SCRIPT_NAME):
@@ -4172,6 +4353,7 @@ def create_wo_ops_client_script():
     frappe.db.commit()
 
 
+# --- DISABLED (client change request Phase 0.4): kept for reference only, not called from after_install/after_migrate anymore.
 def create_jc_drawing_client_script():
     # SHARED_SCO_JC: mirrors create_soe_client_script()
     if frappe.db.exists("Client Script", JC_DRAWING_CLIENT_SCRIPT_NAME):
