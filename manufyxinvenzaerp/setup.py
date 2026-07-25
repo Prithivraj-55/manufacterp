@@ -3167,7 +3167,20 @@ def remove_sco_purchase_order_mandatory():
 def hide_sco_job_worker_warehouse():
     """Hide Job Worker Warehouse — CustomSubcontractingOrder._auto_set_supplier_warehouse
     (overrides.py) resolves it automatically from the Job Worker's dedicated Warehouse
-    ('<Job Worker> - <Company Abbr>') on PP-flow SCOs, so the user no longer picks it."""
+    ('<Job Worker> - <Company Abbr>') on PP-flow SCOs, so the user no longer picks it.
+
+    reqd is cleared before hidden is set: the core field ships with reqd=1 and no
+    default, so setting hidden=1 first leaves it hidden-and-mandatory-without-default,
+    which Frappe's DocType validation rejects outright (breaks fresh installs)."""
+    frappe.make_property_setter(
+        {
+            "doctype": "Subcontracting Order",
+            "fieldname": "supplier_warehouse",
+            "property": "reqd",
+            "value": 0,
+            "property_type": "Check",
+        }
+    )
     frappe.make_property_setter(
         {
             "doctype": "Subcontracting Order",
