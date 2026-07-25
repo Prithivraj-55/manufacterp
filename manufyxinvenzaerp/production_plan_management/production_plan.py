@@ -6,6 +6,7 @@ from collections import defaultdict
 from frappe.query_builder.functions import IfNull, Sum
 from erpnext.stock.get_item_details import get_conversion_factor
 from erpnext.setup.doctype.item_group.item_group import get_item_group_defaults
+from frappe.model.naming import make_autoname
 from frappe.utils import (
 	add_days,
 	ceil,
@@ -50,7 +51,20 @@ def get_sbb_available_qty(item_code, warehouse, dimensions, location=None):
 	Returns (total_qty, matched_batches) where each matched_batch includes
 	batch_no, qty (Kg), custom_sec_qty (NOS), custom_sec_uom.
 	Only batches whose dimensions exactly match the required dimensions are returned.
+
+	Client change request Phase 6.2: a batch whose item requires inspection
+	(Item.custom_inspection_required) and whose source Purchase Receipt hasn't
+	completed inspection yet is excluded from matched_batches entirely -- not
+	offered as an Exact Match candidate at all, rather than only failing later
+	at actual reservation time (reserve_exact_match_batches carries the same
+	gate, via material_planning._get_batch_inspection_block_reason, imported
+	locally here to avoid a circular import -- material_planning.py already
+	imports from this module the same way, function-local, for this reason).
 	"""
+	from manufyxinvenzaerp.production_management.doctype.material_planning.material_planning import (
+		_get_batch_inspection_block_reason,
+	)
+
 	total_qty = 0
 	matched_batches = []
 
@@ -112,6 +126,8 @@ def get_sbb_available_qty(item_code, warehouse, dimensions, location=None):
 			continue
 		batch = batch_map.get(batch_no)
 		if not batch:
+			continue
+		if _get_batch_inspection_block_reason(batch_no):
 			continue
 
 		if (
@@ -936,6 +952,23 @@ def make_material_request(doc, submit):
 		frappe.msgprint(_("{0} created").format(comma_and(material_request_list)))
 	else:
 		frappe.msgprint(_("No material request created"))
+
+
+PP_TYPE_ABBR = {
+	"Internal Job": "INT",
+	"Supplier Job": "SUP",
+	"Supplier with Material": "SUPWM",
+}
+
+
+def autoname_production_plan(doc, method):
+	"""Name as PP-<abbr>-<year>-<running>, e.g. PP-INT-2026-00001, based on the
+	Type field — resets the running number every year since the year is baked
+	into the series prefix. Overrides the core naming_series-based naming."""
+	abbr = PP_TYPE_ABBR.get(doc.custom_type)
+	if not abbr:
+		frappe.throw(_("Set Type before saving (Internal Job / Supplier Job / Supplier with Material)."))
+	doc.name = make_autoname(f"PP-{abbr}-.YYYY.-.#####", doc.doctype, doc)
 
 
 def after_save_production_plan(doc, method):

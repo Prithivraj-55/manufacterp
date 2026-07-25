@@ -180,7 +180,7 @@ function _pp_autofill_from_standard_routing(frm) {
 
 function _show_pp_drawings_picker(frm) {
 	let _all_rows = [];
-	let _search_mode = "material_planning"; // or "sales_order"
+	let _search_mode = "sales_order"; // or "material_planning" -- Sales Order is the default (client change request Phase 3.1)
 
 	let d = new frappe.ui.Dialog({
 		title: __("Add Drawings to Production Plan"),
@@ -191,7 +191,7 @@ function _show_pp_drawings_picker(frm) {
 				fieldname: "search_mode",
 				label: __("Search By"),
 				options: "Material Planning\nSales Order",
-				default: "Material Planning",
+				default: "Sales Order",
 				change() {
 					_search_mode = d.get_value("search_mode") === "Sales Order"
 						? "sales_order" : "material_planning";
@@ -211,14 +211,14 @@ function _show_pp_drawings_picker(frm) {
 				fieldname: "mp_value",
 				label: __("Material Planning"),
 				options: "Material Planning",
-				hidden: 0,
+				hidden: 1,
 			},
 			{
 				fieldtype: "Link",
 				fieldname: "so_value",
 				label: __("Sales Order"),
 				options: "Sales Order",
-				hidden: 1,
+				hidden: 0,
 			},
 			{ fieldtype: "Column Break" },
 			{

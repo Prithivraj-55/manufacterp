@@ -6,7 +6,9 @@
  "engine": "InnoDB",
  "field_order": [
   "operation_name",
-  "work_type"
+  "work_type",
+  "create_operation",
+  "inspection_mandatory"
  ],
  "fields": [
   {
@@ -23,6 +25,22 @@
    "in_list_view": 1,
    "label": "Work Type",
    "options": "\nInternal Jobcard\nSubcontractor"
+  },
+  {
+   "default": "1",
+   "fieldname": "create_operation",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Create Operation",
+   "description": "When unchecked, no Supplier Operation Entry is created for this row when the Subcontracting Order is generated."
+  },
+  {
+   "default": "0",
+   "fieldname": "inspection_mandatory",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Inspection Mandatory",
+   "description": "The Supplier Operation Entry created for this row cannot be submitted until an Inspection Entry is completed for it."
   }
  ],
  "istable": 1,
