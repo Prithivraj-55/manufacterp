@@ -85,8 +85,7 @@ jobs:
           bench init --skip-redis-config-generation --python "$(which python3)" --frappe-branch version-15 test-bench
           cd test-bench
           bench get-app erpnext --branch version-15
-          rm -rf apps/manufyxinvenzaerp
-          cp -r "$GITHUB_WORKSPACE/manufyxinvenzaerp" apps/manufyxinvenzaerp
+          bench get-app manufyxinvenzaerp "$GITHUB_WORKSPACE/manufyxinvenzaerp"
 
       - name: Configure site + install apps
         id: configure-site
