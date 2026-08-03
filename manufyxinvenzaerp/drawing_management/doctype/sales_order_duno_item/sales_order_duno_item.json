@@ -66,7 +66,8 @@
    "in_list_view": 1,
    "label": "Customer Provided Weight (Kg)",
    "allow_on_submit": 1,
-   "description": "Weight per Qty"
+   "read_only_depends_on": "eval:doc.docstatus === 1",
+   "description": "Weight per Qty. To update the customer's weight after submission, use \"Update Customer Weight\" on the Drawing."
   },
   {
    "fieldname": "difference_kg",

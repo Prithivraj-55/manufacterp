@@ -18,7 +18,12 @@
   "sec_uom",
   "column_break_result",
   "purchase_kg",
-  "difference_kg"
+  "difference_kg",
+  "section_alternate_item",
+  "alternate_item",
+  "col_break_alt",
+  "alternate_unit_weight",
+  "alternate_parent_item_group"
  ],
  "fields": [
   {
@@ -69,21 +74,22 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Length",
-   "depends_on": "eval:['Structurals','Plates'].includes(doc.parent_item_group)"
+   "description": "When Alternate Item is set (below), this describes the ALTERNATE item's length, not the original item's.",
+   "depends_on": "eval:['Structurals','Plates'].includes(doc.alternate_item ? doc.alternate_parent_item_group : doc.parent_item_group)"
   },
   {
    "fieldname": "width",
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Width",
-   "depends_on": "eval:doc.parent_item_group==='Plates'"
+   "depends_on": "eval:(doc.alternate_item ? doc.alternate_parent_item_group : doc.parent_item_group)==='Plates'"
   },
   {
    "fieldname": "thickness",
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Thickness",
-   "depends_on": "eval:doc.parent_item_group==='Plates'"
+   "depends_on": "eval:(doc.alternate_item ? doc.alternate_parent_item_group : doc.parent_item_group)==='Plates'"
   },
   {
    "fieldname": "sec_qty",
@@ -109,13 +115,43 @@
    "in_list_view": 1,
    "label": "Purchase Kg",
    "read_only": 1,
-   "description": "Auto-calculated from Length/Width/Thickness/Sec Qty"
+   "description": "Auto-calculated from Length/Width/Thickness/Sec Qty and Unit Weight — the Alternate Item's when one is set, otherwise the original item's"
   },
   {
    "fieldname": "difference_kg",
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Difference (Required − Purchase)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_alternate_item",
+   "fieldtype": "Section Break",
+   "label": "Alternate Item"
+  },
+  {
+   "description": "Set once for the whole consolidated (deduped-by-item_code) purchase line to substitute a different item. Once set, the Length/Width/Thickness/Sec Qty fields above describe THIS item (not the original) and Purchase/Difference Kg recalculate using its Unit Weight — no separate dimension fields needed. When the Material Request created from this row is fulfilled, the purchased batch is allocated into Material Mapping against every original Unavailable Item row this line was consolidated from -- same mechanism as Unavailable Item's own Alternate Item field.",
+   "fieldname": "alternate_item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Alternate Item",
+   "options": "Item"
+  },
+  {
+   "fieldname": "col_break_alt",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "alternate_unit_weight",
+   "fieldtype": "Float",
+   "label": "Unit Weight",
+   "read_only": 1
+  },
+  {
+   "fieldname": "alternate_parent_item_group",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Alternate Parent Item Group",
    "read_only": 1
   }
  ],

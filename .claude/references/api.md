@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-07-25 21:12:10_
+_Generated: 2026-08-03 19:57:50_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -76,9 +76,9 @@ All `@frappe.whitelist()` methods. Call from JS:
 | `make_production_plan` | 2826 |
 | `make_material_request` | 2885 |
 | `make_material_request_from_consolidate` | 3039 |
-| `update_so_difference_kg` | 3154 |
-| `auto_purchase_from_mp` | 3184 |
-| `complete_batch_mapping` | 3353 |
+| `update_so_difference_kg` | 3177 |
+| `auto_purchase_from_mp` | 3207 |
+| `complete_batch_mapping` | 3381 |
 | `@frappe.validate_and_sanitize_search_inputs` | 406 |
 | `get_bom_info` | 432 |
 | `get_so_drawings_for_bom_picker` | 484 |
@@ -119,7 +119,7 @@ All `@frappe.whitelist()` methods. Call from JS:
 | `get_pr_item_uom` | 16 |
 | `get_mp_for_pr` | 252 |
 | `allocate_pr_stock_to_mp` | 273 |
-| `get_pr_mp_allocations` | 599 |
+| `get_pr_mp_allocations` | 632 |
 ## sq_management/supplier_quotation.py
 
 | Method | Line |

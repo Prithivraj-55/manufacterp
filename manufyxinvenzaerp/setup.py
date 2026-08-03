@@ -4414,7 +4414,7 @@ def create_material_planning_auto_purchase_fields():
                     "fieldname": "custom_auto_purchase_section",
                     "fieldtype": "Section Break",
                     "label": "Auto Purchase",
-                    "insert_after": "unavailable_items",
+                    "insert_after": "consolidate_items",
                     "hidden": 1,
                 },
                 {

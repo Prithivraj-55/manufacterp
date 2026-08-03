@@ -3042,7 +3042,18 @@ def make_material_request_from_consolidate(material_planning_name, selected_item
     deduped by item_code across every drawing/sales order that needed it. Simpler
     than make_material_request: purchase_kg is already the auto-calculated Kg
     quantity (Material Planning Consolidate Item.recalculate), so no need to
-    re-derive it from Length/Width/Thickness/Sec Qty here."""
+    re-derive it from Length/Width/Thickness/Sec Qty here.
+
+    Consolidate Item's own Alternate Item section (mirrors Unavailable Item's,
+    added so a bulk purchasing decision can be made once for the whole
+    consolidated line): when set, the MR line orders the ALTERNATE item, not
+    the original item_code. Unlike Unavailable Item, there are no separate
+    alternate_* dimension fields -- the row's own Length/Width/Thickness/Sec
+    Qty are reused (reinterpreted as describing the alternate item), only the
+    Unit Weight/Parent Item Group are looked up separately since the
+    alternate item can differ from the original on those. allocate_pr_stock_to_mp
+    fans the received batch back out across every original Unavailable Item
+    row this line was consolidated from once that MR is fulfilled."""
     mp = frappe.get_doc("Material Planning", material_planning_name)
     if not mp.consolidate_items:
         frappe.throw(_("No consolidated items found on this Material Planning."))
@@ -3081,22 +3092,34 @@ def make_material_request_from_consolidate(material_planning_name, selected_item
     mr.set("items", [])
 
     for row in rows_to_request:
+        order_item = row.alternate_item or row.item_code
         item_data = frappe.db.get_value(
-            "Item", row.item_code, ["item_name", "stock_uom"], as_dict=True
+            "Item", order_item, ["item_name", "stock_uom"], as_dict=True
         ) or {}
-        order_item_name = item_data.get("item_name") or row.item_name or row.item_code
+        order_item_name = item_data.get("item_name") or row.item_name or order_item
         uom = item_data.get("stock_uom") or row.sec_uom or "Nos"
+
+        use_length, use_width, use_thickness = flt(row.length), flt(row.width), flt(row.thickness)
+        use_sec_qty = flt(row.sec_qty)
         qty = flt(row.purchase_kg) or flt(row.required_kg) or 1
+        if row.alternate_item:
+            use_unit_weight = flt(row.alternate_unit_weight)
+            group = row.alternate_parent_item_group or ""
+        else:
+            use_unit_weight = flt(row.unit_weight)
+            group = row.parent_item_group or ""
 
         dim_parts = []
-        if row.length:    dim_parts.append(f"L={row.length}mm")
-        if row.width:     dim_parts.append(f"W={row.width}mm")
-        if row.thickness: dim_parts.append(f"T={row.thickness}mm")
+        if use_length:    dim_parts.append(f"L={use_length}mm")
+        if use_width:     dim_parts.append(f"W={use_width}mm")
+        if use_thickness: dim_parts.append(f"T={use_thickness}mm")
         dim_str = ", ".join(dim_parts)
         description = f"{order_item_name}" + (f" ({dim_str})" if dim_str else "")
+        if row.alternate_item:
+            description += f" [Alt for {row.item_code}]"
 
         mr.append("items", {
-            "item_code":                row.item_code,
+            "item_code":                order_item,
             "item_name":                order_item_name,
             "qty":                      qty,
             "uom":                      uom,
@@ -3105,12 +3128,12 @@ def make_material_request_from_consolidate(material_planning_name, selected_item
             "schedule_date":            today(),
             "warehouse":                mp.for_warehouse or "",
             "description":              description,
-            "custom_length":            flt(row.length),
-            "custom_width":             flt(row.width),
-            "custom_thickness":         flt(row.thickness),
-            "custom_unit_weight":       flt(row.unit_weight),
-            "custom_sec_qty":           flt(row.sec_qty),
-            "custom_parent_item_group": row.parent_item_group or "",
+            "custom_length":            use_length,
+            "custom_width":             use_width,
+            "custom_thickness":         use_thickness,
+            "custom_unit_weight":       use_unit_weight,
+            "custom_sec_qty":           use_sec_qty,
+            "custom_parent_item_group": group,
         })
 
     mr.custom_material_planning = material_planning_name
@@ -3182,8 +3205,13 @@ def unlink_material_request_on_cancel(doc, method=None):
 
 @frappe.whitelist()
 def auto_purchase_from_mp(material_planning_name):
-    """One-click MR → submit → PO → submit → PR → submit for all unavailable items.
+    """One-click MR → submit → PO → submit → PR → submit for all consolidated items.
     Reads custom_auto_purchase_supplier and for_warehouse from the MP.
+
+    Sources from consolidate_items (not unavailable_items) -- same move already made
+    for the "Create Material Request" button (client change request Phase 2.4):
+    Consolidate Item is the purchasing-facing table, deduped by item_code across
+    every drawing/sales order that needed it.
     """
     from frappe.utils import today
     from erpnext.stock.doctype.material_request.material_request import (
@@ -3204,12 +3232,12 @@ def auto_purchase_from_mp(material_planning_name):
         frappe.throw(_("Please set the Supplier for Auto Purchase on this Material Planning."))
     if not warehouse:
         frappe.throw(_("Please set the Raw Materials Warehouse on this Material Planning."))
-    if not mp.unavailable_items:
-        frappe.throw(_("No unavailable items found. Run stock check first."))
+    if not mp.consolidate_items:
+        frappe.throw(_("No consolidated items found. Run stock check first."))
 
-    # Step 1 — Create Material Request (draft) for all unavailable items, then submit
-    all_item_codes = list({r.item_code for r in mp.unavailable_items})
-    mr_name = make_material_request(material_planning_name, json.dumps(all_item_codes))
+    # Step 1 — Create Material Request (draft) for all consolidated items, then submit
+    all_item_codes = list({r.item_code for r in mp.consolidate_items})
+    mr_name = make_material_request_from_consolidate(material_planning_name, json.dumps(all_item_codes))
     mr = frappe.get_doc("Material Request", mr_name)
     mr.submit()
     frappe.db.commit()
