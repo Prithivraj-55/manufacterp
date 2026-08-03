@@ -19,7 +19,11 @@
   "uom",
   "return_reason",
   "stock_entry_created",
-  "source_mip_raw_material_row"
+  "source_table",
+  "source_row",
+  "source_mip_raw_material_row",
+  "mapped_material_planning",
+  "mapped_row_name"
  ],
  "fields": [
   {
@@ -135,12 +139,48 @@
   },
   {
    "allow_on_submit": 1,
+   "fieldname": "source_table",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Source Table",
+   "options": "Material Planning Material Mapping\nMaterial Planning Available Raw Material\nMaterial Planning Unavailable Item",
+   "read_only": 1,
+   "description": "Copied from the source raw_materials row's own source_table -- together with Source Row, this is the STABLE reference back to the underlying Material Planning row that survives a raw_materials rebuild (unlike Source MIP Raw Material Row below, which is this MIP's own row and gets a new name on every refresh)."
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "source_row",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Source Row",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
    "fieldname": "source_mip_raw_material_row",
    "fieldtype": "Data",
    "hidden": 1,
    "label": "Source MIP Raw Material Row",
    "read_only": 1,
-   "description": "Row name of the Material Issue Plan Raw Material row this excess entry was auto-populated from (client change request Phase 5.3), so re-saving the plan updates rather than duplicates it."
+   "description": "Row name of the Material Issue Plan Raw Material row this excess entry was auto-populated from (client change request Phase 5.3). Display/informational only -- matching uses Source Table/Source Row instead, since this MIP row's own name is regenerated on every raw_materials rebuild."
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "mapped_material_planning",
+   "fieldtype": "Link",
+   "label": "Mapped Into Material Planning",
+   "options": "Material Planning",
+   "read_only": 1,
+   "description": "Set once the batch returned from this row is reserved elsewhere via Excess Material Mapping."
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "mapped_row_name",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Mapped Material Mapping Row",
+   "read_only": 1,
+   "description": "Row name of the Material Planning Material Mapping row the batch was reserved into."
   }
  ],
  "istable": 1,

@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-08-03 19:57:50_
+_Generated: 2026-08-04 00:24:35_
 
 ## drawing
 
@@ -284,6 +284,7 @@ _Generated: 2026-08-03 19:57:50_
 | ` _get_batch_dims` | no |
 | ` _calc_batch_qty` | no |
 | ` _precheck_batch_reassignment` | no |
+| ` _mark_excess_item_mapped` | no |
 | ` _batch_change_remarks` | no |
 | ` reassign_batch` | no |
 | ` _apply_batch_to_mapping_row` | no |

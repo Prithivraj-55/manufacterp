@@ -8,7 +8,7 @@ class MaterialPlanningConsolidateItem(Document):
 
 
 def recalculate(row):
-	"""Purchase Kg from Length/Width/Thickness/Sec Qty, and the Required-vs-Purchase
+	"""Purchase Kg from Length/Width/Thickness/Sec Qty, and the Purchase-vs-Required
 	difference. Reuses the same Structurals/Plates/Nuts-and-Bolts formula as
 	Material Planning's own _calc_batch_qty (material_planning.py) rather than
 	reimplementing it.
@@ -29,4 +29,4 @@ def recalculate(row):
 	row.purchase_kg = _calc_batch_qty(
 		group, row.length, row.width, row.thickness, row.sec_qty, unit_weight
 	)
-	row.difference_kg = flt(flt(row.required_kg) - flt(row.purchase_kg), 3)
+	row.difference_kg = flt(flt(row.purchase_kg) - flt(row.required_kg), 3)

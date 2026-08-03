@@ -2204,7 +2204,7 @@ def add_excess_material_mapping(mp_name, batch_no, sec_qty, unavailable_item_row
             src.qty = remaining
             src.sec_qty = flt(flt(src.sec_qty) * ratio, 3)
 
-    mp.append("material_mapping", dict(base,
+    new_row = mp.append("material_mapping", dict(base,
         qty=flt(calc_qty, 3), uom="Kg", sec_qty=sec_qty, sec_uom=batch.custom_sec_uom or "",
         parent_item_group=group, length=flt(batch.custom_length), width=flt(batch.custom_width),
         thickness=flt(batch.custom_thickness), unit_weight=unit_weight,
@@ -2215,6 +2215,7 @@ def add_excess_material_mapping(mp_name, batch_no, sec_qty, unavailable_item_row
     ))
 
     mp.save(ignore_permissions=True)
+    _mark_excess_item_mapped(batch_no, mp_name, new_row.name)
     return reserve_batches(mp_name)
 
 
@@ -2564,6 +2565,32 @@ def _precheck_batch_reassignment(mp, item_code, new_batch_no, group, length, wid
     return warnings
 
 
+def _mark_excess_item_mapped(batch_no, mp_name, row_name):
+    """If `batch_no` was recovered via the excess-material-return flow (carries
+    custom_source_mip_excess_row -- see create_mip_excess_return_entry), record
+    where it just got reserved back onto the source SCO Excess Material Item
+    row, so that Material Issue Plan can show it's been reused rather than
+    looking like it's still sitting unused in the warehouse. Silently a no-op
+    for any ordinary (non-excess-return) batch. Called from every place a
+    batch actually gets assigned to a Material Mapping row (reassign_batch,
+    add_excess_material_mapping) so this stays correct regardless of which
+    path -- the per-row Excess Material Mapping button or manually typing the
+    batch into Update Batch -- was used to pick it."""
+    if not batch_no:
+        return
+    excess_row_name = frappe.db.get_value("Batch", batch_no, "custom_source_mip_excess_row")
+    if not excess_row_name:
+        return
+    mip_name = frappe.db.get_value("SCO Excess Material Item", excess_row_name, "parent")
+    if not mip_name:
+        return
+    frappe.db.set_value(
+        "SCO Excess Material Item", excess_row_name,
+        {"mapped_material_planning": mp_name, "mapped_row_name": row_name},
+        update_modified=False,
+    )
+
+
 def _batch_change_remarks(item_code, old_batch, new_batch_no, material_issue_plan):
     text = _("Batch changed from {0} to {1} for {2}").format(
         old_batch or _("(none)"), new_batch_no or _("(none)"), item_code
@@ -2646,6 +2673,7 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
             "remarks": _batch_change_remarks(row.item_code, old_batch, new_batch_no, material_issue_plan),
         })
         mp.save(ignore_permissions=True)
+        _mark_excess_item_mapped(new_batch_no, material_planning_name, row_name)
 
     else:
         row = next((r for r in mp.available_raw_materials if r.name == row_name), None)
@@ -2697,6 +2725,7 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
                                          allocate_based_on_sec_qty)
             new_sec_qty, new_qty = flt(new_row.batch_sec_qty), flt(new_row.batch_calc_qty)
             planned_item_for_log = new_item
+            target_row_name = new_row.name
         else:
             row.batch_no = new_batch_no or ""
             if dimensions.get("length") is not None:
@@ -2708,6 +2737,7 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
             if sec_qty is not None:
                 row.sec_qty = flt(sec_qty)
             new_sec_qty, new_qty = flt(row.sec_qty), flt(row.required_qty)
+            target_row_name = row_name
 
         mp.append("batch_change_log", {
             "material_issue_plan": material_issue_plan or "",
@@ -2724,6 +2754,7 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
             "remarks": _batch_change_remarks(item_code, old_batch, new_batch_no, material_issue_plan),
         })
         mp.save(ignore_permissions=True)
+        _mark_excess_item_mapped(new_batch_no, material_planning_name, target_row_name)
 
     # Dry-run validation — the same check the JS already runs before/after save.
     mp = frappe.get_doc("Material Planning", material_planning_name)

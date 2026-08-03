@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-08-03 19:57:50_
+_Generated: 2026-08-04 00:24:35_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -67,18 +67,18 @@ All `@frappe.whitelist()` methods. Call from JS:
 | `reserve_batches` | 1894 |
 | `get_available_excess_batches` | 2062 |
 | `add_excess_material_mapping` | 2128 |
-| `reserve_exact_match_batches` | 2222 |
-| `unreserve_exact_match_batches` | 2355 |
-| `check_mapping_batch_availability` | 2396 |
-| `unreserve_batches` | 2462 |
-| `reassign_batch` | 2577 |
-| `_test_simulate_se_release` | 2807 |
-| `make_production_plan` | 2826 |
-| `make_material_request` | 2885 |
-| `make_material_request_from_consolidate` | 3039 |
-| `update_so_difference_kg` | 3177 |
-| `auto_purchase_from_mp` | 3207 |
-| `complete_batch_mapping` | 3381 |
+| `reserve_exact_match_batches` | 2223 |
+| `unreserve_exact_match_batches` | 2356 |
+| `check_mapping_batch_availability` | 2397 |
+| `unreserve_batches` | 2463 |
+| `reassign_batch` | 2604 |
+| `_test_simulate_se_release` | 2838 |
+| `make_production_plan` | 2857 |
+| `make_material_request` | 2916 |
+| `make_material_request_from_consolidate` | 3070 |
+| `update_so_difference_kg` | 3208 |
+| `auto_purchase_from_mp` | 3238 |
+| `complete_batch_mapping` | 3412 |
 | `@frappe.validate_and_sanitize_search_inputs` | 406 |
 | `get_bom_info` | 432 |
 | `get_so_drawings_for_bom_picker` | 484 |
@@ -117,9 +117,9 @@ All `@frappe.whitelist()` methods. Call from JS:
 | Method | Line |
 |--------|------|
 | `get_pr_item_uom` | 16 |
-| `get_mp_for_pr` | 252 |
-| `allocate_pr_stock_to_mp` | 273 |
-| `get_pr_mp_allocations` | 632 |
+| `get_mp_for_pr` | 257 |
+| `allocate_pr_stock_to_mp` | 278 |
+| `get_pr_mp_allocations` | 637 |
 ## sq_management/supplier_quotation.py
 
 | Method | Line |
@@ -131,7 +131,7 @@ All `@frappe.whitelist()` methods. Call from JS:
 |--------|------|
 | `refresh_mip_raw_materials` | 160 |
 | `create_from_subcontracting_order` | 41 |
-| `refresh_weight_summary` | 437 |
+| `refresh_weight_summary` | 498 |
 | `create_from_work_order` | 60 |
 | `populate_from_production_plan` | 79 |
 ## subcontracting_management/material_issue_plan_transfer.py

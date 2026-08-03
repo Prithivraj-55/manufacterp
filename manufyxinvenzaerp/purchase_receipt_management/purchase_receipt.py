@@ -183,6 +183,11 @@ def _setup_batch_from_stock_entry(doc):
     doc.custom_width = flt(target_row.custom_width)
     doc.custom_sec_qty = flt(target_row.custom_sec_qty)
     doc.custom_sec_uom = target_row.custom_sec_uom
+    # Excess-material-return Stock Entries (create_mip_excess_return_entry) tag
+    # each item with the SCO Excess Material Item row it came from, so Excess
+    # Material Mapping can trace a reservation back to it -- carry that onto
+    # the batch the same way every other custom_* dimension field is copied.
+    doc.custom_source_mip_excess_row = target_row.get("custom_source_mip_excess_row") or ""
 
     group = (target_row.get("custom_parent_item_group") or "").strip()
     if group in {"Structurals", "Plates"}:

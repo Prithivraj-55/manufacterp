@@ -51,7 +51,9 @@
   "batch_calc_qty",
   "cnc_process",
   "store_location",
-  "purchase_receipt"
+  "purchase_receipt",
+  "section_excess_mapping",
+  "excess_material_mapping_btn"
  ],
  "fields": [
   {
@@ -370,6 +372,17 @@
    "label": "Purchase Receipt",
    "options": "Purchase Receipt",
    "read_only": 1
+  },
+  {
+   "fieldname": "section_excess_mapping",
+   "fieldtype": "Section Break",
+   "label": "Excess Material Mapping"
+  },
+  {
+   "description": "Reserve a batch recovered via another job's excess material return into THIS row instead of buying fresh raw material.",
+   "fieldname": "excess_material_mapping_btn",
+   "fieldtype": "Button",
+   "label": "Excess Material Mapping"
   }
  ],
  "istable": 1,

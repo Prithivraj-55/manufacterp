@@ -224,11 +224,13 @@
    "label": "Refresh Raw Materials"
   },
   {
+   "cannot_add_rows": 1,
+   "cannot_delete_rows": 1,
+   "description": "Rebuilt from the linked Material Planning(s) by Refresh Raw Materials / Update Batch -- rows can't be manually added or removed, but Excess Return and Cut Sheet on each row are genuinely user-editable (their own fields are the only ones NOT individually read-only).",
    "fieldname": "raw_materials",
    "fieldtype": "Table",
    "label": "Raw Materials",
-   "options": "Material Issue Plan Raw Material",
-   "read_only": 1
+   "options": "Material Issue Plan Raw Material"
   },
   {
    "fieldname": "tab_excess_return",

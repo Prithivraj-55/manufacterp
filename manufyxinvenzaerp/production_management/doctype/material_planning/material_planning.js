@@ -241,7 +241,6 @@ frappe.ui.form.on("Material Planning", {
 			$btn.html(frappe.utils.icon(icon, "sm") + "&nbsp;" + __(label));
 		}
 		setTimeout(function () {
-			_color_consolidate_diff_cells(frm);
 			_style_btn("get_raw_materials_btn",  "refresh", "Get Raw Materials");
 			_style_btn("verify_raw_materials_btn", "check", "Verify Raw Materials");
 			_style_btn("check_stock_btn",        "search",  "Check Stock Availability");
@@ -2069,6 +2068,12 @@ frappe.ui.form.on("Material Planning Material Mapping", {
 	},
 });
 
+frappe.ui.form.on("Material Planning Material Mapping", {
+	excess_material_mapping_btn(frm, cdt, cdn) {
+		_show_excess_material_mapping_dialog(frm, locals[cdt][cdn]);
+	},
+});
+
 // Shared helper: build the partial-reservation warning table HTML
 function _partial_reservation_html(partial) {
 	let lines = partial.map(function(p) {
@@ -2120,40 +2125,6 @@ function _blocked_reservation_html(blocked) {
 			</tr></thead>
 			<tbody>${lines}</tbody>
 		</table>`;
-}
-
-// Color Consolidate Item's "Difference (Required − Purchase)" cell directly in
-// the DOM: red with a "-" prefix when still short (purchase < required, a
-// positive stored difference), green with a "+" prefix when over-purchased
-// (purchase > required, a negative stored difference). The displayed sign is
-// deliberately the OPPOSITE of the stored value's own sign -- "-" reads as
-// "short by this much" and "+" as "extra by this much", matching how a
-// purchaser actually thinks about it, while the underlying difference_kg
-// field itself keeps its existing required-minus-purchase formula (other
-// logic may depend on that), unaffected by this display-only change.
-// df.formatter doesn't work for Float columns in Frappe's grid renderer (see
-// the call site's comment), so this styles each grid row's cell after render
-// instead -- safe to call on every refresh() since the value only ever
-// changes via a save+reload round trip (purchase_kg/difference_kg are
-// server-computed, not live-recalculated client-side), which itself
-// re-triggers refresh(frm).
-function _color_consolidate_diff_cells(frm) {
-	let grid = frm.fields_dict["consolidate_items"] && frm.fields_dict["consolidate_items"].grid;
-	if (!grid || !grid.grid_rows) return;
-	grid.grid_rows.forEach(function(grid_row) {
-		if (!grid_row.doc || !grid_row.row) return;
-		let $cell = grid_row.row.find('[data-fieldname="difference_kg"] .static-area');
-		if (!$cell.length) return;
-		let v = flt(grid_row.doc.difference_kg);
-		let abs_v = Math.abs(v);
-		let color = v > 0 ? "red" : (v < 0 ? "green" : "");
-		let symbol = v > 0 ? "-" : (v < 0 ? "+" : "");
-		// Same "show 1.000000 as 1" trim Frappe's own Float formatter applies —
-		// only show decimals when the value actually has a fractional part.
-		let precision = (abs_v % 1 === 0) ? 0 : null;
-		$cell.css({ color: color, "font-weight": color ? "bold" : "normal" });
-		$cell.html(`<div style="text-align:right">${symbol}${format_number(abs_v, null, precision)}</div>`);
-	});
 }
 
 // Breakdown table for rows split by finalize_mapping() — an under-covering
@@ -2314,18 +2285,31 @@ function _add_reservation_buttons(frm) {
 // ── Excess Material Mapping dialog (client change request Phase 2.3) ───────
 // Lists batches recovered via the excess-material-return flow (off-cuts from
 // another job, sitting in this MP's warehouse) and lets the user manually map
-// one into Material Mapping instead of buying fresh raw material.
-function _show_excess_material_mapping_dialog(frm) {
+// one in instead of buying fresh raw material.
+//
+// Two entry points share this one dialog:
+//   - The Material Mapping grid's own toolbar button (existing_row omitted) --
+//     "Add & Reserve" creates a brand NEW Material Mapping row, optionally
+//     linked to an Unavailable Item row to shrink its shortfall.
+//   - The per-row "Excess Material Mapping" button on an existing Material
+//     Mapping row (existing_row passed in) -- filtered to that row's own
+//     item_code, and "Add & Reserve" calls the same reassign_batch RPC
+//     "Update Batch" already uses, reserving straight into THAT row instead
+//     of creating a new one.
+// Either way, if the picked batch came from the excess-return flow, the
+// server-side call marks the source SCO Excess Material Item row with where
+// it ended up (_mark_excess_item_mapped), so Material Issue Plan can show
+// it's been reused instead of looking like it's still sitting unused.
+function _show_excess_material_mapping_dialog(frm, existing_row) {
 	if (!frm.doc.for_warehouse) {
 		frappe.msgprint(__("Set 'Raw Materials Warehouse' before mapping excess material."));
 		return;
 	}
-	let unavailable = (frm.doc.unavailable_items || []).filter(r => r.item_code);
+	let unavailable = existing_row ? [] : (frm.doc.unavailable_items || []).filter(r => r.item_code);
 
-	let d = new frappe.ui.Dialog({
-		title: __("Excess Material Mapping"),
-		size: "extra-large",
-		fields: [
+	let dialog_fields = [];
+	if (!existing_row) {
+		dialog_fields.push(
 			{
 				fieldtype: "Select",
 				fieldname: "unavailable_item_row",
@@ -2341,22 +2325,39 @@ function _show_excess_material_mapping_dialog(frm) {
 				fieldname: "item_filter",
 				label: __("Filter by Item Code"),
 			},
-			{ fieldtype: "Section Break" },
-			{ fieldtype: "HTML", fieldname: "excess_html" },
-			{ fieldtype: "Section Break" },
-			{
-				fieldtype: "Float",
-				fieldname: "sec_qty_to_use",
-				label: __("Sec Qty to Use"),
-			},
-			{ fieldtype: "Column Break" },
-			{
-				fieldtype: "Float",
-				fieldname: "kg_preview",
-				label: __("Kg (calculated)"),
-				read_only: 1,
-			},
-		],
+		);
+	} else {
+		dialog_fields.push({
+			fieldtype: "Data",
+			fieldname: "item_filter",
+			label: __("Item Code"),
+			default: existing_row.item_code,
+			read_only: 1,
+			description: __("Only batches for this row's own item are shown -- to substitute a different item, use Update Batch instead."),
+		});
+	}
+	dialog_fields.push(
+		{ fieldtype: "Section Break" },
+		{ fieldtype: "HTML", fieldname: "excess_html" },
+		{ fieldtype: "Section Break" },
+		{
+			fieldtype: "Float",
+			fieldname: "sec_qty_to_use",
+			label: __("Sec Qty to Use"),
+		},
+		{ fieldtype: "Column Break" },
+		{
+			fieldtype: "Float",
+			fieldname: "kg_preview",
+			label: __("Kg (calculated)"),
+			read_only: 1,
+		},
+	);
+
+	let d = new frappe.ui.Dialog({
+		title: existing_row ? __("Excess Material Mapping — Row {0}", [existing_row.idx]) : __("Excess Material Mapping"),
+		size: "extra-large",
+		fields: dialog_fields,
 		primary_action_label: __("Add & Reserve"),
 		primary_action(values) {
 			if (!d._selected_batch) {
@@ -2368,6 +2369,37 @@ function _show_excess_material_mapping_dialog(frm) {
 				frappe.msgprint(__("Enter Sec Qty to use."));
 				return;
 			}
+
+			if (existing_row) {
+				frappe.call({
+					method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.reassign_batch",
+					args: {
+						material_planning_name: frm.doc.name,
+						source_table: "Material Planning Material Mapping",
+						row_name: existing_row.name,
+						new_batch_no: d._selected_batch.batch_no,
+						sec_qty: sec_qty,
+					},
+					freeze: true,
+					freeze_message: __("Mapping and reserving…"),
+					callback(r) {
+						d.hide();
+						let warnings = (r.message && r.message.warnings) || [];
+						if (warnings.length) {
+							frappe.msgprint({
+								title: __("Reallocation Warnings"),
+								indicator: "orange",
+								message: warnings.map((w) => w.reason || `${w.item_code} (${w.batch}): ${__("short by")} ${w.shortfall_qty}`).join("<br>"),
+							});
+						}
+						frm._grid_btns_added = false;
+						frm.reload_doc();
+						frappe.show_alert({ message: __("Excess material mapped and reserved."), indicator: "green" }, 4);
+					},
+				});
+				return;
+			}
+
 			let unavailable_row_name = null;
 			if (values.unavailable_item_row) {
 				let idx = parseInt(values.unavailable_item_row.split("::")[0], 10);
@@ -2454,10 +2486,12 @@ function _show_excess_material_mapping_dialog(frm) {
 	}
 
 	d.fields_dict.sec_qty_to_use.df.onchange = _update_kg_preview;
-	d.fields_dict.item_filter.df.onchange = () => _load(d.get_value("item_filter"));
+	if (!existing_row) {
+		d.fields_dict.item_filter.df.onchange = () => _load(d.get_value("item_filter"));
+	}
 
 	d.show();
-	_load();
+	_load(existing_row ? existing_row.item_code : null);
 }
 
 // Column definitions for each table's View All popup
@@ -2868,7 +2902,7 @@ function _recalc_consolidate_item(frm, cdt, cdn) {
 	let kg_per_nos = _kg_per_nos(group, row.length, row.width, row.thickness, unit_weight);
 	let purchase_kg = flt(kg_per_nos * flt(row.sec_qty), 3);
 	frappe.model.set_value(cdt, cdn, "purchase_kg", purchase_kg);
-	frappe.model.set_value(cdt, cdn, "difference_kg", flt(flt(row.required_kg) - purchase_kg, 3));
+	frappe.model.set_value(cdt, cdn, "difference_kg", flt(purchase_kg - flt(row.required_kg), 3));
 }
 
 frappe.ui.form.on("Material Planning Consolidate Item", {

@@ -847,6 +847,7 @@ function _mip_build_picker(dialog, all_rows, on_select) {
 		["sales_order", __("Sales Order")],
 		["_batch", __("Batch / Purchase Ref")],
 		["sec_qty", __("Sec Qty")],
+		["reqd_kg", __("Reqd Kg")],
 		["qty", __("Qty (Kg)")],
 	];
 	let thead = "<tr>" + cols.map((c) => `<th style="${th_style}">${c[1]}</th>`).join("") + "</tr>";
@@ -875,6 +876,7 @@ function _mip_build_picker(dialog, all_rows, on_select) {
 				frappe.utils.escape_html(r.sales_order || ""),
 				_mip_batch_cell_html(r),
 				format_number(flt(r.sec_qty), null, 3),
+				format_number(flt(r.reqd_kg), null, 3),
 				format_number(flt(r.qty), null, 3),
 			];
 			return `<tr data-name="${frappe.utils.escape_html(r.name)}" data-reservable="${reservable ? 1 : 0}" style="${row_style}">`
@@ -963,6 +965,8 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 			{ fieldname: "current_sec_qty", fieldtype: "Float", label: __("Current Sec Qty (Nos)"), read_only: 1 },
 			{ fieldtype: "Column Break" },
 			{ fieldname: "current_qty", fieldtype: "Float", label: __("Current Qty (Kg)"), read_only: 1 },
+			{ fieldname: "reqd_kg", fieldtype: "Float", label: __("Reqd Kg"), read_only: 1,
+				description: __("The drawing's own planned/required weight -- fixed, does not change no matter which batch/Sec Qty is picked below.") },
 			{ fieldtype: "HTML", fieldname: "transferred_notice_html" },
 			{ fieldtype: "Section Break", label: __("New Allocation"), fieldname: "new_alloc_section" },
 			{ fieldname: "new_batch_no", fieldtype: "Link", options: "Batch", label: __("New Batch"), reqd: 1,
@@ -1156,6 +1160,7 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 		dialog.set_value("current_batch", row.batch_no || (row.purchase_receipt ? __("Purchased via {0}", [row.purchase_receipt]) : __("(none)")));
 		dialog.set_value("current_sec_qty", flt(row.sec_qty));
 		dialog.set_value("current_qty", flt(row.qty));
+		dialog.set_value("reqd_kg", flt(row.reqd_kg));
 		dialog.set_value("new_batch_no", "");
 		dialog.set_value("length", 0);
 		dialog.set_value("width", 0);

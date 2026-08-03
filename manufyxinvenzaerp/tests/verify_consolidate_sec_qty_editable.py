@@ -57,8 +57,8 @@ def run():
     print("purchase_kg (expect", expected_purchase_kg, "):", row.purchase_kg)
     assert flt(row.sec_qty) == 3, "sec_qty must hold exactly what was manually entered"
     assert flt(row.purchase_kg) == expected_purchase_kg, "purchase_kg must be computed from the manually-entered sec_qty"
-    print("difference_kg (required_kg - purchase_kg, expect 50-150=-100):", row.difference_kg)
-    assert flt(row.difference_kg) == flt(row.required_kg) - expected_purchase_kg
+    print("difference_kg (purchase_kg - required_kg, expect 150-50=100):", row.difference_kg)
+    assert flt(row.difference_kg) == expected_purchase_kg - flt(row.required_kg)
 
     frappe.db.commit()
     print("\nALL CHECKS DONE — Consolidate Item's Sec Qty is never inherited, stays editable, "

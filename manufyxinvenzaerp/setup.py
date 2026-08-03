@@ -1854,6 +1854,17 @@ def create_batch_custom_fields():
                 "description": "Populated from the Inspection Call's remarks for this batch's source "
                                 "Purchase Receipt item, once inspected (client change request Phase 6.3).",
             },
+            {
+                "fieldname": "custom_source_mip_excess_row",
+                "label": "Source MIP Excess Row",
+                "fieldtype": "Data",
+                "hidden": 1,
+                "read_only": 1,
+                "insert_after": "custom_batch_remarks",
+                "description": "Row name (SCO Excess Material Item) this batch was returned from, if it "
+                                "came from the excess-material-return flow -- lets Excess Material Mapping "
+                                "trace a reservation back to the Material Issue Plan it originated from.",
+            },
         ],
     }
     create_custom_fields(custom_fields, update=True)
@@ -3101,6 +3112,19 @@ def create_stock_entry_custom_fields():
                     "insert_after": "custom_sales_order",
                     "description": "Synced from the batch's own Batch Remarks on every save "
                                    "(client change request Phase 6.3).",
+                },
+                {
+                    "fieldname": "custom_source_mip_excess_row",
+                    "label": "Source MIP Excess Row",
+                    "fieldtype": "Data",
+                    "hidden": 1,
+                    "read_only": 1,
+                    "insert_after": "custom_batch_remarks",
+                    "description": "Row name of the SCO Excess Material Item this off-cut was returned "
+                                   "from (set by create_mip_excess_return_entry) -- ERPNext copies "
+                                   "same-named custom fields from a Stock Entry item onto the batch it "
+                                   "auto-creates, which is how this reaches the Batch record itself for "
+                                   "Excess Material Mapping to trace back to.",
                 },
             ],
             "Stock Entry": [
