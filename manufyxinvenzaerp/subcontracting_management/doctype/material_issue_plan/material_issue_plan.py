@@ -162,6 +162,17 @@ def refresh_mip_raw_materials(mip_name):
     this plan's drawings. Material Planning's own child tables remain the source of
     truth for reservation state — this only refreshes MIP's read-only display copy.
 
+    A linked Material Planning commonly covers far more drawings than this one MIP
+    was created for (e.g. one MP for a whole sales order's 22 beams, split across
+    several MIPs of a few drawings each) -- so rows are filtered down to only the
+    (sales_order, duno_mark_no) pairs actually listed in this MIP's own
+    drawing_items, instead of pulling every row the linked MP(s) happen to have.
+    A Material Planning is only scoped this way when EVERY drawing_items row
+    pointing at it carries a real duno_mark_no -- a row with no DUNO at all
+    (custom_material_planning set on the Production Plan Item without a specific
+    Drawing/DUNO picked) means "pull this whole MP, unrestricted", same as before
+    this filter existed, since there is no per-drawing scope to filter down to.
+
     User-editable fields (Excess Return / Cut Sheet — see _RAW_MATERIAL_EDITABLE_FIELDS)
     are carried forward from the row being replaced, matched by (source_table,
     source_row), since those two together uniquely identify "the same underlying
@@ -174,6 +185,15 @@ def refresh_mip_raw_materials(mip_name):
     mip = frappe.get_doc("Material Issue Plan", mip_name)
     mp_names = sorted({r.material_planning for r in (mip.drawing_items or []) if r.material_planning})
 
+    drawing_keys_by_mp, wildcard_mps = {}, set()
+    for r in (mip.drawing_items or []):
+        if not r.material_planning:
+            continue
+        if not r.duno_mark_no:
+            wildcard_mps.add(r.material_planning)
+        else:
+            drawing_keys_by_mp.setdefault(r.material_planning, set()).add((r.sales_order, r.duno_mark_no))
+
     transferred_batches = _get_already_transferred_batches(mip)
 
     old_rows_by_key = {
@@ -182,12 +202,28 @@ def refresh_mip_raw_materials(mip_name):
         if r.source_row
     }
 
+    # Material Planning Available Raw Material carries no unit_weight field of its
+    # own (unlike Material Mapping/Unavailable Item), so it has to be looked up from
+    # the Item master directly -- missing this left every ARM-sourced raw_materials
+    # row (and anything derived from it, e.g. Excess Calc Qty) stuck at a wrong 0.
+    unit_weight_by_item = {}
+    all_mps = [frappe.get_doc("Material Planning", n) for n in mp_names]
+    arm_item_codes = {r.item_code for mp in all_mps for r in (mp.available_raw_materials or []) if r.item_code}
+    if arm_item_codes:
+        unit_weight_by_item = dict(frappe.get_all(
+            "Item", filters={"name": ["in", list(arm_item_codes)]},
+            fields=["name", "custom_unit_weight"], as_list=True,
+        ))
+
     mip.set("raw_materials", [])
 
-    for mp_name in mp_names:
-        mp = frappe.get_doc("Material Planning", mp_name)
+    for mp in all_mps:
+        mp_name = mp.name
+        scoped_keys = drawing_keys_by_mp.get(mp_name) if mp_name not in wildcard_mps else None
 
         for row in (mp.material_mapping or []):
+            if scoped_keys is not None and (row.sales_order, row.duno_mark_no) not in scoped_keys:
+                continue
             qty = row.batch_calc_qty if row.batch else row.qty
             sec_qty = row.batch_sec_qty if row.batch else row.sec_qty
             planned_weight = _lookup_drawing_planned_weight(row.sales_order, row.customer_drawing_number, row.item_code)
@@ -210,6 +246,7 @@ def refresh_mip_raw_materials(mip_name):
                 "unit_weight": row.unit_weight,
                 "sec_qty": sec_qty,
                 "sec_uom": row.sec_uom,
+                "reqd_kg": row.qty,
                 "qty": qty,
                 "transferred_qty": qty if row.batch and row.batch in transferred_batches else 0,
                 "drawing_planned_weight": planned_weight,
@@ -221,6 +258,8 @@ def refresh_mip_raw_materials(mip_name):
             _carry_forward_editable_fields(new_row, old_rows_by_key, "Material Planning Material Mapping", row.name)
 
         for row in (mp.available_raw_materials or []):
+            if scoped_keys is not None and (row.sales_order, row.duno_mark_no) not in scoped_keys:
+                continue
             planned_weight = _lookup_drawing_planned_weight(row.sales_order, row.customer_drawing_number, row.item_code)
             new_row = mip.append("raw_materials", {
                 "material_planning": mp_name,
@@ -237,8 +276,10 @@ def refresh_mip_raw_materials(mip_name):
                 "length": row.length,
                 "width": row.width,
                 "thickness": row.thickness,
+                "unit_weight": unit_weight_by_item.get(row.item_code),
                 "sec_qty": row.sec_qty,
                 "sec_uom": row.sec_uom,
+                "reqd_kg": row.overall_required_qty or row.required_qty,
                 "qty": row.required_qty,
                 "transferred_qty": row.required_qty if row.batch_no and row.batch_no in transferred_batches else 0,
                 "drawing_planned_weight": planned_weight,
@@ -250,6 +291,8 @@ def refresh_mip_raw_materials(mip_name):
             _carry_forward_editable_fields(new_row, old_rows_by_key, "Material Planning Available Raw Material", row.name)
 
         for row in (mp.unavailable_items or []):
+            if scoped_keys is not None and (row.sales_order, row.duno_mark_no) not in scoped_keys:
+                continue
             new_row = mip.append("raw_materials", {
                 "material_planning": mp_name,
                 "source_table": "Material Planning Unavailable Item",
@@ -265,6 +308,7 @@ def refresh_mip_raw_materials(mip_name):
                 "thickness": row.thickness,
                 "unit_weight": row.unit_weight,
                 "sec_qty": row.sec_qty,
+                "reqd_kg": row.qty,
                 "qty": row.qty,
                 "transferred_qty": 0,
                 "is_reserved": 0,
@@ -315,15 +359,23 @@ def _sync_excess_return_from_raw_materials(mip):
     """For every raw_materials row flagged Excess Return Applicable, recompute
     Excess Calc Qty (Kg) from its Excess Length/Width/Sec Qty (Thickness reuses
     the row's own batch Thickness), then find-or-create a matching row in
-    excess_return_items -- keyed by source_mip_raw_material_row so re-saving
-    the plan updates the same row instead of duplicating it, and a row the
-    user has since edited by hand (or that already has its own Stock Entry)
-    is left alone rather than silently overwritten (client change request
-    Phase 5.3)."""
+    excess_return_items -- keyed by (source_table, source_row), a row's own
+    reference back to the STABLE Material Planning child row it traces to, so
+    re-saving the plan updates the same excess_return_items row instead of
+    duplicating it, and a row the user has since edited by hand (or that
+    already has its own Stock Entry) is left alone rather than silently
+    overwritten (client change request Phase 5.3).
+
+    NOTE: raw_materials itself is fully rebuilt (fresh row names) on every
+    refresh_mip_raw_materials call, so matching on row.name (as this used to)
+    silently duplicated every still-pending excess entry on every subsequent
+    refresh -- (source_table, source_row) is the one reference on a
+    raw_materials row that stays stable across a rebuild, since it points at
+    the underlying Material Planning row, not this MIP's own copy of it."""
     by_source = {
-        r.source_mip_raw_material_row: r
+        (r.source_table, r.source_row): r
         for r in (mip.excess_return_items or [])
-        if r.source_mip_raw_material_row
+        if r.source_row
     }
 
     for row in (mip.raw_materials or []):
@@ -336,14 +388,23 @@ def _sync_excess_return_from_raw_materials(mip):
         )
         row.excess_calc_qty = flt(calc_qty, 3) if calc_qty is not None else 0
 
-        target = by_source.get(row.name)
+        key = (row.source_table, row.source_row)
+        target = by_source.get(key)
         if target and target.stock_entry_created:
             # Already returned to stock -- leave the historical entry alone.
             continue
 
         if not target:
-            target = mip.append("excess_return_items", {"source_mip_raw_material_row": row.name})
-            by_source[row.name] = target
+            target = mip.append("excess_return_items", {
+                "source_table": row.source_table, "source_row": row.source_row,
+                "source_mip_raw_material_row": row.name,
+            })
+            by_source[key] = target
+        else:
+            # raw_materials was rebuilt since this row was created -- refresh
+            # the display-only pointer to whichever raw_materials row now
+            # represents the same underlying source_table/source_row.
+            target.source_mip_raw_material_row = row.name
 
         target.item_code = row.item_code
         # parent_item_group/unit_weight/sec_uom/uom are `fetch_from` fields on

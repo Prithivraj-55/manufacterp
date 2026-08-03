@@ -605,6 +605,11 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
             "custom_length": flt(r.get("length"), 3),
             "custom_width": flt(r.get("width"), 3),
             "custom_thickness": flt(r.get("thickness"), 3),
+            # Same-named custom field on Batch -- ERPNext copies matching custom
+            # fields from a Stock Entry item onto the batch it auto-creates, so
+            # this reaches the Batch record itself, letting Excess Material
+            # Mapping trace a reservation back to the row it came from.
+            "custom_source_mip_excess_row": r.name,
         })
 
     if not se_items:
@@ -634,12 +639,20 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
     # excess_calc_qty directly here would just get silently overwritten the
     # moment mip.save() below runs validate(). Updating the dimensions lets
     # that same recompute produce the correct answer instead of fighting it.
-    raw_material_by_row = {row.name: row for row in (mip.raw_materials or [])}
+    # Keyed by (source_table, source_row) -- the stable reference back to the
+    # underlying Material Planning row -- not by the raw_materials row's own
+    # name, which gets regenerated (and so would no longer match r's own
+    # source_mip_raw_material_row) every time refresh_mip_raw_materials runs.
+    raw_material_by_row = {
+        (row.source_table, row.source_row): row
+        for row in (mip.raw_materials or [])
+        if row.source_row
+    }
     for r in mip.excess_return_items:
         if r.name not in new_row_names:
             continue
         r.stock_entry_created = 1
-        src = raw_material_by_row.get(r.source_mip_raw_material_row)
+        src = raw_material_by_row.get((r.source_table, r.source_row))
         if src and (r.parent_item_group or "") in _DIMENSION_DRIVEN_GROUPS:
             src.excess_length = r.length
             src.excess_width = r.width
