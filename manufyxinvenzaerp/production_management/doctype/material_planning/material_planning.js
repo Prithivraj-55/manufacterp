@@ -200,6 +200,22 @@ frappe.ui.form.on("Material Planning", {
 			return {};
 		});
 
+		// Color-code Consolidate Item's "Difference (Required − Purchase)":
+		// red when under-purchased (purchase < required, a positive
+		// difference — still short), green when over-purchased (purchase >
+		// required, a negative difference — surplus).
+		//
+		// NOTE: df.formatter (the usual custom-grid-cell-formatter extension
+		// point) does NOT work here — frappe.form.formatters.Float never
+		// calls _apply_custom_formatter at all (unlike Data/Select), so a
+		// per-field formatter on a Float column is silently ignored by
+		// Frappe's own grid renderer. Confirmed live: the pre-existing
+		// batch_mapped status-pill formatter below uses the same df.formatter
+		// pattern and only happens to work because that field is a Data
+		// field, not Float. Styling the cell DOM directly after render is the
+		// only mechanism that actually works for a Float column -- deferred
+		// to the same setTimeout below the grid rows are already rendered.
+
 		let has_raw = !!(frm.doc.raw_materials || []).length;
 		let has_avail = !!(frm.doc.available_raw_materials || []).length;
 		let has_mapping = !!(frm.doc.material_mapping || []).length;
@@ -225,6 +241,7 @@ frappe.ui.form.on("Material Planning", {
 			$btn.html(frappe.utils.icon(icon, "sm") + "&nbsp;" + __(label));
 		}
 		setTimeout(function () {
+			_color_consolidate_diff_cells(frm);
 			_style_btn("get_raw_materials_btn",  "refresh", "Get Raw Materials");
 			_style_btn("verify_raw_materials_btn", "check", "Verify Raw Materials");
 			_style_btn("check_stock_btn",        "search",  "Check Stock Availability");
@@ -1613,9 +1630,15 @@ function _build_consolidate_material_request_dialog(frm, items) {
 
 // ── Alternate dimension UI helpers ───────────────────────────────────────────
 
-function _apply_alternate_dim_ui(frm, cdt, cdn, group) {
+function _apply_alternate_dim_ui(frm, cdt, cdn, group, child_doctype, grid_fieldname) {
+	// child_doctype/grid_fieldname default to Unavailable Item's own for
+	// backward compatibility with existing call sites; Consolidate Item's
+	// alternate-item section (added alongside it) passes its own.
+	child_doctype = child_doctype || "Material Planning Unavailable Item";
+	grid_fieldname = grid_fieldname || "unavailable_items";
+
 	let get_df = function(fn) {
-		return frappe.meta.get_docfield("Material Planning Unavailable Item", fn, frm.doc.name);
+		return frappe.meta.get_docfield(child_doctype, fn, frm.doc.name);
 	};
 
 	// Defaults: hide all, not required
@@ -1641,7 +1664,7 @@ function _apply_alternate_dim_ui(frm, cdt, cdn, group) {
 		if (df) { df.hidden = cfg[fn].hidden; df.reqd = cfg[fn].reqd; }
 	});
 
-	frm.refresh_field("unavailable_items");
+	frm.refresh_field(grid_fieldname);
 }
 
 function _recalc_alternate_quantity(frm, cdt, cdn) {
@@ -1702,6 +1725,43 @@ frappe.ui.form.on("Material Planning Unavailable Item", {
 	alternate_thickness(frm, cdt, cdn) { _recalc_alternate_quantity(frm, cdt, cdn); },
 	alternate_sec_qty(frm, cdt, cdn)   { _recalc_alternate_quantity(frm, cdt, cdn); },
 	alternate_unit_weight(frm, cdt, cdn) { _recalc_alternate_quantity(frm, cdt, cdn); },
+});
+
+// Consolidate Item's own "Alternate Item" section -- unlike Unavailable Item's,
+// this does NOT duplicate Length/Width/Thickness/Sec Qty for the alternate
+// item. Once Alternate Item is set, the row's own (shared) Length/Width/
+// Thickness/Sec Qty fields are simply reinterpreted as describing the
+// ALTERNATE item's dimensions (their depends_on in the JSON already switches
+// on doc.alternate_item to gate visibility off the alternate item's own
+// Parent Item Group) -- only the alternate item's Unit Weight needs a
+// separate lookup, since it can differ from the original item's. Purchase Kg /
+// Difference Kg then recalculate off that same shared Length/Width/Thickness/
+// Sec Qty using whichever group/unit weight applies -- see
+// _recalc_consolidate_item (mirrors the server-side
+// material_planning_consolidate_item.recalculate).
+frappe.ui.form.on("Material Planning Consolidate Item", {
+	alternate_item(frm, cdt, cdn) {
+		let row = locals[cdt][cdn];
+		if (!row.alternate_item) {
+			frappe.model.set_value(cdt, cdn, "alternate_unit_weight",       0);
+			frappe.model.set_value(cdt, cdn, "alternate_parent_item_group", "");
+			frm.refresh_field("consolidate_items");
+			_recalc_consolidate_item(frm, cdt, cdn);
+			return;
+		}
+		frappe.db.get_value(
+			"Item",
+			row.alternate_item,
+			["custom_parent_item_group", "custom_unit_weight"],
+			function(d) {
+				if (!d) return;
+				frappe.model.set_value(cdt, cdn, "alternate_parent_item_group", d.custom_parent_item_group || "");
+				frappe.model.set_value(cdt, cdn, "alternate_unit_weight", flt(d.custom_unit_weight));
+				frm.refresh_field("consolidate_items");
+				_recalc_consolidate_item(frm, cdt, cdn);
+			}
+		);
+	},
 });
 
 // Recalculate Calc Qty (Kg) from assigned batch dimensions × sec qty
@@ -2060,6 +2120,40 @@ function _blocked_reservation_html(blocked) {
 			</tr></thead>
 			<tbody>${lines}</tbody>
 		</table>`;
+}
+
+// Color Consolidate Item's "Difference (Required − Purchase)" cell directly in
+// the DOM: red with a "-" prefix when still short (purchase < required, a
+// positive stored difference), green with a "+" prefix when over-purchased
+// (purchase > required, a negative stored difference). The displayed sign is
+// deliberately the OPPOSITE of the stored value's own sign -- "-" reads as
+// "short by this much" and "+" as "extra by this much", matching how a
+// purchaser actually thinks about it, while the underlying difference_kg
+// field itself keeps its existing required-minus-purchase formula (other
+// logic may depend on that), unaffected by this display-only change.
+// df.formatter doesn't work for Float columns in Frappe's grid renderer (see
+// the call site's comment), so this styles each grid row's cell after render
+// instead -- safe to call on every refresh() since the value only ever
+// changes via a save+reload round trip (purchase_kg/difference_kg are
+// server-computed, not live-recalculated client-side), which itself
+// re-triggers refresh(frm).
+function _color_consolidate_diff_cells(frm) {
+	let grid = frm.fields_dict["consolidate_items"] && frm.fields_dict["consolidate_items"].grid;
+	if (!grid || !grid.grid_rows) return;
+	grid.grid_rows.forEach(function(grid_row) {
+		if (!grid_row.doc || !grid_row.row) return;
+		let $cell = grid_row.row.find('[data-fieldname="difference_kg"] .static-area');
+		if (!$cell.length) return;
+		let v = flt(grid_row.doc.difference_kg);
+		let abs_v = Math.abs(v);
+		let color = v > 0 ? "red" : (v < 0 ? "green" : "");
+		let symbol = v > 0 ? "-" : (v < 0 ? "+" : "");
+		// Same "show 1.000000 as 1" trim Frappe's own Float formatter applies —
+		// only show decimals when the value actually has a fractional part.
+		let precision = (abs_v % 1 === 0) ? 0 : null;
+		$cell.css({ color: color, "font-weight": color ? "bold" : "normal" });
+		$cell.html(`<div style="text-align:right">${symbol}${format_number(abs_v, null, precision)}</div>`);
+	});
 }
 
 // Breakdown table for rows split by finalize_mapping() — an under-covering
@@ -2712,12 +2806,12 @@ function _run_auto_purchase(frm) {
 		frappe.msgprint({ title: __("Warehouse Required"), message: __("Please set the Raw Materials Warehouse before running Auto Purchase."), indicator: "orange" });
 		return;
 	}
-	if (!(frm.doc.unavailable_items || []).length) {
-		frappe.msgprint({ title: __("No Items"), message: __("No unavailable items to purchase."), indicator: "orange" });
+	if (!(frm.doc.consolidate_items || []).length) {
+		frappe.msgprint({ title: __("No Items"), message: __("No consolidated items to purchase."), indicator: "orange" });
 		return;
 	}
 	frappe.confirm(
-		__("This will automatically create and submit a Material Request, Purchase Order, and Purchase Receipt for ALL unavailable items. Continue?"),
+		__("This will automatically create and submit a Material Request, Purchase Order, and Purchase Receipt for ALL consolidated items. Continue?"),
 		function() {
 			if (frm.is_dirty()) {
 				frappe.call({
@@ -2763,10 +2857,15 @@ function _do_auto_purchase(frm) {
 // ── Consolidate Item: live Purchase Kg / Difference Kg calc ────────────────
 function _recalc_consolidate_item(frm, cdt, cdn) {
 	let row = locals[cdt][cdn];
+	// When Alternate Item is set, Length/Width/Thickness/Sec Qty describe THAT
+	// item instead of the original -- only the group (which dims apply) and
+	// unit weight need to switch to the alternate item's own.
+	let group       = row.alternate_item ? row.alternate_parent_item_group : row.parent_item_group;
+	let unit_weight = row.alternate_item ? row.alternate_unit_weight       : row.unit_weight;
 	// _kg_per_nos already returns 0 unless its own group's required dimensions are
 	// present, so multiplying by Sec Qty here reproduces the full Structurals/Plates/
 	// Nuts-and-Bolts formula without re-deriving the group branching.
-	let kg_per_nos = _kg_per_nos(row.parent_item_group, row.length, row.width, row.thickness, row.unit_weight);
+	let kg_per_nos = _kg_per_nos(group, row.length, row.width, row.thickness, unit_weight);
 	let purchase_kg = flt(kg_per_nos * flt(row.sec_qty), 3);
 	frappe.model.set_value(cdt, cdn, "purchase_kg", purchase_kg);
 	frappe.model.set_value(cdt, cdn, "difference_kg", flt(flt(row.required_kg) - purchase_kg, 3));

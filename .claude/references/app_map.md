@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-07-25 21:12:10_
+_Generated: 2026-08-03 19:57:50_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-07-25 21:12:10_
 
 ## Python files
 
-_Total: 174_
+_Total: 175_
 
 - config/__init__.py
 - drawing_management/bom_class_override.py
@@ -165,6 +165,7 @@ _Total: 174_
 - tests/verify_batch_remarks.py
 - tests/verify_bom_routing_new_bom.py
 - tests/verify_bom_routing_trim.py
+- tests/verify_consolidate_alternate_item.py
 - tests/verify_consolidate_finalize.py
 - tests/verify_consolidate_item2.py
 - tests/verify_consolidate_item.py
@@ -731,8 +732,8 @@ Functions:
   - 237:_resolve_pr_batch_no:
   - 252:get_mp_for_pr:
   - 273:allocate_pr_stock_to_mp:
-  - 534:on_submit_purchase_receipt:
-  - 599:get_pr_mp_allocations:
+  - 567:on_submit_purchase_receipt:
+  - 632:get_pr_mp_allocations:
 
 ### rfq_management/request_for_quotation.py
 Functions:
@@ -916,7 +917,8 @@ Functions:
 
 ### tests/test_classification_logic.py
 Functions:
-  - 24:_mock_sbb:
+  - 24:_mock_sbb_batches_bulk:
+  - 41:_ensure_batch_items:
 
 ### tests/test_e2e_material_planning.py
 Functions:
@@ -968,6 +970,7 @@ Functions:
 ### tests/test_unavailable_actions.py
 Functions:
   - 29:_mock_sbb:
+  - 38:_ensure_batch_items:
 
 ### tests/verify_batch_remarks.py
 Functions:
@@ -980,6 +983,10 @@ Functions:
 ### tests/verify_bom_routing_trim.py
 Functions:
   - 15:run:
+
+### tests/verify_consolidate_alternate_item.py
+Functions:
+  - 41:run:
 
 ### tests/verify_consolidate_finalize.py
 Functions:
@@ -1216,13 +1223,13 @@ Functions:
 - `production_management/doctype/material_planning/material_planning.py:2826` — `make_production_plan`
 - `production_management/doctype/material_planning/material_planning.py:2885` — `make_material_request`
 - `production_management/doctype/material_planning/material_planning.py:3039` — `make_material_request_from_consolidate`
-- `production_management/doctype/material_planning/material_planning.py:3154` — `update_so_difference_kg`
-- `production_management/doctype/material_planning/material_planning.py:3184` — `auto_purchase_from_mp`
-- `production_management/doctype/material_planning/material_planning.py:3353` — `complete_batch_mapping`
+- `production_management/doctype/material_planning/material_planning.py:3177` — `update_so_difference_kg`
+- `production_management/doctype/material_planning/material_planning.py:3207` — `auto_purchase_from_mp`
+- `production_management/doctype/material_planning/material_planning.py:3381` — `complete_batch_mapping`
 - `purchase_receipt_management/purchase_receipt.py:16` — `get_pr_item_uom`
 - `purchase_receipt_management/purchase_receipt.py:252` — `get_mp_for_pr`
 - `purchase_receipt_management/purchase_receipt.py:273` — `allocate_pr_stock_to_mp`
-- `purchase_receipt_management/purchase_receipt.py:599` — `get_pr_mp_allocations`
+- `purchase_receipt_management/purchase_receipt.py:632` — `get_pr_mp_allocations`
 
 ## hooks.py — doc_events
 

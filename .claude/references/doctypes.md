@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-07-25 21:12:10_
+_Generated: 2026-08-03 19:57:50_
 
 ## drawing
 

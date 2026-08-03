@@ -276,6 +276,12 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
     - Original item purchased  → Available Raw Materials (Exact Match)
     - Alternate item purchased → Material Mapping (Partial Stock)
 
+    "Alternate item purchased" covers both Unavailable Item's own per-row
+    alternate_item AND Material Planning Consolidate Item's alternate_item
+    (a bulk substitution decision made once for the whole deduped-by-item_code
+    consolidated line) -- either way the purchased batch lands in Material
+    Mapping against every original Unavailable Item row it substitutes for.
+
     The matched Unavailable Items row is removed once fully covered; if the PR
     received less than the row's required qty, the row is kept with its qty
     (and proportional Sec Qty) reduced to just the remaining shortfall.
@@ -288,6 +294,7 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
     # created before this reference chain existed (no custom_duno_mark_no to match on).
     by_alternate, by_alternate_any = {}, {}
     by_original, by_original_any = {}, {}
+    unavail_by_item_code = {}
     for row in (mp.unavailable_items or []):
         duno = row.duno_mark_no or ""
         if row.alternate_item:
@@ -295,6 +302,22 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
             by_alternate_any.setdefault(row.alternate_item, []).append(row)
         by_original.setdefault((row.item_code, duno), []).append(row)
         by_original_any.setdefault(row.item_code, []).append(row)
+        unavail_by_item_code.setdefault(row.item_code, []).append(row)
+
+    # Consolidate Item's own Alternate Item section (bulk, whole-consolidated-
+    # line purchasing decision, set once rather than per original drawing row)
+    # -- when set, a purchase of that alternate item must fan out across every
+    # Unavailable Item row sharing the Consolidate Item row's own item_code
+    # (i.e. everything that got deduped into it), the same way Unavailable
+    # Item's own per-row alternate_item already does. Consolidate Item never
+    # carries a DUNO (it's deduped across drawings), so this only ever
+    # participates in the item-code-only ("_any"/sequential) matching below.
+    by_consolidate_alt_any = {}
+    for c_row in (mp.consolidate_items or []):
+        if c_row.alternate_item:
+            by_consolidate_alt_any.setdefault(c_row.alternate_item, []).extend(
+                unavail_by_item_code.get(c_row.item_code, [])
+            )
 
     # Existing allocations — avoid duplicates. Keyed by (item_code, batch_no,
     # duno_mark_no): batch_no alone isn't enough — many items in this instance
@@ -407,8 +430,18 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
             matched_alternate = by_alternate.get((item_code, pr_duno), [])
             matched_original  = by_original.get((item_code, pr_duno), [])
         else:
-            matched_alternate = by_alternate_any.get(item_code, [])
+            matched_alternate = list(by_alternate_any.get(item_code, []))
             matched_original  = by_original_any.get(item_code, [])
+            # Merge in rows matched via a Consolidate Item row's own
+            # alternate_item -- dedup by row name in case a row is ALSO
+            # independently flagged with its own row-level alternate_item
+            # equal to the same purchased item_code.
+            if item_code in by_consolidate_alt_any:
+                seen_names = {r.name for r in matched_alternate}
+                for r in by_consolidate_alt_any[item_code]:
+                    if r.name not in seen_names:
+                        matched_alternate.append(r)
+                        seen_names.add(r.name)
 
         if matched_alternate:
             # Alternate item purchased → Material Mapping, fully populated as
