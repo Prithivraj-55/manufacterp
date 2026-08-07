@@ -4,10 +4,17 @@
 frappe.query_reports["Inspection Status Report"] = {
 	filters: [
 		{
+			fieldname: "source_doctype",
+			label: __("Source"),
+			fieldtype: "Select",
+			options: "\nJob Card\nSupplier Operation Entry\nPurchase Receipt",
+		},
+		{
 			fieldname: "operation",
 			label: __("Operation"),
 			fieldtype: "Select",
 			options: "\nFitup Inspection\nFinal Inspection",
+			description: __("Only applies to Job Card / Supplier Operation Entry rows."),
 		},
 		{
 			fieldname: "inspection_status",

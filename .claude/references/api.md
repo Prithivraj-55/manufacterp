@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-08-04 00:24:35_
+_Generated: 2026-08-07 11:06:05_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -67,18 +67,20 @@ All `@frappe.whitelist()` methods. Call from JS:
 | `reserve_batches` | 1894 |
 | `get_available_excess_batches` | 2062 |
 | `add_excess_material_mapping` | 2128 |
-| `reserve_exact_match_batches` | 2223 |
-| `unreserve_exact_match_batches` | 2356 |
-| `check_mapping_batch_availability` | 2397 |
-| `unreserve_batches` | 2463 |
-| `reassign_batch` | 2604 |
-| `_test_simulate_se_release` | 2838 |
-| `make_production_plan` | 2857 |
-| `make_material_request` | 2916 |
-| `make_material_request_from_consolidate` | 3070 |
-| `update_so_difference_kg` | 3208 |
-| `auto_purchase_from_mp` | 3238 |
-| `complete_batch_mapping` | 3412 |
+| `get_available_virtual_excess_items` | 2223 |
+| `claim_virtual_excess_mapping` | 2310 |
+| `reserve_exact_match_batches` | 2429 |
+| `unreserve_exact_match_batches` | 2562 |
+| `check_mapping_batch_availability` | 2603 |
+| `unreserve_batches` | 2669 |
+| `reassign_batch` | 2817 |
+| `_test_simulate_se_release` | 3051 |
+| `make_production_plan` | 3070 |
+| `make_material_request` | 3129 |
+| `make_material_request_from_consolidate` | 3283 |
+| `update_so_difference_kg` | 3421 |
+| `auto_purchase_from_mp` | 3451 |
+| `complete_batch_mapping` | 3625 |
 | `@frappe.validate_and_sanitize_search_inputs` | 406 |
 | `get_bom_info` | 432 |
 | `get_so_drawings_for_bom_picker` | 484 |
@@ -131,7 +133,7 @@ All `@frappe.whitelist()` methods. Call from JS:
 |--------|------|
 | `refresh_mip_raw_materials` | 160 |
 | `create_from_subcontracting_order` | 41 |
-| `refresh_weight_summary` | 498 |
+| `refresh_weight_summary` | 501 |
 | `create_from_work_order` | 60 |
 | `populate_from_production_plan` | 79 |
 ## subcontracting_management/material_issue_plan_transfer.py
@@ -168,4 +170,4 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 ## Total
 
-_96 whitelisted methods_
+_98 whitelisted methods_

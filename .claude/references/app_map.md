@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-04 00:24:35_
+_Generated: 2026-08-07 11:06:05_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-08-04 00:24:35_
 
 ## Python files
 
-_Total: 176_
+_Total: 180_
 
 - config/__init__.py
 - drawing_management/bom_class_override.py
@@ -105,8 +105,12 @@ _Total: 176_
 - production_management/report/__init__.py
 - production_management/report/inspection_status_report/__init__.py
 - production_management/report/inspection_status_report/inspection_status_report.py
+- production_management/report/inventory_report/__init__.py
+- production_management/report/inventory_report/inventory_report.py
 - production_management/report/manufyxinvenza_stock_balance/__init__.py
 - production_management/report/manufyxinvenza_stock_balance/manufyxinvenza_stock_balance.py
+- production_management/report/production_report/__init__.py
+- production_management/report/production_report/production_report.py
 - production_management/stock_entry.py
 - production_plan_management/production_plan.py
 - pull_live.py
@@ -206,12 +210,14 @@ _Total: 176_
 
 ## JavaScript files
 
-_Total: 15_
+_Total: 17_
 
 - drawing_management/doctype/drawing/drawing.js
 - production_management/doctype/material_planning/material_planning.js
 - production_management/report/inspection_status_report/inspection_status_report.js
+- production_management/report/inventory_report/inventory_report.js
 - production_management/report/manufyxinvenza_stock_balance/manufyxinvenza_stock_balance.js
+- production_management/report/production_report/production_report.js
 - public/js/batch.js
 - public/js/bom.js
 - public/js/inspection_entry.js
@@ -226,7 +232,7 @@ _Total: 15_
 
 ## JSON files
 
-_Total: 38_
+_Total: 40_
 
 - drawing_management/doctype/drawing/drawing.json
 - drawing_management/doctype/drawing_item/drawing_item.json
@@ -255,7 +261,9 @@ _Total: 38_
 - production_management/doctype/storage_location/storage_location.json
 - production_management/doctype/store_location/store_location.json
 - production_management/report/inspection_status_report/inspection_status_report.json
+- production_management/report/inventory_report/inventory_report.json
 - production_management/report/manufyxinvenza_stock_balance/manufyxinvenza_stock_balance.json
+- production_management/report/production_report/production_report.json
 - subcontracting_management/doctype/job_card_consumption_log/job_card_consumption_log.json
 - subcontracting_management/doctype/material_issue_plan/material_issue_plan.json
 - subcontracting_management/doctype/material_issue_plan_raw_material/material_issue_plan_raw_material.json
@@ -421,6 +429,9 @@ _Total: 38_
   - _get_batch_reserved_by_self:
   - get_available_excess_batches:
   - add_excess_material_mapping:
+  - get_available_virtual_excess_items:
+  - _release_virtual_excess_source:
+  - claim_virtual_excess_mapping:
   - reserve_exact_match_batches:
   - unreserve_exact_match_batches:
   - check_mapping_batch_availability:
@@ -1199,7 +1210,7 @@ Functions:
 - `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:60` — `create_from_work_order`
 - `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:79` — `populate_from_production_plan`
 - `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:160` — `refresh_mip_raw_materials`
-- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:498` — `refresh_weight_summary`
+- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:501` — `refresh_weight_summary`
 - `production_management/inspection.py:104` — `add_inspection_call`
 - `production_management/inspection.py:133` — `update_inspection_call_date`
 - `production_management/inspection.py:153` — `create_inspection_entry`
@@ -1220,18 +1231,20 @@ Functions:
 - `production_management/doctype/material_planning/material_planning.py:1894` — `reserve_batches`
 - `production_management/doctype/material_planning/material_planning.py:2062` — `get_available_excess_batches`
 - `production_management/doctype/material_planning/material_planning.py:2128` — `add_excess_material_mapping`
-- `production_management/doctype/material_planning/material_planning.py:2223` — `reserve_exact_match_batches`
-- `production_management/doctype/material_planning/material_planning.py:2356` — `unreserve_exact_match_batches`
-- `production_management/doctype/material_planning/material_planning.py:2397` — `check_mapping_batch_availability`
-- `production_management/doctype/material_planning/material_planning.py:2463` — `unreserve_batches`
-- `production_management/doctype/material_planning/material_planning.py:2604` — `reassign_batch`
-- `production_management/doctype/material_planning/material_planning.py:2838` — `_test_simulate_se_release`
-- `production_management/doctype/material_planning/material_planning.py:2857` — `make_production_plan`
-- `production_management/doctype/material_planning/material_planning.py:2916` — `make_material_request`
-- `production_management/doctype/material_planning/material_planning.py:3070` — `make_material_request_from_consolidate`
-- `production_management/doctype/material_planning/material_planning.py:3208` — `update_so_difference_kg`
-- `production_management/doctype/material_planning/material_planning.py:3238` — `auto_purchase_from_mp`
-- `production_management/doctype/material_planning/material_planning.py:3412` — `complete_batch_mapping`
+- `production_management/doctype/material_planning/material_planning.py:2223` — `get_available_virtual_excess_items`
+- `production_management/doctype/material_planning/material_planning.py:2310` — `claim_virtual_excess_mapping`
+- `production_management/doctype/material_planning/material_planning.py:2429` — `reserve_exact_match_batches`
+- `production_management/doctype/material_planning/material_planning.py:2562` — `unreserve_exact_match_batches`
+- `production_management/doctype/material_planning/material_planning.py:2603` — `check_mapping_batch_availability`
+- `production_management/doctype/material_planning/material_planning.py:2669` — `unreserve_batches`
+- `production_management/doctype/material_planning/material_planning.py:2817` — `reassign_batch`
+- `production_management/doctype/material_planning/material_planning.py:3051` — `_test_simulate_se_release`
+- `production_management/doctype/material_planning/material_planning.py:3070` — `make_production_plan`
+- `production_management/doctype/material_planning/material_planning.py:3129` — `make_material_request`
+- `production_management/doctype/material_planning/material_planning.py:3283` — `make_material_request_from_consolidate`
+- `production_management/doctype/material_planning/material_planning.py:3421` — `update_so_difference_kg`
+- `production_management/doctype/material_planning/material_planning.py:3451` — `auto_purchase_from_mp`
+- `production_management/doctype/material_planning/material_planning.py:3625` — `complete_batch_mapping`
 - `purchase_receipt_management/purchase_receipt.py:16` — `get_pr_item_uom`
 - `purchase_receipt_management/purchase_receipt.py:257` — `get_mp_for_pr`
 - `purchase_receipt_management/purchase_receipt.py:278` — `allocate_pr_stock_to_mp`

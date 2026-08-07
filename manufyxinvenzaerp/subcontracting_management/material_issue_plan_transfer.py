@@ -566,6 +566,11 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
     for r in (mip.excess_return_items or []):
         if r.get("stock_entry_created"):
             continue
+        if r.get("return_type") == "Retain at Supplier (Virtual)":
+            # Never physically returns to any warehouse -- no Stock Entry/Batch
+            # for this row at all; it's claimed directly from this table via
+            # Excess Material Mapping's virtual-excess picker instead.
+            continue
 
         override = overrides.get(r.name)
         if override:
