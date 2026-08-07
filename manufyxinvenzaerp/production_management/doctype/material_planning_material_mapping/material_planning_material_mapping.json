@@ -53,7 +53,10 @@
   "store_location",
   "purchase_receipt",
   "section_excess_mapping",
-  "excess_material_mapping_btn"
+  "excess_material_mapping_btn",
+  "is_virtual_excess",
+  "virtual_excess_source_row",
+  "virtual_excess_source_mip"
  ],
  "fields": [
   {
@@ -383,6 +386,30 @@
    "fieldname": "excess_material_mapping_btn",
    "fieldtype": "Button",
    "label": "Excess Material Mapping"
+  },
+  {
+   "default": "0",
+   "description": "Set when this row is filled from excess material that stays at the supplier's location (never physically returned to any warehouse, no Batch/Stock Entry) rather than a real returned batch.",
+   "fieldname": "is_virtual_excess",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "label": "Virtual Excess (At Supplier)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "virtual_excess_source_row",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Virtual Excess Source Row",
+   "read_only": 1
+  },
+  {
+   "fieldname": "virtual_excess_source_mip",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Virtual Excess Source MIP",
+   "options": "Material Issue Plan",
+   "read_only": 1
   }
  ],
  "istable": 1,

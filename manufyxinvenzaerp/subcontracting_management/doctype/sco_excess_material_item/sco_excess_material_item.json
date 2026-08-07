@@ -18,6 +18,7 @@
   "qty",
   "uom",
   "return_reason",
+  "return_type",
   "stock_entry_created",
   "source_table",
   "source_row",
@@ -127,6 +128,16 @@
    "fieldname": "return_reason",
    "fieldtype": "Small Text",
    "label": "Return Reason"
+  },
+  {
+   "allow_on_submit": 1,
+   "default": "Return to Own Warehouse",
+   "description": "'Return to Own Warehouse' is the standard flow -- create a Return Excess Entry (Stock Entry) so the material becomes a real, reservable batch in stock. 'Retain at Supplier (Virtual)' is for material that never physically comes back -- it stays at the supplier's location, is never a Stock Entry / Batch, and is claimed directly from this row via the Excess Material Mapping picker.",
+   "fieldname": "return_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Return Type",
+   "options": "Return to Own Warehouse\nRetain at Supplier (Virtual)"
   },
   {
    "allow_on_submit": 1,

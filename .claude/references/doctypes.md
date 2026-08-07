@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-08-04 00:24:35_
+_Generated: 2026-08-07 11:06:05_
 
 ## drawing
 
@@ -277,6 +277,9 @@ _Generated: 2026-08-04 00:24:35_
 | ` _get_batch_reserved_by_self` | no |
 | ` get_available_excess_batches` | no |
 | ` add_excess_material_mapping` | no |
+| ` get_available_virtual_excess_items` | no |
+| ` _release_virtual_excess_source` | no |
+| ` claim_virtual_excess_mapping` | no |
 | ` reserve_exact_match_batches` | no |
 | ` unreserve_exact_match_batches` | no |
 | ` check_mapping_batch_availability` | no |

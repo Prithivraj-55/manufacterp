@@ -390,8 +390,11 @@ def _sync_excess_return_from_raw_materials(mip):
 
         key = (row.source_table, row.source_row)
         target = by_source.get(key)
-        if target and target.stock_entry_created:
-            # Already returned to stock -- leave the historical entry alone.
+        if target and (target.stock_entry_created or target.mapped_material_planning):
+            # Already returned to stock, or already claimed (real batch or
+            # Retain-at-Supplier virtual claim) -- leave the historical entry
+            # alone so a later resave can't drift it out from under whatever
+            # already reserved it.
             continue
 
         if not target:

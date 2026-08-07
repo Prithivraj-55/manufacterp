@@ -2292,10 +2292,12 @@ function _add_reservation_buttons(frm) {
 //     "Add & Reserve" creates a brand NEW Material Mapping row, optionally
 //     linked to an Unavailable Item row to shrink its shortfall.
 //   - The per-row "Excess Material Mapping" button on an existing Material
-//     Mapping row (existing_row passed in) -- filtered to that row's own
-//     item_code, and "Add & Reserve" calls the same reassign_batch RPC
+//     Mapping row (existing_row passed in) -- the item filter defaults to
+//     that row's own item_code but can be changed to browse any item's
+//     excess batches, and "Add & Reserve" calls the same reassign_batch RPC
 //     "Update Batch" already uses, reserving straight into THAT row instead
-//     of creating a new one.
+//     of creating a new one (picking a different item's batch substitutes
+//     it in via planned_item, same as Update Batch already supports).
 // Either way, if the picked batch came from the excess-return flow, the
 // server-side call marks the source SCO Excess Material Item row with where
 // it ended up (_mark_excess_item_mapped), so Material Issue Plan can show
@@ -2330,20 +2332,25 @@ function _show_excess_material_mapping_dialog(frm, existing_row) {
 		dialog_fields.push({
 			fieldtype: "Data",
 			fieldname: "item_filter",
-			label: __("Item Code"),
+			label: __("Filter by Item Code"),
 			default: existing_row.item_code,
-			read_only: 1,
-			description: __("Only batches for this row's own item are shown -- to substitute a different item, use Update Batch instead."),
+			description: __("Starts on this row's own item; clear or change it to browse excess of any item -- picking a different item substitutes it in (recorded as Planned Item, same as Update Batch)."),
 		});
 	}
 	dialog_fields.push(
 		{ fieldtype: "Section Break" },
+		{
+			fieldtype: "HTML",
+			fieldname: "excess_legend",
+			options: `<div style="font-size:12px;color:#888;margin-bottom:4px;">${__("Returned Batch")} = ${__("physically back in your own warehouse")}. ${__("At Supplier (Virtual)")} = ${__("never returned to any warehouse -- stays at the supplier, claimed whole (no partial split), no Stock Entry created.")}</div>`,
+		},
 		{ fieldtype: "HTML", fieldname: "excess_html" },
 		{ fieldtype: "Section Break" },
 		{
 			fieldtype: "Float",
 			fieldname: "sec_qty_to_use",
 			label: __("Sec Qty to Use"),
+			description: __("Locked to the full quantity for 'At Supplier (Virtual)' rows -- those are claimed whole, not split."),
 		},
 		{ fieldtype: "Column Break" },
 		{
@@ -2360,8 +2367,35 @@ function _show_excess_material_mapping_dialog(frm, existing_row) {
 		fields: dialog_fields,
 		primary_action_label: __("Add & Reserve"),
 		primary_action(values) {
+			if (d._selected_virtual) {
+				let unavailable_row_name = null;
+				if (!existing_row && values.unavailable_item_row) {
+					let idx = parseInt(values.unavailable_item_row.split("::")[0], 10);
+					unavailable_row_name = unavailable[idx] && unavailable[idx].name;
+				}
+				frappe.call({
+					method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.claim_virtual_excess_mapping",
+					args: {
+						mp_name: frm.doc.name,
+						excess_row_name: d._selected_virtual.excess_row,
+						row_name: existing_row ? existing_row.name : null,
+						unavailable_item_row: unavailable_row_name,
+					},
+					freeze: true,
+					freeze_message: __("Claiming excess held at supplier…"),
+					callback(r) {
+						if (!r.message) return;
+						d.hide();
+						frm._grid_btns_added = false;
+						frm.reload_doc();
+						frappe.show_alert({ message: __("Excess material (at supplier) claimed and reserved."), indicator: "green" }, 4);
+					},
+				});
+				return;
+			}
+
 			if (!d._selected_batch) {
-				frappe.msgprint(__("Select a batch first."));
+				frappe.msgprint(__("Select a batch or an 'At Supplier' row first."));
 				return;
 			}
 			let sec_qty = flt(values.sec_qty_to_use);
@@ -2431,46 +2465,84 @@ function _show_excess_material_mapping_dialog(frm, existing_row) {
 			method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.get_available_excess_batches",
 			args: { mp_name: frm.doc.name, item_code: item_filter || null },
 			freeze: true,
-			freeze_message: __("Loading excess batches…"),
-			callback(r) { _render(r.message || []); },
+			freeze_message: __("Loading excess material…"),
+			callback(r) {
+				let batches = (r.message || []).map(row => Object.assign({ _kind: "batch" }, row));
+				frappe.call({
+					method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.get_available_virtual_excess_items",
+					args: { mp_name: frm.doc.name, item_code: item_filter || null },
+					callback(r2) {
+						let virtual = (r2.message || []).map(row => Object.assign({ _kind: "virtual" }, row));
+						_render(batches.concat(virtual));
+					},
+				});
+			},
 		});
 	}
 
 	function _render(rows) {
 		let $wrap = d.fields_dict.excess_html.$wrapper;
 		if (!rows.length) {
-			$wrap.html(`<div style="padding:20px;text-align:center;color:#888;">${__("No excess batches with free stock found in this warehouse.")}</div>`);
+			$wrap.html(`<div style="padding:20px;text-align:center;color:#888;">${__("No excess material (returned or at supplier) found for this filter.")}</div>`);
 			return;
 		}
 		let th = "white-space:nowrap;padding:6px 10px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;";
 		let td = "padding:5px 10px;white-space:nowrap;border-bottom:1px solid #f0f0f0;";
-		let cols = [__("Item Code"), __("Item Name"), __("Batch No"), __("L (mm)"), __("W (mm)"), __("T (mm)"), __("Batch Sec Qty"), __("Free Kg")];
+		let cols = [__("Item Code"), __("Item Name"), __("Source"), __("Batch / MIP"), __("L (mm)"), __("W (mm)"), __("T (mm)"), __("Sec Qty"), __("Free/Qty (Kg)"), __("Supplier")];
 		let thead = "<tr>" + cols.map(c => `<th style="${th}">${c}</th>`).join("") + "</tr>";
-		let tbody = rows.map(r => `
-			<tr data-batch="${frappe.utils.escape_html(r.batch_no)}" style="cursor:pointer;">
+		let tbody = rows.map((r, i) => {
+			if (r._kind === "batch") {
+				return `
+			<tr data-idx="${i}" style="cursor:pointer;">
 				<td style="${td}">${frappe.utils.escape_html(r.item_code)}</td>
 				<td style="${td}">${frappe.utils.escape_html(r.item_name || "")}</td>
+				<td style="${td}">${__("Returned Batch")}</td>
 				<td style="${td}">${frappe.utils.escape_html(r.batch_no)}</td>
 				<td style="${td}">${format_number(flt(r.length), null, 1)}</td>
 				<td style="${td}">${format_number(flt(r.width), null, 1)}</td>
 				<td style="${td}">${format_number(flt(r.thickness), null, 1)}</td>
 				<td style="${td}">${format_number(flt(r.batch_sec_qty), null, 3)}</td>
 				<td style="${td}">${format_number(flt(r.free_qty), null, 3)}</td>
-			</tr>`).join("");
+				<td style="${td}">-</td>
+			</tr>`;
+			}
+			return `
+			<tr data-idx="${i}" style="cursor:pointer;">
+				<td style="${td}">${frappe.utils.escape_html(r.item_code)}</td>
+				<td style="${td}">${frappe.utils.escape_html(r.item_name || "")}</td>
+				<td style="${td};color:#b8860b;">${__("At Supplier (Virtual)")}</td>
+				<td style="${td}">${frappe.utils.escape_html(r.mip_name)}</td>
+				<td style="${td}">${format_number(flt(r.length), null, 1)}</td>
+				<td style="${td}">${format_number(flt(r.width), null, 1)}</td>
+				<td style="${td}">${format_number(flt(r.thickness), null, 1)}</td>
+				<td style="${td}">${format_number(flt(r.sec_qty), null, 3)}</td>
+				<td style="${td}">${format_number(flt(r.qty), null, 3)}</td>
+				<td style="${td}">${frappe.utils.escape_html(r.supplier || "-")}</td>
+			</tr>`;
+		}).join("");
 		$wrap.html(`<div style="overflow-x:auto;max-height:32vh;overflow-y:auto;border:1px solid #e9ecef;border-radius:4px;">
-			<table style="font-size:12px;border-collapse:collapse;width:100%;min-width:700px;">
+			<table style="font-size:12px;border-collapse:collapse;width:100%;min-width:800px;">
 				<thead style="position:sticky;top:0;">${thead}</thead>
 				<tbody>${tbody}</tbody>
 			</table></div>`);
 
-		$wrap.find("tr[data-batch]").on("click", function() {
-			let batch_no = $(this).data("batch");
-			let row = rows.find(x => x.batch_no === batch_no);
-			d._selected_batch = row;
-			let default_sec_qty = (row.batch_sec_qty && row.free_qty)
-				? Math.min(flt(row.batch_sec_qty), flt(row.free_qty))
-				: flt(row.batch_sec_qty);
-			d.set_value("sec_qty_to_use", default_sec_qty);
+		$wrap.find("tr[data-idx]").on("click", function() {
+			let row = rows[parseInt($(this).data("idx"), 10)];
+			d._selected_batch = null;
+			d._selected_virtual = null;
+			if (row._kind === "batch") {
+				d._selected_batch = row;
+				let default_sec_qty = (row.batch_sec_qty && row.free_qty)
+					? Math.min(flt(row.batch_sec_qty), flt(row.free_qty))
+					: flt(row.batch_sec_qty);
+				d.set_df_property("sec_qty_to_use", "read_only", 0);
+				d.set_value("sec_qty_to_use", default_sec_qty);
+			} else {
+				d._selected_virtual = row;
+				d.set_df_property("sec_qty_to_use", "read_only", 1);
+				d.set_value("sec_qty_to_use", flt(row.sec_qty));
+				d.set_value("kg_preview", flt(row.qty, 3));
+			}
 			_update_kg_preview();
 			$wrap.find("tr").css("background", "");
 			$(this).css("background", "#e3f2fd");
@@ -2478,6 +2550,10 @@ function _show_excess_material_mapping_dialog(frm, existing_row) {
 	}
 
 	function _update_kg_preview() {
+		if (d._selected_virtual) {
+			d.set_value("kg_preview", flt(d._selected_virtual.qty, 3));
+			return;
+		}
 		let row = d._selected_batch;
 		if (!row) return;
 		let sec_qty = flt(d.get_value("sec_qty_to_use"));
@@ -2486,9 +2562,7 @@ function _show_excess_material_mapping_dialog(frm, existing_row) {
 	}
 
 	d.fields_dict.sec_qty_to_use.df.onchange = _update_kg_preview;
-	if (!existing_row) {
-		d.fields_dict.item_filter.df.onchange = () => _load(d.get_value("item_filter"));
-	}
+	d.fields_dict.item_filter.df.onchange = () => _load(d.get_value("item_filter"));
 
 	d.show();
 	_load(existing_row ? existing_row.item_code : null);

@@ -2220,6 +2220,212 @@ def add_excess_material_mapping(mp_name, batch_no, sec_qty, unavailable_item_row
 
 
 @frappe.whitelist()
+def get_available_virtual_excess_items(mp_name, item_code=None):
+    """List excess raw material that will NEVER be physically returned to any
+    warehouse -- it stays at the supplier's location, tracked only as a row
+    in a Material Issue Plan's Excess Material Items table with
+    return_type = 'Retain at Supplier (Virtual)'. Unlike
+    get_available_excess_batches, there is no Batch/Stock Entry/stock-ledger
+    behind this at all -- "available" simply means not yet claimed
+    (mapped_material_planning empty). A claim always takes the row in full;
+    no partial splitting, since a specific off-cut sitting at one supplier
+    can't be meaningfully divided across the live stock-summation logic used
+    for real batches."""
+    mp = frappe.get_doc("Material Planning", mp_name)
+
+    filters = {
+        "parenttype": "Material Issue Plan",
+        "return_type": "Retain at Supplier (Virtual)",
+        "mapped_material_planning": ["in", ["", None]],
+    }
+    if item_code:
+        filters["item_code"] = item_code
+
+    rows = frappe.get_all(
+        "SCO Excess Material Item",
+        filters=filters,
+        fields=["name", "parent", "item_code", "item_name", "parent_item_group",
+                "unit_weight", "length", "width", "thickness", "sec_qty", "sec_uom",
+                "qty", "uom"],
+    )
+    rows = [r for r in rows if r.item_code and flt(r.qty) > 0]
+    if not rows:
+        return []
+
+    mip_names = list({r.parent for r in rows})
+    mips = frappe.get_all(
+        "Material Issue Plan", filters={"name": ["in", mip_names]},
+        fields=["name", "company", "subcontracting_order"],
+    )
+    company_by_mip = {m.name: m.company for m in mips}
+    sco_by_mip = {m.name: m.subcontracting_order for m in mips}
+    sco_names = list({v for v in sco_by_mip.values() if v})
+    supplier_by_sco = {}
+    if sco_names:
+        supplier_by_sco = {
+            s.name: s.supplier for s in frappe.get_all(
+                "Subcontracting Order", filters={"name": ["in", sco_names]}, fields=["name", "supplier"]
+            )
+        }
+
+    result = []
+    for r in rows:
+        if company_by_mip.get(r.parent) != mp.company:
+            continue
+        result.append({
+            "excess_row": r.name,
+            "mip_name": r.parent,
+            "item_code": r.item_code,
+            "item_name": r.item_name or r.item_code,
+            "parent_item_group": r.parent_item_group or "",
+            "unit_weight": flt(r.unit_weight),
+            "length": flt(r.length),
+            "width": flt(r.width),
+            "thickness": flt(r.thickness),
+            "sec_qty": flt(r.sec_qty),
+            "sec_uom": r.sec_uom or "",
+            "qty": flt(r.qty),
+            "uom": r.uom or "Kg",
+            "supplier": supplier_by_sco.get(sco_by_mip.get(r.parent)) or "",
+        })
+    return result
+
+
+def _release_virtual_excess_source(row):
+    """Undo a virtual-excess claim on a material_mapping row: frees the
+    source SCO Excess Material Item row back up for another job to claim,
+    and clears the row's own virtual-excess markers. Caller is responsible
+    for saving the parent Material Planning afterwards."""
+    if row.get("is_virtual_excess") and row.get("virtual_excess_source_row"):
+        frappe.db.set_value(
+            "SCO Excess Material Item", row.virtual_excess_source_row,
+            {"mapped_material_planning": "", "mapped_row_name": ""}, update_modified=False,
+        )
+    row.is_virtual_excess = 0
+    row.virtual_excess_source_row = ""
+    row.virtual_excess_source_mip = ""
+
+
+@frappe.whitelist()
+def claim_virtual_excess_mapping(mp_name, excess_row_name, row_name=None, unavailable_item_row=None):
+    """Reserve excess material that stays at the supplier (never returned to
+    stock -- no Batch, no Stock Entry) into a Material Planning Material
+    Mapping row. Claimed in full, all-or-nothing (see
+    get_available_virtual_excess_items docstring for why). Mirrors
+    add_excess_material_mapping/reassign_batch's shape but skips every
+    batch-stock code path entirely, since there is no ledger to check --
+    is_reserved/reserved_qty are set directly rather than via
+    reserve_batches()."""
+    mp = frappe.get_doc("Material Planning", mp_name)
+    if not frappe.has_permission("Material Planning", "write", doc=mp):
+        frappe.throw(_("Not permitted to modify this Material Planning"), frappe.PermissionError)
+
+    excess = frappe.db.get_value(
+        "SCO Excess Material Item", excess_row_name,
+        ["parent", "item_code", "item_name", "parent_item_group", "unit_weight",
+         "length", "width", "thickness", "sec_qty", "sec_uom", "qty", "uom",
+         "return_type", "mapped_material_planning"],
+        as_dict=True,
+    )
+    if not excess:
+        frappe.throw(_("Excess Material Item row {0} not found.").format(excess_row_name))
+    if excess.return_type != "Retain at Supplier (Virtual)":
+        frappe.throw(_("This row is not marked 'Retain at Supplier (Virtual)'."))
+    if excess.mapped_material_planning:
+        frappe.throw(_("This excess item has already been claimed by {0}.").format(excess.mapped_material_planning))
+    if flt(excess.qty) <= 0:
+        frappe.throw(_("Excess item has no quantity to claim."))
+
+    if row_name:
+        row = next((r for r in mp.material_mapping if r.name == row_name), None)
+        if not row:
+            frappe.throw(_("Row {0} not found.").format(row_name))
+        _release_virtual_excess_source(row)
+        # Drop any prior reservation on this row FIRST, in the same save that
+        # changes qty/dims below -- _validate_batch_calc_qty blocks a save
+        # that changes a row's qty/batch while row.is_reserved is still true,
+        # so is_reserved must already read false by the time that check runs.
+        row.is_reserved = 0
+        row.reserved_qty = 0
+        row.shortfall_qty = 0
+        row.reserved_on = None
+    else:
+        base = {
+            "item_number": "", "sales_order": "", "item_code": excess.item_code,
+            "item_name": excess.item_name or excess.item_code, "bom_no": "", "drawing": "",
+            "duno_mark_no": "", "customer_drawing_number": "",
+        }
+        if unavailable_item_row:
+            src = next((r for r in (mp.unavailable_items or []) if r.name == unavailable_item_row), None)
+            if not src:
+                frappe.throw(_("Unavailable Item row {0} not found.").format(unavailable_item_row))
+            if src.item_code != excess.item_code:
+                frappe.throw(
+                    _("Selected excess item ({0}) does not match the Unavailable Item row's item ({1}).")
+                    .format(excess.item_code, src.item_code)
+                )
+            base.update({
+                "item_number": src.item_number, "sales_order": src.sales_order,
+                "bom_no": src.bom_no, "drawing": src.drawing,
+                "duno_mark_no": src.duno_mark_no, "customer_drawing_number": src.customer_drawing_number,
+            })
+            old_qty = flt(src.qty)
+            remaining = flt(old_qty - flt(excess.qty), 3)
+            if remaining <= 0.001:
+                mp.unavailable_items = [r for r in mp.unavailable_items if r.name != unavailable_item_row]
+            else:
+                ratio = (remaining / old_qty) if old_qty else 0.0
+                src.qty = remaining
+                src.sec_qty = flt(flt(src.sec_qty) * ratio, 3)
+        row = mp.append("material_mapping", base)
+
+    row.qty = flt(excess.qty, 3)
+    row.uom = excess.uom or "Kg"
+    row.sec_qty = flt(excess.sec_qty)
+    row.sec_uom = excess.sec_uom or ""
+    row.parent_item_group = excess.parent_item_group or ""
+    row.length = flt(excess.length)
+    row.width = flt(excess.width)
+    row.thickness = flt(excess.thickness)
+    row.unit_weight = flt(excess.unit_weight)
+
+    row.batch = ""
+    row.planned_item = excess.item_code
+    row.batch_mapped = "Virtual (At Supplier)"
+    row.batch_parent_item_group = excess.parent_item_group or ""
+    row.batch_length = flt(excess.length)
+    row.batch_width = flt(excess.width)
+    row.batch_thickness = flt(excess.thickness)
+    row.batch_unit_weight = flt(excess.unit_weight)
+    row.batch_sec_qty = flt(excess.sec_qty)
+    row.batch_calc_qty = flt(excess.qty, 3)
+
+    row.is_virtual_excess = 1
+    row.virtual_excess_source_row = excess_row_name
+    row.virtual_excess_source_mip = excess.parent
+
+    # is_reserved deliberately NOT set in this save -- see the comment above
+    # about _validate_batch_calc_qty. It's flipped on right after, via a raw
+    # field write (same pattern _mark_excess_item_mapped uses) that bypasses
+    # validate() entirely, once the new qty is already the row's committed
+    # DB value and so can no longer look like an in-flight change.
+    mp.save(ignore_permissions=True)
+
+    frappe.db.set_value(
+        "Material Planning Material Mapping", row.name,
+        {"is_reserved": 1, "reserved_qty": flt(excess.qty, 3), "shortfall_qty": 0, "reserved_on": now()},
+        update_modified=False,
+    )
+    frappe.db.set_value(
+        "SCO Excess Material Item", excess_row_name,
+        {"mapped_material_planning": mp_name, "mapped_row_name": row.name}, update_modified=False,
+    )
+    frappe.db.commit()
+
+    return {"row_name": row.name, "mp_name": mp_name}
+
+
+@frappe.whitelist()
 def reserve_exact_match_batches(material_planning_name):
     """
     Reserve batches in available_raw_materials (Exact Match) with partial-stock awareness.
@@ -2478,6 +2684,13 @@ def unreserve_batches(material_planning_name, row_names):
             row.reserved_qty = 0
             row.shortfall_qty = 0
             row.reserved_on = None
+            if row.get("is_virtual_excess"):
+                _release_virtual_excess_source(row)
+                row.batch_mapped = "Not Mapped"
+                row.batch_calc_qty = 0
+                row.batch_sec_qty = 0
+                row.batch_length = row.batch_width = row.batch_thickness = row.batch_unit_weight = 0
+                row.planned_item = ""
             unreserved_count += 1
 
     if not unreserved_count:
