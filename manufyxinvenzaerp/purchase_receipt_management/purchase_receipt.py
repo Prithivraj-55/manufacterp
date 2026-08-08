@@ -500,6 +500,13 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
                     "batch_reserved_qty":     flt(batch_reserved_qty, 3),
                     "batch_free_qty":         flt(max(0.0, batch_total_qty - batch_reserved_qty), 3),
                     "purchase_receipt":       pr_name,
+                    # An alternate item's own dimensions generally won't line
+                    # up with the original requirement's -- reserve by
+                    # Sec Qty/weight rather than requiring a dimension match
+                    # (client feedback), same as picking this manually via
+                    # "Assign Batch" with this option enabled.
+                    "reserve_without_dimensions": 1,
+                    "allocate_based_on_sec_qty":  1,
                 })
                 added_mapping += 1
 

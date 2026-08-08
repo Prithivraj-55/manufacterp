@@ -1272,6 +1272,7 @@ def after_install():
     # create_job_card_client_script()
     create_stock_entry_custom_fields()
     create_stock_entry_client_script()
+    create_subcontracting_order_translation()
     remove_sco_purchase_order_mandatory()
     hide_sco_job_worker_warehouse()
     create_sco_custom_fields()
@@ -1324,6 +1325,7 @@ def after_migrate():
     # create_job_card_client_script()
     create_stock_entry_custom_fields()
     create_stock_entry_client_script()
+    create_subcontracting_order_translation()
     remove_sco_purchase_order_mandatory()
     hide_sco_job_worker_warehouse()
     create_sco_custom_fields()
@@ -2481,7 +2483,7 @@ def create_production_plan_custom_fields():
                 {
                     "fieldname": "custom_subcontracting_plan_tab",
                     "fieldtype": "Tab Break",
-                    "label": "Subcontracting Plan",
+                    "label": "Work order plan",
                     "insert_after": "amended_from",
                 },
                 {
@@ -2513,6 +2515,30 @@ def create_production_plan_custom_fields():
                     "depends_on": "eval:doc.custom_process_planning && doc.custom_process_planning.some(r => r.work_type === 'Subcontractor')",
                     "mandatory_depends_on": "eval:doc.custom_process_planning && doc.custom_process_planning.some(r => r.work_type === 'Subcontractor')",
                 },
+                # Unconditional section (does NOT inherit the Subcontractor-only
+                # depends_on above) -- Job work order + MIP are created for every
+                # Production Plan Type, not only plans with a Subcontractor row.
+                {
+                    "fieldname": "custom_job_work_order_mip_section",
+                    "fieldtype": "Section Break",
+                    "label": "Job Work Order & Material Issue Plan",
+                    "insert_after": "custom_vendor_contractor",
+                    "depends_on": "eval:doc.docstatus === 1",
+                },
+                {
+                    "fieldname": "custom_material_issue_plan",
+                    "fieldtype": "Link",
+                    "label": "Material Issue Plan",
+                    "options": "Material Issue Plan",
+                    "insert_after": "custom_job_work_order_mip_section",
+                    "read_only": 1,
+                },
+                {
+                    "fieldname": "custom_delete_job_work_order_mip_btn",
+                    "fieldtype": "Button",
+                    "label": "Delete Job work order and MIP",
+                    "insert_after": "custom_material_issue_plan",
+                },
             ],
         },
         update=True,
@@ -2525,28 +2551,67 @@ frappe.ui.form.on("Production Plan", {
 		if (frm.doc.docstatus !== 1) return;
 
 		var ops = frm.doc.custom_process_planning || [];
-		if (!ops.length) {
-			frm.page.set_inner_btn_group_as_primary(__("Create"));
-			return;
-		}
 
 		// Subcontracting Order is the single production-execution doctype for every
 		// Production Plan Type (Internal Job / Supplier Job / Supplier with Material)
 		// -- Work Order is no longer created from here at all (client change request
 		// Phase 0.4/4.1). Process Planning rows can mix Subcontractor and Internal
 		// Jobcard freely; Supplier Operation Entry executes each one regardless.
-		var has_sub = ops.some(function(r) { return r.work_type === "Subcontractor"; });
+		//
+		// Given as its own standalone toolbar button (not tucked inside "Create") per
+		// client request, placed immediately before the "View" button. A single
+		// click now creates BOTH the Job work order (Subcontracting Order) and its
+		// Material Issue Plan together.
+		if (ops.length) {
+			var has_sub = ops.some(function(r) { return r.work_type === "Subcontractor"; });
 
-		frm.remove_custom_button(__("Subcontracting Order"), __("Create"));
-		frm.add_custom_button(__("Subcontracting Order"), function() {
-			if (has_sub && !frm.doc.custom_vendor_contractor) {
-				frappe.msgprint(__("Please set Vendor/Contractor on this Production Plan before creating a Subcontracting Order."));
-				return;
+			frm.remove_custom_button(__("Job work order & MIP"));
+			var $job_btn = frm.add_custom_button(__("Job work order & MIP"), function() {
+				if (has_sub && !frm.doc.custom_vendor_contractor) {
+					frappe.msgprint(__("Please set Vendor/Contractor on this Production Plan before creating a Subcontracting Order."));
+					return;
+				}
+				_pp_create_sco_and_mip(frm);
+			});
+			frm.change_custom_button_type(__("Job work order & MIP"), null, "primary");
+
+			var $view_group = frm.page.get_inner_group_button(__("View"));
+			if ($job_btn && $job_btn.length && $view_group && $view_group.length) {
+				$job_btn.insertBefore($view_group);
 			}
-			_pp_create_sco(frm);
+		}
+
+		// ERPNext core still adds its own "Work Order / Subcontract PO" item under
+		// Create when it finds pending items -- this app never creates a Work Order
+		// from a Production Plan, so clicking it now just points the user at the
+		// "Job work order" button above instead of proceeding. If nothing legitimate
+		// (e.g. the native "Material Request" shortcut) is left in Create afterwards,
+		// the whole dropdown is hidden too.
+		frm.remove_custom_button(__("Work Order / Subcontract PO"), __("Create"));
+		frm.add_custom_button(__("Work Order / Subcontract PO"), function() {
+			frappe.msgprint(__('Use the "Job work order" button to create a Job work order for this Production Plan.'));
 		}, __("Create"));
 
-		frm.page.set_inner_btn_group_as_primary(__("Create"));
+		var $create_group = frm.page.get_inner_group_button(__("Create"));
+		if ($create_group && $create_group.length) {
+			var other_items = $create_group.find(".dropdown-item").not(
+				'[data-label="' + encodeURIComponent(__("Work Order / Subcontract PO")) + '"]'
+			);
+			if (other_items.length === 0) {
+				$create_group.hide();
+			} else {
+				$create_group.show();
+			}
+		}
+	},
+
+	custom_delete_job_work_order_mip_btn(frm) {
+		frappe.confirm(
+			__("Delete the Job work order and Material Issue Plan created from this Production Plan? This cannot be undone."),
+			function() {
+				_pp_delete_sco_and_mip(frm);
+			}
+		);
 	}
 });
 
@@ -2571,23 +2636,39 @@ frappe.ui.form.on("Production Plan Item", {
 	}
 });
 
-function _pp_create_sco(frm) {
-	frappe.db.get_value("Subcontracting Order", {"custom_production_plan": frm.doc.name}, "name", function(r) {
-		if (r && r.name) {
-			frappe.msgprint({ title: __("Already Created"), message: __("Subcontracting Order: ") + '<a href="/app/subcontracting-order/' + encodeURIComponent(r.name) + '">' + r.name + "</a>", indicator: "orange" });
-			return;
+function _pp_create_sco_and_mip(frm) {
+	frappe.call({
+		method: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_sco_and_mip_from_production_plan",
+		args: { pp_name: frm.doc.name },
+		freeze: true,
+		freeze_message: __("Creating Job work order & Material Issue Plan…"),
+		callback: function(r) {
+			if (!r.message) return;
+			var sco = r.message.sco, mip = r.message.mip, already = r.message.already_existed;
+			var lines = [];
+			if (sco) lines.push(__("Job work order: ") + '<a href="' + frappe.utils.get_form_link("Subcontracting Order", sco) + '">' + sco + "</a>");
+			if (mip) lines.push(__("Material Issue Plan: ") + '<a href="' + frappe.utils.get_form_link("Material Issue Plan", mip) + '">' + mip + "</a>");
+			frappe.msgprint({
+				title: already ? __("Already Created") : __("Job work order & MIP Created"),
+				message: lines.join("<br>") + (already ? "" : "<br><br>" + __("Set Supplier / Source / WIP Warehouses on the Job work order then submit.")),
+				indicator: already ? "orange" : "green",
+			});
+			frm.reload_doc();
 		}
-		frappe.call({
-			method: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_sco_from_production_plan",
-			args: { pp_name: frm.doc.name },
-			freeze: true,
-			callback: function(r) {
-				if (r.message) {
-					frappe.msgprint({ title: __("Subcontracting Order Created (Draft)"), message: __("Set Supplier / Source / WIP Warehouses then submit: ") + '<a href="/app/subcontracting-order/' + encodeURIComponent(r.message) + '">' + r.message + "</a>", indicator: "green" });
-					frm.reload_doc();
-				}
-			}
-		});
+	});
+}
+
+function _pp_delete_sco_and_mip(frm) {
+	frappe.call({
+		method: "manufyxinvenzaerp.subcontracting_management.subcontracting.delete_sco_and_mip_for_production_plan",
+		args: { pp_name: frm.doc.name },
+		freeze: true,
+		freeze_message: __("Deleting Job work order & Material Issue Plan…"),
+		callback: function(r) {
+			if (!r.message) return;
+			frappe.show_alert({ message: __("Job work order and Material Issue Plan deleted."), indicator: "green" });
+			frm.reload_doc();
+		}
 	});
 }
 
@@ -3193,6 +3274,31 @@ def create_stock_entry_client_script():
 # ─────────────────────────────────────────────────────────────────────────────
 # Subcontracting Management — Subcontracting Order custom fields + client scripts
 # ─────────────────────────────────────────────────────────────────────────────
+
+def create_subcontracting_order_translation():
+    """Display-only relabel: "Subcontracting Order" renders as "Job work order"
+    everywhere Frappe wraps a string in __() (breadcrumbs, form/list titles,
+    sidebar, print formats, global search, etc.) via the standard Translation
+    doctype -- the doctype itself, its DocType name, links, and all backend
+    code are untouched and stay "Subcontracting Order". This is the lightweight
+    interim fix for client change request Phase 0.2 (the real doctype rename is
+    deferred indefinitely -- see client_change_request_progress.md)."""
+    existing = frappe.db.get_value(
+        "Translation", {"source_text": "Subcontracting Order", "language": "en"}, "name"
+    )
+    if existing:
+        frappe.db.set_value("Translation", existing, "translated_text", "Job work order")
+    else:
+        frappe.get_doc(
+            {
+                "doctype": "Translation",
+                "language": "en",
+                "source_text": "Subcontracting Order",
+                "translated_text": "Job work order",
+            }
+        ).insert(ignore_permissions=True)
+    frappe.db.commit()
+
 
 def remove_sco_purchase_order_mandatory():
     """Remove mandatory from SCO fields that are not required in the PP → SCO flow."""

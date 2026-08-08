@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-08-07 11:06:05_
+_Generated: 2026-08-08 19:58:37_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -58,29 +58,30 @@ All `@frappe.whitelist()` methods. Call from JS:
 | Method | Line |
 |--------|------|
 | `move_to_exact_match` | 1047 |
-| `finalize_mapping` | 1210 |
-| `verify_raw_materials` | 1409 |
-| `get_batch_reservation_summary` | 1425 |
-| `get_batch_item` | 1461 |
-| `get_batch_stock_summary` | 1469 |
-| `get_batch_cross_table_usage` | 1707 |
-| `reserve_batches` | 1894 |
-| `get_available_excess_batches` | 2062 |
-| `add_excess_material_mapping` | 2128 |
-| `get_available_virtual_excess_items` | 2223 |
-| `claim_virtual_excess_mapping` | 2310 |
-| `reserve_exact_match_batches` | 2429 |
-| `unreserve_exact_match_batches` | 2562 |
-| `check_mapping_batch_availability` | 2603 |
-| `unreserve_batches` | 2669 |
-| `reassign_batch` | 2817 |
-| `_test_simulate_se_release` | 3051 |
-| `make_production_plan` | 3070 |
-| `make_material_request` | 3129 |
-| `make_material_request_from_consolidate` | 3283 |
-| `update_so_difference_kg` | 3421 |
-| `auto_purchase_from_mp` | 3451 |
-| `complete_batch_mapping` | 3625 |
+| `update_exact_match_from_consolidate` | 1210 |
+| `finalize_mapping` | 1431 |
+| `verify_raw_materials` | 1658 |
+| `get_batch_reservation_summary` | 1674 |
+| `get_batch_item` | 1710 |
+| `get_batch_stock_summary` | 1718 |
+| `get_batch_cross_table_usage` | 1956 |
+| `reserve_batches` | 2143 |
+| `get_available_excess_batches` | 2311 |
+| `add_excess_material_mapping` | 2377 |
+| `get_available_virtual_excess_items` | 2472 |
+| `claim_virtual_excess_mapping` | 2572 |
+| `reserve_exact_match_batches` | 2696 |
+| `unreserve_exact_match_batches` | 2829 |
+| `check_mapping_batch_availability` | 2870 |
+| `unreserve_batches` | 2936 |
+| `reassign_batch` | 3084 |
+| `_test_simulate_se_release` | 3318 |
+| `make_production_plan` | 3337 |
+| `make_material_request` | 3396 |
+| `make_material_request_from_consolidate` | 3550 |
+| `update_so_difference_kg` | 3688 |
+| `auto_purchase_from_mp` | 3718 |
+| `complete_batch_mapping` | 3892 |
 | `@frappe.validate_and_sanitize_search_inputs` | 406 |
 | `get_bom_info` | 432 |
 | `get_so_drawings_for_bom_picker` | 484 |
@@ -121,7 +122,7 @@ All `@frappe.whitelist()` methods. Call from JS:
 | `get_pr_item_uom` | 16 |
 | `get_mp_for_pr` | 257 |
 | `allocate_pr_stock_to_mp` | 278 |
-| `get_pr_mp_allocations` | 637 |
+| `get_pr_mp_allocations` | 644 |
 ## sq_management/supplier_quotation.py
 
 | Method | Line |
@@ -151,23 +152,25 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `backfill_drawing_item_qty` | 1815 |
-| `create_work_order_from_pp` | 183 |
-| `get_wo_pending_items` | 1879 |
-| `create_partial_wo_transfer` | 1984 |
-| `create_cnc_to_wip_entry` | 2040 |
-| `create_return_stock_entry_for_wo` | 2139 |
-| `get_jc_summary` | 2191 |
+| `create_sco_and_mip_from_production_plan` | 183 |
+| `backfill_drawing_item_qty` | 1920 |
+| `get_wo_pending_items` | 1984 |
+| `delete_sco_and_mip_for_production_plan` | 208 |
+| `create_partial_wo_transfer` | 2089 |
+| `create_cnc_to_wip_entry` | 2145 |
+| `create_return_stock_entry_for_wo` | 2244 |
+| `get_jc_summary` | 2296 |
 | `create_sco_from_production_plan` | 26 |
-| `create_supplier_operation_entries` | 343 |
-| `create_send_to_subcontractor_entry` | 363 |
-| `get_sco_pending_items` | 459 |
-| `create_partial_transfer` | 569 |
-| `create_cnc_to_supplier_entry` | 630 |
-| `get_soe_summary` | 733 |
-| `create_return_stock_entry` | 779 |
-| `create_finished_goods_entry` | 837 |
+| `create_work_order_from_pp` | 288 |
+| `create_supplier_operation_entries` | 448 |
+| `create_send_to_subcontractor_entry` | 468 |
+| `get_sco_pending_items` | 564 |
+| `create_partial_transfer` | 674 |
+| `create_cnc_to_supplier_entry` | 735 |
+| `get_soe_summary` | 838 |
+| `create_return_stock_entry` | 884 |
+| `create_finished_goods_entry` | 942 |
 
 ## Total
 
-_98 whitelisted methods_
+_101 whitelisted methods_

@@ -105,7 +105,7 @@ frappe.ui.form.on("Production Plan", {
 			if ($fw.find(".pp-bulk-btn-row").length) return; // already injected
 
 			let $row = $('<div class="pp-bulk-btn-row" style="margin-bottom:10px;padding:4px 0;">');
-			let $btn = $('<button class="btn btn-sm btn-default">' + __("Bulk Update") + '</button>');
+			let $btn = $('<button class="btn btn-sm btn-default">' + __("Set Work Type") + '</button>');
 			$btn.on("click", function() { _show_bulk_update_dialog(frm); });
 			$row.append($btn);
 			$fw.find(".form-grid").before($row);

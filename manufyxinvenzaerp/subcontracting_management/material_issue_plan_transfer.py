@@ -571,6 +571,14 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
             # for this row at all; it's claimed directly from this table via
             # Excess Material Mapping's virtual-excess picker instead.
             continue
+        if r.get("mapped_material_planning"):
+            # Already claimed straight off this table (client feedback: the
+            # picker now also surfaces still-Pending default-return-type rows,
+            # not just ones explicitly flagged Retain-at-Supplier -- see
+            # get_available_virtual_excess_items). Once claimed, its eventual
+            # physical return is the claiming job's own business, not a fresh
+            # batch this button should hand out to someone else.
+            continue
 
         override = overrides.get(r.name)
         if override:
