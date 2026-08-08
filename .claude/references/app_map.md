@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-07 11:06:05_
+_Generated: 2026-08-08 19:58:37_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-08-07 11:06:05_
 
 ## Python files
 
-_Total: 180_
+_Total: 182_
 
 - config/__init__.py
 - drawing_management/bom_class_override.py
@@ -101,6 +101,8 @@ _Total: 180_
 - production_management/inspection.py
 - production_management/job_card.py
 - production_management/manual_release_check.py
+- production_management/page/material_planning_case_studies/__init__.py
+- production_management/page/material_planning_manual/__init__.py
 - production_management/production_utils.py
 - production_management/report/__init__.py
 - production_management/report/inspection_status_report/__init__.py
@@ -210,10 +212,12 @@ _Total: 180_
 
 ## JavaScript files
 
-_Total: 17_
+_Total: 19_
 
 - drawing_management/doctype/drawing/drawing.js
 - production_management/doctype/material_planning/material_planning.js
+- production_management/page/material_planning_case_studies/material_planning_case_studies.js
+- production_management/page/material_planning_manual/material_planning_manual.js
 - production_management/report/inspection_status_report/inspection_status_report.js
 - production_management/report/inventory_report/inventory_report.js
 - production_management/report/manufyxinvenza_stock_balance/manufyxinvenza_stock_balance.js
@@ -232,7 +236,7 @@ _Total: 17_
 
 ## JSON files
 
-_Total: 40_
+_Total: 42_
 
 - drawing_management/doctype/drawing/drawing.json
 - drawing_management/doctype/drawing_item/drawing_item.json
@@ -260,6 +264,8 @@ _Total: 40_
 - production_management/doctype/production_plan_available_raw_material/production_plan_available_raw_material.json
 - production_management/doctype/storage_location/storage_location.json
 - production_management/doctype/store_location/store_location.json
+- production_management/page/material_planning_case_studies/material_planning_case_studies.json
+- production_management/page/material_planning_manual/material_planning_manual.json
 - production_management/report/inspection_status_report/inspection_status_report.json
 - production_management/report/inventory_report/inventory_report.json
 - production_management/report/manufyxinvenza_stock_balance/manufyxinvenza_stock_balance.json
@@ -407,6 +413,7 @@ _Total: 40_
   - _get_non_batch_stock:
   - _get_non_batch_stock_bulk:
   - move_to_exact_match:
+  - update_exact_match_from_consolidate:
   - finalize_mapping:
   - _verify_nos_vs_qty:
   - verify_raw_materials:
@@ -745,8 +752,8 @@ Functions:
   - 242:_resolve_pr_batch_no:
   - 257:get_mp_for_pr:
   - 278:allocate_pr_stock_to_mp:
-  - 572:on_submit_purchase_receipt:
-  - 637:get_pr_mp_allocations:
+  - 579:on_submit_purchase_receipt:
+  - 644:get_pr_mp_allocations:
 
 ### rfq_management/request_for_quotation.py
 Functions:
@@ -761,48 +768,49 @@ Functions:
 Functions:
   - 1231:create_default_warehouse_types:
   - 1245:after_install:
-  - 1297:after_migrate:
-  - 1350:setup_storage_location:
-  - 1372:create_item_client_script:
-  - 1388:create_item_custom_fields:
-  - 1473:create_purchase_order_custom_fields:
-  - 1579:hide_purchase_order_weight_fields:
-  - 1593:create_purchase_order_client_script:
-  - 1609:create_purchase_receipt_custom_fields:
-  - 1788:create_batch_custom_fields:
-  - 1873:create_purchase_receipt_client_script:
-  - 1889:create_material_request_custom_fields:
-  - 2014:create_material_request_client_script:
-  - 2030:create_rfq_custom_fields:
-  - 2106:create_rfq_client_script:
-  - 2122:create_sq_custom_fields:
-  - 2201:create_sq_client_script:
-  - 2217:create_bom_custom_fields:
-  - 2324:create_so_custom_fields:
-  - 2401:create_so_client_script:
-  - 2417:create_bom_client_script:
-  - 2437:create_production_plan_custom_fields:
-  - 2674:create_production_plan_client_script:
-  - 2697:create_job_card_custom_fields:
-  - 2965:create_job_card_client_script:
-  - 2983:create_stock_entry_custom_fields:
-  - 3175:create_stock_entry_client_script:
-  - 3197:remove_sco_purchase_order_mandatory:
-  - 3208:hide_sco_job_worker_warehouse:
-  - 3237:create_sco_custom_fields:
-  - 3675:create_sco_client_script:
-  - 3691:create_sco_ops_client_script:
-  - 3707:create_soe_client_script:
-  - 3723:create_manufacturing_settings_custom_fields:
-  - 3751:create_work_order_custom_fields:
-  - 3864:layout_work_order_fields:
-  - 3960:create_job_card_drawing_fields:
-  - 4033:create_job_card_inspection_fields:
-  - 4089:layout_job_card_fields:
-  - 4375:create_wo_client_script:
-  - 4393:create_wo_ops_client_script:
-  - 4411:create_jc_drawing_client_script:
-  - 4432:create_material_planning_auto_purchase_fields:
+  - 1298:after_migrate:
+  - 1352:setup_storage_location:
+  - 1374:create_item_client_script:
+  - 1390:create_item_custom_fields:
+  - 1475:create_purchase_order_custom_fields:
+  - 1581:hide_purchase_order_weight_fields:
+  - 1595:create_purchase_order_client_script:
+  - 1611:create_purchase_receipt_custom_fields:
+  - 1790:create_batch_custom_fields:
+  - 1875:create_purchase_receipt_client_script:
+  - 1891:create_material_request_custom_fields:
+  - 2016:create_material_request_client_script:
+  - 2032:create_rfq_custom_fields:
+  - 2108:create_rfq_client_script:
+  - 2124:create_sq_custom_fields:
+  - 2203:create_sq_client_script:
+  - 2219:create_bom_custom_fields:
+  - 2326:create_so_custom_fields:
+  - 2403:create_so_client_script:
+  - 2419:create_bom_client_script:
+  - 2439:create_production_plan_custom_fields:
+  - 2755:create_production_plan_client_script:
+  - 2778:create_job_card_custom_fields:
+  - 3046:create_job_card_client_script:
+  - 3064:create_stock_entry_custom_fields:
+  - 3256:create_stock_entry_client_script:
+  - 3278:create_subcontracting_order_translation:
+  - 3303:remove_sco_purchase_order_mandatory:
+  - 3314:hide_sco_job_worker_warehouse:
+  - 3343:create_sco_custom_fields:
+  - 3781:create_sco_client_script:
+  - 3797:create_sco_ops_client_script:
+  - 3813:create_soe_client_script:
+  - 3829:create_manufacturing_settings_custom_fields:
+  - 3857:create_work_order_custom_fields:
+  - 3970:layout_work_order_fields:
+  - 4066:create_job_card_drawing_fields:
+  - 4139:create_job_card_inspection_fields:
+  - 4195:layout_job_card_fields:
+  - 4481:create_wo_client_script:
+  - 4499:create_wo_ops_client_script:
+  - 4517:create_jc_drawing_client_script:
+  - 4538:create_material_planning_auto_purchase_fields:
 
 ### sq_management/supplier_quotation.py
 Functions:
@@ -835,56 +843,58 @@ Functions:
 Functions:
   - 12:get_sco_dashboard_data:
   - 26:create_sco_from_production_plan:
-  - 183:create_work_order_from_pp:
-  - 343:create_supplier_operation_entries:
-  - 363:create_send_to_subcontractor_entry:
-  - 459:get_sco_pending_items:
-  - 569:create_partial_transfer:
-  - 630:create_cnc_to_supplier_entry:
-  - 733:get_soe_summary:
-  - 779:create_return_stock_entry:
-  - 837:create_finished_goods_entry:
-  - 924:validate_supplier_operation_entry:
-  - 1037:before_submit_supplier_operation_entry:
-  - 1071:_propagate_available_to_next:
-  - 1093:_propagate_drawing_nos_to_next:
-  - 1133:_update_sco_drawing_item_completion:
-  - 1157:on_update_supplier_operation_entry:
-  - 1164:_push_sco_completion_to_wo:
-  - 1204:on_submit_supplier_operation_entry:
-  - 1232:before_delete_supplier_operation_entry:
-  - 1254:on_cancel_subcontracting_order:
-  - 1275:_build_soe_drawing_rows:
-  - 1313:_create_soes_for_sco:
-  - 1389:_get_mp_total_weight:
-  - 1417:_get_mp_actual_transferred_weight:
-  - 1463:_refresh_wo_drawing_transferred_weights:
-  - 1509:_get_sco_transfer_warehouses:
-  - 1521:_get_wo_transfer_warehouses:
-  - 1535:_refresh_sco_drawing_transferred_weights:
-  - 1576:_get_mp_drawing_weight:
-  - 1593:_get_mp_drawing_weights_by_duno:
-  - 1619:_get_mp_mapped_weight_by_duno:
-  - 1686:_get_mp_excess_by_duno:
-  - 1705:_get_mp_reserved_batches:
-  - 1800:_get_pp_planned_qty:
-  - 1815:backfill_drawing_item_qty:
-  - 1835:_get_supplier_wh_consumption_items:
-  - 1879:get_wo_pending_items:
-  - 1984:create_partial_wo_transfer:
-  - 2040:create_cnc_to_wip_entry:
-  - 2139:create_return_stock_entry_for_wo:
-  - 2191:get_jc_summary:
-  - 2236:on_submit_work_order:
-  - 2244:on_cancel_work_order:
-  - 2253:validate_job_card_drawing_entry:
-  - 2367:before_submit_job_card_drawing_entry:
-  - 2404:_propagate_drawing_nos_to_next_jc:
-  - 2444:_update_wo_drawing_item_completion:
-  - 2469:on_update_job_card_drawing_entry:
-  - 2477:on_submit_job_card_drawing_entry:
-  - 2503:_build_jc_drawing_rows:
-  - 2536:_populate_jcs_for_wo:
+  - 183:create_sco_and_mip_from_production_plan:
+  - 208:delete_sco_and_mip_for_production_plan:
+  - 288:create_work_order_from_pp:
+  - 448:create_supplier_operation_entries:
+  - 468:create_send_to_subcontractor_entry:
+  - 564:get_sco_pending_items:
+  - 674:create_partial_transfer:
+  - 735:create_cnc_to_supplier_entry:
+  - 838:get_soe_summary:
+  - 884:create_return_stock_entry:
+  - 942:create_finished_goods_entry:
+  - 1029:validate_supplier_operation_entry:
+  - 1142:before_submit_supplier_operation_entry:
+  - 1176:_propagate_available_to_next:
+  - 1198:_propagate_drawing_nos_to_next:
+  - 1238:_update_sco_drawing_item_completion:
+  - 1262:on_update_supplier_operation_entry:
+  - 1269:_push_sco_completion_to_wo:
+  - 1309:on_submit_supplier_operation_entry:
+  - 1337:before_delete_supplier_operation_entry:
+  - 1359:on_cancel_subcontracting_order:
+  - 1380:_build_soe_drawing_rows:
+  - 1418:_create_soes_for_sco:
+  - 1494:_get_mp_total_weight:
+  - 1522:_get_mp_actual_transferred_weight:
+  - 1568:_refresh_wo_drawing_transferred_weights:
+  - 1614:_get_sco_transfer_warehouses:
+  - 1626:_get_wo_transfer_warehouses:
+  - 1640:_refresh_sco_drawing_transferred_weights:
+  - 1681:_get_mp_drawing_weight:
+  - 1698:_get_mp_drawing_weights_by_duno:
+  - 1724:_get_mp_mapped_weight_by_duno:
+  - 1791:_get_mp_excess_by_duno:
+  - 1810:_get_mp_reserved_batches:
+  - 1905:_get_pp_planned_qty:
+  - 1920:backfill_drawing_item_qty:
+  - 1940:_get_supplier_wh_consumption_items:
+  - 1984:get_wo_pending_items:
+  - 2089:create_partial_wo_transfer:
+  - 2145:create_cnc_to_wip_entry:
+  - 2244:create_return_stock_entry_for_wo:
+  - 2296:get_jc_summary:
+  - 2341:on_submit_work_order:
+  - 2349:on_cancel_work_order:
+  - 2358:validate_job_card_drawing_entry:
+  - 2472:before_submit_job_card_drawing_entry:
+  - 2509:_propagate_drawing_nos_to_next_jc:
+  - 2549:_update_wo_drawing_item_completion:
+  - 2574:on_update_job_card_drawing_entry:
+  - 2582:on_submit_job_card_drawing_entry:
+  - 2608:_build_jc_drawing_rows:
+  - 2641:_populate_jcs_for_wo:
 
 ### tests/create_full_test_entry.py
 Functions:
@@ -1191,21 +1201,23 @@ Functions:
 - `subcontracting_management/material_issue_plan_transfer.py:421` — `create_mip_cnc_forward_entry`
 - `subcontracting_management/material_issue_plan_transfer.py:526` — `create_mip_excess_return_entry`
 - `subcontracting_management/subcontracting.py:26` — `create_sco_from_production_plan`
-- `subcontracting_management/subcontracting.py:183` — `create_work_order_from_pp`
-- `subcontracting_management/subcontracting.py:343` — `create_supplier_operation_entries`
-- `subcontracting_management/subcontracting.py:363` — `create_send_to_subcontractor_entry`
-- `subcontracting_management/subcontracting.py:459` — `get_sco_pending_items`
-- `subcontracting_management/subcontracting.py:569` — `create_partial_transfer`
-- `subcontracting_management/subcontracting.py:630` — `create_cnc_to_supplier_entry`
-- `subcontracting_management/subcontracting.py:733` — `get_soe_summary`
-- `subcontracting_management/subcontracting.py:779` — `create_return_stock_entry`
-- `subcontracting_management/subcontracting.py:837` — `create_finished_goods_entry`
-- `subcontracting_management/subcontracting.py:1815` — `backfill_drawing_item_qty`
-- `subcontracting_management/subcontracting.py:1879` — `get_wo_pending_items`
-- `subcontracting_management/subcontracting.py:1984` — `create_partial_wo_transfer`
-- `subcontracting_management/subcontracting.py:2040` — `create_cnc_to_wip_entry`
-- `subcontracting_management/subcontracting.py:2139` — `create_return_stock_entry_for_wo`
-- `subcontracting_management/subcontracting.py:2191` — `get_jc_summary`
+- `subcontracting_management/subcontracting.py:183` — `create_sco_and_mip_from_production_plan`
+- `subcontracting_management/subcontracting.py:208` — `delete_sco_and_mip_for_production_plan`
+- `subcontracting_management/subcontracting.py:288` — `create_work_order_from_pp`
+- `subcontracting_management/subcontracting.py:448` — `create_supplier_operation_entries`
+- `subcontracting_management/subcontracting.py:468` — `create_send_to_subcontractor_entry`
+- `subcontracting_management/subcontracting.py:564` — `get_sco_pending_items`
+- `subcontracting_management/subcontracting.py:674` — `create_partial_transfer`
+- `subcontracting_management/subcontracting.py:735` — `create_cnc_to_supplier_entry`
+- `subcontracting_management/subcontracting.py:838` — `get_soe_summary`
+- `subcontracting_management/subcontracting.py:884` — `create_return_stock_entry`
+- `subcontracting_management/subcontracting.py:942` — `create_finished_goods_entry`
+- `subcontracting_management/subcontracting.py:1920` — `backfill_drawing_item_qty`
+- `subcontracting_management/subcontracting.py:1984` — `get_wo_pending_items`
+- `subcontracting_management/subcontracting.py:2089` — `create_partial_wo_transfer`
+- `subcontracting_management/subcontracting.py:2145` — `create_cnc_to_wip_entry`
+- `subcontracting_management/subcontracting.py:2244` — `create_return_stock_entry_for_wo`
+- `subcontracting_management/subcontracting.py:2296` — `get_jc_summary`
 - `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:41` — `create_from_subcontracting_order`
 - `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:60` — `create_from_work_order`
 - `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:79` — `populate_from_production_plan`
@@ -1222,33 +1234,34 @@ Functions:
 - `production_management/doctype/material_planning/material_planning.py:591` — `get_raw_materials`
 - `production_management/doctype/material_planning/material_planning.py:694` — `check_stock_availability`
 - `production_management/doctype/material_planning/material_planning.py:1047` — `move_to_exact_match`
-- `production_management/doctype/material_planning/material_planning.py:1210` — `finalize_mapping`
-- `production_management/doctype/material_planning/material_planning.py:1409` — `verify_raw_materials`
-- `production_management/doctype/material_planning/material_planning.py:1425` — `get_batch_reservation_summary`
-- `production_management/doctype/material_planning/material_planning.py:1461` — `get_batch_item`
-- `production_management/doctype/material_planning/material_planning.py:1469` — `get_batch_stock_summary`
-- `production_management/doctype/material_planning/material_planning.py:1707` — `get_batch_cross_table_usage`
-- `production_management/doctype/material_planning/material_planning.py:1894` — `reserve_batches`
-- `production_management/doctype/material_planning/material_planning.py:2062` — `get_available_excess_batches`
-- `production_management/doctype/material_planning/material_planning.py:2128` — `add_excess_material_mapping`
-- `production_management/doctype/material_planning/material_planning.py:2223` — `get_available_virtual_excess_items`
-- `production_management/doctype/material_planning/material_planning.py:2310` — `claim_virtual_excess_mapping`
-- `production_management/doctype/material_planning/material_planning.py:2429` — `reserve_exact_match_batches`
-- `production_management/doctype/material_planning/material_planning.py:2562` — `unreserve_exact_match_batches`
-- `production_management/doctype/material_planning/material_planning.py:2603` — `check_mapping_batch_availability`
-- `production_management/doctype/material_planning/material_planning.py:2669` — `unreserve_batches`
-- `production_management/doctype/material_planning/material_planning.py:2817` — `reassign_batch`
-- `production_management/doctype/material_planning/material_planning.py:3051` — `_test_simulate_se_release`
-- `production_management/doctype/material_planning/material_planning.py:3070` — `make_production_plan`
-- `production_management/doctype/material_planning/material_planning.py:3129` — `make_material_request`
-- `production_management/doctype/material_planning/material_planning.py:3283` — `make_material_request_from_consolidate`
-- `production_management/doctype/material_planning/material_planning.py:3421` — `update_so_difference_kg`
-- `production_management/doctype/material_planning/material_planning.py:3451` — `auto_purchase_from_mp`
-- `production_management/doctype/material_planning/material_planning.py:3625` — `complete_batch_mapping`
+- `production_management/doctype/material_planning/material_planning.py:1210` — `update_exact_match_from_consolidate`
+- `production_management/doctype/material_planning/material_planning.py:1431` — `finalize_mapping`
+- `production_management/doctype/material_planning/material_planning.py:1658` — `verify_raw_materials`
+- `production_management/doctype/material_planning/material_planning.py:1674` — `get_batch_reservation_summary`
+- `production_management/doctype/material_planning/material_planning.py:1710` — `get_batch_item`
+- `production_management/doctype/material_planning/material_planning.py:1718` — `get_batch_stock_summary`
+- `production_management/doctype/material_planning/material_planning.py:1956` — `get_batch_cross_table_usage`
+- `production_management/doctype/material_planning/material_planning.py:2143` — `reserve_batches`
+- `production_management/doctype/material_planning/material_planning.py:2311` — `get_available_excess_batches`
+- `production_management/doctype/material_planning/material_planning.py:2377` — `add_excess_material_mapping`
+- `production_management/doctype/material_planning/material_planning.py:2472` — `get_available_virtual_excess_items`
+- `production_management/doctype/material_planning/material_planning.py:2572` — `claim_virtual_excess_mapping`
+- `production_management/doctype/material_planning/material_planning.py:2696` — `reserve_exact_match_batches`
+- `production_management/doctype/material_planning/material_planning.py:2829` — `unreserve_exact_match_batches`
+- `production_management/doctype/material_planning/material_planning.py:2870` — `check_mapping_batch_availability`
+- `production_management/doctype/material_planning/material_planning.py:2936` — `unreserve_batches`
+- `production_management/doctype/material_planning/material_planning.py:3084` — `reassign_batch`
+- `production_management/doctype/material_planning/material_planning.py:3318` — `_test_simulate_se_release`
+- `production_management/doctype/material_planning/material_planning.py:3337` — `make_production_plan`
+- `production_management/doctype/material_planning/material_planning.py:3396` — `make_material_request`
+- `production_management/doctype/material_planning/material_planning.py:3550` — `make_material_request_from_consolidate`
+- `production_management/doctype/material_planning/material_planning.py:3688` — `update_so_difference_kg`
+- `production_management/doctype/material_planning/material_planning.py:3718` — `auto_purchase_from_mp`
+- `production_management/doctype/material_planning/material_planning.py:3892` — `complete_batch_mapping`
 - `purchase_receipt_management/purchase_receipt.py:16` — `get_pr_item_uom`
 - `purchase_receipt_management/purchase_receipt.py:257` — `get_mp_for_pr`
 - `purchase_receipt_management/purchase_receipt.py:278` — `allocate_pr_stock_to_mp`
-- `purchase_receipt_management/purchase_receipt.py:637` — `get_pr_mp_allocations`
+- `purchase_receipt_management/purchase_receipt.py:644` — `get_pr_mp_allocations`
 
 ## hooks.py — doc_events
 

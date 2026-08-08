@@ -400,8 +400,14 @@ function _add_transfer_buttons(frm) {
 	}
 }
 
-// Popup with three filter modes — Item Code (searchable list), DUNO/Mark No (searchable list),
-// Drawing-wise — combined with AND semantics, then transfer only the checked rows.
+// Item Code filter only. DUNO/Mark No, Drawing, Sales Order and Customer Drawing No
+// are deliberately NOT shown/filterable here: a row in this table is one reserved
+// BATCH, and a single consolidated batch (bought once, allocated across many
+// drawings' requirements -- see Consolidate Item / allocate_pr_stock_to_mp) can
+// legitimately serve several DUNO/drawings at once, so no single value could be
+// shown here without being misleading. A batch with no drawing tag at all (e.g. a
+// purchase never traced back to one specific drawing) is still a perfectly valid
+// row and is never excluded from this list on that basis.
 function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 	var items = pending_items.filter(function(d) { return transfer_type === "cnc" ? d.cnc_process : !d.cnc_process; });
 	if (!items.length) {
@@ -414,10 +420,6 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 	}
 
 	var item_code_options = Array.from(new Set(items.map((d) => d.item_code).filter(Boolean))).sort();
-	var duno_options     = Array.from(new Set(items.map((d) => d.duno_mark_no).filter(Boolean))).sort();
-	var drawing_options  = Array.from(new Set(items.map((d) => d.drawing).filter(Boolean))).sort();
-	var so_options       = Array.from(new Set(items.map((d) => d.sales_order).filter(Boolean))).sort();
-	var cdn_options      = Array.from(new Set(items.map((d) => d.customer_drawing_number).filter(Boolean))).sort();
 
 	// Searchable dropdown list — text input that opens a filtered option list on focus/type.
 	// Returns { $el, getValue(), reset() }. Triggers a custom "mip:filter" event on $el
@@ -473,21 +475,10 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 	}
 
 	var item_search = _make_search_list(item_code_options, __("Search item code…"));
-	var duno_search  = _make_search_list(duno_options, __("Search DUNO/Mark No…"));
-	var so_search    = _make_search_list(so_options, __("Search Sales Order…"));
-	var cdn_search   = _make_search_list(cdn_options, __("Search Customer Drawing No…"));
-	var $drawing = $("<select class='form-control form-control-sm' style='margin-bottom:8px'><option value=''>" + __("All Drawings") + "</option>"
-		+ drawing_options.map((d) => "<option value='" + d + "'>" + d + "</option>").join("") + "</select>");
 
 	var $filter_row = $("<div>").append(
 		$("<div class='row'>").append(
-			$("<div class='col-sm-4'>").append(item_search.$el),
-			$("<div class='col-sm-4'>").append(duno_search.$el),
-			$("<div class='col-sm-4'>").append($drawing)
-		),
-		$("<div class='row'>").append(
-			$("<div class='col-sm-6'>").append(so_search.$el),
-			$("<div class='col-sm-6'>").append(cdn_search.$el)
+			$("<div class='col-sm-4'>").append(item_search.$el)
 		)
 	);
 	var $actions = $("<div style='margin-bottom:8px'>"
@@ -499,50 +490,30 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 		+ "<th style='width:32px'></th>"
 		+ "<th>" + __("Item Code") + "</th>"
 		+ "<th>" + __("Batch No") + "</th>"
-		+ "<th>" + __("DUNO/Mark No") + "</th>"
-		+ "<th>" + __("Drawing") + "</th>"
 		+ "<th class='text-right'>" + __("Qty (Kg)") + "</th>"
 		+ "</tr></thead><tbody></tbody></table>");
 
 	var $tbody = $table.find("tbody");
 	items.forEach(function(d, idx) {
 		$tbody.append(
-			"<tr data-idx='" + idx + "' data-item='" + frappe.utils.escape_html(d.item_code || "") + "'"
-			+ " data-duno='" + frappe.utils.escape_html(d.duno_mark_no || "") + "'"
-			+ " data-drawing='" + frappe.utils.escape_html(d.drawing || "") + "'"
-			+ " data-so='" + frappe.utils.escape_html(d.sales_order || "") + "'"
-			+ " data-cdn='" + frappe.utils.escape_html(d.customer_drawing_number || "") + "'>" +
+			"<tr data-idx='" + idx + "' data-item='" + frappe.utils.escape_html(d.item_code || "") + "'>" +
 			"<td class='text-center'><input type='checkbox' class='mip-item-chk' checked></td>" +
 			"<td>" + frappe.utils.escape_html(d.item_code) + "</td>" +
 			"<td>" + frappe.utils.escape_html(d.batch_no || "") + "</td>" +
-			"<td>" + frappe.utils.escape_html(d.duno_mark_no || "") + "</td>" +
-			"<td>" + frappe.utils.escape_html(d.drawing || "") + "</td>" +
 			"<td class='text-right'>" + format_number(flt(d.qty), null, 3) + "</td>" +
 			"</tr>"
 		);
 	});
 
 	function _apply_filters() {
-		var item_q  = item_search.getValue().toLowerCase();
-		var duno_q  = duno_search.getValue().toLowerCase();
-		var so_q    = so_search.getValue().toLowerCase();
-		var cdn_q   = cdn_search.getValue().toLowerCase();
-		var drawing = $drawing.val();
+		var item_q = item_search.getValue().toLowerCase();
 		$tbody.find("tr").each(function() {
 			var $row = $(this);
-			var matches = (!item_q  || $row.data("item").toLowerCase().includes(item_q))
-				&& (!duno_q  || $row.data("duno").toLowerCase().includes(duno_q))
-				&& (!drawing || $row.data("drawing") === drawing)
-				&& (!so_q   || $row.data("so").toLowerCase().includes(so_q))
-				&& (!cdn_q  || $row.data("cdn").toLowerCase().includes(cdn_q));
+			var matches = !item_q || $row.data("item").toLowerCase().includes(item_q);
 			$row.toggle(matches);
 		});
 	}
 	item_search.$el.on("mip:filter", _apply_filters);
-	duno_search.$el.on("mip:filter", _apply_filters);
-	so_search.$el.on("mip:filter", _apply_filters);
-	cdn_search.$el.on("mip:filter", _apply_filters);
-	$drawing.on("change", _apply_filters);
 	$actions.find(".mip-sel-all").on("click", function() { $tbody.find("tr:visible .mip-item-chk").prop("checked", true); });
 	$actions.find(".mip-desel-all").on("click", function() { $tbody.find("tr:visible .mip-item-chk").prop("checked", false); });
 

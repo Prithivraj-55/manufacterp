@@ -203,6 +203,7 @@
   {
    "fieldname": "update_exact_match_btn",
    "fieldtype": "Button",
+   "hidden": 1,
    "label": "Update & Map Exact Matches"
   },
   {
@@ -229,7 +230,8 @@
    "options": "Material Planning Material Mapping"
   },
   {
-   "description": "Items with no stock at selected in the warehouse. These must be purchased before production can proceed. Once a purchase receipt is created and stock is available, Click 'Update &amp; Map Exact Matches' to move them to exact matching table and Material Mapping to assign batch manually.",
+   "collapsible": 1,
+   "description": "Upstream staging table -- consolidated (deduped by Item Code) into the Consolidate Item table below, which is now the purchasing-facing table. Kept for per-drawing/DUNO traceability: this is what Purchase Receipt allocation and re-check-stock still operate on internally, even though those actions are now triggered from Consolidate Item. Collapsed by default to keep the form clean.",
    "fieldname": "section_unavailable_items",
    "fieldtype": "Section Break",
    "label": "Unavailable Items (No Stock — Needs Purchase)"

@@ -182,6 +182,20 @@ frappe.ui.form.on("Material Planning", {
 	},
 
 	refresh(frm) {
+		// End-user walkthrough of every Stock Details table/button, with worked
+		// examples -- kept in its own page (not a dialog) so it's easy to read
+		// alongside the form. Update material_planning_manual.js whenever this
+		// form's fields/buttons change.
+		frm.add_custom_button(frappe.utils.icon("book", "xs") + " " + __("Manual"), () => {
+			frappe.set_route("material-planning-manual");
+		});
+		// Real-document, case-by-case walkthrough (separate from the
+		// feature-by-feature Manual above) -- kept in its own page too.
+		// Update material_planning_case_studies.js whenever a new case is added.
+		frm.add_custom_button(frappe.utils.icon("repo", "xs") + " " + __("Over all Manual"), () => {
+			frappe.set_route("material-planning-case-studies");
+		});
+
 		// Always keep the Stock Analysis tab visible regardless of table data
 		frm.set_df_property("tab_stock_analysis", "hidden", 0); // fieldname stays, label changed to "Stock Details"
 		frm.set_df_property("section_raw_materials", "hidden", 0);
@@ -225,7 +239,10 @@ frappe.ui.form.on("Material Planning", {
 		frm.set_df_property("get_raw_materials_btn",  "hidden", 0);
 		frm.set_df_property("verify_raw_materials_btn", "hidden", has_raw ? 0 : 1);
 		frm.set_df_property("check_stock_btn",         "hidden", has_raw     ? 0 : 1);
-		frm.set_df_property("update_exact_match_btn",  "hidden", has_unavail ? 0 : 1);
+		// "Update & Map Exact Matches" moved to the Consolidate Item grid
+		// (client feedback) -- always hidden here now, regardless of
+		// unavailable_items state.
+		frm.set_df_property("update_exact_match_btn",  "hidden", 1);
 		frm.set_df_property("finalize_mapping_btn",    "hidden", has_mapping ? 0 : 1);
 
 		// Lock the SO picker and Show Drawings button once stock has been checked
@@ -337,6 +354,15 @@ frappe.ui.form.on("Material Planning", {
 				frm.fields_dict["consolidate_items"].grid.add_custom_button(
 					frappe.utils.icon("buying", "xs") + " " + __("Create Material Request"),
 					function () { _show_consolidate_material_request_dialog(frm); }
+				);
+				// "Update & Map Exact Matches" — moved here from Unavailable Items
+				// (client feedback): for every Consolidate Item row not already
+				// covered by an active Material Request, drop the row and re-check
+				// stock against the underlying Unavailable Item rows, updating
+				// Available Raw Materials / Material Mapping accordingly.
+				frm.fields_dict["consolidate_items"].grid.add_custom_button(
+					frappe.utils.icon("tick", "xs") + " " + __("Update & Map Exact Matches"),
+					function () { _update_exact_match_from_consolidate(frm); }
 				);
 			}
 
@@ -809,7 +835,7 @@ frappe.ui.form.on("Material Planning", {
 					let shortfall_mapping = result.shortfall_mapping_count || 0;
 
 					frm.set_df_property("finalize_mapping_btn",   "hidden", mapping  ? 0 : 1);
-					frm.set_df_property("update_exact_match_btn", "hidden", unavail  ? 0 : 1);
+					frm.set_df_property("update_exact_match_btn", "hidden", 1);
 
 					_update_weight_summary(frm);
 
@@ -930,7 +956,7 @@ frappe.ui.form.on("Material Planning", {
 				let unavail      = (frm.doc.unavailable_items || []).length;
 
 				frm.set_df_property("finalize_mapping_btn",   "hidden", mapped  ? 0 : 1);
-				frm.set_df_property("update_exact_match_btn", "hidden", unavail ? 0 : 1);
+				frm.set_df_property("update_exact_match_btn", "hidden", 1);
 
 				_update_weight_summary(frm);
 
@@ -1009,7 +1035,7 @@ frappe.ui.form.on("Material Planning", {
 				});
 				frm.refresh_field("unavailable_items");
 
-				frm.set_df_property("update_exact_match_btn", "hidden", still_rows.length ? 0 : 1);
+				frm.set_df_property("update_exact_match_btn", "hidden", 1);
 				frm.set_df_property("finalize_mapping_btn", "hidden",
 					(frm.doc.material_mapping || []).length ? 0 : 1);
 
@@ -1444,7 +1470,7 @@ function _show_add_to_mapping_dialog(frm, selected_rows) {
 			let has_mapping  = !!(frm.doc.material_mapping   || []).length;
 			let has_unavail  = !!(frm.doc.unavailable_items   || []).length;
 			frm.set_df_property("finalize_mapping_btn",   "hidden", has_mapping  ? 0 : 1);
-			frm.set_df_property("update_exact_match_btn", "hidden", has_unavail  ? 0 : 1);
+			frm.set_df_property("update_exact_match_btn", "hidden", 1);
 			setTimeout(function () {
 				let $fin = frm.fields_dict["finalize_mapping_btn"] && frm.fields_dict["finalize_mapping_btn"].$input;
 				if ($fin && $fin.length) {
@@ -1544,6 +1570,47 @@ function _build_material_request_dialog(frm, items) {
 	});
 
 	d.show();
+}
+
+// "Update & Map Exact Matches" — Consolidate Item version (client feedback:
+// moved off Unavailable Items, which is now a collapsed staging section).
+// Runs entirely server-side against the saved doc; just reload afterwards.
+function _update_exact_match_from_consolidate(frm) {
+	if (!(frm.doc.consolidate_items || []).length) {
+		frappe.msgprint(__("No consolidated items to check."));
+		return;
+	}
+	if (!frm.doc.for_warehouse) {
+		frappe.msgprint(__("Set 'Raw Materials Warehouse' before checking stock."));
+		return;
+	}
+	if (frm.is_dirty()) {
+		frappe.msgprint(__("Save the document first."));
+		return;
+	}
+	frappe.call({
+		method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.update_exact_match_from_consolidate",
+		args: { mp_name: frm.doc.name },
+		freeze: true,
+		freeze_message: __("Checking stock for consolidated items…"),
+		callback(r) {
+			if (!r.message) return;
+			let { checked, matched, moved_to_mapping, still_unavailable, skipped_ordered } = r.message;
+			frm.reload_doc();
+			let parts = [];
+			if (matched) parts.push(__("{0} matched to Available Raw Materials", [matched]));
+			if (moved_to_mapping) parts.push(__("{0} moved to Material Mapping (assign batch manually)", [moved_to_mapping]));
+			if (still_unavailable) parts.push(__("{0} still unavailable", [still_unavailable]));
+			if (skipped_ordered && skipped_ordered.length) {
+				parts.push(__("{0} left as-is (already on an active Material Request)", [skipped_ordered.length]));
+			}
+			frappe.msgprint({
+				title: __("Consolidated Stock Check"),
+				indicator: "blue",
+				message: (parts.length ? parts.join("<br>") : __("Nothing to update.")),
+			});
+		},
+	});
 }
 
 // Material Request creation dialog — Consolidate Item version (client change
@@ -2342,7 +2409,7 @@ function _show_excess_material_mapping_dialog(frm, existing_row) {
 		{
 			fieldtype: "HTML",
 			fieldname: "excess_legend",
-			options: `<div style="font-size:12px;color:#888;margin-bottom:4px;">${__("Returned Batch")} = ${__("physically back in your own warehouse")}. ${__("At Supplier (Virtual)")} = ${__("never returned to any warehouse -- stays at the supplier, claimed whole (no partial split), no Stock Entry created.")}</div>`,
+			options: `<div style="font-size:12px;color:#888;margin-bottom:4px;">${__("Returned Batch")} = ${__("physically back in your own warehouse")}. ${__("Not Yet Returned")} = ${__("still just a row in some Material Issue Plan's Excess Material Items table -- not present in any warehouse yet, either because it's flagged Retain at Supplier (never will be) or it simply hasn't been returned yet. Claimed whole (no partial split), no Stock Entry created by claiming it.")}</div>`,
 		},
 		{ fieldtype: "HTML", fieldname: "excess_html" },
 		{ fieldtype: "Section Break" },
@@ -2350,7 +2417,7 @@ function _show_excess_material_mapping_dialog(frm, existing_row) {
 			fieldtype: "Float",
 			fieldname: "sec_qty_to_use",
 			label: __("Sec Qty to Use"),
-			description: __("Locked to the full quantity for 'At Supplier (Virtual)' rows -- those are claimed whole, not split."),
+			description: __("Locked to the full quantity for 'Not Yet Returned' rows -- those are claimed whole, not split."),
 		},
 		{ fieldtype: "Column Break" },
 		{
@@ -2483,7 +2550,7 @@ function _show_excess_material_mapping_dialog(frm, existing_row) {
 	function _render(rows) {
 		let $wrap = d.fields_dict.excess_html.$wrapper;
 		if (!rows.length) {
-			$wrap.html(`<div style="padding:20px;text-align:center;color:#888;">${__("No excess material (returned or at supplier) found for this filter.")}</div>`);
+			$wrap.html(`<div style="padding:20px;text-align:center;color:#888;">${__("No excess material (returned, or still pending in an Excess Material Items table) found for this filter.")}</div>`);
 			return;
 		}
 		let th = "white-space:nowrap;padding:6px 10px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;";
@@ -2506,11 +2573,13 @@ function _show_excess_material_mapping_dialog(frm, existing_row) {
 				<td style="${td}">-</td>
 			</tr>`;
 			}
+			let source_label = r.return_type === "Retain at Supplier (Virtual)"
+				? __("At Supplier (Virtual)") : __("Not Yet Returned (Pending)");
 			return `
 			<tr data-idx="${i}" style="cursor:pointer;">
 				<td style="${td}">${frappe.utils.escape_html(r.item_code)}</td>
 				<td style="${td}">${frappe.utils.escape_html(r.item_name || "")}</td>
-				<td style="${td};color:#b8860b;">${__("At Supplier (Virtual)")}</td>
+				<td style="${td};color:#b8860b;">${frappe.utils.escape_html(source_label)}</td>
 				<td style="${td}">${frappe.utils.escape_html(r.mip_name)}</td>
 				<td style="${td}">${format_number(flt(r.length), null, 1)}</td>
 				<td style="${td}">${format_number(flt(r.width), null, 1)}</td>

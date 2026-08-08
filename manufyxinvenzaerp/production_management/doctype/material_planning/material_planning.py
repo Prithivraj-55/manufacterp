@@ -1207,6 +1207,227 @@ def move_to_exact_match(doc, item_codes):
 
 
 @frappe.whitelist()
+def update_exact_match_from_consolidate(mp_name):
+    """Consolidate Item's own "Update & Map Exact Matches" (client feedback --
+    the same action moved off Unavailable Items, which is now a collapsed,
+    de-emphasized staging section since Consolidate Item is the
+    purchasing-facing table). For every Consolidate Item row:
+
+      - If an active Material Request already orders this row's item
+        (its own alternate_item if set, else item_code) for this Material
+        Planning, leave the row alone -- a purchase is already in motion,
+        don't disturb it.
+      - Otherwise, remove the Consolidate Item row (it gets freshly
+        re-derived from Unavailable Items on save if anything's still
+        genuinely unavailable after the recheck below) and re-run the same
+        stock-availability check move_to_exact_match does, scoped to every
+        Unavailable Item row sharing that item_code:
+          Batch items:   exact-dimension batch w/ free stock -> Available Raw
+                         Materials; no exact match -> Material Mapping
+                         (blank batch, assign manually) -- a batch item is
+                         never left sitting in Unavailable Items once
+                         real stock of it exists somewhere.
+          Non-batch items: enough plain stock -> Available Raw Materials;
+                         still short -> stays in Unavailable Items.
+
+    Unlike move_to_exact_match (which works off a client-supplied doc dict
+    and returns rows for JS to rebuild), this runs entirely server-side
+    against the real, saved document -- the caller just reloads the form
+    afterwards."""
+    from manufyxinvenzaerp.production_plan_management.production_plan import get_sbb_available_qty
+
+    mp = frappe.get_doc("Material Planning", mp_name)
+    if not frappe.has_permission("Material Planning", "write", doc=mp):
+        frappe.throw(_("Not permitted to modify this Material Planning"), frappe.PermissionError)
+    if not mp.for_warehouse:
+        frappe.throw(_("Set 'Raw Materials Warehouse' before checking stock."))
+    if not mp.consolidate_items:
+        frappe.throw(_("No consolidated items to check."))
+
+    warehouse = mp.for_warehouse
+    location = mp.get("store_location") or None
+    QTY_EPSILON = 0.001
+
+    active_mrs = frappe.get_all(
+        "Material Request",
+        filters={"custom_material_planning": mp_name, "status": ["not in", ["Cancelled", "Stopped"]]},
+        pluck="name",
+    )
+    ordered_item_codes = set()
+    if active_mrs:
+        ordered_item_codes = set(frappe.get_all(
+            "Material Request Item", filters={"parent": ["in", active_mrs]}, pluck="item_code"
+        ))
+
+    skipped_ordered = []
+    to_recheck_item_codes = []
+    kept_consolidate_rows = []
+    for c_row in mp.consolidate_items:
+        order_item = c_row.alternate_item or c_row.item_code
+        if order_item in ordered_item_codes:
+            kept_consolidate_rows.append(c_row)
+            skipped_ordered.append(c_row.item_code)
+            continue
+        to_recheck_item_codes.append(c_row.item_code)
+    mp.consolidate_items = kept_consolidate_rows
+
+    if not to_recheck_item_codes:
+        return {"checked": 0, "matched": 0, "moved_to_mapping": 0, "still_unavailable": 0,
+                "skipped_ordered": skipped_ordered}
+
+    pre_allocated = {}
+    for r in (mp.available_raw_materials or []):
+        if r.batch_no:
+            pre_allocated[r.batch_no] = pre_allocated.get(r.batch_no, 0.0) + flt(r.required_qty)
+
+    item_set = set(to_recheck_item_codes)
+    item_batch_flag = {}
+    for rec in frappe.get_all("Item", filters={"name": ["in", list(item_set)]}, fields=["name", "has_batch_no"]):
+        item_batch_flag[rec.name] = rec.has_batch_no
+
+    matched_count = 0
+    moved_to_mapping_count = 0
+    still_unavailable_count = 0
+    batch_remaining = {}
+    batch_total_kg = {}
+    batch_total_sec = {}
+    kept_unavailable = []
+
+    for row in (mp.unavailable_items or []):
+        if row.item_code not in item_set:
+            kept_unavailable.append(row)
+            continue
+
+        item_code = row.item_code
+        required_qty = flt(row.qty)
+        has_batch = item_batch_flag.get(item_code, 0)
+
+        if has_batch:
+            dimensions = {
+                "custom_length": flt(row.length),
+                "custom_thickness": flt(row.thickness),
+                "custom_width": flt(row.width),
+            }
+            _available_qty, raw_batches = get_sbb_available_qty(item_code, warehouse, dimensions, location=location)
+
+            for b in raw_batches:
+                batch_total_kg.setdefault(b["batch_no"], flt(b["qty"]))
+                batch_total_sec.setdefault(b["batch_no"], flt(b.get("custom_sec_qty")))
+                if b["batch_no"] not in batch_remaining:
+                    reserved_by_others = _get_batch_reserved_by_others(
+                        b["batch_no"], mp_name, exclude_table="available_raw_materials"
+                    )
+                    already_allocated = pre_allocated.get(b["batch_no"], 0.0)
+                    batch_remaining[b["batch_no"]] = max(0.0, flt(b["qty"]) - reserved_by_others - already_allocated)
+
+            free_batches = sorted(
+                [{**b, "qty": batch_remaining[b["batch_no"]]} for b in raw_batches if batch_remaining.get(b["batch_no"], 0) > 0],
+                key=lambda b: b["qty"], reverse=True,
+            )
+
+            if free_batches:
+                to_consume = required_qty
+                consumed_batches = []
+                for b in free_batches:
+                    if to_consume <= 0:
+                        break
+                    consumed = min(batch_remaining[b["batch_no"]], to_consume)
+                    batch_remaining[b["batch_no"]] -= consumed
+                    to_consume -= consumed
+                    consumed_batches.append((b, consumed))
+
+                for b, consumed_qty in consumed_batches:
+                    bn = b["batch_no"]
+                    row_sec = _alloc_sec_qty(consumed_qty, batch_total_kg.get(bn), batch_total_sec.get(bn))
+                    mp.append("available_raw_materials", {
+                        "item_number": row.item_number or "",
+                        "sales_order": row.sales_order or "",
+                        "item_code": item_code,
+                        "item_name": row.item_name,
+                        "duno_mark_no": row.duno_mark_no or "",
+                        "customer_drawing_number": row.customer_drawing_number or "",
+                        "batch_no": bn,
+                        "overall_required_qty": flt(required_qty, 3),
+                        "required_qty": flt(consumed_qty, 3),
+                        "available_qty": flt(b["qty"]),
+                        "sec_qty": row_sec,
+                        "sec_uom": b.get("custom_sec_uom") or row.sec_uom,
+                        "uom": row.uom,
+                        "length": flt(row.length),
+                        "thickness": flt(row.thickness),
+                        "width": flt(row.width),
+                        "warehouse": warehouse,
+                        "parent_item_group": row.parent_item_group,
+                        "store_location": location or "",
+                    })
+                    matched_count += 1
+                # A batch item is never left in Unavailable Items -- any
+                # unconsumed remainder (no more free batches at all, or the
+                # free ones didn't fully cover it) goes to Material Mapping
+                # for manual assignment, same as the "failed" outcome below.
+                if to_consume > QTY_EPSILON:
+                    ratio = (to_consume / required_qty) if required_qty else 0.0
+                    mp.append("material_mapping", {
+                        "item_number": row.item_number or "", "sales_order": row.sales_order or "",
+                        "item_code": item_code, "item_name": row.item_name,
+                        "bom_no": row.bom_no or "", "drawing": row.drawing or "",
+                        "duno_mark_no": row.duno_mark_no or "", "customer_drawing_number": row.customer_drawing_number or "",
+                        "qty": flt(to_consume, 3), "uom": row.uom,
+                        "sec_qty": flt(flt(row.sec_qty) * ratio, 3), "sec_uom": row.sec_uom,
+                        "parent_item_group": row.parent_item_group,
+                        "length": flt(row.length), "width": flt(row.width), "thickness": flt(row.thickness),
+                        "unit_weight": flt(row.unit_weight), "store_location": location or "",
+                        "batch": "", "planned_item": "", "batch_mapped": "Not Mapped",
+                    })
+                    moved_to_mapping_count += 1
+            else:
+                mp.append("material_mapping", {
+                    "item_number": row.item_number or "", "sales_order": row.sales_order or "",
+                    "item_code": item_code, "item_name": row.item_name,
+                    "bom_no": row.bom_no or "", "drawing": row.drawing or "",
+                    "duno_mark_no": row.duno_mark_no or "", "customer_drawing_number": row.customer_drawing_number or "",
+                    "qty": flt(required_qty, 3), "uom": row.uom,
+                    "sec_qty": flt(row.sec_qty), "sec_uom": row.sec_uom,
+                    "parent_item_group": row.parent_item_group,
+                    "length": flt(row.length), "width": flt(row.width), "thickness": flt(row.thickness),
+                    "unit_weight": flt(row.unit_weight), "store_location": location or "",
+                    "batch": "", "planned_item": "", "batch_mapped": "Not Mapped",
+                })
+                moved_to_mapping_count += 1
+        else:
+            total_stock = _get_non_batch_stock(item_code, warehouse)
+            reserved_by_others = _get_non_batch_reserved_by_others(item_code, warehouse, mp_name)
+            available_qty = max(0.0, total_stock - reserved_by_others)
+            if available_qty >= required_qty:
+                mp.append("available_raw_materials", {
+                    "item_number": row.item_number or "", "sales_order": row.sales_order or "",
+                    "item_code": item_code, "item_name": row.item_name,
+                    "duno_mark_no": row.duno_mark_no or "", "customer_drawing_number": row.customer_drawing_number or "",
+                    "batch_no": "", "overall_required_qty": flt(required_qty, 3),
+                    "required_qty": required_qty, "available_qty": available_qty,
+                    "sec_qty": flt(row.sec_qty), "sec_uom": row.sec_uom or "", "uom": row.uom,
+                    "length": 0.0, "thickness": 0.0, "width": 0.0,
+                    "warehouse": warehouse, "parent_item_group": row.parent_item_group,
+                    "store_location": location or "",
+                })
+                matched_count += 1
+            else:
+                kept_unavailable.append(row)
+                still_unavailable_count += 1
+
+    mp.unavailable_items = kept_unavailable
+    mp.save(ignore_permissions=True)
+
+    return {
+        "checked": len(to_recheck_item_codes),
+        "matched": matched_count,
+        "moved_to_mapping": moved_to_mapping_count,
+        "still_unavailable": still_unavailable_count,
+        "skipped_ordered": skipped_ordered,
+    }
+
+
+@frappe.whitelist()
 def finalize_mapping(doc):
     """
     Scan the material_mapping table:
@@ -1268,6 +1489,34 @@ def finalize_mapping(doc):
 
         batch = row.get("batch")
         if not batch:
+            if row.get("is_virtual_excess"):
+                # Fulfilled via Excess Material Mapping's virtual-claim path
+                # (Retain-at-Supplier, or still-pending-return) -- batch is
+                # blank BY DESIGN there, not because it's unmapped. Sweeping
+                # it into Unavailable Items would incorrectly send an
+                # already-fulfilled requirement back through the purchase
+                # pipeline (client feedback).
+                mapped.append(dict(
+                    base,
+                    batch="",
+                    planned_item=row.get("planned_item"),
+                    batch_mapped=row.get("batch_mapped") or "Virtual (At Supplier)",
+                    batch_parent_item_group=row.get("batch_parent_item_group") or "",
+                    batch_length=flt(row.get("batch_length")),
+                    batch_width=flt(row.get("batch_width")),
+                    batch_thickness=flt(row.get("batch_thickness")),
+                    batch_unit_weight=flt(row.get("batch_unit_weight")),
+                    batch_sec_qty=flt(row.get("batch_sec_qty")),
+                    batch_calc_qty=flt(row.get("batch_calc_qty")),
+                    is_reserved=row.get("is_reserved") or 0,
+                    reserved_qty=flt(row.get("reserved_qty")),
+                    shortfall_qty=flt(row.get("shortfall_qty")),
+                    reserved_on=row.get("reserved_on") or "",
+                    is_virtual_excess=1,
+                    virtual_excess_source_row=row.get("virtual_excess_source_row") or "",
+                    virtual_excess_source_mip=row.get("virtual_excess_source_mip") or "",
+                ))
+                continue
             unavailable.append(base)
             continue
 
@@ -2221,21 +2470,33 @@ def add_excess_material_mapping(mp_name, batch_no, sec_qty, unavailable_item_row
 
 @frappe.whitelist()
 def get_available_virtual_excess_items(mp_name, item_code=None):
-    """List excess raw material that will NEVER be physically returned to any
-    warehouse -- it stays at the supplier's location, tracked only as a row
-    in a Material Issue Plan's Excess Material Items table with
-    return_type = 'Retain at Supplier (Virtual)'. Unlike
-    get_available_excess_batches, there is no Batch/Stock Entry/stock-ledger
-    behind this at all -- "available" simply means not yet claimed
-    (mapped_material_planning empty). A claim always takes the row in full;
-    no partial splitting, since a specific off-cut sitting at one supplier
-    can't be meaningfully divided across the live stock-summation logic used
-    for real batches."""
+    """List every excess raw-material row entered in an Excess Material Items
+    table (Material Issue Plan) that isn't PHYSICALLY in any warehouse yet --
+    i.e. stock_entry_created is still 0, whether that's because it's flagged
+    'Retain at Supplier (Virtual)' (will never physically return) or it's
+    simply still Pending under the default 'Return to Own Warehouse' type
+    (will return eventually, just hasn't yet -- client feedback: the
+    Excess Material Return Report already lists these Pending rows, but the
+    Excess Material Mapping picker was only showing the Retain-at-Supplier
+    subset, hiding the rest of what the report itself proves exists). There
+    is no Batch/Stock Entry/stock-ledger behind ANY of these rows yet --
+    "available" simply means not yet claimed (mapped_material_planning
+    empty). A claim always takes the row in full; no partial splitting,
+    since a specific off-cut can't be meaningfully divided across the live
+    stock-summation logic used for real batches.
+
+    Claiming a still-physically-pending row (default return_type) does NOT
+    stop it from later being returned for real -- create_mip_excess_return_entry
+    skips any row that's already claimed (mapped_material_planning set,
+    checked there directly) regardless of return_type, so the same off-cut
+    can never be double-allocated: once claimed here, its eventual physical
+    return is the claiming job's own responsibility to chase down, not a
+    fresh pool of stock for someone else to grab."""
     mp = frappe.get_doc("Material Planning", mp_name)
 
     filters = {
         "parenttype": "Material Issue Plan",
-        "return_type": "Retain at Supplier (Virtual)",
+        "stock_entry_created": 0,
         "mapped_material_planning": ["in", ["", None]],
     }
     if item_code:
@@ -2246,7 +2507,7 @@ def get_available_virtual_excess_items(mp_name, item_code=None):
         filters=filters,
         fields=["name", "parent", "item_code", "item_name", "parent_item_group",
                 "unit_weight", "length", "width", "thickness", "sec_qty", "sec_uom",
-                "qty", "uom"],
+                "qty", "uom", "return_type"],
     )
     rows = [r for r in rows if r.item_code and flt(r.qty) > 0]
     if not rows:
@@ -2287,6 +2548,7 @@ def get_available_virtual_excess_items(mp_name, item_code=None):
             "qty": flt(r.qty),
             "uom": r.uom or "Kg",
             "supplier": supplier_by_sco.get(sco_by_mip.get(r.parent)) or "",
+            "return_type": r.return_type or "Return to Own Warehouse",
         })
     return result
 
@@ -2308,9 +2570,11 @@ def _release_virtual_excess_source(row):
 
 @frappe.whitelist()
 def claim_virtual_excess_mapping(mp_name, excess_row_name, row_name=None, unavailable_item_row=None):
-    """Reserve excess material that stays at the supplier (never returned to
-    stock -- no Batch, no Stock Entry) into a Material Planning Material
-    Mapping row. Claimed in full, all-or-nothing (see
+    """Reserve an excess-material-items row that isn't physically in any
+    warehouse yet (stock_entry_created still 0 -- whether flagged 'Retain at
+    Supplier' or just still-Pending under the default return type) into a
+    Material Planning Material Mapping row, with no Batch/Stock Entry
+    involved. Claimed in full, all-or-nothing (see
     get_available_virtual_excess_items docstring for why). Mirrors
     add_excess_material_mapping/reassign_batch's shape but skips every
     batch-stock code path entirely, since there is no ledger to check --
@@ -2324,13 +2588,13 @@ def claim_virtual_excess_mapping(mp_name, excess_row_name, row_name=None, unavai
         "SCO Excess Material Item", excess_row_name,
         ["parent", "item_code", "item_name", "parent_item_group", "unit_weight",
          "length", "width", "thickness", "sec_qty", "sec_uom", "qty", "uom",
-         "return_type", "mapped_material_planning"],
+         "return_type", "mapped_material_planning", "stock_entry_created"],
         as_dict=True,
     )
     if not excess:
         frappe.throw(_("Excess Material Item row {0} not found.").format(excess_row_name))
-    if excess.return_type != "Retain at Supplier (Virtual)":
-        frappe.throw(_("This row is not marked 'Retain at Supplier (Virtual)'."))
+    if excess.stock_entry_created:
+        frappe.throw(_("This row has already been physically returned to stock -- use the normal batch-based Excess Material Mapping instead."))
     if excess.mapped_material_planning:
         frappe.throw(_("This excess item has already been claimed by {0}.").format(excess.mapped_material_planning))
     if flt(excess.qty) <= 0:
@@ -2391,7 +2655,10 @@ def claim_virtual_excess_mapping(mp_name, excess_row_name, row_name=None, unavai
 
     row.batch = ""
     row.planned_item = excess.item_code
-    row.batch_mapped = "Virtual (At Supplier)"
+    row.batch_mapped = (
+        "Virtual (At Supplier)" if excess.return_type == "Retain at Supplier (Virtual)"
+        else "Claimed (Pending Return)"
+    )
     row.batch_parent_item_group = excess.parent_item_group or ""
     row.batch_length = flt(excess.length)
     row.batch_width = flt(excess.width)

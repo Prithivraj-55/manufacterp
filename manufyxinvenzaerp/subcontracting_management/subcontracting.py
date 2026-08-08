@@ -180,6 +180,111 @@ def create_sco_from_production_plan(pp_name):
 
 
 @frappe.whitelist()
+def create_sco_and_mip_from_production_plan(pp_name):
+    """Create the Job work order (Subcontracting Order) and its Material Issue
+    Plan together in one step -- client request: MIP is always created
+    immediately alongside the SCO now, not as a separate later step. Both
+    directions of the reference are kept: MIP.subcontracting_order points back
+    to the SCO (create_from_subcontracting_order already does this), and
+    Production Plan.custom_material_issue_plan is set here to the new MIP.
+    Idempotent -- safe to call again once both already exist."""
+    from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
+        create_from_subcontracting_order,
+    )
+
+    existing_sco = frappe.db.get_value(
+        "Subcontracting Order", {"custom_production_plan": pp_name, "docstatus": ["!=", 2]}, "name"
+    )
+    already_existed = bool(existing_sco)
+    sco_name = existing_sco or create_sco_from_production_plan(pp_name)
+
+    mip_name = create_from_subcontracting_order(sco_name)
+    frappe.db.set_value("Production Plan", pp_name, "custom_material_issue_plan", mip_name)
+
+    return {"sco": sco_name, "mip": mip_name, "already_existed": already_existed}
+
+
+@frappe.whitelist()
+def delete_sco_and_mip_for_production_plan(pp_name):
+    """Delete the Job work order (Subcontracting Order) and Material Issue Plan
+    created from this Production Plan, cleanly, in the order that avoids
+    "linked document" errors: the Material Issue Plan is deleted FIRST (it is
+    what links to the SCO via its own subcontracting_order field -- deleting it
+    first removes that reference before the SCO is touched), then the SCO is
+    cancelled (its own on_cancel_subcontracting_order hook already cleanly
+    cancels + deletes every linked Supplier Operation Entry in the correct
+    reverse-sequence order) and deleted.
+
+    Refuses outright, with one clear message, rather than cascading through
+    any REAL stock movement: if a Stock Entry has already been submitted
+    against the Material Issue Plan, or any Supplier Operation Entry under the
+    Subcontracting Order already has recorded production/transfer, nothing is
+    deleted."""
+    if not (frappe.has_permission("Subcontracting Order", "delete") and frappe.has_permission("Material Issue Plan", "delete")):
+        frappe.throw(_("Not permitted to delete Job work orders / Material Issue Plans"), frappe.PermissionError)
+
+    sco_name = frappe.db.get_value(
+        "Subcontracting Order", {"custom_production_plan": pp_name, "docstatus": ["!=", 2]}, "name"
+    )
+    mip_name = frappe.db.get_value("Material Issue Plan", {"production_plan": pp_name}, "name")
+
+    if not sco_name and not mip_name:
+        frappe.throw(_("Nothing to delete -- no Job work order or Material Issue Plan exists for this Production Plan."))
+
+    if mip_name:
+        # custom_mip_ref lives on Stock Entry itself (header), not a child table.
+        transferred = frappe.db.count("Stock Entry", {"custom_mip_ref": mip_name, "docstatus": 1})
+        if transferred:
+            frappe.throw(_(
+                "Cannot delete: {0} submitted Stock Entry(ies) already exist against Material Issue Plan {1} "
+                "(material has actually been transferred). Reverse/cancel those first if this really needs to be removed."
+            ).format(transferred, mip_name))
+
+    if sco_name:
+        # completed_qty_nos / transferred_weight_kg live on the SOE Drawing Detail
+        # child table, not on Supplier Operation Entry itself -- join through it.
+        worked = frappe.db.sql(
+            """
+            select distinct sdd.parent
+            from `tabSOE Drawing Detail` sdd
+            inner join `tabSupplier Operation Entry` soe on soe.name = sdd.parent
+            where soe.subcontracting_order = %s and soe.docstatus != 2
+              and (sdd.completed_qty_nos > 0 or sdd.transferred_weight_kg > 0)
+            """,
+            sco_name,
+            as_dict=True,
+        )
+        if worked:
+            frappe.throw(_(
+                "Cannot delete: {0} already has recorded production/transfer against it ({1}). "
+                "Reverse/cancel that first if this really needs to be removed."
+            ).format(sco_name, ", ".join(w.parent for w in worked)))
+
+    # Clear the Production Plan's own reference to the MIP FIRST -- otherwise
+    # Frappe's link-checker sees the Production Plan itself still pointing at
+    # the Material Issue Plan (via custom_material_issue_plan) and refuses to
+    # delete it, exactly the kind of "connection/link issue" this needs to avoid.
+    frappe.db.set_value("Production Plan", pp_name, "custom_material_issue_plan", "")
+
+    try:
+        if mip_name:
+            frappe.delete_doc("Material Issue Plan", mip_name, ignore_permissions=True)
+
+        if sco_name:
+            sco = frappe.get_doc("Subcontracting Order", sco_name)
+            if sco.docstatus == 1:
+                sco.cancel()
+            frappe.delete_doc("Subcontracting Order", sco_name, ignore_permissions=True)
+    except frappe.LinkExistsError:
+        frappe.throw(_(
+            "Cannot delete: something else in the system still links to this Job work order or "
+            "Material Issue Plan. Remove that link first, then try again."
+        ))
+
+    return {"sco": sco_name, "mip": mip_name}
+
+
+@frappe.whitelist()
 def create_work_order_from_pp(pp_name):
     """Create a Work Order for Internal Jobcard operations from a submitted Production Plan.
     Populates custom_drawing_items and weight summary fields (mirrors create_sco_from_production_plan).

@@ -141,7 +141,7 @@ def get_data(filters):
 			"uom": r.uom,
 			"return_type": r.return_type or "Return to Own Warehouse",
 			"status": _("Returned") if r.stock_entry_created else (
-				_("Claimed (At Supplier)") if r.mapped_material_planning else _("Pending")
+				_("Claimed (via Excess Material Mapping)") if r.mapped_material_planning else _("Pending")
 			),
 			"return_reason": r.return_reason or "",
 			"days_pending": days_pending,

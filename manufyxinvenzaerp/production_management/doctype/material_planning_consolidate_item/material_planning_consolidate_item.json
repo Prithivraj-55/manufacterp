@@ -53,10 +53,10 @@
    "read_only": 1
   },
   {
+   "description": "From the Item master (custom_unit_weight) -- used together with Length/Width/Thickness/Sec Qty to compute Purchase Kg for the original item (ignored once an Alternate Item is set below, which uses its own Unit Weight instead).",
    "fetch_from": "item_code.custom_unit_weight",
    "fieldname": "unit_weight",
    "fieldtype": "Float",
-   "hidden": 1,
    "label": "Unit Weight",
    "read_only": 1
   },
