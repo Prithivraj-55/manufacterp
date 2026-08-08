@@ -342,6 +342,155 @@ const MP_MANUAL_SECTIONS = [
 		],
 	},
 	{
+		id: "production-plan",
+		title: "Production Plan",
+		kicker: "After Material Planning — starting the job",
+		purpose:
+			"Once Material Planning has sorted out where every raw material is coming from, " +
+			"Production Plan is where you actually schedule the job — pick the Type, lay out the " +
+			"operations it goes through and who performs each one, and from here create the Job " +
+			"work order and Material Issue Plan that drive everything downstream. Example used " +
+			"below: Production Plan 1, created against Material Planning 1.",
+		fields: [
+			{ name: "Type (Internal Job / Supplier Job / Supplier with Material)", note: "Drives the naming series. Doesn't restrict which Work Type each individual operation uses below — those can still be mixed within one plan." },
+			{ name: "Process Planning — Operation Name", note: "The ordered list of operations this job goes through, e.g. Material Issue, Fit-up, Welding, Final, Blasting, Painting. One Supplier Operation Entry gets created per row, in this exact order." },
+			{ name: "Process Planning — Work Type (Internal Jobcard / Subcontractor)", note: "Who performs THIS operation. Can vary row by row in the same plan — e.g. Welding done in-house, Blasting sent to a supplier — but every Subcontractor row must come before every Internal Jobcard row, no interleaving." },
+			{ name: "Process Planning — Inspection Mandatory", note: "Tick on any operation that needs a formal QC sign-off before its completed quantity counts. Covered in full in the Inspection section below." },
+		],
+		buttons: [
+			{ name: "Set Work Type", note: "Bulk-sets Work Type across selected Process Planning rows instead of editing each one by hand." },
+			{ name: "Job work order & MIP", note: "Appears once the Production Plan is submitted. Creates the Job work order (see below) AND its Material Issue Plan together in one click. Safe to click again later — it just opens what already exists instead of duplicating." },
+			{ name: "Delete Job work order and MIP", note: "Sits next to the Vendor/Contractor field. Deletes both together, with a confirmation prompt — refuses outright if any real stock movement or production has already happened against either one, so nothing gets silently lost." },
+		],
+		notes: [
+			"“Job work order” is a display name only — underneath, it's still the same Subcontracting Order doctype; it just reads as “Job work order” everywhere in the UI.",
+			"If any operation in the Process Planning table has Work Type Subcontractor, Vendor/Contractor must be set before “Job work order & MIP” will create anything.",
+		],
+	},
+	{
+		id: "job-work-order",
+		title: "Job work order",
+		kicker: "One document drives every operation",
+		purpose:
+			"Created from Production Plan 1, Job work order 1 is the single execution document " +
+			"for EVERY operation in the plan, whether it's done in-house or by a supplier — there " +
+			"is no separate Work Order/Job Card involved.",
+		fields: [
+			{ name: "Drawing Items", note: "Every drawing/DUNO this job covers, each with its own Customer Provided Weight, Planned RM Weight, Mapped Weight, Excess Weight, and Transferred Weight — rolled up from Material Planning 1." },
+			{ name: "All Operations Complete", note: "Ticks itself once every operation in the chain has been submitted." },
+		],
+		steps: [
+			"Submitting Job work order 1 and clicking “Job work order & MIP” back on Production Plan 1 creates one Supplier Operation Entry per Process Planning row, in sequence order — Supplier Operation Entry 1, Supplier Operation Entry 2, and so on.",
+			"Each operation only becomes submittable once every earlier one already is — Supplier Operation Entry 3 can't be completed before Supplier Operation Entry 2 is.",
+			"The Operations tab shows a live summary table — Seq, Operation, Status, Overall Qty, Available to Consume, Total Consumed, Difference, Entry, Drawings. Click any operation's name (shown in blue, underlined) to jump straight into that Supplier Operation Entry.",
+		],
+		buttons: [
+			{ name: "Material Issue Plan (under Create)", note: "Creates the Material Issue Plan if it doesn't already exist, or opens the existing one." },
+			{ name: "Supplier Operation Entries (under Create)", note: "Creates any still-missing Supplier Operation Entry in the chain — normally already done automatically by “Job work order & MIP”." },
+		],
+		notes: [
+			"The old separate “Work Order / Subcontract PO” create option under Production Plan is disabled — use “Job work order & MIP” there instead.",
+		],
+	},
+	{
+		id: "material-issue-plan",
+		title: "Material Issue Plan",
+		kicker: "Getting reserved stock to the supplier/WIP warehouse",
+		purpose:
+			"Created alongside Job work order 1, Material Issue Plan 1 is where reserved batches " +
+			"actually leave your warehouse — the physical stock movement that Material Planning's " +
+			"“Reserve” only ever soft-claimed.",
+		fields: [
+			{ name: "Raw Materials", note: "Every reserved batch pulled in for this job's drawings, with Reqd Qty (the mapped batch's weight), Issued Qty (cumulative transferred so far across every Stock Entry), and per-row Cut Sheet / Excess Return fields." },
+			{ name: "Finished Goods Warehouse", note: "Receives BOTH the finished good (via Make Final Stock Entry) and any unconsumed/off-cut material (via Return Excess Entry). Must be set before either button will work." },
+		],
+		buttons: [
+			{ name: "Select Materials to Transfer / To CNC Warehouse", note: "Move reserved batches out to the supplier — or, for CNC-flagged rows, to the CNC Warehouse first. Only batches that are BOTH purchased AND reserved are ever offered, filtered by Item Code only, since one consolidated batch can legitimately serve several drawings at once." },
+			{ name: "CNC to Supplier/WIP", note: "Forwards material on from the CNC Warehouse once machining is done." },
+			{ name: "PDF", note: "A shareable batch plan — DUNO/Mark No, Customer Drawing No, Planned Kg, batch details and Sec Qty — for the production or supplier team, with its own Download button in the popup's corner." },
+			{ name: "Return Excess Entry", note: "Review Qty/dimensions and enter a mandatory Reason for every row, confirm that the material will be received into the Finished Goods Warehouse, then the return Stock Entry is created." },
+			{ name: "Make Final Stock Entry", note: "Appears once Job work order 1's operations are ALL complete. Creates a draft Manufacture Stock Entry that consumes the supplier-warehouse raw material and produces the finished good into the Finished Goods Warehouse — review and submit it from there." },
+		],
+		notes: [
+			"Nothing is ever offered for transfer unless it's BOTH purchased (a Purchase Receipt allocated it) AND reserved (a manual step back on Material Planning 1) — after a Purchase Receipt submits, its popup tells you exactly which Material Planning to open and reserve if anything's still pending.",
+		],
+	},
+	{
+		id: "supplier-operation-entry",
+		title: "Supplier Operation Entry (Operations)",
+		kicker: "One per operation, tracking Nos completed",
+		purpose:
+			"One Supplier Operation Entry exists per Process Planning row. Supplier Operation " +
+			"Entry 1 (the first operation) tracks Kg consumed from what was transferred; every " +
+			"operation after that tracks Nos (pieces) handed forward from the one before it.",
+		fields: [
+			{ name: "Consumption Log", note: "Log how many Nos (pieces) of each drawing were completed, with a Date. Weight (Kg) is auto-calculated from the drawing's own per-piece weight." },
+			{ name: "Drawing Details", note: "Per-drawing Qty to Manufacture, Available to Consume (Nos), Completed Qty (Nos), Customer Weight (Kg) and Planned Weight (Kg) — the last two now show on every operation, not just the first." },
+			{ name: "Available to Consume (Nos)", note: "Supplier Operation Entry 1 gets this from what's actually been transferred; every later one gets it from the PREVIOUS operation's own Completed Qty, once that operation is saved (while still draft) or submitted." },
+		],
+		steps: [
+			"Logging Nos against a drawing in Consumption Log auto-advances Status from Open to In Progress, and — when Inspection Mandatory is off — immediately updates that drawing's Completed Qty.",
+			"Status must be set to Completed before a Supplier Operation Entry can be submitted, and every earlier operation in the sequence must already be submitted too.",
+		],
+		buttons: [
+			{ name: "Add All Drawing (Testing group)", note: "Fills Consumption Log with one row per drawing at its full available quantity in one click, instead of adding rows one by one. For quick testing/data entry, not a normal production step." },
+		],
+		notes: [
+			"If Inspection Mandatory is ticked for this operation, Consumption Log no longer completes anything directly — see Inspection below for what happens instead.",
+		],
+	},
+	{
+		id: "inspection",
+		title: "Inspection (Mandatory Operations)",
+		kicker: "QC sign-off before quantity counts as done",
+		purpose:
+			"When an operation's Inspection Mandatory box is ticked, logging Nos in Consumption " +
+			"Log no longer completes them on its own — they sit as pending review until an " +
+			"Inspection Entry accepts them. This is the one gate that guarantees nothing moves to " +
+			"the next operation, or into a Final Stock Entry, without QC sign-off.",
+		fields: [
+			{ name: "Inspection Items (on the Supplier Operation Entry)", note: "One row per drawing, auto-showing what's been logged in Consumption Log but not yet accepted. Recalculates itself on every save — nothing to maintain by hand, and it never shows more than the drawing's real Qty to Manufacture, however many times something is re-logged." },
+			{ name: "Inspection Entry — Status / Feedback / Overall Remarks / Rework Remarks", note: "Status is Open/Working/Completed; Feedback is Ok/Not Ok." },
+			{ name: "Inspection Items (on the Inspection Entry)", note: "One row per drawing, copied in from the source Supplier Operation Entry: Completed Qty (frozen at creation), Accepted Qty (you enter), Rejected Qty (auto = Completed − Accepted)." },
+		],
+		steps: [
+			"Click “Create Inspection” on the Supplier Operation Entry's Inspection tab — it logs the call and creates the Inspection Entry in one step, carrying over whatever is currently pending.",
+			"Enter Accepted Qty per drawing row — Rejected Qty fills in automatically.",
+			"Set Feedback before marking Status Completed — trying to complete without it first shows “Enter Feedback to complete it” and reverts Status.",
+			"Set Status to Completed and save — you're asked to confirm (“cannot be edited once submitted”); confirming saves AND submits in one action, there is no separate manual Submit step.",
+			"On submit, each row's Accepted Qty is added onto that drawing's Completed Qty on the Supplier Operation Entry — this is what lets the next operation proceed. Rejected Qty isn't written anywhere; it simply reappears in the Supplier Operation Entry's own Inspection Items table the moment it's logged again in Consumption Log, ready for another round.",
+		],
+		calcs: [
+			{
+				title: "A full rework round-trip",
+				item: "Drawing 1", group: "Qty to Manufacture: 2 pieces",
+				sec_qty: "see steps", unit_weight: "n/a",
+				formula:
+					"Round 1: 2 Nos logged in Consumption Log → 2 pending in Inspection Items → Inspection Entry 1: Accepted 1, Rejected 1 → " +
+					"Completed Qty becomes 1, and 1 stays pending (capped at the real 2-piece total no matter how many times it's re-logged). " +
+					"Round 2: the rejected piece is reworked and logged again → 1 pending again → Inspection Entry 2: Accepted 1",
+				result: "2 / 2 (fully complete)",
+				note: "Completed Qty finishes at exactly 2 — the drawing's real total — never more, regardless of how many rounds or re-logged Nos it took to get there.",
+			},
+		],
+		examples: [
+			{
+				type: "do",
+				label: "Rejected Nos are never lost",
+				text: "Re-logging the same drawing in Consumption Log after a rejection brings it straight back into the Inspection Items table for another round — with no validation blocking the resubmission, even though the cumulative log total now exceeds the drawing's nominal quantity.",
+			},
+			{
+				type: "dont",
+				label: "Don't expect Consumption Log alone to complete anything once Inspection Mandatory is on",
+				text: "Completion only ever happens through a submitted Inspection Entry's Accepted Qty — logging Nos just queues them for review.",
+			},
+		],
+		notes: [
+			"Rework Remarks is mandatory whenever total Rejected Qty across the Inspection Entry's rows is greater than 1.",
+			"Total Checked / Cleared / Rework Qty still appear (read-only) at the top of the Inspection Entry for reporting — they're auto-totalled from the Inspection Items rows, not entered directly.",
+		],
+	},
+	{
 		id: "checking-stock",
 		title: "Checking Overall Stock",
 		kicker: "Table 7 of 7 — outside Material Planning",
@@ -370,6 +519,10 @@ const MP_MANUAL_SECTIONS = [
 			{ name: "Virtual Excess", note: "Material promised from another job's leftovers that has no physical batch — either it will never return to your warehouse (stays at the supplier) or it just hasn't yet." },
 			{ name: "CNC Process", note: "Marks that a piece needs CNC cutting at your own facility before it can go to the supplier — routes it through the Material Issue Plan's CNC Warehouse first." },
 			{ name: "DUNO / Mark No", note: "The drawing-level identifier that keeps every row traceable back to exactly which piece, on which drawing, it belongs to." },
+			{ name: "Job work order", note: "Display name only — the same Subcontracting Order doctype underneath, created from a Production Plan, driving every operation whether performed in-house or by a supplier." },
+			{ name: "Consumption Log", note: "Where completed Nos (pieces) are logged, per drawing, on a Supplier Operation Entry — the source of truth for what's been done at that operation." },
+			{ name: "Inspection Mandatory", note: "A per-operation flag (set on Production Plan's Process Planning table) that requires an Inspection Entry to accept quantity before it counts as Completed — see the Inspection section." },
+			{ name: "Finished Goods Warehouse", note: "The Material Issue Plan field that receives both the finished good (Make Final Stock Entry) and any off-cut/unconsumed material (Return Excess Entry)." },
 		],
 	},
 ];
@@ -393,7 +546,7 @@ function render_manual(page) {
 			<header class="mpm-hero">
 				<div class="mpm-hero-kicker">${__("Material Planning")}</div>
 				<h1>${__("The Complete Guide")}</h1>
-				<p>${__("A step-by-step walkthrough of every table, field, and button — with worked examples — written so a first-time user can follow it start to finish.")}</p>
+				<p>${__("A step-by-step walkthrough of every table, field, and button — with worked examples — written so a first-time user can follow it start to finish, from Material Planning all the way through Production Plan, Job work order, Material Issue Plan, and Inspection.")}</p>
 			</header>
 			<div class="mpm-body">
 				<nav class="mpm-nav">${nav_html}</nav>

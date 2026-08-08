@@ -967,7 +967,8 @@ def create_finished_goods_entry(sco_name):
             fg_warehouse = frappe.db.get_value("Material Issue Plan", mip_name, "excess_return_warehouse") or ""
     if not fg_warehouse:
         frappe.throw(_("No finished-good warehouse set. Set the warehouse on the "
-                       "Subcontracting Order item (or the Finished Goods/Return Warehouse) first."))
+                       "Subcontracting Order item (or the Finished Goods Warehouse on the "
+                       "linked Material Issue Plan) first."))
 
     consumed = _get_supplier_wh_consumption_items(sco)
     if not consumed:
@@ -1030,7 +1031,14 @@ def validate_supplier_operation_entry(doc, method):
     """Per-drawing Nos tracking + validation.
 
     For all operations:
-      - Sum qty_nos per drawing from consumption_log → update drawing_details.completed_qty_nos.
+      - Sum qty_nos per drawing from consumption_log.
+      - If Inspection Mandatory is OFF: that sum is pushed straight into
+        drawing_details.completed_qty_nos, same as before.
+      - If Inspection Mandatory is ON: completed_qty_nos is left untouched here — it only
+        ever grows via Accepted Qty from a submitted Inspection Entry (see
+        inspection.on_submit_inspection_entry / _apply_soe_inspection_results). The gap
+        between what's been logged and what Inspection has actually accepted is instead
+        surfaced in inspection_items (see _sync_soe_inspection_items) for QC to review.
       - Auto-advance status from Open → In Progress when any Nos are logged.
 
     For Op-1 (sequence_id == 1):
@@ -1049,9 +1057,13 @@ def validate_supplier_operation_entry(doc, method):
         if r.drawing and flt(r.qty_nos) > 0:
             log_nos_by_drawing[r.drawing] += flt(r.qty_nos)
 
-    # --- 2. Push completed_qty_nos into drawing_details rows ---
-    for row in (doc.drawing_details or []):
-        row.completed_qty_nos = flt(log_nos_by_drawing.get(row.drawing or "", 0.0), 3)
+    # --- 2. Push completed_qty_nos into drawing_details rows (non-mandatory only —
+    #         see _sync_soe_inspection_items for the mandatory path) ---
+    if not doc.custom_inspection_mandatory:
+        for row in (doc.drawing_details or []):
+            row.completed_qty_nos = flt(log_nos_by_drawing.get(row.drawing or "", 0.0), 3)
+
+    _sync_soe_inspection_items(doc, log_nos_by_drawing)
 
     # --- 2a. Op-1: auto-set available_to_consume_nos = qty_to_manufacture when material
     #         has been transferred for that drawing (transferred_weight_kg > 0) ---
@@ -1115,7 +1127,13 @@ def validate_supplier_operation_entry(doc, method):
                 title=_("Exceeds Available to Consume"),
             )
 
-    # --- 6. Op-2+: validate qty_nos per drawing against available_to_consume_nos ---
+    # --- 6. Op-2+: validate qty_nos per drawing against available_to_consume_nos.
+    #        The raw per-drawing log total is only checked against the ceiling for
+    #        non-mandatory operations. For a mandatory operation, rework means the same
+    #        Nos can legitimately be re-logged across multiple Consumption Log rounds, so
+    #        the cumulative raw total can genuinely exceed "available" -- the real ceiling
+    #        there is enforced downstream by completed_qty_nos (accepted-only) and by
+    #        _validate_soe_items' accept_qty <= qty_nos check instead. ---
     if seq > 1:
         detail_map = {r.drawing: r for r in (doc.drawing_details or []) if r.drawing}
         for drawing, nos in log_nos_by_drawing.items():
@@ -1130,13 +1148,48 @@ def validate_supplier_operation_entry(doc, method):
                     .format(label),
                     title=_("Previous Operation Not Completed"),
                 )
-            if nos > available:
+            if nos > available and not doc.custom_inspection_mandatory:
                 frappe.throw(
                     _("Drawing {0}: entered {1} Nos but only {2} Nos are available "
                       "from the previous operation.")
                     .format(label, flt(nos, 3), flt(available, 3)),
                     title=_("Exceeds Available Qty"),
                 )
+
+
+def _sync_soe_inspection_items(doc, log_nos_by_drawing):
+    """Rebuild inspection_items fresh on every save, one row per drawing in
+    drawing_details: pending Nos = everything ever logged in Consumption Log for that
+    drawing, minus whatever Inspection has already accepted (completed_qty_nos). This is
+    derived, not incrementally tracked, so it self-corrects across any number of rework
+    rounds with no manual bookkeeping: a rejected Nos simply isn't subtracted from the log
+    total, so it reappears here on its own the moment it's logged again.
+
+    The raw log total is capped at qty_to_manufacture before subtracting completed_qty_nos
+    -- Consumption Log itself is deliberately left free to be over-logged across rework
+    rounds (see validate_supplier_operation_entry, step 6), but "pending" must never promise
+    more than the drawing's real physical quantity or an Inspection Entry could end up
+    accepting more Nos than actually exist (caught too late, at SOE save, as "Completed Qty
+    Exceeds Limit" -- capping here instead means it can never be entered in the first place).
+
+    Empty (cleared) when Inspection Mandatory is off -- there is nothing pending review."""
+    doc.set("inspection_items", [])
+    if not doc.custom_inspection_mandatory:
+        return
+
+    for row in (doc.drawing_details or []):
+        if not row.drawing:
+            continue
+        logged = flt(log_nos_by_drawing.get(row.drawing, 0.0), 3)
+        qty_to_mfg = flt(row.qty_to_manufacture)
+        if qty_to_mfg > 0:
+            logged = min(logged, qty_to_mfg)
+        pending = flt(logged - flt(row.completed_qty_nos), 3)
+        doc.append("inspection_items", {
+            "drawing": row.drawing,
+            "customer_drawing_number": row.customer_drawing_number or "",
+            "qty_nos": pending if pending > 0 else 0.0,
+        })
 
 
 def before_submit_supplier_operation_entry(doc, method):
@@ -1380,14 +1433,31 @@ def on_cancel_subcontracting_order(doc, method):
 def _build_soe_drawing_rows(sco, seq_idx):
     """Build drawing_details rows for a new SOE from the SCO's drawing items.
 
-    Op-1 (seq_idx == 1): populates the planned Kg fields from the SCO Drawing Items
-    (customer_weight_kg, total_weight_kg = planned). transferred_weight_kg starts at
-    0 — it is not yet backed by any Stock Entry — and is kept live afterwards by
-    _refresh_sco_drawing_transferred_weights() on every transfer SE submit/cancel.
-    Op-2+ : only copies drawing identity + qty_to_manufacture; Kg fields are blank
-    (not meaningful after the first transfer operation); available_to_consume_nos is
-    filled later by _propagate_drawing_nos_to_next when Op-1 saves/submits.
+    Customer Weight / Planned Weight are static per-drawing reference figures from the
+    SCO Drawing Items -- populated on every operation's SOE, not just Op-1, so whoever
+    opens Op-3/Op-4/etc. can still see what the drawing was supposed to weigh.
+
+    Op-1 (seq_idx == 1) additionally seeds transferred_weight_kg from whatever has
+    ALREADY been transferred at SOE-creation time -- material can legitimately be
+    transferred to the supplier before "Create Supplier Operation Entries" is ever
+    clicked, and in that case there is no future transfer SE submit left to trigger
+    _refresh_sco_drawing_transferred_weights(), so a hardcoded 0 here would permanently
+    under-report "Available to Consume" on Op-1 even though the SCO header
+    (custom_transferred_weight_kg) is correct. Uses the same proportional scaling
+    (mapped_weight_kg share of the SCO total) as that refresh function, so both stay
+    consistent whichever one runs first. It is still kept live afterwards by
+    _refresh_sco_drawing_transferred_weights() on every subsequent transfer SE submit/cancel.
+    Op-2+ : transferred_weight_kg stays 0 (not meaningful after the first transfer
+    operation); available_to_consume_nos is filled later by
+    _propagate_drawing_nos_to_next when Op-1 saves/submits.
     """
+    total_mapped = 0.0
+    ratio = 0.0
+    if seq_idx == 1:
+        total_mapped = sum(flt(d.mapped_weight_kg) for d in (sco.get("custom_drawing_items") or []))
+        transferred_weight = flt(sco.get("custom_transferred_weight_kg") or 0)
+        ratio = min(transferred_weight / total_mapped, 1.0) if total_mapped else 0.0
+
     rows = []
     for d in (sco.get("custom_drawing_items") or []):
         row = {
@@ -1399,18 +1469,10 @@ def _build_soe_drawing_rows(sco, seq_idx):
             "qty_to_manufacture": flt(d.qty_to_manufacture, 3),
             "available_to_consume_nos": 0.0,
             "completed_qty_nos": 0.0,
-            "transferred_weight_kg": 0.0,
+            "transferred_weight_kg": flt(flt(d.mapped_weight_kg) * ratio, 3) if seq_idx == 1 else 0.0,
+            "customer_provided_weight_kg": flt(d.customer_weight_kg, 3),
+            "planned_weight_kg": flt(d.total_weight_kg, 3),
         }
-        if seq_idx == 1:
-            row.update({
-                "customer_provided_weight_kg": flt(d.customer_weight_kg, 3),
-                "planned_weight_kg": flt(d.total_weight_kg, 3),
-            })
-        else:
-            row.update({
-                "customer_provided_weight_kg": 0.0,
-                "planned_weight_kg": 0.0,
-            })
         rows.append(row)
     return rows
 
@@ -1807,11 +1869,20 @@ def _get_mp_excess_by_duno(mp_name):
     return excess
 
 
-def _get_mp_reserved_batches(mp_name, source_warehouse, supplier_warehouse):
-    """Return SE item dicts for all reserved batches in a Material Planning document.
+def _get_mp_reserved_batches(mp_name, source_warehouse, supplier_warehouse, duno_filter=None):
+    """Return SE item dicts for reserved batches in a Material Planning document.
     Includes sec_qty, dimensions, and unit_weight for each SE line.
+
+    duno_filter: an optional iterable of DUNO/Mark Nos to restrict results to. A
+    single Material Planning document can be shared across several Production
+    Plans/Material Issue Plans (only some of its drawings pulled into any one of
+    them at a time) -- without this, every reserved batch in the WHOLE Material
+    Planning gets offered for transfer by every caller, including batches
+    reserved for drawings that belong to a completely different, not-yet-planned
+    job. Pass None (the default) for the old unfiltered whole-MP behaviour.
     """
     items = []
+    duno_filter = set(duno_filter) if duno_filter else None
 
     # Cache item stock_uom and unit_weight to avoid N queries
     _uom_cache = {}
@@ -1828,9 +1899,12 @@ def _get_mp_reserved_batches(mp_name, source_warehouse, supplier_warehouse):
         return _uwt_cache[item_code]
 
     # From material_mapping: batch-assigned reserved rows
+    mm_filters = {"parent": mp_name, "is_reserved": 1}
+    if duno_filter:
+        mm_filters["duno_mark_no"] = ["in", list(duno_filter)]
     rows = frappe.get_all(
         "Material Planning Material Mapping",
-        filters={"parent": mp_name, "is_reserved": 1},
+        filters=mm_filters,
         fields=[
             "item_code", "planned_item", "batch", "batch_calc_qty", "batch_sec_qty",
             "batch_length", "batch_width", "batch_thickness", "batch_unit_weight",
@@ -1869,9 +1943,12 @@ def _get_mp_reserved_batches(mp_name, source_warehouse, supplier_warehouse):
         })
 
     # From available_raw_material: exact-match reserved rows
+    arm_filters = {"parent": mp_name, "is_reserved": 1}
+    if duno_filter:
+        arm_filters["duno_mark_no"] = ["in", list(duno_filter)]
     rows2 = frappe.get_all(
         "Material Planning Available Raw Material",
-        filters={"parent": mp_name, "is_reserved": 1},
+        filters=arm_filters,
         fields=[
             "item_code", "batch_no", "reserved_qty", "available_qty",
             "sec_qty", "sec_uom", "length", "width", "thickness", "parent_item_group", "cnc_process",

@@ -3508,30 +3508,10 @@ frappe.ui.form.on("Subcontracting Order", {
 \t\t\t\t});
 \t\t\t}, __("Create"));
 
-\t\t\tif (frm.doc.custom_all_ops_complete) {
-\t\t\t\t// Raw materials fully supplied → produce the finished goods. Creates a
-\t\t\t\t// Manufacture stock entry that consumes the supplier-warehouse stock and
-\t\t\t\t// adds the finished good to inventory on submission.
-\t\t\t\tfrm.add_custom_button(__("Make Final Stock Entry"), function() {
-\t\t\t\t\tfrappe.call({
-\t\t\t\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_finished_goods_entry",
-\t\t\t\t\t\targs: { sco_name: frm.doc.name },
-\t\t\t\t\t\tfreeze: true,
-\t\t\t\t\t\tfreeze_message: __("Creating Final Stock Entry…"),
-\t\t\t\t\t\tcallback: function(r) {
-\t\t\t\t\t\t\tif (r.message) {
-\t\t\t\t\t\t\t\tfrappe.msgprint({
-\t\t\t\t\t\t\t\t\ttitle: __("Final Stock Entry Created"),
-\t\t\t\t\t\t\t\t\tmessage: __("Review and submit the stock entry: ") +
-\t\t\t\t\t\t\t\t\t\t'<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>",
-\t\t\t\t\t\t\t\t\tindicator: "green"
-\t\t\t\t\t\t\t\t});
-\t\t\t\t\t\t\t\tfrm.reload_doc();
-\t\t\t\t\t\t\t}
-\t\t\t\t\t\t}
-\t\t\t\t\t});
-\t\t\t\t});
-\t\t\t}
+\t\t\t// "Make Final Stock Entry" moved to Material Issue Plan (see
+\t\t\t// material_issue_plan.js's _add_final_stock_entry_button) -- the Return
+\t\t\t// Excess Entry / stock-return workflow already lives there, so the
+\t\t\t// finished-goods stock entry is created from the same place.
 
 \t\t\t// Create one Supplier Operation Entry per subcontractor operation
 \t\t\tif (frm.doc.custom_transferred_weight_kg) {
@@ -3608,7 +3588,7 @@ function render_soe_summary(frm) {
                 var diff_color = diff < 0 ? "color:red" : (diff > 0 ? "color:orange" : "");
                 return "<tr>"
                     + "<td class='text-center'>" + (d.sequence_id || "") + "</td>"
-                    + "<td><a href='/app/supplier-operation-entry/" + encodeURIComponent(d.name) + "'>"
+                    + "<td><a href='/app/supplier-operation-entry/" + encodeURIComponent(d.name) + "' style='color:#0ea5e9;text-decoration:underline;'>"
                         + frappe.utils.escape_html(d.operation || "") + "</a></td>"
                     + "<td><span class='indicator " + color + "'>" + (d.status || "") + "</span></td>"
                     + "<td class='text-right'>" + format_number(mfg, null, 3) + "</td>"
@@ -3713,8 +3693,45 @@ frappe.ui.form.on("Supplier Operation Entry", {
 \t\t\t\t}
 \t\t\t);
 \t\t}
+
+\t\t// Testing convenience -- fills Consumption Log with one row per drawing at its
+\t\t// full available quantity in one click, instead of adding rows one by one.
+\t\tif (frm.doc.docstatus === 0 && !frm.is_new()) {
+\t\t\tfrm.add_custom_button(__("Add All Drawing"), function() {
+\t\t\t\t_add_all_drawing_to_log(frm);
+\t\t\t}, __("Testing"));
+\t\t}
 \t}
 });
+
+function _add_all_drawing_to_log(frm) {
+\tvar rows = frm.doc.drawing_details || [];
+\tif (!rows.length) {
+\t\tfrappe.msgprint(__("No drawings on this Supplier Operation Entry yet."));
+\t\treturn;
+\t}
+\tvar added = 0;
+\trows.forEach(function(row) {
+\t\tif (!row.drawing) return;
+\t\tvar qty = flt(row.available_to_consume_nos) || flt(row.qty_to_manufacture);
+\t\tif (!qty) return;
+\t\tvar log_row = frm.add_child("consumption_log", {
+\t\t\tdate: frappe.datetime.get_today(),
+\t\t\tdrawing: row.drawing,
+\t\t\tqty_nos: qty,
+\t\t});
+\t\t_calc_consumption_weight_kg(frm, log_row.doctype, log_row.name);
+\t\tadded++;
+\t});
+\tfrm.refresh_field("consumption_log");
+\t_sync_drawing_nos(frm);
+\tif (added) {
+\t\tfrm.dirty();
+\t\tfrappe.show_alert({ message: __("Added {0} drawing(s) to Consumption Log.", [added]), indicator: "green" }, 5);
+\t} else {
+\t\tfrappe.msgprint(__("Nothing to add -- no drawing has an available quantity yet."));
+\t}
+}
 
 function _sync_drawing_nos(frm) {
 \t// Sum qty_nos per drawing from the consumption log
@@ -3725,12 +3742,18 @@ function _sync_drawing_nos(frm) {
 \t\t}
 \t});
 
-\t// Push completed_qty_nos into each drawing_details row
-\t(frm.doc.drawing_details || []).forEach(function(row) {
-\t\tvar completed = flt(byDrawing[row.drawing] || 0, 3);
-\t\tfrappe.model.set_value(row.doctype, row.name, "completed_qty_nos", completed);
-\t});
-\tfrm.refresh_field("drawing_details");
+\t// Push completed_qty_nos into each drawing_details row -- only when Inspection
+\t// Mandatory is off. When it's on, completed_qty_nos only ever grows through an
+\t// Inspection Entry's Accepted Qty (server-side, on submit) -- pushing the raw
+\t// log total here would leak unreviewed quantity straight past QC the moment the
+\t// form is saved. Mirrors subcontracting.validate_supplier_operation_entry.
+\tif (!frm.doc.custom_inspection_mandatory) {
+\t\t(frm.doc.drawing_details || []).forEach(function(row) {
+\t\t\tvar completed = flt(byDrawing[row.drawing] || 0, 3);
+\t\t\tfrappe.model.set_value(row.doctype, row.name, "completed_qty_nos", completed);
+\t\t});
+\t\tfrm.refresh_field("drawing_details");
+\t}
 
 \t// Auto-advance status
 \tvar has_log = (frm.doc.consumption_log || []).some(function(r) { return flt(r.qty_nos) > 0; });
@@ -3738,8 +3761,10 @@ function _sync_drawing_nos(frm) {
 \t\tfrm.set_value("status", "In Progress");
 \t}
 
-\t// Op-2+: warn if any drawing exceeds available_to_consume_nos
-\tif ((frm.doc.sequence_id || 1) > 1) {
+\t// Op-2+: warn if any drawing exceeds available_to_consume_nos -- not meaningful
+\t// when Inspection Mandatory is on, since rework can legitimately push the raw log
+\t// total past "available" (the server no longer blocks that case either).
+\tif ((frm.doc.sequence_id || 1) > 1 && !frm.doc.custom_inspection_mandatory) {
 \t\tvar detailMap = {};
 \t\t(frm.doc.drawing_details || []).forEach(function(r) {
 \t\t\tif (r.drawing) detailMap[r.drawing] = flt(r.available_to_consume_nos);

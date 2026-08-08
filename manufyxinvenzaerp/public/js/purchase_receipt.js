@@ -158,6 +158,12 @@ frappe.ui.form.on("Purchase Receipt", {
 					by_mp[a.material_planning].push(a);
 				});
 
+				// Allocated is NOT the same as reserved -- allocate_pr_stock_to_mp only
+				// places the batch into Available Raw Materials / Material Mapping;
+				// reserving it is still a separate, manual step on the Material
+				// Planning, and nothing transfers via a Material Issue Plan until that
+				// happens (_get_mp_reserved_batches only ever offers is_reserved=1 rows
+				// for transfer). Say exactly that instead of claiming it's ready.
 				let sections = Object.entries(by_mp).map(function([mp, rows]) {
 					let mp_safe = frappe.utils.escape_html(mp);
 					let mp_link = `<a href="/app/material-planning/${encodeURIComponent(mp)}" target="_blank"><b>${mp_safe}</b></a>`;
@@ -165,7 +171,8 @@ frappe.ui.form.on("Purchase Receipt", {
 						return `<tr>
 							<td style="padding:3px 6px">${frappe.utils.escape_html(String(r.batch_no == null ? "" : r.batch_no))}</td>
 							<td style="padding:3px 6px">${frappe.utils.escape_html(String(r.item_code == null ? "" : r.item_code))}</td>
-							<td style="padding:3px 6px;text-align:right">${flt(r.reserved_qty, 3)} Kg</td>
+							<td style="padding:3px 6px;text-align:right">${flt(r.qty, 3)} Kg</td>
+							<td style="padding:3px 6px">${r.is_reserved ? __("Reserved") : __("Not Reserved Yet")}</td>
 						</tr>`;
 					}).join("");
 					return `<p style="margin:10px 0 4px">Material Planning: ${mp_link}</p>
@@ -173,18 +180,23 @@ frappe.ui.form.on("Purchase Receipt", {
 							<thead><tr>
 								<th>${__("Batch No")}</th>
 								<th>${__("Item Code")}</th>
-								<th>${__("Reserved Qty")}</th>
+								<th>${__("Qty")}</th>
+								<th>${__("Status")}</th>
 							</tr></thead>
 							<tbody>${row_html}</tbody>
 						</table>`;
 				}).join("");
 
+				let any_unreserved = allocs.some(function(a) { return !a.is_reserved; });
+
 				frappe.msgprint({
-					title: __("Material Planning — Batch Reserved"),
-					indicator: "green",
-					message: `<p>${__("The batches from this Purchase Receipt have been automatically allocated and reserved against the following Material Planning document(s):")}</p>`
+					title: __("Material Planning — Batches Allocated"),
+					indicator: any_unreserved ? "orange" : "green",
+					message: `<p>${__("Received batches from this Purchase Receipt have been allocated against the following Material Planning document(s):")}</p>`
 						+ sections
-						+ `<p style="margin-top:8px;color:#555">${__("These batches are now ready for transfer in the linked Material Issue Plan.")}</p>`,
+						+ (any_unreserved
+							? `<p style="margin-top:8px;color:#555">${__("Open the Material Planning and Reserve the batch(es) marked \"Not Reserved Yet\" before they can be used in a Material Issue Plan / transferred — unreserved batches are never offered for transfer.")}</p>`
+							: `<p style="margin-top:8px;color:#555">${__("These batches are already reserved and ready for transfer in the linked Material Issue Plan.")}</p>`),
 				});
 			},
 		});

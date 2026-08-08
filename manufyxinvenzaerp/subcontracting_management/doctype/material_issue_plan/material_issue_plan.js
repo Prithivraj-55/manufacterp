@@ -16,7 +16,9 @@ frappe.ui.form.on("Material Issue Plan", {
 		_add_view_all_raw_materials_button(frm);
 		_add_update_batch_button(frm);
 		_add_transfer_buttons(frm);
+		_add_pdf_button(frm);
 		_render_excess_action_btn(frm);
+		_add_final_stock_entry_button(frm);
 	},
 
 	load_drawings_btn(frm) {
@@ -58,6 +60,41 @@ function _load_mip_drawings(frm) {
 	} else {
 		_load();
 	}
+}
+
+// "Make Final Stock Entry" — moved here from the Subcontracting Order (client
+// change request). Once the linked SCO's operations are all complete, creates a
+// draft Manufacture Stock Entry that consumes the supplier-warehouse raw material
+// and produces the finished good; the stock-return workflow (Return Excess Entry)
+// already lives on this doctype, so the finished-goods entry is created from the
+// same place. custom_all_ops_complete lives on the Subcontracting Order, not the
+// MIP, so it's read via a lookup rather than a stored/fetched field.
+function _add_final_stock_entry_button(frm) {
+	if (frm.is_new() || !frm.doc.subcontracting_order) return;
+
+	frappe.db.get_value("Subcontracting Order", frm.doc.subcontracting_order, "custom_all_ops_complete")
+		.then((r) => {
+			if (!(r.message && r.message.custom_all_ops_complete)) return;
+
+			frm.add_custom_button(__("Make Final Stock Entry"), function () {
+				frappe.call({
+					method: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_finished_goods_entry",
+					args: { sco_name: frm.doc.subcontracting_order },
+					freeze: true,
+					freeze_message: __("Creating Final Stock Entry…"),
+					callback: function (r) {
+						if (r.message) {
+							frappe.msgprint({
+								title: __("Final Stock Entry Created"),
+								message: __("Review and submit the stock entry: ") +
+									'<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>",
+								indicator: "green"
+							});
+						}
+					},
+				});
+			});
+		});
 }
 
 // "View All" — raw_materials can run past 100 rows, well beyond the grid's
@@ -298,6 +335,54 @@ function _check_transfer_readiness(frm, on_proceed) {
 				secondary_action() { dialog.hide(); },
 			});
 			dialog.show();
+		},
+	});
+}
+
+// ── Batch Plan PDF ────────────────────────────────────────────────────────────
+// Simple, printable reference for the production/supplier team: for this item,
+// this batch (with its Sec Qty) is what's planned, per drawing. The preview
+// popup and the downloaded PDF render from the exact same server-built HTML
+// (get_mip_batch_plan_html), so what you see is exactly what you download.
+
+function _add_pdf_button(frm) {
+	if (frm.is_new()) return;
+	frm.add_custom_button(frappe.utils.icon("filetype", "xs") + " " + __("PDF"), function() {
+		_show_mip_batch_plan_popup(frm);
+	});
+}
+
+function _show_mip_batch_plan_popup(frm) {
+	frappe.call({
+		method: "manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.get_mip_batch_plan_html",
+		args: { mip_name: frm.doc.name },
+		freeze: true,
+		freeze_message: __("Building batch plan…"),
+		callback: function(r) {
+			if (!r.message) return;
+
+			var dlg = new frappe.ui.Dialog({
+				title: __("Batch Plan — {0}", [frm.doc.name]),
+				size: "extra-large",
+				fields: [{ fieldtype: "HTML", fieldname: "content" }],
+			});
+			dlg.fields_dict.content.$wrapper.html(r.message);
+
+			// "Download" in the dialog's top corner (next to the close icon) rather
+			// than the usual bottom primary-action button, per how this was asked for.
+			var $download = $(
+				'<button class="btn btn-primary btn-sm" style="margin-right:8px">' + __("Download") + "</button>"
+			);
+			$download.on("click", function() {
+				window.open(
+					"/api/method/manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.download_mip_batch_plan_pdf?mip_name="
+					+ encodeURIComponent(frm.doc.name),
+					"_blank"
+				);
+			});
+			dlg.header.find(".modal-actions").prepend($download);
+
+			dlg.show();
 		},
 	});
 }
@@ -651,19 +736,24 @@ function _show_return_excess_dialog(frm) {
 				});
 				return;
 			}
-			dialog.hide();
-			frappe.call({
-				method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.create_mip_excess_return_entry",
-				args: { mip_name: frm.doc.name, rows_json: JSON.stringify(payload) },
-				freeze: true,
-				freeze_message: __("Creating return entry…"),
-				callback(r) {
-					if (r.message) {
-						frappe.msgprint({ title: __("Return Excess Entry Created"), message: __("Return Stock Entry: ") + '<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>", indicator: "green" });
-						frm.reload_doc();
-					}
-				},
-			});
+			frappe.confirm(
+				__("This material will be received into the Finished Goods Warehouse ({0}). Continue?", [frappe.utils.escape_html(frm.doc.excess_return_warehouse)]),
+				function () {
+					dialog.hide();
+					frappe.call({
+						method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.create_mip_excess_return_entry",
+						args: { mip_name: frm.doc.name, rows_json: JSON.stringify(payload) },
+						freeze: true,
+						freeze_message: __("Creating return entry…"),
+						callback(r) {
+							if (r.message) {
+								frappe.msgprint({ title: __("Return Excess Entry Created"), message: __("Return Stock Entry: ") + '<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>", indicator: "green" });
+								frm.reload_doc();
+							}
+						},
+					});
+				}
+			);
 		},
 	});
 

@@ -26,15 +26,42 @@ _DIMENSION_DRIVEN_GROUPS = {"Structurals", "Plates"}
 
 
 def _linked_mp_names(mip):
+    return _linked_mp_names_and_duno_scope(mip)[0]
+
+
+def _linked_mp_names_and_duno_scope(mip):
+    """Material Plannings linked to this MIP's Production Plan items, each paired
+    with the set of DUNO/Mark Nos this Production Plan actually covers for it.
+
+    A single Material Planning document can be shared across several Production
+    Plans -- only some of its drawings pulled into any one of them at a time.
+    Without this scope, every reserved batch in the WHOLE Material Planning gets
+    offered for transfer here, including batches reserved for drawings that
+    belong to a completely different, not-yet-planned job (they'd move to the
+    wrong supplier/warehouse if transferred from here). A Material Planning where
+    any po_items row is missing a duno_mark_no falls back to no filtering for it
+    -- the same "take the whole Material Planning's totals" fallback already used
+    elsewhere (create_sco_from_production_plan) for undated rows.
+    """
     pp = frappe.get_doc("Production Plan", mip.production_plan)
     mp_names = []
     seen = set()
+    dunos_by_mp = {}
+    has_blank_by_mp = set()
     for pi in pp.po_items:
         mp_name = pi.get("custom_material_planning")
-        if mp_name and mp_name not in seen:
+        if not mp_name:
+            continue
+        if mp_name not in seen:
             seen.add(mp_name)
             mp_names.append(mp_name)
-    return mp_names
+        duno = pi.get("custom_duno_mark_no")
+        if duno:
+            dunos_by_mp.setdefault(mp_name, set()).add(duno)
+        else:
+            has_blank_by_mp.add(mp_name)
+    duno_scope = {mp: (None if mp in has_blank_by_mp else dunos_by_mp.get(mp)) for mp in mp_names}
+    return mp_names, duno_scope
 
 
 def _tag_stock_entry(se_dict, mip_name, ctx):
@@ -58,8 +85,11 @@ def get_mip_pending_items(mip_name):
     cnc_warehouse = mip.cnc_warehouse or ""
 
     raw_items = []
-    for mp_name in _linked_mp_names(mip):
-        raw_items.extend(_get_mp_reserved_batches(mp_name, source_warehouse, primary_warehouse))
+    mp_names, duno_scope = _linked_mp_names_and_duno_scope(mip)
+    for mp_name in mp_names:
+        raw_items.extend(_get_mp_reserved_batches(
+            mp_name, source_warehouse, primary_warehouse, duno_filter=duno_scope.get(mp_name)
+        ))
 
     # Cut Sheet (client change request Phase 5.2): a row flagged Cut Sheet only
     # ever offers its To Use (W1) qty for transfer -- the Balance (W2) portion
@@ -557,7 +587,7 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
     """
     mip = frappe.get_doc("Material Issue Plan", mip_name)
     if not mip.excess_return_warehouse:
-        frappe.throw(_("Please set the Excess/Return Warehouse on this Material Issue Plan first."))
+        frappe.throw(_("Please set the Finished Goods Warehouse on this Material Issue Plan first."))
 
     overrides = {o.get("name"): o for o in _json.loads(rows_json)} if rows_json else {}
 

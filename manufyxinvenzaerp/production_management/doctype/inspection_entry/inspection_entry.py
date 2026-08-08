@@ -1,18 +1,55 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt
+from frappe.utils import flt, nowdate
 
 
 class InspectionEntry(Document):
 	def validate(self):
 		if self.source_doctype == "Purchase Receipt":
 			self._validate_pr_items()
+		elif self.source_doctype == "Supplier Operation Entry":
+			self._validate_soe_items()
 		else:
+			self._autofill_total_qty_to_check()
 			self._validate_scalar_result()
+
+		self._set_inspection_complete_date()
+
+	def _autofill_total_qty_to_check(self):
+		"""Job Card only -- Supplier Operation Entry uses the row-wise soe_items table
+		instead (see _validate_soe_items), which already carries its own per-drawing
+		Completed Qty copied from the source SOE's inspection_items at creation time."""
+		if self.job_card:
+			self.total_qty_to_check = flt(frappe.db.get_value("Job Card", self.job_card, "for_quantity"))
+
+	def _set_inspection_complete_date(self):
+		"""Set once, the first time Status is saved as Completed -- not re-derived on
+		later saves so it reflects when the inspection was actually completed, not
+		today's date on every subsequent edit."""
+		if self.status == "Completed" and not self.inspection_complete_date:
+			self.inspection_complete_date = nowdate()
+
+	def before_submit(self):
+		if self.status != "Completed":
+			frappe.throw(
+				_("Status must be <b>Completed</b> before this Inspection Entry can be submitted."),
+				title=_("Inspection Not Completed"),
+			)
 
 	def _validate_scalar_result(self):
 		self.rework_qty = flt(flt(self.total_checked_qty) - flt(self.cleared_qty), 3)
+
+		if self.is_new():
+			# create_inspection_entry() inserts a bare draft prefilled only from the
+			# source document (Total Checked Qty defaults from Total Qty to Check,
+			# Cleared Qty starts at 0) so the inspector has something to open and edit --
+			# it must not fail before that draft even exists. Everything below applies
+			# from the inspector's first real save onward instead.
+			return
+
+		if flt(self.total_checked_qty) <= 0:
+			frappe.throw(_("Total Checked Qty cannot be zero."))
 
 		if self.rework_qty < 0:
 			frappe.throw(
@@ -33,8 +70,60 @@ class InspectionEntry(Document):
 				  "Set Feedback to <b>Ok</b>, or reduce Cleared Qty to reflect the rework quantity.")
 			)
 
-		if self.rework_qty > 0 and not (self.rework_remarks or "").strip():
-			frappe.throw(_("Rework Remarks is mandatory when Rework Qty is greater than zero."))
+		if self.rework_qty > 1 and not (self.rework_remarks or "").strip():
+			frappe.throw(_("Rework Remarks is mandatory when Rework Qty is greater than 1."))
+
+	def _validate_soe_items(self):
+		"""Row-wise inspection for a Supplier Operation Entry source -- replaces the
+		scalar Total Checked/Cleared Qty fields with per-drawing Accepted/Rejected Qty
+		(client change: "instead of entering the Overall checked quantity, user need to
+		enter in the item table"). Accepted Qty is what on_submit_inspection_entry /
+		_apply_soe_inspection_results later adds onto the source SOE's
+		drawing_details.completed_qty_nos; Rejected Qty is not pushed anywhere -- it
+		naturally reappears in the SOE's own inspection_items table (see
+		_sync_soe_inspection_items) the moment it's logged again in Consumption Log."""
+		if not self.soe_items:
+			if self.is_new():
+				return
+			frappe.throw(_("Add at least one drawing to inspect."))
+
+		for row in self.soe_items:
+			if flt(row.accept_qty) > flt(row.qty_nos):
+				frappe.throw(
+					_("Row {0}: Accepted Qty ({1}) cannot exceed Completed Qty ({2}) for drawing {3}.").format(
+						row.idx, row.accept_qty, row.qty_nos, row.customer_drawing_number or row.drawing
+					)
+				)
+			row.reject_qty = flt(flt(row.qty_nos) - flt(row.accept_qty), 3)
+
+		# Mirror aggregates onto the header scalar fields -- kept in sync so the
+		# Inspection Status Report and any other reader of total_checked_qty /
+		# cleared_qty / rework_qty keeps working for an SOE source too, even though the
+		# UI shows the item table instead of these fields in that case.
+		self.total_checked_qty = flt(sum(flt(r.qty_nos) for r in self.soe_items), 3)
+		self.cleared_qty = flt(sum(flt(r.accept_qty) for r in self.soe_items), 3)
+		self.rework_qty = flt(sum(flt(r.reject_qty) for r in self.soe_items), 3)
+
+		if self.is_new():
+			return
+
+		if self.total_checked_qty <= 0:
+			frappe.throw(_("Total Completed Qty cannot be zero."))
+
+		if self.feedback == "Ok" and self.rework_qty > 0:
+			frappe.throw(
+				_("Feedback cannot be <b>Ok</b> while any quantity is rejected. "
+				  "Set Feedback to <b>Not Ok</b> or clear all rejections.")
+			)
+
+		if self.feedback == "Not Ok" and self.rework_qty == 0:
+			frappe.throw(
+				_("Feedback cannot be <b>Not Ok</b> when nothing is rejected. "
+				  "Set Feedback to <b>Ok</b>, or set a Rejected Qty on at least one row.")
+			)
+
+		if self.rework_qty > 1 and not (self.rework_remarks or "").strip():
+			frappe.throw(_("Rework Remarks is mandatory when Rework Qty is greater than 1."))
 
 	def _validate_pr_items(self):
 		if not self.items:

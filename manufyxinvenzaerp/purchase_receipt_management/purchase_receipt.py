@@ -640,11 +640,32 @@ def on_submit_purchase_receipt(doc, method):
                 )
 
 
+def _get_batch_from_bundle(sbb_name):
+    """Resolve a Serial and Batch Bundle to its batch_no -- Frappe v15 items using
+    use_serial_batch_fields can end up with the PR item's own batch_no blank and
+    the batch reference living only in its serial_and_batch_bundle instead. Was
+    previously called here but never defined (a latent NameError -- this crashed
+    get_pr_mp_allocations for any PR whose items went through the bundle path)."""
+    if not sbb_name:
+        return None
+    return frappe.db.get_value("Serial and Batch Entry", {"parent": sbb_name}, "batch_no")
+
+
 @frappe.whitelist()
 def get_pr_mp_allocations(pr_name):
     """Return which Material Planning documents have batches from this PR allocated,
-    so the client can show a post-submit popup. Only returns data if at least one
-    batch from this PR appears in a reserved row of any MP."""
+    so the client can show a post-submit popup pointing the user at them.
+
+    Deliberately NOT filtered to is_reserved=1: allocate_pr_stock_to_mp only places
+    the received batch into Available Raw Materials / Material Mapping -- it never
+    sets is_reserved itself, that's still a separate, manual Reserve step on the
+    Material Planning. Filtering by is_reserved here would make this popup fire
+    almost never (nothing is reserved yet right after a normal receipt) and, worse,
+    would let a stale "already reserved" message go out even though a reserve step
+    still needs to happen before the batch can be transferred via a Material Issue
+    Plan (client change request: no transfer for anything not purchased AND
+    reserved -- see _get_mp_reserved_batches's is_reserved=1 filter, which is what
+    actually enforces that)."""
     if not frappe.has_permission("Material Planning", "read"):
         frappe.throw(_("Not permitted to view Material Planning allocations"), frappe.PermissionError)
     pr = frappe.get_doc("Purchase Receipt", pr_name)
@@ -667,18 +688,20 @@ def get_pr_mp_allocations(pr_name):
     ph = ", ".join(["%s"] * len(batch_list))
 
     mm_rows = frappe.db.sql(
-        f"SELECT parent AS mp, batch AS batch_no, item_code, SUM(reserved_qty) AS reserved_qty "
+        f"SELECT parent AS mp, batch AS batch_no, item_code, is_reserved, "
+        f"       SUM(CASE WHEN is_reserved = 1 THEN reserved_qty ELSE qty END) AS qty "
         f"FROM `tabMaterial Planning Material Mapping` "
-        f"WHERE batch IN ({ph}) AND is_reserved = 1 "
-        f"GROUP BY parent, batch, item_code",
+        f"WHERE batch IN ({ph}) "
+        f"GROUP BY parent, batch, item_code, is_reserved",
         batch_list, as_dict=True,
     )
 
     arm_rows = frappe.db.sql(
-        f"SELECT parent AS mp, batch_no, item_code, SUM(reserved_qty) AS reserved_qty "
+        f"SELECT parent AS mp, batch_no, item_code, is_reserved, "
+        f"       SUM(CASE WHEN is_reserved = 1 THEN reserved_qty ELSE required_qty END) AS qty "
         f"FROM `tabMaterial Planning Available Raw Material` "
-        f"WHERE batch_no IN ({ph}) AND is_reserved = 1 "
-        f"GROUP BY parent, batch_no, item_code",
+        f"WHERE batch_no IN ({ph}) "
+        f"GROUP BY parent, batch_no, item_code, is_reserved",
         batch_list, as_dict=True,
     )
 
@@ -688,7 +711,8 @@ def get_pr_mp_allocations(pr_name):
             "material_planning": r.mp,
             "batch_no": r.batch_no,
             "item_code": r.item_code,
-            "reserved_qty": flt(r.reserved_qty, 3),
+            "qty": flt(r.qty, 3),
+            "is_reserved": bool(r.is_reserved),
         })
 
     return result

@@ -665,4 +665,131 @@ def _resolve_warehouses(mip):
         if wip_warehouse:
             target_warehouses.append(wip_warehouse)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Batch Plan PDF -- a simple, printable reference for the production/supplier
+# team: for each item on each drawing, which physical batch (and how much of
+# it, by Sec Qty) is planned. get_mip_batch_plan_html and
+# download_mip_batch_plan_pdf both render from the exact same HTML builder so
+# the on-screen preview and the downloaded PDF are always identical.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@frappe.whitelist()
+def get_mip_batch_plan_html(mip_name):
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+    return _render_mip_batch_plan_html(mip)
+
+
+@frappe.whitelist()
+def download_mip_batch_plan_pdf(mip_name):
+    from frappe.utils.pdf import get_pdf
+
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+    html = _render_mip_batch_plan_html(mip)
+    frappe.local.response.filename = "{0}-Batch-Plan.pdf".format(
+        mip_name.replace(" ", "-").replace("/", "-")
+    )
+    frappe.local.response.filecontent = get_pdf(html)
+    frappe.local.response.type = "pdf"
+
+
+def _render_mip_batch_plan_html(mip):
+    supplier = ""
+    if mip.subcontracting_order:
+        supplier = frappe.db.get_value("Subcontracting Order", mip.subcontracting_order, "supplier") or ""
+    elif mip.work_order:
+        supplier = _("Internal")
+
+    rows = []
+    for r in (mip.raw_materials or []):
+        if not r.item_code:
+            continue
+        dims = " x ".join(str(flt(v, 2)) for v in (r.length, r.width, r.thickness) if flt(v)) or "-"
+        rows.append({
+            "duno": r.duno_mark_no or "",
+            "cdn": r.customer_drawing_number or "",
+            "item_code": r.item_code,
+            "item_name": r.item_name or "",
+            "planned_kg": flt(r.reqd_kg, 3),
+            "batch_no": r.batch_no or _("Not Yet Allocated"),
+            "dims": dims,
+            "sec_qty": flt(r.sec_qty, 3),
+            "sec_uom": r.sec_uom or "",
+            "batch_weight_kg": flt(r.qty, 3),
+        })
+    rows.sort(key=lambda x: (not x["duno"], x["duno"], x["item_code"]))
+
+    posting_date = frappe.utils.formatdate(mip.posting_date) if mip.posting_date else ""
+
+    row_html = "".join("""
+        <tr>
+            <td>{duno}</td>
+            <td>{cdn}</td>
+            <td>{item_code}<br><span class="item-name">{item_name}</span></td>
+            <td class="num">{planned_kg}</td>
+            <td>{batch_no}</td>
+            <td>{dims}</td>
+            <td class="num">{sec_qty} {sec_uom}</td>
+            <td class="num">{batch_weight_kg}</td>
+        </tr>
+    """.format(
+        duno=frappe.utils.escape_html(r["duno"] or "-"),
+        cdn=frappe.utils.escape_html(r["cdn"] or "-"),
+        item_code=frappe.utils.escape_html(r["item_code"]),
+        item_name=frappe.utils.escape_html(r["item_name"]),
+        planned_kg=r["planned_kg"],
+        batch_no=frappe.utils.escape_html(r["batch_no"]),
+        dims=frappe.utils.escape_html(r["dims"]),
+        sec_qty=r["sec_qty"],
+        sec_uom=frappe.utils.escape_html(r["sec_uom"]),
+        batch_weight_kg=r["batch_weight_kg"],
+    ) for r in rows)
+
+    return """
+    <div class="mip-batch-plan">
+        <style>
+            .mip-batch-plan {{ font-family: Arial, Helvetica, sans-serif; color:#222; }}
+            .mip-batch-plan h2 {{ margin:0 0 4px; }}
+            .mip-batch-plan .meta {{ font-size:12px; color:#555; margin-bottom:14px; }}
+            .mip-batch-plan table {{ width:100%; border-collapse:collapse; font-size:11.5px; }}
+            .mip-batch-plan th {{ background:#f4f4f4; text-align:left; padding:6px 8px; border:1px solid #ccc; }}
+            .mip-batch-plan td {{ padding:6px 8px; border:1px solid #ddd; vertical-align:top; }}
+            .mip-batch-plan td.num {{ text-align:right; }}
+            .mip-batch-plan .item-name {{ color:#777; font-size:10.5px; }}
+        </style>
+        <h2>{title}</h2>
+        <div class="meta">
+            {mip_label}: {mip_name} &nbsp;|&nbsp; {company_label}: {company} &nbsp;|&nbsp;
+            {date_label}: {posting_date} &nbsp;|&nbsp; {supplier_label}: {supplier}
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>{col_duno}</th>
+                    <th>{col_cdn}</th>
+                    <th>{col_item}</th>
+                    <th>{col_planned}</th>
+                    <th>{col_batch}</th>
+                    <th>{col_dims}</th>
+                    <th>{col_secqty}</th>
+                    <th>{col_batchwt}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {row_html}
+            </tbody>
+        </table>
+    </div>
+    """.format(
+        title=_("Material Issue Plan — Batch Plan"),
+        mip_label=_("MIP"), mip_name=mip.name,
+        company_label=_("Company"), company=frappe.utils.escape_html(mip.company or ""),
+        date_label=_("Posting Date"), posting_date=posting_date,
+        supplier_label=_("Supplier"), supplier=frappe.utils.escape_html(supplier),
+        col_duno=_("DUNO/Mark No"), col_cdn=_("Customer Drawing No"), col_item=_("Item"),
+        col_planned=_("Planned Kg"), col_batch=_("Batch No"), col_dims=_("Dimensions (mm)"),
+        col_secqty=_("Sec Qty"), col_batchwt=_("Batch Weight (Kg)"),
+        row_html=row_html,
+    )
+
     return source_warehouse, [w for w in target_warehouses if w]

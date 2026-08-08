@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-08-08 19:58:37_
+_Generated: 2026-08-09 01:26:37_
 
 ## drawing
 
@@ -132,7 +132,11 @@ _Generated: 2026-08-08 19:58:37_
 | Method | Whitelisted |
 |--------|-------------|
 | ` validate` | no |
+| ` _autofill_total_qty_to_check` | no |
+| ` _set_inspection_complete_date` | no |
+| ` before_submit` | no |
 | ` _validate_scalar_result` | no |
+| ` _validate_soe_items` | no |
 | ` _validate_pr_items` | no |
 
 ---
@@ -414,6 +418,9 @@ _Generated: 2026-08-08 19:58:37_
 | ` refresh_weight_summary` | no |
 | ` get_target_context` | no |
 | ` _resolve_warehouses` | no |
+| ` get_mip_batch_plan_html` | no |
+| ` download_mip_batch_plan_pdf` | no |
+| ` _render_mip_batch_plan_html` | no |
 
 ---
 
@@ -468,6 +475,17 @@ _Generated: 2026-08-08 19:58:37_
 | Module | subcontracting_management |
 | Path | `subcontracting_management/doctype/soe_drawing_detail` |
 | Controller | `subcontracting_management/doctype/soe_drawing_detail/soe_drawing_detail.py` |
+| Client script | none |
+
+---
+
+## soe_inspection_item
+
+| Key | Value |
+|-----|-------|
+| Module | subcontracting_management |
+| Path | `subcontracting_management/doctype/soe_inspection_item` |
+| Controller | `subcontracting_management/doctype/soe_inspection_item/soe_inspection_item.py` |
 | Client script | none |
 
 ---
