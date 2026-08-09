@@ -11,6 +11,7 @@ instead of the old SCO-button-created ones.
 """
 
 import json as _json
+import math
 
 import frappe
 from frappe import _
@@ -25,16 +26,53 @@ from manufyxinvenzaerp.utils.dimension_formula import calculate_qty
 _DIMENSION_DRIVEN_GROUPS = {"Structurals", "Plates"}
 
 
+def _ensure_mip_editable(mip):
+    """Server-side lock: once a Material Issue Plan is Completed (see
+    _maybe_mark_completed), block every action here that would create a new Stock
+    Entry against it. Defense-in-depth alongside disable_form() in
+    material_issue_plan.js, which is what actually hides these buttons in the UI --
+    this guard is what stops a direct/scripted call from bypassing that."""
+    if mip.status == "Completed":
+        frappe.throw(_("{0} is Completed and locked for further changes.").format(mip.name))
+
+
 def _linked_mp_names(mip):
+    return _linked_mp_names_and_duno_scope(mip)[0]
+
+
+def _linked_mp_names_and_duno_scope(mip):
+    """Material Plannings linked to this MIP's Production Plan items, each paired
+    with the set of DUNO/Mark Nos this Production Plan actually covers for it.
+
+    A single Material Planning document can be shared across several Production
+    Plans -- only some of its drawings pulled into any one of them at a time.
+    Without this scope, every reserved batch in the WHOLE Material Planning gets
+    offered for transfer here, including batches reserved for drawings that
+    belong to a completely different, not-yet-planned job (they'd move to the
+    wrong supplier/warehouse if transferred from here). A Material Planning where
+    any po_items row is missing a duno_mark_no falls back to no filtering for it
+    -- the same "take the whole Material Planning's totals" fallback already used
+    elsewhere (create_sco_from_production_plan) for undated rows.
+    """
     pp = frappe.get_doc("Production Plan", mip.production_plan)
     mp_names = []
     seen = set()
+    dunos_by_mp = {}
+    has_blank_by_mp = set()
     for pi in pp.po_items:
         mp_name = pi.get("custom_material_planning")
-        if mp_name and mp_name not in seen:
+        if not mp_name:
+            continue
+        if mp_name not in seen:
             seen.add(mp_name)
             mp_names.append(mp_name)
-    return mp_names
+        duno = pi.get("custom_duno_mark_no")
+        if duno:
+            dunos_by_mp.setdefault(mp_name, set()).add(duno)
+        else:
+            has_blank_by_mp.add(mp_name)
+    duno_scope = {mp: (None if mp in has_blank_by_mp else dunos_by_mp.get(mp)) for mp in mp_names}
+    return mp_names, duno_scope
 
 
 def _tag_stock_entry(se_dict, mip_name, ctx):
@@ -58,8 +96,19 @@ def get_mip_pending_items(mip_name):
     cnc_warehouse = mip.cnc_warehouse or ""
 
     raw_items = []
-    for mp_name in _linked_mp_names(mip):
-        raw_items.extend(_get_mp_reserved_batches(mp_name, source_warehouse, primary_warehouse))
+    mp_names, duno_scope = _linked_mp_names_and_duno_scope(mip)
+    # Round Up Sec Qty for Transfer (Material Planning field, default on): when several
+    # drawings share one purchased batch, the combined Sec Qty needed for one transfer can
+    # come out fractional (e.g. 13.982 Nos) -- physically impossible to hand over. If ANY
+    # linked Material Planning has this enabled, round up below; off keeps the exact
+    # fractional Kg calculation this function has always returned.
+    round_up_enabled = any(
+        frappe.db.get_value("Material Planning", m, "round_up_transfer_sec_qty") for m in mp_names
+    )
+    for mp_name in mp_names:
+        raw_items.extend(_get_mp_reserved_batches(
+            mp_name, source_warehouse, primary_warehouse, duno_filter=duno_scope.get(mp_name)
+        ))
 
     # Cut Sheet (client change request Phase 5.2): a row flagged Cut Sheet only
     # ever offers its To Use (W1) qty for transfer -- the Balance (W2) portion
@@ -164,7 +213,117 @@ def get_mip_pending_items(mip_name):
             "customer_drawing_number": cdn_by_key.get((item_code, batch_no), ""),
         })
 
+    if round_up_enabled:
+        _round_up_sec_qty(result)
+
     return result
+
+
+def _round_up_sec_qty(rows):
+    """Round each row's Sec Qty up to the next whole piece (Structurals/Plates only --
+    the only groups where Sec Qty means a discrete physical piece), bumping its Kg to
+    match via this row's own Kg-per-piece. The bump (round_up_excess_kg, 0 when no
+    rounding was needed) travels with the row through the transfer popup's client-side
+    selection and back into create_mip_partial_transfer/create_mip_transfer_entry, which
+    log it as excess material to return once the transfer is actually created -- this
+    function only computes the numbers, it never writes anything itself."""
+    for row in rows:
+        row["round_up_excess_kg"] = 0.0
+        row["round_up_excess_pieces"] = 0.0
+        if row.get("custom_parent_item_group") not in _DIMENSION_DRIVEN_GROUPS:
+            continue
+        sec_qty = flt(row.get("custom_sec_qty"))
+        qty = flt(row.get("qty"))
+        if sec_qty <= 0 or qty <= 0:
+            continue
+        kg_per_piece = qty / sec_qty
+        rounded = math.ceil(flt(sec_qty, 6) - 0.001)
+        if rounded <= sec_qty + 0.001:
+            continue
+        excess_pieces = rounded - sec_qty
+        excess_kg = flt(excess_pieces * kg_per_piece, 3)
+        row["qty"] = flt(qty + excess_kg, 3)
+        row["custom_sec_qty"] = flt(rounded, 3)
+        row["round_up_excess_kg"] = excess_kg
+        row["round_up_excess_pieces"] = flt(excess_pieces, 3)
+
+
+def _log_round_up_excess(mip, items):
+    """After a transfer whose Sec Qty was rounded up (see _round_up_sec_qty), log the
+    rounding surplus into excess_return_items so it flows through the existing Return
+    Excess Entry workflow once physically confirmed. Keyed by (item_code, batch_no) via
+    the same source_table/source_row find-or-update pattern
+    _sync_excess_return_from_raw_materials already uses -- a second transfer that rounds
+    up the SAME item/batch again ACCUMULATES into the one existing row instead of piling
+    up a new row every time.
+
+    Length/Width/Thickness are seeded from the BATCH's own standard dimensions (not left
+    at 0) and Sec Qty from the fractional excess-piece count -- together these recompute
+    back to exactly the tracked excess Kg, so the Return Excess Entry dialog shows a
+    correct, non-zero starting figure instead of losing the tracked amount the moment it's
+    opened (its live preview recalculates Qty FROM these fields). This is still only a
+    placeholder, standing in for "one standard piece, mostly unused" -- the real leftover
+    is almost never that shape, so the user is expected to overwrite these with whatever
+    they actually measure once the job cuts the material, same as any other excess row."""
+    SOURCE_TABLE = "Round Up Sec Qty for Transfer"
+    by_key = {
+        (r.source_table, r.source_row): r
+        for r in (mip.excess_return_items or [])
+        if r.source_table == SOURCE_TABLE
+    }
+    changed = False
+    for item in items:
+        excess_kg = flt(item.get("round_up_excess_kg"))
+        if excess_kg <= 0:
+            continue
+        excess_pieces = flt(item.get("round_up_excess_pieces"))
+        length = flt(item.get("custom_length"))
+        width = flt(item.get("custom_width"))
+        thickness = flt(item.get("custom_thickness"))
+        source_row = f"{item['item_code']}|{item.get('batch_no') or ''}"
+        key = (SOURCE_TABLE, source_row)
+        target = by_key.get(key)
+        if target and (target.stock_entry_created or target.mapped_material_planning):
+            # Already returned to stock, or already claimed elsewhere -- start a fresh
+            # row instead of drifting a historical, already-settled entry.
+            target = None
+        if target:
+            new_qty = flt(flt(target.qty) + excess_kg, 3)
+            new_pieces = flt(flt(target.sec_qty) + excess_pieces, 3)
+            target.qty = new_qty
+            target.sec_qty = new_pieces
+            if not target.length:
+                target.length = length
+            if not target.width:
+                target.width = width
+            if not target.thickness:
+                target.thickness = thickness
+        else:
+            target = mip.append("excess_return_items", {
+                "source_table": SOURCE_TABLE,
+                "source_row": source_row,
+                "item_code": item["item_code"],
+                "item_name": item.get("item_name") or item["item_code"],
+                "parent_item_group": item.get("custom_parent_item_group") or "",
+                "unit_weight": flt(item.get("custom_unit_weight")),
+                "length": length,
+                "width": width,
+                "thickness": thickness,
+                "sec_qty": excess_pieces,
+                "sec_uom": item.get("custom_sec_uom") or "",
+                "uom": item.get("uom") or "Kg",
+                "qty": excess_kg,
+                "return_type": "Return to Own Warehouse",
+                "return_reason": _(
+                    "Rounding surplus from \"Round Up Sec Qty for Transfer\" -- placeholder "
+                    "dimensions (standard piece size); confirm the exact leftover once "
+                    "this material is cut."
+                ),
+            })
+            by_key[key] = target
+        changed = True
+    if changed:
+        mip.save(ignore_permissions=True)
 
 
 @frappe.whitelist()
@@ -187,18 +346,28 @@ def has_cnc_stock(mip_name):
     return bool(result)
 
 
-def _get_already_transferred_batches(mip):
-    """Return the set of batch_nos already physically moved by submitted SEs for this MIP.
-    After SE submission, is_reserved is cleared on MP rows, so without this exclusion
-    already-transferred batches would appear as false-positive 'unreserved' warnings."""
+def _get_mip_transfer_stock_entry_names(mip):
+    """Names of submitted Stock Entries that physically transferred material for this
+    MIP's SCO/WO (Send to Subcontractor / Material Transfer, tagged via
+    custom_sco_ref/custom_wo_ref by _tag_stock_entry) -- the ones that make raw-material
+    refresh unsafe/blocked. Shared by _get_already_transferred_batches and the
+    "Refresh Raw Materials" guard, which needs the names themselves (not just the
+    batches) to tell the user exactly what to delete to unblock a refresh."""
     filters = {"docstatus": 1}
     if mip.subcontracting_order:
         filters["custom_sco_ref"] = mip.subcontracting_order
     elif mip.work_order:
         filters["custom_wo_ref"] = mip.work_order
     else:
-        return set()
-    se_names = frappe.db.get_all("Stock Entry", filters=filters, pluck="name")
+        return []
+    return frappe.db.get_all("Stock Entry", filters=filters, pluck="name")
+
+
+def _get_already_transferred_batches(mip):
+    """Return the set of batch_nos already physically moved by submitted SEs for this MIP.
+    After SE submission, is_reserved is cleared on MP rows, so without this exclusion
+    already-transferred batches would appear as false-positive 'unreserved' warnings."""
+    se_names = _get_mip_transfer_stock_entry_names(mip)
     if not se_names:
         return set()
     batch_nos = frappe.db.get_all(
@@ -322,6 +491,7 @@ def create_mip_transfer_entry(mip_name):
     function.
     """
     mip = frappe.get_doc("Material Issue Plan", mip_name)
+    _ensure_mip_editable(mip)
     ctx = get_target_context(mip)
     pending = get_mip_pending_items(mip_name)
     if not pending:
@@ -348,6 +518,7 @@ def create_mip_transfer_entry(mip_name):
     }, mip_name, ctx))
     frappe.db.commit()  # release read-locks before SE insert to avoid gap-lock deadlock
     se.insert(ignore_permissions=True)
+    _log_round_up_excess(mip, primary_rows)
     return {"primary_se": se.name}
 
 
@@ -370,6 +541,7 @@ def create_mip_partial_transfer(mip_name, selected_items_json, transfer_type):
         frappe.throw(_("No items selected for transfer."))
 
     mip = frappe.get_doc("Material Issue Plan", mip_name)
+    _ensure_mip_editable(mip)
     ctx = get_target_context(mip)
     if not mip.source_warehouse:
         frappe.throw(_("Please set the Source Warehouse (RM) on this Material Issue Plan first."))
@@ -414,6 +586,7 @@ def create_mip_partial_transfer(mip_name, selected_items_json, transfer_type):
     }, mip_name, ctx))
     frappe.db.commit()
     se.insert(ignore_permissions=True)
+    _log_round_up_excess(mip, selected)
     return se.name
 
 
@@ -428,6 +601,7 @@ def create_mip_cnc_forward_entry(mip_name):
     first.
     """
     mip = frappe.get_doc("Material Issue Plan", mip_name)
+    _ensure_mip_editable(mip)
     ctx = get_target_context(mip)
     cnc_warehouse = mip.cnc_warehouse
     if not cnc_warehouse:
@@ -556,8 +730,9 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
     is specifically about writes introduced ABOVE the commit() line.)
     """
     mip = frappe.get_doc("Material Issue Plan", mip_name)
+    _ensure_mip_editable(mip)
     if not mip.excess_return_warehouse:
-        frappe.throw(_("Please set the Excess/Return Warehouse on this Material Issue Plan first."))
+        frappe.throw(_("Please set the Finished Goods Warehouse on this Material Issue Plan first."))
 
     overrides = {o.get("name"): o for o in _json.loads(rows_json)} if rows_json else {}
 

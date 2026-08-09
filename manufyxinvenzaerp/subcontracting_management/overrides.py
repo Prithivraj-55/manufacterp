@@ -43,11 +43,26 @@ class CustomSubcontractingOrder(SubcontractingOrder):
             return
 
         # PP flow: skip all PO-dependent validation; run only what's safe.
+        self._pp_validate_job_worker()
         self._auto_set_supplier_warehouse()
         self._pp_validate_items()
         self.validate_supplied_items()
         self.calculate_additional_costs()
         self._pp_calculate_amounts()
+
+    def _pp_validate_job_worker(self):
+        """Job Worker is optional on Internal Job plans (setup.py's
+        make_sco_job_worker_conditional relaxes the client-side/UI requirement via
+        mandatory_depends_on) but still required for Supplier Job / Supplier with
+        Material -- enforce that here too since reqd=0 means the core mandatory-field
+        check no longer catches it server-side."""
+        if self.supplier:
+            return
+        pp_type = self.get("custom_production_plan_type") or frappe.db.get_value(
+            "Production Plan", self.get("custom_production_plan"), "custom_type"
+        )
+        if pp_type != "Internal Job":
+            frappe.throw(_("Job Worker is mandatory for a {0} Production Plan.").format(pp_type or "non-Internal-Job"))
 
     def _auto_set_supplier_warehouse(self):
         """Job Worker Warehouse is hidden on the form (setup.py hide_sco_job_worker_warehouse)

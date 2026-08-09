@@ -46,6 +46,7 @@
    "fieldname": "remark",
    "fieldtype": "Small Text",
    "in_list_view": 1,
+   "columns": 2,
    "label": "Remark"
   }
  ],

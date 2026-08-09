@@ -156,10 +156,10 @@
    "fieldtype": "Column Break"
   },
   {
-   "description": "Warehouse to receive unconsumed/off-cut material back.",
+   "description": "Warehouse that receives both the finished good (Make Final Stock Entry) and unconsumed/off-cut material (Return Excess Entry).",
    "fieldname": "excess_return_warehouse",
    "fieldtype": "Link",
-   "label": "Excess/Return Warehouse",
+   "label": "Finished Goods Warehouse",
    "options": "Warehouse"
   },
   {

@@ -159,7 +159,7 @@ def get_columns():
 		{"label": _("Job Type"), "fieldname": "job_type", "fieldtype": "Data", "width": 120},
 		{"label": _("Subcontracting Order"), "fieldname": "subcontracting_order", "fieldtype": "Link", "options": "Subcontracting Order", "width": 150},
 		{"label": _("Supplier"), "fieldname": "supplier", "fieldtype": "Link", "options": "Supplier", "width": 140},
-		{"label": _("Excess/Return Warehouse"), "fieldname": "excess_return_warehouse", "fieldtype": "Link", "options": "Warehouse", "width": 160},
+		{"label": _("Finished Goods Warehouse"), "fieldname": "excess_return_warehouse", "fieldtype": "Link", "options": "Warehouse", "width": 160},
 		{"label": _("Item Code"), "fieldname": "item_code", "fieldtype": "Link", "options": "Item", "width": 130},
 		{"label": _("Item Name"), "fieldname": "item_name", "fieldtype": "Data", "width": 160},
 		{"label": _("Item Group"), "fieldname": "parent_item_group", "fieldtype": "Data", "width": 100},

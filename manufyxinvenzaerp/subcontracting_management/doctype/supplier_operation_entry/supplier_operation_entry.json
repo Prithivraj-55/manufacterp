@@ -28,6 +28,8 @@
   "custom_inspection_tab",
   "custom_inspection_status",
   "custom_inspection_call_date",
+  "custom_inspection_items_section",
+  "inspection_items",
   "custom_inspection_call_log_section",
   "custom_inspection_call_log"
  ],
@@ -183,6 +185,20 @@
    "fieldtype": "Date",
    "label": "Inspection Call Date",
    "depends_on": "eval:doc.custom_inspection_mandatory"
+  },
+  {
+   "fieldname": "custom_inspection_items_section",
+   "fieldtype": "Section Break",
+   "label": "Inspection Items",
+   "depends_on": "eval:doc.custom_inspection_mandatory"
+  },
+  {
+   "fieldname": "inspection_items",
+   "fieldtype": "Table",
+   "label": "Inspection Items",
+   "options": "SOE Inspection Item",
+   "read_only": 1,
+   "description": "Auto-maintained: Nos logged as completed in Consumption Log but not yet cleared by Inspection. Reduces as Inspection Entries are submitted; rejected Nos reappear here for rework."
   },
   {
    "fieldname": "custom_inspection_call_log_section",

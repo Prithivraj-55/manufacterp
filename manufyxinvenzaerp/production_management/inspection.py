@@ -26,9 +26,11 @@ that entry's `status` — it is not independently re-derived from rework/reject
 qty, since the inspector's own status choice is authoritative.
 """
 
+from collections import defaultdict
+
 import frappe
 from frappe import _
-from frappe.utils import flt, nowdate
+from frappe.utils import flt
 
 INSPECTION_OPERATIONS = ("Fitup Inspection", "Final Inspection")
 
@@ -106,7 +108,17 @@ def add_inspection_call(source_doctype, source_name, call_date=None):
 	directly (Purchase Receipt's popup-driven flow, which doesn't persist a
 	separate call-date field on the document); falls back to the source
 	doc's own `custom_inspection_call_date` field for Job Card/SOE. Blocked
-	while a round is already logged and not yet Completed."""
+	while a round is already logged and not yet Completed.
+
+	For Supplier Operation Entry, also blocked when nothing is actually pending
+	inspection yet (inspection_items all at qty_nos 0 -- e.g. everything already
+	accepted in a prior round, nothing new logged in the Consumption Log since).
+	Without this check, supplier_operation_entry.js's single "Create Inspection"
+	button would add a new Pending round here, then immediately fail in
+	create_inspection_entry's own identical check right after -- leaving an
+	orphan Pending round with no Inspection Entry that can never be completed
+	(nothing is pending) and that then blocks any FUTURE real inspection call too
+	(the round-in-progress check above)."""
 	doc = _get_source_doc(source_doctype, source_name)
 
 	call_date = call_date or doc.custom_inspection_call_date
@@ -116,6 +128,14 @@ def add_inspection_call(source_doctype, source_name, call_date=None):
 	existing = doc.get("custom_inspection_call_log") or []
 	if any(row.round_status != "Completed" for row in existing):
 		frappe.throw(_("Inspection already in progress, complete it to create new inspection."))
+
+	if source_doctype == "Supplier Operation Entry":
+		pending_items = [row for row in (doc.get("inspection_items") or []) if flt(row.qty_nos) > 0]
+		if not pending_items:
+			frappe.throw(_(
+				"All items have already completed inspection -- nothing new is pending. "
+				"Log more Nos as completed in the Consumption Log first."
+			))
 
 	doc.append("custom_inspection_call_log", {
 		"round_no": len(existing) + 1,
@@ -209,6 +229,24 @@ def create_inspection_entry(source_doctype, source_name):
 			"supplier": supplier,
 		})
 
+		if source_doctype == "Supplier Operation Entry":
+			# Carry over whatever is currently pending in the SOE's own inspection_items
+			# (Consumption Log total minus what's already been accepted) as this entry's
+			# review rows -- the inspector enters Accepted/Rejected Qty per drawing here
+			# instead of one overall Total Checked Qty.
+			soe_items = [
+				{
+					"drawing": row.drawing,
+					"customer_drawing_number": row.customer_drawing_number,
+					"qty_nos": row.qty_nos,
+				}
+				for row in (doc.get("inspection_items") or [])
+				if flt(row.qty_nos) > 0
+			]
+			if not soe_items:
+				frappe.throw(_("Nothing is pending inspection yet -- log some Nos as completed in the Consumption Log first."))
+			entry_data["soe_items"] = soe_items
+
 	entry = frappe.get_doc(entry_data).insert(ignore_mandatory=True)
 
 	frappe.db.set_value("Inspection Call Log", pending_row.name, "inspection_entry", entry.name)
@@ -264,6 +302,9 @@ def on_submit_inspection_entry(doc, method):
 			)
 			for row_batch_no in _resolve_pr_item_batch_nos(row.pr_item_row):
 				frappe.db.set_value("Batch", row_batch_no, "custom_batch_remarks", row.remarks or remarks)
+	elif parent_doctype == "Supplier Operation Entry":
+		remarks = doc.overall_remarks or doc.rework_remarks or ""
+		_apply_soe_inspection_results(doc)
 	else:
 		remarks = doc.overall_remarks or doc.rework_remarks or ""
 
@@ -275,10 +316,66 @@ def on_submit_inspection_entry(doc, method):
 		{"round_status": "Completed", "remarks": remarks},
 	)
 	frappe.db.set_value(parent_doctype, parent_name, "custom_inspection_status", new_status)
-	frappe.db.set_value("Inspection Entry", doc.name, "inspection_complete_date", nowdate())
+	# inspection_complete_date is set on the Inspection Entry itself at save-time
+	# (InspectionEntry._set_inspection_complete_date), not here on submit — it should
+	# reflect when Status was actually saved as Completed, not the later submit moment.
 
 
 # ─── Private helpers ─────────────────────────────────────────────────────────
+
+def _apply_soe_inspection_results(entry):
+	"""Add each soe_items row's Accepted Qty onto the source SOE's own Drawing
+	Details completed_qty_nos (additive across inspection rounds, keyed by drawing),
+	so accepted quantity can proceed to the next operation. Rejected Qty is not
+	written anywhere here -- the SOE's own inspection_items table re-derives what's
+	still pending on its next save (raw Consumption Log total minus the
+	now-updated completed_qty_nos -- see subcontracting._sync_soe_inspection_items),
+	so a rejection simply reappears there for rework the moment it's logged again."""
+	accept_by_drawing = defaultdict(float)
+	for row in (entry.get("soe_items") or []):
+		if row.drawing and flt(row.accept_qty) > 0:
+			accept_by_drawing[row.drawing] += flt(row.accept_qty)
+	if not accept_by_drawing:
+		return
+
+	soe = frappe.get_doc("Supplier Operation Entry", entry.supplier_operation_entry)
+	changed = False
+	for row in (soe.drawing_details or []):
+		add = accept_by_drawing.get(row.drawing or "")
+		if add:
+			row.completed_qty_nos = flt(flt(row.completed_qty_nos) + add, 3)
+			changed = True
+	if not changed:
+		return
+
+	if soe.docstatus == 1:
+		# Normally inspection completes while the SOE is still draft -- this only runs
+		# if the SOE was already submitted first. A plain doc.save() would hit
+		# Frappe's update-after-submit guard on completed_qty_nos, so patch the numbers
+		# directly instead and re-run the same propagation on_submit_supplier_operation_entry
+		# already does once, by hand.
+		from manufyxinvenzaerp.subcontracting_management.subcontracting import (
+			_propagate_available_to_next,
+			_propagate_drawing_nos_to_next,
+			_update_sco_drawing_item_completion,
+		)
+
+		for row in soe.drawing_details:
+			frappe.db.set_value(
+				"SOE Drawing Detail", row.name, "completed_qty_nos", row.completed_qty_nos,
+				update_modified=False,
+			)
+		soe.total_completed_nos = flt(sum(flt(r.completed_qty_nos) for r in soe.drawing_details), 3)
+		frappe.db.set_value(
+			"Supplier Operation Entry", soe.name, "total_completed_nos", soe.total_completed_nos,
+			update_modified=False,
+		)
+		_propagate_available_to_next(soe)
+		_propagate_drawing_nos_to_next(soe)
+		_update_sco_drawing_item_completion(soe)
+	else:
+		soe.save(ignore_permissions=True)
+
 
 def _resolve_pr_item_batch_nos(pr_item_row):
 	"""Batch(es) a Purchase Receipt Item row actually received, for the Batch

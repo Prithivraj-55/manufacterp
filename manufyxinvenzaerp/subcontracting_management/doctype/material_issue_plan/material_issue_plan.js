@@ -1,5 +1,20 @@
 frappe.ui.form.on("Material Issue Plan", {
 	refresh(frm) {
+		// Once auto-completed (stock received + every excess row resolved --
+		// see _maybe_mark_completed in material_issue_plan.py), lock the whole
+		// document: no more edits, and skip adding the transfer/return/final-SE
+		// action buttons below. The matching whitelisted endpoints also refuse
+		// directly (_ensure_mip_editable), so this is UI convenience on top of
+		// a real server-side lock, not the only thing enforcing it.
+		if (frm.doc.status === "Completed") {
+			frm.disable_form();
+			frappe.show_alert({
+				message: __("This Material Issue Plan is Completed and locked for further changes."),
+				indicator: "green",
+			});
+			return;
+		}
+
 		frm.set_query("subcontracting_order", () => ({
 			filters: { custom_production_plan: frm.doc.production_plan || "" },
 		}));
@@ -16,7 +31,9 @@ frappe.ui.form.on("Material Issue Plan", {
 		_add_view_all_raw_materials_button(frm);
 		_add_update_batch_button(frm);
 		_add_transfer_buttons(frm);
+		_add_pdf_button(frm);
 		_render_excess_action_btn(frm);
+		_add_final_stock_entry_button(frm);
 	},
 
 	load_drawings_btn(frm) {
@@ -24,13 +41,53 @@ frappe.ui.form.on("Material Issue Plan", {
 	},
 
 	refresh_raw_materials_btn(frm) {
+		let rows = frm.doc.raw_materials || [];
+
+		function do_refresh() {
+			frappe.call({
+				method: "manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.refresh_mip_raw_materials_manual",
+				args: { mip_name: frm.doc.name },
+				freeze: true,
+				freeze_message: __("Refreshing raw materials..."),
+				callback() {
+					frm.reload_doc();
+				},
+			});
+		}
+
+		function maybe_confirm_then_refresh() {
+			// Nothing transferred, but rows already exist -- batch mapping, excess
+			// material mapping, cut sheet, or excess return edits may already be on
+			// them. Refreshing rebuilds the table from scratch, so confirm first.
+			if (rows.length) {
+				frappe.confirm(
+					__("Batch mapping, Excess Material Mapping, or other changes may already be made on these rows. Refreshing will remove all current rows and rebuild them fresh. Are you sure you want to continue?"),
+					do_refresh
+				);
+			} else {
+				do_refresh();
+			}
+		}
+
+		// Live check against submitted Stock Entries -- deliberately NOT based on
+		// raw_materials.transferred_qty on the currently-loaded doc, which only
+		// gets (re)computed by a refresh itself and so reads stale (still 0) right
+		// after a transfer if nothing has refreshed this table since. Server enforces
+		// the same check too (refresh_mip_raw_materials_manual); this pre-flight call
+		// is what avoids showing the "are you sure?" confirm before that hard block.
 		frappe.call({
-			method: "manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.refresh_mip_raw_materials",
+			method: "manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.check_mip_raw_materials_refreshable",
 			args: { mip_name: frm.doc.name },
-			freeze: true,
-			freeze_message: __("Refreshing raw materials..."),
-			callback() {
-				frm.reload_doc();
+			callback(r) {
+				if (r.message && r.message.blocked) {
+					frappe.msgprint({
+						title: __("Cannot Refresh"),
+						indicator: "red",
+						message: r.message.message,
+					});
+					return;
+				}
+				maybe_confirm_then_refresh();
 			},
 		});
 	},
@@ -58,6 +115,46 @@ function _load_mip_drawings(frm) {
 	} else {
 		_load();
 	}
+}
+
+// "Make Final Stock Entry" — moved here from the Subcontracting Order (client
+// change request). Once the linked SCO's operations are all complete, creates a
+// draft Manufacture Stock Entry that consumes the supplier-warehouse raw material
+// and produces the finished good; the stock-return workflow (Return Excess Entry)
+// already lives on this doctype, so the finished-goods entry is created from the
+// same place. custom_all_ops_complete lives on the Subcontracting Order, not the
+// MIP, so it's read via a lookup rather than a stored/fetched field.
+function _add_final_stock_entry_button(frm) {
+	if (frm.is_new() || !frm.doc.subcontracting_order) return;
+
+	frappe.db.get_value("Subcontracting Order", frm.doc.subcontracting_order, "custom_all_ops_complete")
+		.then((r) => {
+			if (!(r.message && r.message.custom_all_ops_complete)) return;
+
+			frm.add_custom_button(__("Make Final Stock Entry"), function () {
+				frappe.call({
+					method: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_finished_goods_entry",
+					args: { sco_name: frm.doc.subcontracting_order },
+					freeze: true,
+					freeze_message: __("Creating Final Stock Entry…"),
+					callback: function (r) {
+						if (r.message) {
+							let se_name = r.message.name;
+							let already = r.message.already_existed;
+							frappe.msgprint({
+								title: already ? __("Final Stock Entry Already Exists") : __("Final Stock Entry Created"),
+								message: (already
+										? __("A draft Final Stock Entry already exists for this Subcontracting Order. ")
+										: "")
+									+ __("Review and submit the stock entry: ") +
+									'<a href="/app/stock-entry/' + encodeURIComponent(se_name) + '">' + se_name + "</a>",
+								indicator: already ? "orange" : "green"
+							});
+						}
+					},
+				});
+			});
+		});
 }
 
 // "View All" — raw_materials can run past 100 rows, well beyond the grid's
@@ -302,6 +399,54 @@ function _check_transfer_readiness(frm, on_proceed) {
 	});
 }
 
+// ── Batch Plan PDF ────────────────────────────────────────────────────────────
+// Simple, printable reference for the production/supplier team: for this item,
+// this batch (with its Sec Qty) is what's planned, per drawing. The preview
+// popup and the downloaded PDF render from the exact same server-built HTML
+// (get_mip_batch_plan_html), so what you see is exactly what you download.
+
+function _add_pdf_button(frm) {
+	if (frm.is_new()) return;
+	frm.add_custom_button(frappe.utils.icon("filetype", "xs") + " " + __("PDF"), function() {
+		_show_mip_batch_plan_popup(frm);
+	});
+}
+
+function _show_mip_batch_plan_popup(frm) {
+	frappe.call({
+		method: "manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.get_mip_batch_plan_html",
+		args: { mip_name: frm.doc.name },
+		freeze: true,
+		freeze_message: __("Building batch plan…"),
+		callback: function(r) {
+			if (!r.message) return;
+
+			var dlg = new frappe.ui.Dialog({
+				title: __("Batch Plan — {0}", [frm.doc.name]),
+				size: "extra-large",
+				fields: [{ fieldtype: "HTML", fieldname: "content" }],
+			});
+			dlg.fields_dict.content.$wrapper.html(r.message);
+
+			// "Download" in the dialog's top corner (next to the close icon) rather
+			// than the usual bottom primary-action button, per how this was asked for.
+			var $download = $(
+				'<button class="btn btn-primary btn-sm" style="margin-right:8px">' + __("Download") + "</button>"
+			);
+			$download.on("click", function() {
+				window.open(
+					"/api/method/manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.download_mip_batch_plan_pdf?mip_name="
+					+ encodeURIComponent(frm.doc.name),
+					"_blank"
+				);
+			});
+			dlg.header.find(".modal-actions").prepend($download);
+
+			dlg.show();
+		},
+	});
+}
+
 // ── Transfer / CNC buttons ───────────────────────────────────────────────────
 
 function _add_transfer_buttons(frm) {
@@ -490,6 +635,7 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 		+ "<th style='width:32px'></th>"
 		+ "<th>" + __("Item Code") + "</th>"
 		+ "<th>" + __("Batch No") + "</th>"
+		+ "<th class='text-right'>" + __("Sec Nos") + "</th>"
 		+ "<th class='text-right'>" + __("Qty (Kg)") + "</th>"
 		+ "</tr></thead><tbody></tbody></table>");
 
@@ -500,6 +646,8 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 			"<td class='text-center'><input type='checkbox' class='mip-item-chk' checked></td>" +
 			"<td>" + frappe.utils.escape_html(d.item_code) + "</td>" +
 			"<td>" + frappe.utils.escape_html(d.batch_no || "") + "</td>" +
+			"<td class='text-right'>" + format_number(flt(d.custom_sec_qty), null, 3)
+				+ (d.custom_sec_uom ? " " + frappe.utils.escape_html(d.custom_sec_uom) : "") + "</td>" +
 			"<td class='text-right'>" + format_number(flt(d.qty), null, 3) + "</td>" +
 			"</tr>"
 		);
@@ -651,19 +799,24 @@ function _show_return_excess_dialog(frm) {
 				});
 				return;
 			}
-			dialog.hide();
-			frappe.call({
-				method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.create_mip_excess_return_entry",
-				args: { mip_name: frm.doc.name, rows_json: JSON.stringify(payload) },
-				freeze: true,
-				freeze_message: __("Creating return entry…"),
-				callback(r) {
-					if (r.message) {
-						frappe.msgprint({ title: __("Return Excess Entry Created"), message: __("Return Stock Entry: ") + '<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>", indicator: "green" });
-						frm.reload_doc();
-					}
-				},
-			});
+			frappe.confirm(
+				__("This material will be received into the Finished Goods Warehouse ({0}). Continue?", [frappe.utils.escape_html(frm.doc.excess_return_warehouse)]),
+				function () {
+					dialog.hide();
+					frappe.call({
+						method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.create_mip_excess_return_entry",
+						args: { mip_name: frm.doc.name, rows_json: JSON.stringify(payload) },
+						freeze: true,
+						freeze_message: __("Creating return entry…"),
+						callback(r) {
+							if (r.message) {
+								frappe.msgprint({ title: __("Return Excess Entry Created"), message: __("Return Stock Entry: ") + '<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>", indicator: "green" });
+								frm.reload_doc();
+							}
+						},
+					});
+				}
+			);
 		},
 	});
 

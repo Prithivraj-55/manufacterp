@@ -27,6 +27,7 @@ class MaterialIssuePlan(Document):
         _auto_suggest_excess_from_cut_sheet(self)
         _sync_excess_return_from_raw_materials(self)
         _sync_batch_remarks(self)
+        _maybe_mark_completed(self)
 
     def on_trash(self):
         """Remove Batch Change Log rows referencing this MIP from all linked
@@ -112,11 +113,16 @@ def populate_from_production_plan(mip_name):
     if mip.work_order and not mip.excess_return_warehouse:
         mip.excess_return_warehouse = frappe.db.get_value("Work Order", mip.work_order, "fg_warehouse") or ""
 
-    # Supplier Warehouse — read-only display of where material is transferring
-    # TO, resolved from the linked SCO's standard field. Purely informational;
-    # the actual transfer destination is always re-resolved fresh at transfer
-    # time via get_target_context/_resolve_warehouses.
-    if mip.subcontracting_order:
+    # Supplier / WIP Warehouse — for a Supplier Job/Supplier with Material flow this
+    # defaults from the linked SCO's Job Worker Warehouse (auto-resolved once a Job
+    # Worker is set). An Internal Job SCO has no Job Worker, so that field never
+    # auto-sets -- this is then the ONLY place the WIP warehouse is recorded, entered
+    # by hand, and must never be silently overwritten. Only fills in when still blank,
+    # same as source_warehouse/excess_return_warehouse above -- this used to run
+    # unconditionally and wiped out a manually-set WIP Warehouse back to blank on every
+    # refresh, which also broke SCO/SOE transfer tracking downstream (see
+    # _update_sco_transferred_weight in stock_entry.py).
+    if mip.subcontracting_order and not mip.supplier_warehouse:
         mip.supplier_warehouse = frappe.db.get_value(
             "Subcontracting Order", mip.subcontracting_order, "supplier_warehouse"
         ) or ""
@@ -154,6 +160,58 @@ _RAW_MATERIAL_EDITABLE_FIELDS = [
     "cut_sheet", "use_length", "use_width", "use_sec_qty", "use_calc_qty",
     "balance_length", "balance_width", "balance_sec_qty", "balance_calc_qty",
 ]
+
+
+def _mip_refresh_blocked_message(mip):
+    """Shared by check_mip_raw_materials_refreshable (pre-flight check the 'Refresh Raw
+    Materials' button calls before deciding confirm-vs-block) and
+    refresh_mip_raw_materials_manual's own throw -- one source of truth for both the
+    condition and its wording, naming the actual Stock Entry(ies) to delete rather than
+    a generic 'already transferred' notice."""
+    from manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer import (
+        _get_mip_transfer_stock_entry_names,
+    )
+    se_names = _get_mip_transfer_stock_entry_names(mip)
+    if not se_names:
+        return None
+    return _(
+        "Stock has already been transferred for this Material Issue Plan ({0}). "
+        "Raw Materials cannot be refreshed. Delete the Stock Entry to refresh the raw materials."
+    ).format(", ".join(se_names))
+
+
+@frappe.whitelist()
+def check_mip_raw_materials_refreshable(mip_name):
+    """Live pre-flight check for the 'Refresh Raw Materials' button -- queries submitted
+    Stock Entries directly rather than trusting raw_materials.transferred_qty on the
+    currently-loaded snapshot, which only gets (re)computed by refresh_mip_raw_materials
+    itself and so reads stale (still 0) right after a transfer if nothing has refreshed
+    this table since. Returns {"blocked": bool, "message": str|None} so the button can
+    show the correct hard-block message instead of a misleading 'are you sure?' confirm
+    when a transfer has already happened but the snapshot hasn't caught up yet."""
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+    message = _mip_refresh_blocked_message(mip)
+    return {"blocked": bool(message), "message": message}
+
+
+@frappe.whitelist()
+def refresh_mip_raw_materials_manual(mip_name):
+    """Wrapper around refresh_mip_raw_materials specifically for the user-facing
+    'Refresh Raw Materials' button -- blocks outright once any reserved batch has
+    already been physically transferred out. Server-side twin of
+    check_mip_raw_materials_refreshable, so a direct/scripted call is blocked the same
+    way even if the JS pre-flight check was somehow bypassed.
+
+    Every OTHER caller of refresh_mip_raw_materials (post-purchase auto-refresh,
+    batch reassignment's own re-sync, initial population from the Production Plan)
+    must keep working unconditionally even after a partial transfer -- more items
+    can still be purchased/reserved for drawings that haven't shipped yet -- so the
+    block lives here, in this thin wrapper, not in the shared function itself."""
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+    message = _mip_refresh_blocked_message(mip)
+    if message:
+        frappe.throw(message)
+    return refresh_mip_raw_materials(mip_name)
 
 
 @frappe.whitelist()
@@ -477,6 +535,57 @@ def _sync_batch_remarks(mip):
             row.batch_remarks = remarks_by_batch.get(row.batch_no) or ""
 
 
+def _maybe_mark_completed(mip):
+    """Auto-elevate status to Completed once both are true:
+      1. Finished-goods stock has actually been received -- a submitted 'Manufacture'
+         Stock Entry exists for this MIP's Subcontracting Order (created via the
+         'Make Final Stock Entry' button -> create_finished_goods_entry).
+      2. Every excess_return_items row is resolved: either physically returned
+         (stock_entry_created), claimed straight off this table into another
+         Material Planning (mapped_material_planning), or flagged to never
+         physically leave the supplier (Retain at Supplier (Virtual)). An empty
+         table trivially satisfies this -- nothing to return.
+
+    Only ever moves Open/In Progress -> Completed, never the reverse -- once set,
+    later saves are no-ops here (this function returns immediately) and the
+    document is locked for further edits (see the whitelisted-endpoint guards in
+    material_issue_plan_transfer.py and disable_form() in material_issue_plan.js)."""
+    if mip.status == "Completed":
+        return
+    if not mip.subcontracting_order:
+        return
+    fg_received = frappe.db.exists("Stock Entry", {
+        "subcontracting_order": mip.subcontracting_order,
+        "stock_entry_type": "Manufacture",
+        "docstatus": 1,
+    })
+    if not fg_received:
+        return
+    for row in (mip.excess_return_items or []):
+        if row.stock_entry_created or row.mapped_material_planning:
+            continue
+        if row.return_type == "Retain at Supplier (Virtual)":
+            continue
+        return
+    mip.status = "Completed"
+
+
+def recheck_mip_completion(mip_name):
+    """Re-check entrypoint for code paths that resolve an excess_return_items row via
+    a raw frappe.db.set_value on the child row (bypassing this doctype's own validate())
+    -- claim_virtual_excess_mapping and _mark_excess_item_mapped in material_planning.py,
+    both of which claim a row straight into a Material Mapping reservation without ever
+    calling mip.save(). A plain mip.save() would also re-run the full Cut Sheet/Excess
+    Return sync chain for no reason; this only re-evaluates _maybe_mark_completed and, if
+    now eligible, commits the status flip directly."""
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+    if mip.status == "Completed":
+        return
+    _maybe_mark_completed(mip)
+    if mip.status == "Completed":
+        frappe.db.set_value("Material Issue Plan", mip_name, "status", "Completed", update_modified=False)
+
+
 def _auto_suggest_excess_from_cut_sheet(mip):
     """Once a Cut Sheet row's Balance (W2) is calculated, auto-suggest it as an
     Excess Return row: seed excess_return_applicable + Excess Length/Width/Sec
@@ -516,7 +625,12 @@ def refresh_weight_summary(mip_name):
 
     mip = frappe.get_doc("Material Issue Plan", mip_name)
 
-    if mip.subcontracting_order:
+    # See populate_from_production_plan for why this only fills in when blank --
+    # an Internal Job SCO's supplier_warehouse never auto-sets, so overwriting
+    # unconditionally here (this runs on every Stock Entry submit, via
+    # _refresh_linked_mip_weight) wiped out a manually-entered WIP Warehouse right
+    # after the user transferred material into it.
+    if mip.subcontracting_order and not mip.supplier_warehouse:
         mip.supplier_warehouse = frappe.db.get_value(
             "Subcontracting Order", mip.subcontracting_order, "supplier_warehouse"
         ) or ""
@@ -664,5 +778,132 @@ def _resolve_warehouses(mip):
         wip_warehouse = frappe.db.get_value("Work Order", mip.work_order, "wip_warehouse")
         if wip_warehouse:
             target_warehouses.append(wip_warehouse)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Batch Plan PDF -- a simple, printable reference for the production/supplier
+# team: for each item on each drawing, which physical batch (and how much of
+# it, by Sec Qty) is planned. get_mip_batch_plan_html and
+# download_mip_batch_plan_pdf both render from the exact same HTML builder so
+# the on-screen preview and the downloaded PDF are always identical.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@frappe.whitelist()
+def get_mip_batch_plan_html(mip_name):
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+    return _render_mip_batch_plan_html(mip)
+
+
+@frappe.whitelist()
+def download_mip_batch_plan_pdf(mip_name):
+    from frappe.utils.pdf import get_pdf
+
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+    html = _render_mip_batch_plan_html(mip)
+    frappe.local.response.filename = "{0}-Batch-Plan.pdf".format(
+        mip_name.replace(" ", "-").replace("/", "-")
+    )
+    frappe.local.response.filecontent = get_pdf(html)
+    frappe.local.response.type = "pdf"
+
+
+def _render_mip_batch_plan_html(mip):
+    supplier = ""
+    if mip.subcontracting_order:
+        supplier = frappe.db.get_value("Subcontracting Order", mip.subcontracting_order, "supplier") or ""
+    elif mip.work_order:
+        supplier = _("Internal")
+
+    rows = []
+    for r in (mip.raw_materials or []):
+        if not r.item_code:
+            continue
+        dims = " x ".join(str(flt(v, 2)) for v in (r.length, r.width, r.thickness) if flt(v)) or "-"
+        rows.append({
+            "duno": r.duno_mark_no or "",
+            "cdn": r.customer_drawing_number or "",
+            "item_code": r.item_code,
+            "item_name": r.item_name or "",
+            "planned_kg": flt(r.reqd_kg, 3),
+            "batch_no": r.batch_no or _("Not Yet Allocated"),
+            "dims": dims,
+            "sec_qty": flt(r.sec_qty, 3),
+            "sec_uom": r.sec_uom or "",
+            "batch_weight_kg": flt(r.qty, 3),
+        })
+    rows.sort(key=lambda x: (not x["duno"], x["duno"], x["item_code"]))
+
+    posting_date = frappe.utils.formatdate(mip.posting_date) if mip.posting_date else ""
+
+    row_html = "".join("""
+        <tr>
+            <td>{duno}</td>
+            <td>{cdn}</td>
+            <td>{item_code}<br><span class="item-name">{item_name}</span></td>
+            <td class="num">{planned_kg}</td>
+            <td>{batch_no}</td>
+            <td>{dims}</td>
+            <td class="num">{sec_qty} {sec_uom}</td>
+            <td class="num">{batch_weight_kg}</td>
+        </tr>
+    """.format(
+        duno=frappe.utils.escape_html(r["duno"] or "-"),
+        cdn=frappe.utils.escape_html(r["cdn"] or "-"),
+        item_code=frappe.utils.escape_html(r["item_code"]),
+        item_name=frappe.utils.escape_html(r["item_name"]),
+        planned_kg=r["planned_kg"],
+        batch_no=frappe.utils.escape_html(r["batch_no"]),
+        dims=frappe.utils.escape_html(r["dims"]),
+        sec_qty=r["sec_qty"],
+        sec_uom=frappe.utils.escape_html(r["sec_uom"]),
+        batch_weight_kg=r["batch_weight_kg"],
+    ) for r in rows)
+
+    return """
+    <div class="mip-batch-plan">
+        <style>
+            .mip-batch-plan {{ font-family: Arial, Helvetica, sans-serif; color:#222; }}
+            .mip-batch-plan h2 {{ margin:0 0 4px; }}
+            .mip-batch-plan .meta {{ font-size:12px; color:#555; margin-bottom:14px; }}
+            .mip-batch-plan table {{ width:100%; border-collapse:collapse; font-size:11.5px; }}
+            .mip-batch-plan th {{ background:#f4f4f4; text-align:left; padding:6px 8px; border:1px solid #ccc; }}
+            .mip-batch-plan td {{ padding:6px 8px; border:1px solid #ddd; vertical-align:top; }}
+            .mip-batch-plan td.num {{ text-align:right; }}
+            .mip-batch-plan .item-name {{ color:#777; font-size:10.5px; }}
+        </style>
+        <h2>{title}</h2>
+        <div class="meta">
+            {mip_label}: {mip_name} &nbsp;|&nbsp; {company_label}: {company} &nbsp;|&nbsp;
+            {date_label}: {posting_date} &nbsp;|&nbsp; {supplier_label}: {supplier}
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>{col_duno}</th>
+                    <th>{col_cdn}</th>
+                    <th>{col_item}</th>
+                    <th>{col_planned}</th>
+                    <th>{col_batch}</th>
+                    <th>{col_dims}</th>
+                    <th>{col_secqty}</th>
+                    <th>{col_batchwt}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {row_html}
+            </tbody>
+        </table>
+    </div>
+    """.format(
+        title=_("Material Issue Plan — Batch Plan"),
+        mip_label=_("MIP"), mip_name=mip.name,
+        company_label=_("Company"), company=frappe.utils.escape_html(mip.company or ""),
+        date_label=_("Posting Date"), posting_date=posting_date,
+        supplier_label=_("Supplier"), supplier=frappe.utils.escape_html(supplier),
+        col_duno=_("DUNO/Mark No"), col_cdn=_("Customer Drawing No"), col_item=_("Item"),
+        col_planned=_("Planned Kg"), col_batch=_("Batch No"), col_dims=_("Dimensions (mm)"),
+        col_secqty=_("Sec Qty"), col_batchwt=_("Batch Weight (Kg)"),
+        row_html=row_html,
+    )
 
     return source_warehouse, [w for w in target_warehouses if w]

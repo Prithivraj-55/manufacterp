@@ -290,6 +290,20 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
     The matched Unavailable Items row is removed once fully covered; if the PR
     received less than the row's required qty, the row is kept with its qty
     (and proportional Sec Qty) reduced to just the remaining shortfall.
+
+    No item/batch/duno-keyed dedup is applied when appending Available Raw
+    Materials/Material Mapping rows -- a drawing can genuinely need the SAME
+    item from the SAME batch more than once (e.g. two different-length pieces
+    of ISA100 on one duno), and such a key previously collapsed those into one,
+    silently discarding the second Unavailable Item row (still marked
+    fulfilled and removed by the reconcile step below, since _consume() runs
+    before any such check) with no Available Raw Materials/Material Mapping
+    row ever created for it -- a real data-loss bug found on MP-2026-00010
+    (18 rows, ~132.9 Kg, across 13 duno+item combinations). Re-running this
+    function for the same PR is naturally idempotent without a key anyway:
+    each call rebuilds its match candidates from mp.unavailable_items as it
+    currently stands, and a fully-fulfilled row is already gone from that
+    table by the time any second call could happen.
     """
     pr = frappe.get_doc("Purchase Receipt", pr_name)
     mp = frappe.get_doc("Material Planning", mp_name)
@@ -323,14 +337,6 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
             by_consolidate_alt_any.setdefault(c_row.alternate_item, []).extend(
                 unavail_by_item_code.get(c_row.item_code, [])
             )
-
-    # Existing allocations — avoid duplicates. Keyed by (item_code, batch_no,
-    # duno_mark_no): batch_no alone isn't enough — many items in this instance
-    # have batch_no blank/shared, and without the DUNO in the key every
-    # shortfall row past the first for a given item_code would look like a
-    # duplicate of the one already added and get silently skipped.
-    existing_exact   = {(r.item_code, r.batch_no, r.duno_mark_no or "")    for r in (mp.available_raw_materials or [])}
-    existing_mapping = {(r.item_code, r.batch or "", r.duno_mark_no or "") for r in (mp.material_mapping       or [])}
 
     added_exact   = 0
     added_mapping = 0
@@ -463,10 +469,6 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
 
             for mp_row, alloc_qty in _split_allocation(matched_alternate, received_qty, sequential):
                 _consume(mp_row, alloc_qty)
-                key = (mp_row.item_code, batch_no, mp_row.duno_mark_no or "")
-                if key in existing_mapping:
-                    continue
-                existing_mapping.add(key)
                 ratio = (alloc_qty / received_qty) if received_qty else 0.0
                 mp.append("material_mapping", {
                     "item_number":            mp_row.item_number,
@@ -521,10 +523,6 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
 
             for mp_row, alloc_qty in _split_allocation(matched_original, received_qty, sequential):
                 _consume(mp_row, alloc_qty)
-                key = (item_code, batch_no, mp_row.duno_mark_no or "")
-                if key in existing_exact:
-                    continue
-                existing_exact.add(key)
                 ratio = (alloc_qty / received_qty) if received_qty else 0.0
                 mp.append("available_raw_materials", {
                     "item_number":            mp_row.item_number,
@@ -640,11 +638,32 @@ def on_submit_purchase_receipt(doc, method):
                 )
 
 
+def _get_batch_from_bundle(sbb_name):
+    """Resolve a Serial and Batch Bundle to its batch_no -- Frappe v15 items using
+    use_serial_batch_fields can end up with the PR item's own batch_no blank and
+    the batch reference living only in its serial_and_batch_bundle instead. Was
+    previously called here but never defined (a latent NameError -- this crashed
+    get_pr_mp_allocations for any PR whose items went through the bundle path)."""
+    if not sbb_name:
+        return None
+    return frappe.db.get_value("Serial and Batch Entry", {"parent": sbb_name}, "batch_no")
+
+
 @frappe.whitelist()
 def get_pr_mp_allocations(pr_name):
     """Return which Material Planning documents have batches from this PR allocated,
-    so the client can show a post-submit popup. Only returns data if at least one
-    batch from this PR appears in a reserved row of any MP."""
+    so the client can show a post-submit popup pointing the user at them.
+
+    Deliberately NOT filtered to is_reserved=1: allocate_pr_stock_to_mp only places
+    the received batch into Available Raw Materials / Material Mapping -- it never
+    sets is_reserved itself, that's still a separate, manual Reserve step on the
+    Material Planning. Filtering by is_reserved here would make this popup fire
+    almost never (nothing is reserved yet right after a normal receipt) and, worse,
+    would let a stale "already reserved" message go out even though a reserve step
+    still needs to happen before the batch can be transferred via a Material Issue
+    Plan (client change request: no transfer for anything not purchased AND
+    reserved -- see _get_mp_reserved_batches's is_reserved=1 filter, which is what
+    actually enforces that)."""
     if not frappe.has_permission("Material Planning", "read"):
         frappe.throw(_("Not permitted to view Material Planning allocations"), frappe.PermissionError)
     pr = frappe.get_doc("Purchase Receipt", pr_name)
@@ -667,18 +686,20 @@ def get_pr_mp_allocations(pr_name):
     ph = ", ".join(["%s"] * len(batch_list))
 
     mm_rows = frappe.db.sql(
-        f"SELECT parent AS mp, batch AS batch_no, item_code, SUM(reserved_qty) AS reserved_qty "
+        f"SELECT parent AS mp, batch AS batch_no, item_code, is_reserved, "
+        f"       SUM(CASE WHEN is_reserved = 1 THEN reserved_qty ELSE qty END) AS qty "
         f"FROM `tabMaterial Planning Material Mapping` "
-        f"WHERE batch IN ({ph}) AND is_reserved = 1 "
-        f"GROUP BY parent, batch, item_code",
+        f"WHERE batch IN ({ph}) "
+        f"GROUP BY parent, batch, item_code, is_reserved",
         batch_list, as_dict=True,
     )
 
     arm_rows = frappe.db.sql(
-        f"SELECT parent AS mp, batch_no, item_code, SUM(reserved_qty) AS reserved_qty "
+        f"SELECT parent AS mp, batch_no, item_code, is_reserved, "
+        f"       SUM(CASE WHEN is_reserved = 1 THEN reserved_qty ELSE required_qty END) AS qty "
         f"FROM `tabMaterial Planning Available Raw Material` "
-        f"WHERE batch_no IN ({ph}) AND is_reserved = 1 "
-        f"GROUP BY parent, batch_no, item_code",
+        f"WHERE batch_no IN ({ph}) "
+        f"GROUP BY parent, batch_no, item_code, is_reserved",
         batch_list, as_dict=True,
     )
 
@@ -688,7 +709,8 @@ def get_pr_mp_allocations(pr_name):
             "material_planning": r.mp,
             "batch_no": r.batch_no,
             "item_code": r.item_code,
-            "reserved_qty": flt(r.reserved_qty, 3),
+            "qty": flt(r.qty, 3),
+            "is_reserved": bool(r.is_reserved),
         })
 
     return result

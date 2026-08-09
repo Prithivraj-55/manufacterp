@@ -25,12 +25,15 @@
   "feedback",
   "overall_remarks",
   "inspection_complete_date",
+  "section_break_remarks",
+  "rework_remarks",
   "section_break_result",
+  "total_qty_to_check",
   "total_checked_qty",
   "cleared_qty",
   "rework_qty",
-  "column_break_result",
-  "rework_remarks",
+  "section_break_soe_items",
+  "soe_items",
   "section_break_pr_items",
   "items",
   "amended_from"
@@ -174,41 +177,62 @@
    "label": "Inspection Complete Date",
    "read_only": 1,
    "no_copy": 1,
-   "description": "Set automatically when this Inspection Entry is submitted."
+   "description": "Set automatically when Status is changed to Completed and saved."
   },
   {
-   "fieldname": "section_break_result",
+   "fieldname": "section_break_remarks",
    "fieldtype": "Section Break",
-   "label": "Inspection Result",
    "depends_on": "eval:doc.source_doctype!=\"Purchase Receipt\""
-  },
-  {
-   "fieldname": "total_checked_qty",
-   "fieldtype": "Float",
-   "label": "Total Checked Qty",
-   "mandatory_depends_on": "eval:doc.source_doctype!=\"Purchase Receipt\""
-  },
-  {
-   "fieldname": "cleared_qty",
-   "fieldtype": "Float",
-   "label": "Cleared Qty",
-   "mandatory_depends_on": "eval:doc.source_doctype!=\"Purchase Receipt\""
-  },
-  {
-   "fieldname": "rework_qty",
-   "fieldtype": "Float",
-   "label": "Rework Qty",
-   "read_only": 1
-  },
-  {
-   "fieldname": "column_break_result",
-   "fieldtype": "Column Break"
   },
   {
    "fieldname": "rework_remarks",
    "fieldtype": "Small Text",
    "label": "Rework Remarks",
-   "mandatory_depends_on": "eval:doc.rework_qty>0"
+   "mandatory_depends_on": "eval:doc.rework_qty>1"
+  },
+  {
+   "fieldname": "section_break_result",
+   "fieldtype": "Section Break",
+   "label": "Inspection Result",
+   "depends_on": "eval:doc.source_doctype==\"Job Card\""
+  },
+  {
+   "fieldname": "total_qty_to_check",
+   "fieldtype": "Float",
+   "label": "Total Qty to Check",
+   "read_only": 1,
+   "description": "Auto-filled from the source Job Card."
+  },
+  {
+   "fieldname": "total_checked_qty",
+   "fieldtype": "Float",
+   "label": "Total Checked Qty",
+   "mandatory_depends_on": "eval:doc.source_doctype==\"Job Card\""
+  },
+  {
+   "fieldname": "cleared_qty",
+   "fieldtype": "Float",
+   "label": "Cleared Qty",
+   "mandatory_depends_on": "eval:doc.source_doctype==\"Job Card\""
+  },
+  {
+   "fieldname": "rework_qty",
+   "fieldtype": "Float",
+   "label": "Rework Qty",
+   "read_only": 1,
+   "description": "Auto-calculated: Total Checked Qty minus Cleared Qty (or, for a Supplier Operation Entry, the sum of Rejected Qty across Inspection Items)."
+  },
+  {
+   "fieldname": "section_break_soe_items",
+   "fieldtype": "Section Break",
+   "label": "Inspection Items",
+   "depends_on": "eval:doc.source_doctype==\"Supplier Operation Entry\""
+  },
+  {
+   "fieldname": "soe_items",
+   "fieldtype": "Table",
+   "label": "Inspection Items",
+   "options": "SOE Inspection Item"
   },
   {
    "fieldname": "section_break_pr_items",

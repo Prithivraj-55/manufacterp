@@ -117,6 +117,9 @@ const CASE_STUDIES = [
 			"Material Request": "MAT-MR-2026-00004 (submitted, Received)",
 			"Purchase Order": "PUR-ORD-2026-00010 (INTERNATIONAL STEEL PRO)",
 			"Purchase Receipt": "PR-26-00006 (Completed)",
+			"Production Plan": "PP-SUP-2026-00001-1 (Type: Supplier Job)",
+			"Job work order": "SC-ORD-2026-00001 (INTERNATIONAL STEEL PRO)",
+			"Material Issue Plan": "MIP-2026-00001",
 		},
 		overview:
 			"This is the simplest, baseline case: every raw material started with ZERO exact-match " +
@@ -144,8 +147,110 @@ const CASE_STUDIES = [
 		],
 		consolidate_items: CASE1_CONSOLIDATE_ITEMS,
 		allocation_examples: CASE1_ALLOCATION_EXAMPLES,
-		production_plan: null,
-		material_issue_plan: null,
+		production_plan: `
+			<table class="mpc-doc-table">
+				<tbody>
+					<tr><td class="mpc-doc-key">Production Plan</td><td>PP-SUP-2026-00001-1</td></tr>
+					<tr><td class="mpc-doc-key">Type</td><td>Supplier Job</td></tr>
+					<tr><td class="mpc-doc-key">Vendor/Contractor</td><td>INTERNATIONAL STEEL PRO</td></tr>
+					<tr><td class="mpc-doc-key">Drawings covered</td><td>1B1, 1B2, 1B3, 1B4, 1B5 — Planned Qty 2, 2, 4, 2, 1 Nos</td></tr>
+					<tr><td class="mpc-doc-key">Job work order</td><td>SC-ORD-2026-00001</td></tr>
+					<tr><td class="mpc-doc-key">Material Issue Plan</td><td>MIP-2026-00001</td></tr>
+				</tbody>
+			</table>
+			<p class="mpc-note-inline">
+				Process Planning laid out six operations, in this order, all performed by the same
+				supplier (Work Type Subcontractor throughout): <b>Material Issue</b>, <b>Fit-up
+				(Inspection Mandatory)</b>, <b>Welding</b>, <b>Final (Inspection Mandatory)</b>,
+				<b>Blasting</b>, <b>Painting</b>. Clicking "Job work order &amp; MIP" created
+				SC-ORD-2026-00001 and MIP-2026-00001 together in one step, then "Supplier Operation
+				Entries" created one Supplier Operation Entry per row above, in sequence.
+			</p>
+		`,
+		material_issue_plan: `
+			<table class="mpc-doc-table">
+				<tbody>
+					<tr><td class="mpc-doc-key">Material Issue Plan</td><td>MIP-2026-00001</td></tr>
+					<tr><td class="mpc-doc-key">Source Warehouse</td><td>Stores - MIPL</td></tr>
+					<tr><td class="mpc-doc-key">Supplier Warehouse</td><td>INTERNATIONAL STEEL PRO - MIPL</td></tr>
+					<tr><td class="mpc-doc-key">Finished Goods Warehouse</td><td>Stores - MIPL</td></tr>
+					<tr><td class="mpc-doc-key">Raw Materials rows</td><td>13 — one per reserved batch × drawing combination</td></tr>
+				</tbody>
+			</table>
+			<p class="mpc-note-inline">
+				Every row traces back to a batch that was BOTH purchased and reserved back in
+				Material Planning 1 — e.g. PLATE10 batch PLT10-T3-L500-W500-R006 supplies drawings
+				1B1, 1B2 and 1B5 from the same reservation; ISA100 batch ISA100-L3000-R006 supplies
+				all five drawings. "Select Materials to Transfer" moved this stock out to the
+				supplier warehouse — Job work order 1's own Transferred Weight (12,638.923 Kg)
+				reflects that movement. Once all six operations finished, "Make Final Stock Entry"
+				became available here to consume the supplier-warehouse stock and receive the
+				finished good into the Finished Goods Warehouse.
+			</p>
+		`,
+		operations: `
+			<div class="mpc-table-scroll">
+			<table class="mpc-data-table">
+				<thead>
+					<tr><th>Seq</th><th>Operation</th><th>Inspection Mandatory</th><th>Result</th></tr>
+				</thead>
+				<tbody>
+					<tr><td>1</td><td>Material Issue</td><td>No</td><td>11 Nos completed directly from Consumption Log — this operation is Kg-based, tracking Available to Consume (Kg) from Job work order 1's Transferred Weight</td></tr>
+					<tr><td>2</td><td>Fit-up</td><td><b>Yes</b></td><td>Inspected across 2 rounds (Inspection Entry INSP-0001, INSP-0002) — Total Checked 11, Cleared 11, Rework 0 both times (Feedback Ok) — every Nos passed cleanly, no rejections</td></tr>
+					<tr><td>3</td><td>Welding</td><td>No</td><td>11 Nos completed directly from Consumption Log</td></tr>
+					<tr><td>4</td><td>Final</td><td><b>Yes</b></td><td>Inspected across 2 rounds with a real rework loop — see the worked example below</td></tr>
+					<tr><td>5</td><td>Blasting</td><td>No</td><td>11 Nos completed directly from Consumption Log</td></tr>
+					<tr><td>6</td><td>Painting</td><td>No</td><td>11 Nos completed directly — the last operation, so this is what set Job work order 1's "All Operations Complete" flag</td></tr>
+				</tbody>
+			</table>
+			</div>
+			<h3>${__("Worked Example — Inspection Rework Loop (Operation 4, Final)")}</h3>
+			<p class="mpc-note-inline">
+				Two of the five drawings on this operation needed a second inspection round after
+				part of their quantity was rejected in round 1. Both finished at exactly their real
+				total — never more — because the pending quantity shown to Inspection always caps
+				at the drawing's own Qty to Manufacture, however many times it's re-logged.
+			</p>
+			<div class="mpc-calcs">
+				<div class="mpc-calc">
+					<div class="mpc-calc-title">BEAM-1B1 -SHT-1 OF 291 <span>· Qty to Manufacture: 2 Nos</span></div>
+					<table class="mpc-calc-dims">
+						<tr><td>Round 1 — Inspection Entry</td><td>INSP-0003</td></tr>
+						<tr><td>Logged in Consumption Log</td><td>2 Nos</td></tr>
+						<tr><td>Accepted / Rejected</td><td>1 / 1</td></tr>
+						<tr><td>Completed Qty after Round 1</td><td>1 Nos</td></tr>
+					</table>
+					<div class="mpc-calc-formula">The rejected piece was re-logged in Consumption Log, taking the raw total to 3 — but Inspection Items caps pending at Qty to Manufacture (2) minus Completed (1) = 1 Nos, never 2, however many were technically logged.</div>
+					<table class="mpc-calc-dims">
+						<tr><td>Round 2 — Inspection Entry</td><td>INSP-0004</td></tr>
+						<tr><td>Pending shown</td><td>1 Nos</td></tr>
+						<tr><td>Accepted / Rejected</td><td>1 / 0</td></tr>
+					</table>
+					<div class="mpc-calc-result">Completed Qty = 2 / 2 — fully done</div>
+				</div>
+				<div class="mpc-calc">
+					<div class="mpc-calc-title">BEAM-1B3 -SHT-3 OF 291 <span>· Qty to Manufacture: 4 Nos</span></div>
+					<table class="mpc-calc-dims">
+						<tr><td>Round 1 — Inspection Entry</td><td>INSP-0003</td></tr>
+						<tr><td>Logged in Consumption Log at the time</td><td>2 Nos</td></tr>
+						<tr><td>Accepted / Rejected</td><td>1 / 1</td></tr>
+						<tr><td>Completed Qty after Round 1</td><td>1 Nos</td></tr>
+					</table>
+					<div class="mpc-calc-formula">A further 2 Nos were logged afterwards, taking the raw total to 4 — matching the drawing's real quantity — so Round 2's pending = 4 − 1 = 3 Nos.</div>
+					<table class="mpc-calc-dims">
+						<tr><td>Round 2 — Inspection Entry</td><td>INSP-0004</td></tr>
+						<tr><td>Pending shown</td><td>3 Nos</td></tr>
+						<tr><td>Accepted / Rejected</td><td>3 / 0</td></tr>
+					</table>
+					<div class="mpc-calc-result">Completed Qty = 4 / 4 — fully done</div>
+				</div>
+			</div>
+			<p class="mpc-note-inline">
+				Rework Remarks were required on Round 1 (total Rejected was 2, above the
+				"greater than 1" threshold) — entered as "work". Round 2's total Rejected was 0,
+				so no remarks were required there.
+			</p>
+		`,
 	},
 	{
 		id: "case-2",
@@ -288,12 +393,14 @@ function render_case(c) {
 		`);
 	}
 
-	// --- Production Plan / Material Issue Plan placeholders ---
+	// --- Production Plan / Material Issue Plan / Operations & Inspection ---
 	parts.push(`
 		<h3>${__("Production Plan")}</h3>
 		${render_pending_or(c.production_plan, __("Not run yet for this case — will be added here once Production Plan entries are made for MP-2026-00010."))}
 		<h3>${__("Material Issue Plan")}</h3>
 		${render_pending_or(c.material_issue_plan, __("Not run yet for this case — will be added here once Material Issue Plan entries are made for MP-2026-00010."))}
+		<h3>${__("Operations & Inspection")}</h3>
+		${render_pending_or(c.operations, __("Not run yet for this case — will be added here once the Job work order's operations are run."))}
 	`);
 
 	return `<section id="mpc-${c.id}" class="mpc-card">${parts.join("\n")}</section>`;

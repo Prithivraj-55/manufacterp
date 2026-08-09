@@ -154,9 +154,9 @@
    "fieldtype": "Select",
    "hidden": 1,
    "label": "Source Table",
-   "options": "Material Planning Material Mapping\nMaterial Planning Available Raw Material\nMaterial Planning Unavailable Item",
+   "options": "Material Planning Material Mapping\nMaterial Planning Available Raw Material\nMaterial Planning Unavailable Item\nRound Up Sec Qty for Transfer",
    "read_only": 1,
-   "description": "Copied from the source raw_materials row's own source_table -- together with Source Row, this is the STABLE reference back to the underlying Material Planning row that survives a raw_materials rebuild (unlike Source MIP Raw Material Row below, which is this MIP's own row and gets a new name on every refresh)."
+   "description": "Copied from the source raw_materials row's own source_table -- together with Source Row, this is the STABLE reference back to the underlying Material Planning row that survives a raw_materials rebuild (unlike Source MIP Raw Material Row below, which is this MIP's own row and gets a new name on every refresh). \"Round Up Sec Qty for Transfer\" is the one exception -- it has no single Material Planning source row, so Source Row there is a synthetic \"item_code|batch_no\" key instead, just used to find-and-accumulate the same rounding-surplus row across repeated transfers."
   },
   {
    "allow_on_submit": 1,

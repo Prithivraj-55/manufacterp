@@ -2586,7 +2586,7 @@ def claim_virtual_excess_mapping(mp_name, excess_row_name, row_name=None, unavai
 
     excess = frappe.db.get_value(
         "SCO Excess Material Item", excess_row_name,
-        ["parent", "item_code", "item_name", "parent_item_group", "unit_weight",
+        ["parent", "parenttype", "item_code", "item_name", "parent_item_group", "unit_weight",
          "length", "width", "thickness", "sec_qty", "sec_uom", "qty", "uom",
          "return_type", "mapped_material_planning", "stock_entry_created"],
         as_dict=True,
@@ -2687,6 +2687,11 @@ def claim_virtual_excess_mapping(mp_name, excess_row_name, row_name=None, unavai
         "SCO Excess Material Item", excess_row_name,
         {"mapped_material_planning": mp_name, "mapped_row_name": row.name}, update_modified=False,
     )
+    if excess.parenttype == "Material Issue Plan":
+        from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
+            recheck_mip_completion,
+        )
+        recheck_mip_completion(excess.parent)
     frappe.db.commit()
 
     return {"row_name": row.name, "mp_name": mp_name}
@@ -3069,6 +3074,10 @@ def _mark_excess_item_mapped(batch_no, mp_name, row_name):
         {"mapped_material_planning": mp_name, "mapped_row_name": row_name},
         update_modified=False,
     )
+    from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
+        recheck_mip_completion,
+    )
+    recheck_mip_completion(mip_name)
 
 
 def _batch_change_remarks(item_code, old_batch, new_batch_no, material_issue_plan):

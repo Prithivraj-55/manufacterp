@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-08-08 19:58:37_
+_Generated: 2026-08-10 00:31:56_
 
 ## drawing
 
@@ -132,7 +132,11 @@ _Generated: 2026-08-08 19:58:37_
 | Method | Whitelisted |
 |--------|-------------|
 | ` validate` | no |
+| ` _autofill_total_qty_to_check` | no |
+| ` _set_inspection_complete_date` | no |
+| ` before_submit` | no |
 | ` _validate_scalar_result` | no |
+| ` _validate_soe_items` | no |
 | ` _validate_pr_items` | no |
 
 ---
@@ -404,16 +408,24 @@ _Generated: 2026-08-08 19:58:37_
 | ` create_from_subcontracting_order` | no |
 | ` create_from_work_order` | no |
 | ` populate_from_production_plan` | no |
+| ` _mip_refresh_blocked_message` | no |
+| ` check_mip_raw_materials_refreshable` | no |
+| ` refresh_mip_raw_materials_manual` | no |
 | ` refresh_mip_raw_materials` | no |
 | ` _carry_forward_editable_fields` | no |
 | ` _lookup_drawing_planned_weight` | no |
 | ` _sync_excess_return_from_raw_materials` | no |
 | ` _sync_cut_sheet_calc` | no |
 | ` _sync_batch_remarks` | no |
+| ` _maybe_mark_completed` | no |
+| ` recheck_mip_completion` | no |
 | ` _auto_suggest_excess_from_cut_sheet` | no |
 | ` refresh_weight_summary` | no |
 | ` get_target_context` | no |
 | ` _resolve_warehouses` | no |
+| ` get_mip_batch_plan_html` | no |
+| ` download_mip_batch_plan_pdf` | no |
+| ` _render_mip_batch_plan_html` | no |
 
 ---
 
@@ -468,6 +480,17 @@ _Generated: 2026-08-08 19:58:37_
 | Module | subcontracting_management |
 | Path | `subcontracting_management/doctype/soe_drawing_detail` |
 | Controller | `subcontracting_management/doctype/soe_drawing_detail/soe_drawing_detail.py` |
+| Client script | none |
+
+---
+
+## soe_inspection_item
+
+| Key | Value |
+|-----|-------|
+| Module | subcontracting_management |
+| Path | `subcontracting_management/doctype/soe_inspection_item` |
+| Controller | `subcontracting_management/doctype/soe_inspection_item/soe_inspection_item.py` |
 | Client script | none |
 
 ---
