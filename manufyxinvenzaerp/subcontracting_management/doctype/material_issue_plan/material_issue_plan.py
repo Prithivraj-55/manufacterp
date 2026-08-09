@@ -27,6 +27,7 @@ class MaterialIssuePlan(Document):
         _auto_suggest_excess_from_cut_sheet(self)
         _sync_excess_return_from_raw_materials(self)
         _sync_batch_remarks(self)
+        _maybe_mark_completed(self)
 
     def on_trash(self):
         """Remove Batch Change Log rows referencing this MIP from all linked
@@ -112,11 +113,16 @@ def populate_from_production_plan(mip_name):
     if mip.work_order and not mip.excess_return_warehouse:
         mip.excess_return_warehouse = frappe.db.get_value("Work Order", mip.work_order, "fg_warehouse") or ""
 
-    # Supplier Warehouse — read-only display of where material is transferring
-    # TO, resolved from the linked SCO's standard field. Purely informational;
-    # the actual transfer destination is always re-resolved fresh at transfer
-    # time via get_target_context/_resolve_warehouses.
-    if mip.subcontracting_order:
+    # Supplier / WIP Warehouse — for a Supplier Job/Supplier with Material flow this
+    # defaults from the linked SCO's Job Worker Warehouse (auto-resolved once a Job
+    # Worker is set). An Internal Job SCO has no Job Worker, so that field never
+    # auto-sets -- this is then the ONLY place the WIP warehouse is recorded, entered
+    # by hand, and must never be silently overwritten. Only fills in when still blank,
+    # same as source_warehouse/excess_return_warehouse above -- this used to run
+    # unconditionally and wiped out a manually-set WIP Warehouse back to blank on every
+    # refresh, which also broke SCO/SOE transfer tracking downstream (see
+    # _update_sco_transferred_weight in stock_entry.py).
+    if mip.subcontracting_order and not mip.supplier_warehouse:
         mip.supplier_warehouse = frappe.db.get_value(
             "Subcontracting Order", mip.subcontracting_order, "supplier_warehouse"
         ) or ""
@@ -154,6 +160,58 @@ _RAW_MATERIAL_EDITABLE_FIELDS = [
     "cut_sheet", "use_length", "use_width", "use_sec_qty", "use_calc_qty",
     "balance_length", "balance_width", "balance_sec_qty", "balance_calc_qty",
 ]
+
+
+def _mip_refresh_blocked_message(mip):
+    """Shared by check_mip_raw_materials_refreshable (pre-flight check the 'Refresh Raw
+    Materials' button calls before deciding confirm-vs-block) and
+    refresh_mip_raw_materials_manual's own throw -- one source of truth for both the
+    condition and its wording, naming the actual Stock Entry(ies) to delete rather than
+    a generic 'already transferred' notice."""
+    from manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer import (
+        _get_mip_transfer_stock_entry_names,
+    )
+    se_names = _get_mip_transfer_stock_entry_names(mip)
+    if not se_names:
+        return None
+    return _(
+        "Stock has already been transferred for this Material Issue Plan ({0}). "
+        "Raw Materials cannot be refreshed. Delete the Stock Entry to refresh the raw materials."
+    ).format(", ".join(se_names))
+
+
+@frappe.whitelist()
+def check_mip_raw_materials_refreshable(mip_name):
+    """Live pre-flight check for the 'Refresh Raw Materials' button -- queries submitted
+    Stock Entries directly rather than trusting raw_materials.transferred_qty on the
+    currently-loaded snapshot, which only gets (re)computed by refresh_mip_raw_materials
+    itself and so reads stale (still 0) right after a transfer if nothing has refreshed
+    this table since. Returns {"blocked": bool, "message": str|None} so the button can
+    show the correct hard-block message instead of a misleading 'are you sure?' confirm
+    when a transfer has already happened but the snapshot hasn't caught up yet."""
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+    message = _mip_refresh_blocked_message(mip)
+    return {"blocked": bool(message), "message": message}
+
+
+@frappe.whitelist()
+def refresh_mip_raw_materials_manual(mip_name):
+    """Wrapper around refresh_mip_raw_materials specifically for the user-facing
+    'Refresh Raw Materials' button -- blocks outright once any reserved batch has
+    already been physically transferred out. Server-side twin of
+    check_mip_raw_materials_refreshable, so a direct/scripted call is blocked the same
+    way even if the JS pre-flight check was somehow bypassed.
+
+    Every OTHER caller of refresh_mip_raw_materials (post-purchase auto-refresh,
+    batch reassignment's own re-sync, initial population from the Production Plan)
+    must keep working unconditionally even after a partial transfer -- more items
+    can still be purchased/reserved for drawings that haven't shipped yet -- so the
+    block lives here, in this thin wrapper, not in the shared function itself."""
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+    message = _mip_refresh_blocked_message(mip)
+    if message:
+        frappe.throw(message)
+    return refresh_mip_raw_materials(mip_name)
 
 
 @frappe.whitelist()
@@ -477,6 +535,57 @@ def _sync_batch_remarks(mip):
             row.batch_remarks = remarks_by_batch.get(row.batch_no) or ""
 
 
+def _maybe_mark_completed(mip):
+    """Auto-elevate status to Completed once both are true:
+      1. Finished-goods stock has actually been received -- a submitted 'Manufacture'
+         Stock Entry exists for this MIP's Subcontracting Order (created via the
+         'Make Final Stock Entry' button -> create_finished_goods_entry).
+      2. Every excess_return_items row is resolved: either physically returned
+         (stock_entry_created), claimed straight off this table into another
+         Material Planning (mapped_material_planning), or flagged to never
+         physically leave the supplier (Retain at Supplier (Virtual)). An empty
+         table trivially satisfies this -- nothing to return.
+
+    Only ever moves Open/In Progress -> Completed, never the reverse -- once set,
+    later saves are no-ops here (this function returns immediately) and the
+    document is locked for further edits (see the whitelisted-endpoint guards in
+    material_issue_plan_transfer.py and disable_form() in material_issue_plan.js)."""
+    if mip.status == "Completed":
+        return
+    if not mip.subcontracting_order:
+        return
+    fg_received = frappe.db.exists("Stock Entry", {
+        "subcontracting_order": mip.subcontracting_order,
+        "stock_entry_type": "Manufacture",
+        "docstatus": 1,
+    })
+    if not fg_received:
+        return
+    for row in (mip.excess_return_items or []):
+        if row.stock_entry_created or row.mapped_material_planning:
+            continue
+        if row.return_type == "Retain at Supplier (Virtual)":
+            continue
+        return
+    mip.status = "Completed"
+
+
+def recheck_mip_completion(mip_name):
+    """Re-check entrypoint for code paths that resolve an excess_return_items row via
+    a raw frappe.db.set_value on the child row (bypassing this doctype's own validate())
+    -- claim_virtual_excess_mapping and _mark_excess_item_mapped in material_planning.py,
+    both of which claim a row straight into a Material Mapping reservation without ever
+    calling mip.save(). A plain mip.save() would also re-run the full Cut Sheet/Excess
+    Return sync chain for no reason; this only re-evaluates _maybe_mark_completed and, if
+    now eligible, commits the status flip directly."""
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+    if mip.status == "Completed":
+        return
+    _maybe_mark_completed(mip)
+    if mip.status == "Completed":
+        frappe.db.set_value("Material Issue Plan", mip_name, "status", "Completed", update_modified=False)
+
+
 def _auto_suggest_excess_from_cut_sheet(mip):
     """Once a Cut Sheet row's Balance (W2) is calculated, auto-suggest it as an
     Excess Return row: seed excess_return_applicable + Excess Length/Width/Sec
@@ -516,7 +625,12 @@ def refresh_weight_summary(mip_name):
 
     mip = frappe.get_doc("Material Issue Plan", mip_name)
 
-    if mip.subcontracting_order:
+    # See populate_from_production_plan for why this only fills in when blank --
+    # an Internal Job SCO's supplier_warehouse never auto-sets, so overwriting
+    # unconditionally here (this runs on every Stock Entry submit, via
+    # _refresh_linked_mip_weight) wiped out a manually-entered WIP Warehouse right
+    # after the user transferred material into it.
+    if mip.subcontracting_order and not mip.supplier_warehouse:
         mip.supplier_warehouse = frappe.db.get_value(
             "Subcontracting Order", mip.subcontracting_order, "supplier_warehouse"
         ) or ""

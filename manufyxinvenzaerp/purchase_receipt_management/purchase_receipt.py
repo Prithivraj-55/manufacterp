@@ -290,6 +290,20 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
     The matched Unavailable Items row is removed once fully covered; if the PR
     received less than the row's required qty, the row is kept with its qty
     (and proportional Sec Qty) reduced to just the remaining shortfall.
+
+    No item/batch/duno-keyed dedup is applied when appending Available Raw
+    Materials/Material Mapping rows -- a drawing can genuinely need the SAME
+    item from the SAME batch more than once (e.g. two different-length pieces
+    of ISA100 on one duno), and such a key previously collapsed those into one,
+    silently discarding the second Unavailable Item row (still marked
+    fulfilled and removed by the reconcile step below, since _consume() runs
+    before any such check) with no Available Raw Materials/Material Mapping
+    row ever created for it -- a real data-loss bug found on MP-2026-00010
+    (18 rows, ~132.9 Kg, across 13 duno+item combinations). Re-running this
+    function for the same PR is naturally idempotent without a key anyway:
+    each call rebuilds its match candidates from mp.unavailable_items as it
+    currently stands, and a fully-fulfilled row is already gone from that
+    table by the time any second call could happen.
     """
     pr = frappe.get_doc("Purchase Receipt", pr_name)
     mp = frappe.get_doc("Material Planning", mp_name)
@@ -323,14 +337,6 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
             by_consolidate_alt_any.setdefault(c_row.alternate_item, []).extend(
                 unavail_by_item_code.get(c_row.item_code, [])
             )
-
-    # Existing allocations — avoid duplicates. Keyed by (item_code, batch_no,
-    # duno_mark_no): batch_no alone isn't enough — many items in this instance
-    # have batch_no blank/shared, and without the DUNO in the key every
-    # shortfall row past the first for a given item_code would look like a
-    # duplicate of the one already added and get silently skipped.
-    existing_exact   = {(r.item_code, r.batch_no, r.duno_mark_no or "")    for r in (mp.available_raw_materials or [])}
-    existing_mapping = {(r.item_code, r.batch or "", r.duno_mark_no or "") for r in (mp.material_mapping       or [])}
 
     added_exact   = 0
     added_mapping = 0
@@ -463,10 +469,6 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
 
             for mp_row, alloc_qty in _split_allocation(matched_alternate, received_qty, sequential):
                 _consume(mp_row, alloc_qty)
-                key = (mp_row.item_code, batch_no, mp_row.duno_mark_no or "")
-                if key in existing_mapping:
-                    continue
-                existing_mapping.add(key)
                 ratio = (alloc_qty / received_qty) if received_qty else 0.0
                 mp.append("material_mapping", {
                     "item_number":            mp_row.item_number,
@@ -521,10 +523,6 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
 
             for mp_row, alloc_qty in _split_allocation(matched_original, received_qty, sequential):
                 _consume(mp_row, alloc_qty)
-                key = (item_code, batch_no, mp_row.duno_mark_no or "")
-                if key in existing_exact:
-                    continue
-                existing_exact.add(key)
                 ratio = (alloc_qty / received_qty) if received_qty else 0.0
                 mp.append("available_raw_materials", {
                     "item_number":            mp_row.item_number,

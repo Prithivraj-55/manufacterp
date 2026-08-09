@@ -108,7 +108,17 @@ def add_inspection_call(source_doctype, source_name, call_date=None):
 	directly (Purchase Receipt's popup-driven flow, which doesn't persist a
 	separate call-date field on the document); falls back to the source
 	doc's own `custom_inspection_call_date` field for Job Card/SOE. Blocked
-	while a round is already logged and not yet Completed."""
+	while a round is already logged and not yet Completed.
+
+	For Supplier Operation Entry, also blocked when nothing is actually pending
+	inspection yet (inspection_items all at qty_nos 0 -- e.g. everything already
+	accepted in a prior round, nothing new logged in the Consumption Log since).
+	Without this check, supplier_operation_entry.js's single "Create Inspection"
+	button would add a new Pending round here, then immediately fail in
+	create_inspection_entry's own identical check right after -- leaving an
+	orphan Pending round with no Inspection Entry that can never be completed
+	(nothing is pending) and that then blocks any FUTURE real inspection call too
+	(the round-in-progress check above)."""
 	doc = _get_source_doc(source_doctype, source_name)
 
 	call_date = call_date or doc.custom_inspection_call_date
@@ -118,6 +128,14 @@ def add_inspection_call(source_doctype, source_name, call_date=None):
 	existing = doc.get("custom_inspection_call_log") or []
 	if any(row.round_status != "Completed" for row in existing):
 		frappe.throw(_("Inspection already in progress, complete it to create new inspection."))
+
+	if source_doctype == "Supplier Operation Entry":
+		pending_items = [row for row in (doc.get("inspection_items") or []) if flt(row.qty_nos) > 0]
+		if not pending_items:
+			frappe.throw(_(
+				"All items have already completed inspection -- nothing new is pending. "
+				"Log more Nos as completed in the Consumption Log first."
+			))
 
 	doc.append("custom_inspection_call_log", {
 		"round_no": len(existing) + 1,

@@ -154,6 +154,13 @@ def on_submit_stock_entry(doc, method):
 		_update_wo_cnc_weight(doc.custom_wo_ref)
 		_refresh_linked_mip_weight(wo_ref=doc.custom_wo_ref)
 
+	# Finished-goods receipt (create_finished_goods_entry's "Make Final Stock Entry"
+	# button) -- re-saving the linked MIP here is what actually triggers its own
+	# validate()'s _maybe_mark_completed check now that FG stock has been received;
+	# the MIP is otherwise never touched by this Stock Entry at all.
+	if doc.stock_entry_type == "Manufacture" and doc.get("subcontracting_order"):
+		_refresh_linked_mip_weight(sco_ref=doc.subcontracting_order)
+
 
 def _reduce_batch_sec_qty(batch_no, consumed_qty):
 	current = flt(frappe.db.get_value("Batch", batch_no, "custom_sec_qty"))
@@ -484,35 +491,64 @@ def _restore_material_planning_reservations(doc):
 
 def _update_sco_transferred_weight(sco_name):
 	"""Recompute SCO.custom_transferred_weight_kg:
-	  - qty from submitted 'Send to Subcontractor' SEs to the supplier warehouse, PLUS
-	  - qty from submitted 'Material Transfer' SEs that go CNC warehouse → supplier warehouse.
+	  - qty from submitted 'Send to Subcontractor' SEs to the supplier/WIP warehouse, PLUS
+	  - qty from submitted 'Material Transfer' SEs that go CNC warehouse → supplier/WIP warehouse.
 	Also refreshes Op-1 SOE's available_to_consume_kg if it is still in draft.
-	"""
-	from manufyxinvenzaerp.subcontracting_management.subcontracting import _get_sco_transfer_warehouses
 
-	supplier_warehouse = frappe.db.get_value("Subcontracting Order", sco_name, "supplier_warehouse")
-	if not supplier_warehouse:
-		return
-	_, cnc_warehouse = _get_sco_transfer_warehouses(sco_name)
-
-	# Direct source → supplier transfers
-	r1 = frappe.db.sql(
-		"""
-		SELECT COALESCE(SUM(sed.qty), 0)
-		FROM `tabStock Entry Detail` sed
-		JOIN `tabStock Entry` se ON se.name = sed.parent
-		WHERE se.custom_sco_ref = %s
-		  AND se.stock_entry_type = 'Send to Subcontractor'
-		  AND se.docstatus = 1
-		  AND sed.t_warehouse = %s
-		""",
-		(sco_name, supplier_warehouse),
+	supplier_warehouse resolution mirrors get_target_context/_resolve_warehouses in
+	material_issue_plan.py: the Material Issue Plan's own field takes priority (it is
+	what the transfer itself was actually resolved against), falling back to the SCO's
+	core field for a Supplier Job/Supplier with Material flow. An Internal Job SCO has
+	no Job Worker, so its supplier_warehouse never auto-sets (see
+	CustomSubcontractingOrder._auto_set_supplier_warehouse) -- if BOTH are still blank
+	(e.g. the user hasn't set MIP's Supplier / WIP Warehouse either), fall back further
+	to matching on qty transferred out of the known source warehouse instead of into an
+	unknown destination -- 'Send to Subcontractor'/'Material Transfer' Stock Entries
+	tagged with this SCO's own custom_sco_ref are never used for anything else, so this
+	is unambiguous even without a recorded destination warehouse."""
+	mip = frappe.db.get_value(
+		"Material Issue Plan", {"subcontracting_order": sco_name},
+		["supplier_warehouse", "source_warehouse", "cnc_warehouse"], as_dict=True,
 	)
+	sco_supplier_warehouse = frappe.db.get_value("Subcontracting Order", sco_name, "supplier_warehouse")
+	supplier_warehouse = (mip.supplier_warehouse if mip else "") or sco_supplier_warehouse
+	cnc_warehouse = mip.cnc_warehouse if mip else None
+
+	if supplier_warehouse:
+		# Direct source → supplier/WIP transfers, matched on the known destination.
+		r1 = frappe.db.sql(
+			"""
+			SELECT COALESCE(SUM(sed.qty), 0)
+			FROM `tabStock Entry Detail` sed
+			JOIN `tabStock Entry` se ON se.name = sed.parent
+			WHERE se.custom_sco_ref = %s
+			  AND se.stock_entry_type = 'Send to Subcontractor'
+			  AND se.docstatus = 1
+			  AND sed.t_warehouse = %s
+			""",
+			(sco_name, supplier_warehouse),
+		)
+	else:
+		# No destination warehouse recorded anywhere (Internal Job, WIP warehouse never
+		# set) -- fall back to unfiltered qty for this SCO's own Send to Subcontractor
+		# entries, safe since that entry type + ref combination is exclusive to this
+		# transfer.
+		r1 = frappe.db.sql(
+			"""
+			SELECT COALESCE(SUM(sed.qty), 0)
+			FROM `tabStock Entry Detail` sed
+			JOIN `tabStock Entry` se ON se.name = sed.parent
+			WHERE se.custom_sco_ref = %s
+			  AND se.stock_entry_type = 'Send to Subcontractor'
+			  AND se.docstatus = 1
+			""",
+			(sco_name,),
+		)
 	direct_qty = flt(r1[0][0]) if r1 and r1[0][0] else 0
 
-	# CNC warehouse → supplier warehouse transfers
+	# CNC warehouse → supplier/WIP warehouse transfers
 	cnc_to_supplier_qty = 0.0
-	if cnc_warehouse:
+	if cnc_warehouse and supplier_warehouse:
 		r2 = frappe.db.sql(
 			"""
 			SELECT COALESCE(SUM(sed.qty), 0)
@@ -525,6 +561,20 @@ def _update_sco_transferred_weight(sco_name):
 			  AND sed.t_warehouse = %s
 			""",
 			(sco_name, cnc_warehouse, supplier_warehouse),
+		)
+		cnc_to_supplier_qty = flt(r2[0][0]) if r2 and r2[0][0] else 0
+	elif cnc_warehouse:
+		r2 = frappe.db.sql(
+			"""
+			SELECT COALESCE(SUM(sed.qty), 0)
+			FROM `tabStock Entry Detail` sed
+			JOIN `tabStock Entry` se ON se.name = sed.parent
+			WHERE se.custom_sco_ref = %s
+			  AND se.stock_entry_type = 'Material Transfer'
+			  AND se.docstatus = 1
+			  AND sed.s_warehouse = %s
+			""",
+			(sco_name, cnc_warehouse),
 		)
 		cnc_to_supplier_qty = flt(r2[0][0]) if r2 and r2[0][0] else 0
 

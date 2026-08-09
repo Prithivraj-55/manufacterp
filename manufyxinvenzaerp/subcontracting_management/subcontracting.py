@@ -943,15 +943,44 @@ def create_finished_goods_entry(sco_name):
     """Create a draft 'Manufacture' Stock Entry that consumes the raw materials currently
     in the supplier warehouse and produces the finished good into the FG warehouse.
 
-    Exposed via the 'Make Finished Goods Entry' button, which appears once raw materials
+    Exposed via the 'Make Final Stock Entry' button, which appears once raw materials
     have been transferred to the supplier. The user reviews and submits the draft; on
     submission the consumed RM leaves stock and the finished good is added to inventory.
+
+    Idempotent -- the button has no way to know a Stock Entry already exists for this
+    SCO without asking, and previously called through unconditionally every click,
+    creating a fresh duplicate draft (or throwing 'already returned' further down) each
+    time. Now: a SUBMITTED entry means the work is already done, so refuse outright
+    rather than create a second one; a DRAFT one already sitting there is handed back
+    as-is instead of piling up another. Returns {"name": ..., "already_existed": bool}
+    so the caller can phrase its message correctly either way.
     """
     sco = frappe.get_doc("Subcontracting Order", sco_name)
     if sco.docstatus != 1:
         frappe.throw(_("Subcontracting Order must be submitted first."))
-    if not sco.supplier_warehouse:
-        frappe.throw(_("Please set the Supplier Warehouse on the Subcontracting Order first."))
+
+    existing_submitted = frappe.db.get_value(
+        "Stock Entry", {"subcontracting_order": sco_name, "stock_entry_type": "Manufacture", "docstatus": 1}, "name"
+    )
+    if existing_submitted:
+        frappe.throw(_(
+            "A Final Stock Entry has already been created and submitted for this "
+            "Subcontracting Order: {0}"
+        ).format(existing_submitted))
+
+    existing_draft = frappe.db.get_value(
+        "Stock Entry", {"subcontracting_order": sco_name, "stock_entry_type": "Manufacture", "docstatus": 0}, "name"
+    )
+    if existing_draft:
+        return {"name": existing_draft, "already_existed": True}
+
+    mip_status = frappe.db.get_value("Material Issue Plan", {"subcontracting_order": sco_name}, "status")
+    if mip_status == "Completed":
+        frappe.throw(_("The linked Material Issue Plan is already Completed and locked for further changes."))
+    supplier_warehouse = _get_sco_supplier_warehouse(sco)
+    if not supplier_warehouse:
+        frappe.throw(_("Please set the Supplier / WIP Warehouse on the Material Issue Plan "
+                       "(or the Job Worker Warehouse on the Subcontracting Order) first."))
     if not flt(sco.get("custom_transferred_weight_kg")):
         frappe.throw(_("No raw material has been transferred to the supplier yet. "
                        "Transfer raw materials before making the finished-goods entry."))
@@ -970,7 +999,7 @@ def create_finished_goods_entry(sco_name):
                        "Subcontracting Order item (or the Finished Goods Warehouse on the "
                        "linked Material Issue Plan) first."))
 
-    consumed = _get_supplier_wh_consumption_items(sco)
+    consumed = _get_supplier_wh_consumption_items(sco, supplier_warehouse)
     if not consumed:
         frappe.throw(_("No raw-material stock found in the supplier warehouse to consume. "
                        "Ensure the raw materials have been transferred to the supplier."))
@@ -1020,7 +1049,7 @@ def create_finished_goods_entry(sco_name):
         "items": items,
     })
     se.insert(ignore_permissions=True)
-    return se.name
+    return {"name": se.name, "already_existed": False}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1685,6 +1714,23 @@ def _get_sco_transfer_warehouses(sco_name):
     return (mip.source_warehouse, mip.cnc_warehouse) if mip else (None, None)
 
 
+def _get_sco_supplier_warehouse(sco):
+    """Resolve the warehouse raw material was actually transferred into for this SCO.
+
+    sco.supplier_warehouse (core field) only auto-sets when a Job Worker is set
+    (_auto_set_supplier_warehouse) -- an Internal Job SCO has no Job Worker, so it stays
+    blank forever even after real transfers happen. The Material Issue Plan's own
+    Supplier / WIP Warehouse field is the actual source of truth the transfer itself was
+    resolved against (see get_target_context/_resolve_warehouses in material_issue_plan.py
+    and _update_sco_transferred_weight in stock_entry.py, which already use this same
+    fallback) -- check it first, then fall back to the SCO's own field for a Supplier
+    Job/Supplier with Material flow."""
+    mip_warehouse = frappe.db.get_value(
+        "Material Issue Plan", {"subcontracting_order": sco.name}, "supplier_warehouse"
+    )
+    return mip_warehouse or sco.supplier_warehouse
+
+
 def _get_wo_transfer_warehouses(wo_name):
     """Source/CNC warehouse for a Work Order, resolved via its Material Issue Plan —
     these no longer live on the Work Order itself (moved to Material Issue Plan).
@@ -2014,15 +2060,19 @@ def backfill_drawing_item_qty(sco_name):
     return updated
 
 
-def _get_supplier_wh_consumption_items(sco):
-    """Return SE consumption rows (issued FROM the supplier warehouse, no target) for all
-    raw material transferred to the supplier for this SCO.
+def _get_supplier_wh_consumption_items(sco, supplier_warehouse=None):
+    """Return SE consumption rows (issued FROM the supplier/WIP warehouse, no target) for
+    all raw material transferred to the supplier for this SCO.
 
     Pulls items directly from submitted 'Send to Subcontractor' SEs linked to this SCO
     (via custom_sco_ref or subcontracting_order). Querying the SE Detail rows is reliable
     in Frappe v15 because SLE rows store batch tracking in Serial and Batch Bundles rather
     than in the batch_no column, making SLE batch_no lookups unreliable.
-    """
+
+    supplier_warehouse defaults to sco.supplier_warehouse for backward compatibility, but
+    callers should pass _get_sco_supplier_warehouse(sco) instead -- an Internal Job SCO's
+    own field is never set (see that helper's docstring)."""
+    supplier_warehouse = supplier_warehouse or sco.supplier_warehouse
     rows = frappe.db.sql(
         """
         SELECT sed.item_code, sed.batch_no, SUM(sed.qty) AS qty
@@ -2045,7 +2095,7 @@ def _get_supplier_wh_consumption_items(sco):
             "use_serial_batch_fields": 1,
             "qty": flt(r.qty, 3),
             "uom": frappe.db.get_value("Item", r.item_code, "stock_uom") or "Kg",
-            "s_warehouse": sco.supplier_warehouse,
+            "s_warehouse": supplier_warehouse,
         }
         for r in rows
     ]

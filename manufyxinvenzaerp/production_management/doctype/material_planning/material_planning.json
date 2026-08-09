@@ -14,6 +14,7 @@
   "production_plan",
   "section_production_settings",
   "store_location",
+  "round_up_transfer_sec_qty",
   "column_break_settings",
   "section_weight_summary",
   "total_weight_plates_structurals",
@@ -121,6 +122,13 @@
    "hidden": 1,
    "label": "Store Location",
    "options": "Store Location"
+  },
+  {
+   "default": "1",
+   "description": "When several drawings share one purchased batch, the combined Sec Qty (Nos) needed for a single transfer can come out fractional (e.g. 13.982) -- not physically possible to hand over. When on, the Material Issue Plan transfer rounds this up to the next whole piece and logs the small rounding surplus as excess material to return once confirmed. Turn off to keep the exact fractional Kg calculation instead (no rounding, no excess logged).",
+   "fieldname": "round_up_transfer_sec_qty",
+   "fieldtype": "Check",
+   "label": "Round Up Sec Qty for Transfer"
   },
   {
    "fieldname": "column_break_settings",

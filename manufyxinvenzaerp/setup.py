@@ -1275,6 +1275,7 @@ def after_install():
     create_subcontracting_order_translation()
     remove_sco_purchase_order_mandatory()
     hide_sco_job_worker_warehouse()
+    make_sco_job_worker_conditional()
     create_sco_custom_fields()
     create_sco_client_script()
     create_sco_ops_client_script()
@@ -1328,6 +1329,7 @@ def after_migrate():
     create_subcontracting_order_translation()
     remove_sco_purchase_order_mandatory()
     hide_sco_job_worker_warehouse()
+    make_sco_job_worker_conditional()
     create_sco_custom_fields()
     create_sco_client_script()
     create_sco_ops_client_script()
@@ -3340,6 +3342,41 @@ def hide_sco_job_worker_warehouse():
     frappe.db.commit()
 
 
+def make_sco_job_worker_conditional():
+    """Job Worker (core field 'supplier') and its dependent 'supplier_name' (Job Worker
+    Name, fetch_from supplier.supplier_name) are only meaningful when the SCO's
+    Production Plan Type is Supplier Job / Supplier with Material -- an Internal Job
+    plan has no custom_vendor_contractor to begin with (create_sco_from_production_plan
+    sets supplier = pp.custom_vendor_contractor or "", which is blank for Internal Job),
+    so the core reqd=1 on both fields wrongly blocked submit. Override reqd to 0 on both
+    and use mandatory_depends_on instead, keyed off the new fetched
+    custom_production_plan_type field, so both fields stay required for Supplier
+    Job/Supplier with Material (and for any manually-created SCO with no linked
+    Production Plan at all, where the blank string also fails the
+    '!== "Internal Job"' check) but optional for Internal Job."""
+    condition = 'eval:doc.custom_production_plan_type !== "Internal Job"'
+    for fieldname in ("supplier", "supplier_name"):
+        frappe.make_property_setter(
+            {
+                "doctype": "Subcontracting Order",
+                "fieldname": fieldname,
+                "property": "reqd",
+                "value": 0,
+                "property_type": "Check",
+            }
+        )
+        frappe.make_property_setter(
+            {
+                "doctype": "Subcontracting Order",
+                "fieldname": fieldname,
+                "property": "mandatory_depends_on",
+                "value": condition,
+                "property_type": "Code",
+            }
+        )
+    frappe.db.commit()
+
+
 def create_sco_custom_fields():
     create_custom_fields(
         {
@@ -3353,12 +3390,22 @@ def create_sco_custom_fields():
                     "insert_after": "supplier",
                 },
                 {
+                    "fieldname": "custom_production_plan_type",
+                    "fieldtype": "Data",
+                    "label": "Production Plan Type",
+                    "fetch_from": "custom_production_plan.custom_type",
+                    "read_only": 1,
+                    "hidden": 1,
+                    "insert_after": "custom_production_plan",
+                    "description": "Drives whether Job Worker is mandatory (see make_sco_job_worker_conditional) -- Internal Job plans have no supplier, so the field is optional for them.",
+                },
+                {
                     "fieldname": "custom_work_order",
                     "fieldtype": "Link",
                     "label": "Work Order",
                     "options": "Work Order",
                     "read_only": 1,
-                    "insert_after": "custom_production_plan",
+                    "insert_after": "custom_production_plan_type",
                 },
                 {
                     "fieldname": "custom_all_ops_complete",
@@ -3571,7 +3618,6 @@ function render_soe_summary(frm) {
                 $w.find(".sco-ops-refresh").on("click", function() { render_soe_summary(frm); });
                 return;
             }
-            var mfg_total_all = 0, avail_nos_total = 0, cons_nos_total = 0;
             var body = rows.map(function (d, idx) {
                 var color = d.status === "Completed" ? "green"
                           : (d.status === "In Progress" ? "orange" : "gray");
@@ -3582,9 +3628,6 @@ function render_soe_summary(frm) {
                 var avail   = flt(d.avail_nos || 0);
                 var consumed = flt(d.total_completed_nos || 0);
                 var diff    = flt(d.diff_nos || 0);
-                mfg_total_all   += mfg;
-                avail_nos_total += avail;
-                cons_nos_total  += consumed;
                 var diff_color = diff < 0 ? "color:red" : (diff > 0 ? "color:orange" : "");
                 return "<tr>"
                     + "<td class='text-center'>" + (d.sequence_id || "") + "</td>"
@@ -3611,14 +3654,7 @@ function render_soe_summary(frm) {
                 + "<th class='text-right'>Difference (Nos)</th>"
                 + "<th class='text-center' style='width:110px'>Entry</th>"
                 + "<th class='text-center' style='width:70px'>Drawings</th>"
-                + "</tr></thead><tbody>" + body + "</tbody>"
-                + "<tfoot><tr style='font-weight:bold'>"
-                + "<td colspan='3' class='text-right'>Total</td>"
-                + "<td class='text-right'>" + format_number(mfg_total_all, null, 3) + "</td>"
-                + "<td class='text-right'>" + format_number(avail_nos_total, null, 3) + "</td>"
-                + "<td class='text-right'>" + format_number(cons_nos_total, null, 3) + "</td>"
-                + "<td class='text-right'>" + format_number(avail_nos_total - cons_nos_total, null, 3) + "</td>"
-                + "<td colspan='2'></td></tr></tfoot></table>"
+                + "</tr></thead><tbody>" + body + "</tbody></table>"
                 + "<div class='text-muted' style='margin-top:6px;font-size:11px'>"
                 + "Op-1 Available = Transferred (Kg); Op-2+ Available = sum of Available (Nos) from drawing details.</div>";
             $w.html(html);

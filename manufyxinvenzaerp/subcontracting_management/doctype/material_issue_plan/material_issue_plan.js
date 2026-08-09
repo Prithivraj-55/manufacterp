@@ -1,5 +1,20 @@
 frappe.ui.form.on("Material Issue Plan", {
 	refresh(frm) {
+		// Once auto-completed (stock received + every excess row resolved --
+		// see _maybe_mark_completed in material_issue_plan.py), lock the whole
+		// document: no more edits, and skip adding the transfer/return/final-SE
+		// action buttons below. The matching whitelisted endpoints also refuse
+		// directly (_ensure_mip_editable), so this is UI convenience on top of
+		// a real server-side lock, not the only thing enforcing it.
+		if (frm.doc.status === "Completed") {
+			frm.disable_form();
+			frappe.show_alert({
+				message: __("This Material Issue Plan is Completed and locked for further changes."),
+				indicator: "green",
+			});
+			return;
+		}
+
 		frm.set_query("subcontracting_order", () => ({
 			filters: { custom_production_plan: frm.doc.production_plan || "" },
 		}));
@@ -26,13 +41,53 @@ frappe.ui.form.on("Material Issue Plan", {
 	},
 
 	refresh_raw_materials_btn(frm) {
+		let rows = frm.doc.raw_materials || [];
+
+		function do_refresh() {
+			frappe.call({
+				method: "manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.refresh_mip_raw_materials_manual",
+				args: { mip_name: frm.doc.name },
+				freeze: true,
+				freeze_message: __("Refreshing raw materials..."),
+				callback() {
+					frm.reload_doc();
+				},
+			});
+		}
+
+		function maybe_confirm_then_refresh() {
+			// Nothing transferred, but rows already exist -- batch mapping, excess
+			// material mapping, cut sheet, or excess return edits may already be on
+			// them. Refreshing rebuilds the table from scratch, so confirm first.
+			if (rows.length) {
+				frappe.confirm(
+					__("Batch mapping, Excess Material Mapping, or other changes may already be made on these rows. Refreshing will remove all current rows and rebuild them fresh. Are you sure you want to continue?"),
+					do_refresh
+				);
+			} else {
+				do_refresh();
+			}
+		}
+
+		// Live check against submitted Stock Entries -- deliberately NOT based on
+		// raw_materials.transferred_qty on the currently-loaded doc, which only
+		// gets (re)computed by a refresh itself and so reads stale (still 0) right
+		// after a transfer if nothing has refreshed this table since. Server enforces
+		// the same check too (refresh_mip_raw_materials_manual); this pre-flight call
+		// is what avoids showing the "are you sure?" confirm before that hard block.
 		frappe.call({
-			method: "manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.refresh_mip_raw_materials",
+			method: "manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.check_mip_raw_materials_refreshable",
 			args: { mip_name: frm.doc.name },
-			freeze: true,
-			freeze_message: __("Refreshing raw materials..."),
-			callback() {
-				frm.reload_doc();
+			callback(r) {
+				if (r.message && r.message.blocked) {
+					frappe.msgprint({
+						title: __("Cannot Refresh"),
+						indicator: "red",
+						message: r.message.message,
+					});
+					return;
+				}
+				maybe_confirm_then_refresh();
 			},
 		});
 	},
@@ -84,11 +139,16 @@ function _add_final_stock_entry_button(frm) {
 					freeze_message: __("Creating Final Stock Entry…"),
 					callback: function (r) {
 						if (r.message) {
+							let se_name = r.message.name;
+							let already = r.message.already_existed;
 							frappe.msgprint({
-								title: __("Final Stock Entry Created"),
-								message: __("Review and submit the stock entry: ") +
-									'<a href="/app/stock-entry/' + encodeURIComponent(r.message) + '">' + r.message + "</a>",
-								indicator: "green"
+								title: already ? __("Final Stock Entry Already Exists") : __("Final Stock Entry Created"),
+								message: (already
+										? __("A draft Final Stock Entry already exists for this Subcontracting Order. ")
+										: "")
+									+ __("Review and submit the stock entry: ") +
+									'<a href="/app/stock-entry/' + encodeURIComponent(se_name) + '">' + se_name + "</a>",
+								indicator: already ? "orange" : "green"
 							});
 						}
 					},
@@ -575,6 +635,7 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 		+ "<th style='width:32px'></th>"
 		+ "<th>" + __("Item Code") + "</th>"
 		+ "<th>" + __("Batch No") + "</th>"
+		+ "<th class='text-right'>" + __("Sec Nos") + "</th>"
 		+ "<th class='text-right'>" + __("Qty (Kg)") + "</th>"
 		+ "</tr></thead><tbody></tbody></table>");
 
@@ -585,6 +646,8 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 			"<td class='text-center'><input type='checkbox' class='mip-item-chk' checked></td>" +
 			"<td>" + frappe.utils.escape_html(d.item_code) + "</td>" +
 			"<td>" + frappe.utils.escape_html(d.batch_no || "") + "</td>" +
+			"<td class='text-right'>" + format_number(flt(d.custom_sec_qty), null, 3)
+				+ (d.custom_sec_uom ? " " + frappe.utils.escape_html(d.custom_sec_uom) : "") + "</td>" +
 			"<td class='text-right'>" + format_number(flt(d.qty), null, 3) + "</td>" +
 			"</tr>"
 		);

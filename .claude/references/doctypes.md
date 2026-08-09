@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-08-09 01:26:37_
+_Generated: 2026-08-10 00:31:56_
 
 ## drawing
 
@@ -408,12 +408,17 @@ _Generated: 2026-08-09 01:26:37_
 | ` create_from_subcontracting_order` | no |
 | ` create_from_work_order` | no |
 | ` populate_from_production_plan` | no |
+| ` _mip_refresh_blocked_message` | no |
+| ` check_mip_raw_materials_refreshable` | no |
+| ` refresh_mip_raw_materials_manual` | no |
 | ` refresh_mip_raw_materials` | no |
 | ` _carry_forward_editable_fields` | no |
 | ` _lookup_drawing_planned_weight` | no |
 | ` _sync_excess_return_from_raw_materials` | no |
 | ` _sync_cut_sheet_calc` | no |
 | ` _sync_batch_remarks` | no |
+| ` _maybe_mark_completed` | no |
+| ` recheck_mip_completion` | no |
 | ` _auto_suggest_excess_from_cut_sheet` | no |
 | ` refresh_weight_summary` | no |
 | ` get_target_context` | no |

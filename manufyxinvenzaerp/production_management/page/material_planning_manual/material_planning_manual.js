@@ -177,6 +177,20 @@ const MP_MANUAL_SECTIONS = [
 				result: "540.0",
 				note: "540 Kg reserved to cover a 500 Kg requirement — the 40 Kg difference is the unavoidable rounding-up to whole pieces, same idea as the Consolidate Item “Difference” column.",
 			},
+			{
+				title: "Same batch shared by SEVERAL rows — the GROUP rounds once, not each row",
+				item: "5 drawing rows, one shared batch", group: "Structurals",
+				length: 6000, sec_qty: "5 rows, see below", unit_weight: 10,
+				formula:
+					"Kg-per-piece for this batch = (6000÷1000) × 10 = 60. " +
+					"5 different rows all reserve from this same batch with “Allocate based on Sec Nos” on — " +
+					"their own required Kg add up to a combined 838.92 Kg (13.982 pieces-worth). " +
+					"The GROUP's combined total is rounded up ONCE — 13.982 → 14 whole pieces — then that " +
+					"14-piece total (840 Kg) is split back across the 5 rows proportional to each row's own " +
+					"share of the 838.92 Kg group requirement.",
+				result: "14 pieces total, shared across all 5 rows",
+				note: "No single row “absorbs” the rounding, and no row is skipped — each row still gets its own (often fractional-looking) share, e.g. 2.8 + 2.8 + 2.8 + 2.8 + 2.6 = 14 exactly. Rounding once per BATCH GROUP — not once per row — avoids over-reserving up to 4 extra pieces that 5 independent round-ups would otherwise have caused.",
+			},
 		],
 		examples: [
 			{
@@ -197,6 +211,7 @@ const MP_MANUAL_SECTIONS = [
 		],
 		notes: [
 			"“Allocate based on Sec Nos” only matters once “Reserve stock without dimensions” is ON. Left ON (its own default): the reserved Kg rounds up to whole pieces of the batch, as shown above. Turned OFF: the exact Required Kg (row.qty) is reserved directly with no rounding — and the later Transfer step will ask you to enter Sec Qty again there, for its own weight calculation.",
+			"Mixed group — some rows on, some off: to get the group-rounding behaviour above, EVERY row sharing that batch needs “Reserve stock without dimensions” AND “Allocate based on Sec Nos” both ON. If, say, 4 of 5 rows sharing a batch have both ON and the 5th doesn't, the 5th row is simply left OUT of the group — it does NOT end up with a fractional Sec Qty. The other 4 still round together as their own group of 4, unaffected. The 5th row's own Sec Qty is set to exactly 0 (not a fraction) and its Kg reserves at the exact Required Qty with no rounding at all — Sec Qty for that one row is left for you to fill in by hand later, at Transfer.",
 			"Status legend — “Mapped”: a real batch is assigned. “Not Mapped”: nothing assigned yet. “Virtual (At Supplier)”: fulfilled from another job's excess material that's staying at the supplier and will never come back to your warehouse — no batch, nothing to transfer. “Claimed (Pending Return)”: fulfilled from another job's excess that HASN'T physically returned to stock yet, but is already promised to this row.",
 		],
 		buttons: [
