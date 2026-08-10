@@ -373,27 +373,58 @@ function _check_transfer_readiness(frm, on_proceed) {
 			}
 
 			let html = "";
+
+			// CNC Process is a routing instruction, not a preference -- flagged material
+			// must go to CNC before the supplier. With no CNC Warehouse there is nowhere
+			// valid to send it, so this BLOCKS the transfer outright rather than offering
+			// a "proceed anyway" that would physically move stock past the CNC step.
+			let cnc = d.cnc_without_warehouse || [];
+			if (cnc.length) {
+				html += `<div style="border:1px solid #b91c1c;background:#fef2f2;border-radius:6px;padding:12px;margin-bottom:12px;">
+					<p style="margin:0 0 6px;font-weight:bold;color:#b91c1c;font-size:13px;">
+						🚫 ${__("Transfer blocked — CNC Warehouse is not set ({0} CNC item(s))", [cnc.length])}
+					</p>
+					<p style="margin:0 0 8px;color:#7f1d1d;">
+						${__("These rows are marked <b>CNC Process</b>, so they must go to the <b>CNC Warehouse first</b>, and only then on to {0}. This Material Issue Plan has no CNC Warehouse, so there is nowhere valid to send them.", [frappe.utils.escape_html(frm.doc.supplier_warehouse || __("the supplier/WIP warehouse"))])}
+					</p>
+					<p style="margin:0;color:#7f1d1d;">
+						${__("Fix it in one of two ways: set <b>CNC Warehouse</b> in the Warehouses section, or untick <b>CNC Process</b> on those rows in the Material Planning if the CNC step is not required.")}
+					</p>
+					${_rows(cnc, __("CNC rows affected"), true)}
+				</div>`;
+			}
+
 			if (d.unmapped && d.unmapped.length) {
 				html += _rows(d.unmapped, `⚠ ${__("Not Mapped / No Batch Assigned ({0} item(s)) — these will NOT be transferred", [d.unmapped.length])}`, false);
 			}
 			if (d.unreserved && d.unreserved.length) {
 				html += _rows(d.unreserved, `⚠ ${__("Batch Assigned but NOT Reserved ({0} item(s)) — these will NOT be transferred", [d.unreserved.length])}`, true);
 			}
-			html += `<p style="margin-top:10px;color:#555">
-				${__("Ensure stocks are purchased and mapped against Material Planning, or assign batches using the <b>Update Batch</b> option in the Material Issue Plan.")}
-			</p>`;
+			if (d.unmapped && d.unmapped.length || d.unreserved && d.unreserved.length) {
+				html += `<p style="margin-top:10px;color:#555">
+					${__("Ensure stocks are purchased and mapped against Material Planning, or assign batches using the <b>Update Batch</b> option in the Material Issue Plan.")}
+				</p>`;
+			}
 
+			// A missing CNC Warehouse is a hard stop -- no primary action at all, so the
+			// only way on is to fix the routing. The other two issues merely skip rows,
+			// which is a judgement call, so those keep "Proceed Anyway".
 			let dialog = new frappe.ui.Dialog({
-				title: __("Transfer Readiness Check — Issues Found"),
+				title: cnc.length
+					? __("Transfer Blocked — CNC Warehouse Required")
+					: __("Transfer Readiness Check — Issues Found"),
+				size: "large",
 				fields: [{ fieldtype: "HTML", fieldname: "body", options: html }],
-				primary_action_label: __("Proceed Anyway"),
+				primary_action_label: cnc.length ? __("Close") : __("Proceed Anyway"),
 				primary_action() {
 					dialog.hide();
-					on_proceed();
+					if (!cnc.length) on_proceed();
 				},
-				secondary_action_label: __("Cancel"),
-				secondary_action() { dialog.hide(); },
 			});
+			if (!cnc.length) {
+				dialog.set_secondary_action_label(__("Cancel"));
+				dialog.set_secondary_action(() => dialog.hide());
+			}
 			dialog.show();
 		},
 	});
@@ -507,6 +538,19 @@ function _add_transfer_buttons(frm) {
 		});
 	}, __("Transfer"));
 
+	// Reference view of what this plan will hand over, per item + batch, before
+	// any Stock Entry exists — the same Kg/Sec Nos figures the transfer popup
+	// will show, with fractional totals called out.
+	frm.add_custom_button(__("Validate Stock"), function() {
+		frappe.call({
+			method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.get_mip_pending_items",
+			args: { mip_name: frm.doc.name },
+			freeze: true,
+			freeze_message: __("Checking planned stock…"),
+			callback(r) { _show_mip_stock_validation(r.message || []); },
+		});
+	}, __("Transfer"));
+
 	if (frm.doc.cnc_warehouse) {
 		frm.add_custom_button(__("To CNC Warehouse"), function() {
 			_check_transfer_readiness(frm, function() {
@@ -553,6 +597,64 @@ function _add_transfer_buttons(frm) {
 // shown here without being misleading. A batch with no drawing tag at all (e.g. a
 // purchase never traced back to one specific drawing) is still a perfectly valid
 // row and is never excluded from this list on that basis.
+// Read-only summary of the pending transfer rows: Kg and Sec Nos per item+batch.
+// A fractional Sec Nos means one batch is shared across several drawings, so the
+// whole-piece decision is still open — it is taken row by row in the transfer
+// popup, not here.
+function _show_mip_stock_validation(rows) {
+	if (!rows.length) {
+		frappe.msgprint({
+			title: __("Validate Stock"),
+			message: __("Nothing is pending transfer on this plan."),
+			indicator: "orange",
+		});
+		return;
+	}
+
+	// Full width, no horizontal scrollbar: only the text columns wrap, numeric
+	// columns stay nowrap + right-aligned so everything fits the wide dialog.
+	let num = "text-align:right;white-space:nowrap;";
+	let html = '<table class="table table-bordered table-condensed" style="font-size:12px;width:100%;table-layout:auto;margin-bottom:0;">';
+	html += "<thead><tr>" + [
+		[__("Item"), ""], [__("Batch"), ""], [__("DUNO/Mark No"), ""],
+		[__("Planned Kg"), num], [__("Planned Sec Nos"), num],
+	].map(([h, st]) => '<th style="' + st + '">' + h + "</th>").join("") + "</tr></thead><tbody>";
+
+	let fractional = 0;
+	rows.forEach(function (d) {
+		let sec = flt(d.custom_sec_qty, 3);
+		let is_frac = Math.abs(sec - Math.round(sec)) > 0.001;
+		if (is_frac) fractional++;
+		html += "<tr>" +
+			'<td style="white-space:nowrap;">' + frappe.utils.escape_html(d.item_code) + "</td>" +
+			'<td style="word-break:break-all;">' + frappe.utils.escape_html(d.batch_no || "—") + "</td>" +
+			'<td style="white-space:nowrap;">' + frappe.utils.escape_html(d.duno_mark_no || "—") + "</td>" +
+			'<td style="' + num + '">' + flt(d.qty, 3) + "</td>" +
+			'<td style="' + num + '">' + (is_frac
+				? '<span style="color:#b45309;font-weight:600;">' + sec + "</span> " +
+				  "<span class='text-muted'>(" + __("or {0} whole", [Math.ceil(sec - 0.001)]) + ")</span>"
+				: sec) +
+			"</td></tr>";
+	});
+	html += "</tbody></table>";
+
+	if (fractional) {
+		html += '<p class="text-muted" style="margin-top:10px;">' +
+			__("{0} row(s) have a fractional Sec Nos — one batch shared across several drawings. You can raise it to a whole number in the transfer popup; the extra weight is then recorded as excess to return.", [fractional]) +
+			"</p>";
+	}
+
+	// A plain msgprint caps its own width and forces the table to scroll
+	// sideways; an extra-large Dialog fits every column on screen.
+	let dlg = new frappe.ui.Dialog({
+		title: __("Validate Stock"),
+		size: "extra-large",
+		fields: [{ fieldtype: "HTML", fieldname: "content" }],
+	});
+	dlg.fields_dict.content.$wrapper.html(html);
+	dlg.show();
+}
+
 function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 	var items = pending_items.filter(function(d) { return transfer_type === "cnc" ? d.cnc_process : !d.cnc_process; });
 	if (!items.length) {
@@ -640,17 +742,78 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 		+ "</tr></thead><tbody></tbody></table>");
 
 	var $tbody = $table.find("tbody");
+	// Sec Nos stays editable here because nothing rounds automatically any more:
+	// a fractional figure (2.5) is exactly what the drawings need, and raising it
+	// to whole pieces is a physical judgement only the person issuing the material
+	// can make. Each edit is re-checked against free stock server-side, and the
+	// extra weight is carried as excess to return.
 	items.forEach(function(d, idx) {
+		d._planned_sec_qty = flt(d.custom_sec_qty);
+		d._planned_qty = flt(d.qty);
+		var is_frac = Math.abs(d._planned_sec_qty - Math.round(d._planned_sec_qty)) > 0.001;
 		$tbody.append(
 			"<tr data-idx='" + idx + "' data-item='" + frappe.utils.escape_html(d.item_code || "") + "'>" +
 			"<td class='text-center'><input type='checkbox' class='mip-item-chk' checked></td>" +
 			"<td>" + frappe.utils.escape_html(d.item_code) + "</td>" +
 			"<td>" + frappe.utils.escape_html(d.batch_no || "") + "</td>" +
-			"<td class='text-right'>" + format_number(flt(d.custom_sec_qty), null, 3)
-				+ (d.custom_sec_uom ? " " + frappe.utils.escape_html(d.custom_sec_uom) : "") + "</td>" +
-			"<td class='text-right'>" + format_number(flt(d.qty), null, 3) + "</td>" +
+			"<td class='text-right'>" +
+				"<input type='number' step='0.001' min='0' class='form-control input-xs text-right mip-sec-qty' " +
+				"style='width:110px;display:inline-block" + (is_frac ? ";border-color:#f59e0b" : "") + "' " +
+				"value='" + flt(d._planned_sec_qty, 3) + "'>" +
+				(d.custom_sec_uom ? " <span class='text-muted'>" + frappe.utils.escape_html(d.custom_sec_uom) + "</span>" : "") +
+				(is_frac ? "<div class='text-muted' style='font-size:11px'>" +
+					__("planned {0} · whole {1}", [flt(d._planned_sec_qty, 3), Math.ceil(d._planned_sec_qty - 0.001)]) +
+					"</div>" : "") +
+			"</td>" +
+			"<td class='text-right mip-qty-cell'>" + format_number(flt(d.qty), null, 3) + "</td>" +
 			"</tr>"
 		);
+	});
+
+	// Re-derive Kg + excess from an edited Sec Nos, refusing anything the batch
+	// cannot physically cover.
+	$tbody.on("change", ".mip-sec-qty", function() {
+		var $input = $(this);
+		var $row = $input.closest("tr");
+		var d = items[parseInt($row.data("idx"), 10)];
+		var new_sec = flt($input.val());
+
+		if (new_sec <= 0) {
+			frappe.show_alert({ message: __("Sec Nos must be greater than zero."), indicator: "red" }, 5);
+			$input.val(flt(d.custom_sec_qty, 3));
+			return;
+		}
+		frappe.call({
+			method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.update_transfer_sec_qty",
+			args: {
+				mip_name: frm.doc.name,
+				item_code: d.item_code,
+				batch_no: d.batch_no || "",
+				planned_sec_qty: d._planned_sec_qty,
+				planned_qty: d._planned_qty,
+				new_sec_qty: new_sec,
+			},
+			callback: function(r) {
+				if (!r.message) return;
+				var m = r.message;
+				if (m.blocked) {
+					frappe.msgprint({ title: __("Not Enough Stock"), message: m.message, indicator: "red" });
+					$input.val(flt(d.custom_sec_qty, 3));
+					return;
+				}
+				d.custom_sec_qty = m.custom_sec_qty;
+				d.qty = m.qty;
+				d.round_up_excess_kg = m.round_up_excess_kg;
+				d.round_up_excess_pieces = m.round_up_excess_pieces;
+				$row.find(".mip-qty-cell").text(format_number(flt(m.qty), null, 3));
+				if (m.round_up_excess_kg > 0) {
+					frappe.show_alert({
+						message: __("{0} Kg extra will be issued and recorded as excess to return.", [flt(m.round_up_excess_kg, 3)]),
+						indicator: "orange",
+					}, 6);
+				}
+			},
+		});
 	});
 
 	function _apply_filters() {
@@ -1057,11 +1220,11 @@ function _mip_build_picker(dialog, all_rows, on_select) {
 const _MIP_ALLOC_FIELDS = [
 	"current_batch", "current_sec_qty", "current_qty",
 	"new_batch_no", "length", "width", "thickness", "sec_qty", "calculated_qty",
-	"reserve_without_dimensions", "allocate_based_on_sec_qty",
+	"reserve_without_dimensions",
 ];
 const _MIP_NEW_ALLOC_FIELDS = [
 	"new_batch_no", "length", "width", "thickness", "sec_qty", "calculated_qty",
-	"reserve_without_dimensions", "allocate_based_on_sec_qty",
+	"reserve_without_dimensions",
 ];
 
 // "Update Batch" dialog — search/filter across every raw material row (reservable and
@@ -1102,7 +1265,6 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 			{ fieldname: "sec_qty", fieldtype: "Float", label: __("Sec Qty (Nos)") },
 			{ fieldname: "calculated_qty", fieldtype: "Float", label: __("Calculated Qty (Kg)"), read_only: 1 },
 			{ fieldname: "reserve_without_dimensions", fieldtype: "Check", label: __("Reserve Without Dimensions") },
-			{ fieldname: "allocate_based_on_sec_qty", fieldtype: "Check", label: __("Allocate based on Sec Nos"), default: "1" },
 		],
 		primary_action_label: __("Reassign Batch"),
 		primary_action(values) {
@@ -1137,7 +1299,6 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 					dimensions: JSON.stringify(dimensions),
 					sec_qty: values.sec_qty,
 					reserve_without_dimensions: values.reserve_without_dimensions ? 1 : 0,
-					allocate_based_on_sec_qty: values.allocate_based_on_sec_qty ? 1 : 0,
 					material_issue_plan: frm.doc.name,
 				},
 				freeze: true,
@@ -1263,17 +1424,13 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 	dialog.fields_dict.sec_qty.$input && dialog.fields_dict.sec_qty.$input.on("input", _calc_new_qty);
 
 	// "Reserve Without Dimensions" mirrors Material Mapping's own toggle: when checked,
-	// Sec Qty is no longer typed in — it's computed server-side (grouped Sec-Qty rounding
-	// across every row sharing this batch, same as reserve_batches/_calc_group_rwd_allocations)
-	// — and "Allocate based on Sec Nos" appears to control that computation.
+	// Sec Qty is no longer typed in — the row reserves its exact Required Qty in Kg and
+	// Sec Nos is derived from it server-side (_apply_rwd_fractional_nos), left fractional
+	// until someone rounds it to whole pieces at transfer time.
 	function _toggle_rwd(checked) {
-		dialog.fields_dict.allocate_based_on_sec_qty.toggle(!!checked);
 		dialog.fields_dict.sec_qty.df.read_only = checked ? 1 : 0;
 		dialog.fields_dict.sec_qty.refresh();
-		if (checked) {
-			dialog.set_value("allocate_based_on_sec_qty", 1);
-			dialog.set_value("sec_qty", 0);
-		}
+		if (checked) dialog.set_value("sec_qty", 0);
 	}
 	dialog.fields_dict.reserve_without_dimensions.df.onchange = () =>
 		_toggle_rwd(dialog.get_value("reserve_without_dimensions"));
@@ -1292,7 +1449,6 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 		dialog.set_value("sec_qty", 0);
 		dialog.set_value("calculated_qty", 0);
 		dialog.set_value("reserve_without_dimensions", 0);
-		dialog.set_value("allocate_based_on_sec_qty", 1);
 		_toggle_allocation_fields(true, is_transferred);
 		_toggle_rwd(0);
 		picker.markSelected(row.name);
