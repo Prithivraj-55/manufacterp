@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-08-10 23:30:27_
+_Generated: 2026-08-11 04:08:49_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -63,36 +63,37 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `move_to_exact_match` | 1047 |
-| `update_exact_match_from_consolidate` | 1210 |
-| `finalize_mapping` | 1431 |
-| `verify_raw_materials` | 1658 |
-| `get_batch_reservation_summary` | 1674 |
-| `get_batch_item` | 1710 |
-| `get_batch_stock_summary` | 1718 |
-| `get_batch_cross_table_usage` | 1956 |
-| `reserve_batches` | 2143 |
-| `get_available_excess_batches` | 2311 |
-| `add_excess_material_mapping` | 2377 |
-| `get_available_virtual_excess_items` | 2472 |
-| `claim_virtual_excess_mapping` | 2572 |
-| `reserve_exact_match_batches` | 2701 |
-| `unreserve_exact_match_batches` | 2834 |
-| `check_mapping_batch_availability` | 2875 |
-| `unreserve_batches` | 2941 |
-| `reassign_batch` | 3093 |
-| `_test_simulate_se_release` | 3327 |
-| `make_production_plan` | 3346 |
-| `make_material_request` | 3405 |
-| `make_material_request_from_consolidate` | 3559 |
-| `update_so_difference_kg` | 3697 |
-| `auto_purchase_from_mp` | 3727 |
-| `complete_batch_mapping` | 3901 |
-| `@frappe.validate_and_sanitize_search_inputs` | 406 |
-| `get_bom_info` | 432 |
-| `get_so_drawings_for_bom_picker` | 484 |
-| `get_raw_materials` | 591 |
-| `check_stock_availability` | 694 |
+| `move_to_exact_match` | 1097 |
+| `update_exact_match_from_consolidate` | 1260 |
+| `finalize_mapping` | 1481 |
+| `verify_raw_materials` | 1708 |
+| `get_batch_reservation_summary` | 1724 |
+| `get_batch_item` | 1760 |
+| `get_batch_stock_summary` | 1768 |
+| `get_batch_cross_table_usage` | 2006 |
+| `validate_planned_stock` | 2138 |
+| `reserve_batches` | 2233 |
+| `get_available_excess_batches` | 2390 |
+| `add_excess_material_mapping` | 2456 |
+| `get_available_virtual_excess_items` | 2551 |
+| `claim_virtual_excess_mapping` | 2651 |
+| `reserve_exact_match_batches` | 2780 |
+| `unreserve_exact_match_batches` | 2913 |
+| `check_mapping_batch_availability` | 2954 |
+| `unreserve_batches` | 3015 |
+| `reassign_batch` | 3167 |
+| `_test_simulate_se_release` | 3396 |
+| `make_production_plan` | 3415 |
+| `make_material_request` | 3474 |
+| `make_material_request_from_consolidate` | 3628 |
+| `update_so_difference_kg` | 3766 |
+| `auto_purchase_from_mp` | 3796 |
+| `complete_batch_mapping` | 3970 |
+| `@frappe.validate_and_sanitize_search_inputs` | 456 |
+| `get_bom_info` | 482 |
+| `get_so_drawings_for_bom_picker` | 534 |
+| `get_raw_materials` | 641 |
+| `check_stock_availability` | 744 |
 ## production_management/inspection.py
 
 | Method | Line |
@@ -127,8 +128,8 @@ All `@frappe.whitelist()` methods. Call from JS:
 |--------|------|
 | `get_pr_item_uom` | 16 |
 | `get_mp_for_pr` | 257 |
-| `allocate_pr_stock_to_mp` | 278 |
-| `get_pr_mp_allocations` | 653 |
+| `allocate_pr_stock_to_mp` | 359 |
+| `get_pr_mp_allocations` | 844 |
 ## sq_management/supplier_quotation.py
 
 | Method | Line |
@@ -138,49 +139,50 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `check_mip_raw_materials_refreshable` | 184 |
-| `refresh_mip_raw_materials_manual` | 198 |
-| `refresh_mip_raw_materials` | 218 |
-| `create_from_subcontracting_order` | 42 |
-| `refresh_weight_summary` | 610 |
-| `create_from_work_order` | 61 |
-| `get_mip_batch_plan_html` | 792 |
-| `download_mip_batch_plan_pdf` | 798 |
-| `populate_from_production_plan` | 80 |
+| `check_mip_raw_materials_refreshable` | 192 |
+| `refresh_mip_raw_materials_manual` | 206 |
+| `refresh_mip_raw_materials` | 226 |
+| `create_from_subcontracting_order` | 43 |
+| `refresh_weight_summary` | 618 |
+| `create_from_work_order` | 62 |
+| `get_mip_batch_plan_html` | 807 |
+| `populate_from_production_plan` | 81 |
+| `download_mip_batch_plan_pdf` | 813 |
 ## subcontracting_management/material_issue_plan_transfer.py
 
 | Method | Line |
 |--------|------|
-| `has_cnc_stock` | 330 |
-| `get_mip_readiness_check` | 382 |
-| `create_mip_transfer_entry` | 479 |
-| `create_mip_partial_transfer` | 526 |
-| `create_mip_cnc_forward_entry` | 594 |
-| `create_mip_excess_return_entry` | 700 |
-| `get_mip_pending_items` | 86 |
+| `get_mip_pending_items` | 130 |
+| `update_transfer_sec_qty` | 267 |
+| `has_cnc_stock` | 401 |
+| `get_mip_readiness_check` | 453 |
+| `create_mip_transfer_entry` | 573 |
+| `create_mip_partial_transfer` | 621 |
+| `create_mip_cnc_forward_entry` | 690 |
+| `create_mip_excess_return_entry` | 796 |
 ## subcontracting_management/subcontracting.py
 
 | Method | Line |
 |--------|------|
-| `create_sco_and_mip_from_production_plan` | 183 |
-| `backfill_drawing_item_qty` | 2043 |
-| `delete_sco_and_mip_for_production_plan` | 208 |
-| `get_wo_pending_items` | 2111 |
-| `create_partial_wo_transfer` | 2216 |
-| `create_cnc_to_wip_entry` | 2272 |
-| `create_return_stock_entry_for_wo` | 2371 |
-| `get_jc_summary` | 2423 |
+| `create_sco_and_mip_from_production_plan` | 189 |
+| `backfill_drawing_item_qty` | 2049 |
+| `get_wo_pending_items` | 2117 |
+| `delete_sco_and_mip_for_production_plan` | 214 |
+| `create_partial_wo_transfer` | 2222 |
+| `create_cnc_to_wip_entry` | 2278 |
+| `create_return_stock_entry_for_wo` | 2377 |
+| `get_jc_summary` | 2429 |
 | `create_sco_from_production_plan` | 26 |
-| `create_work_order_from_pp` | 288 |
-| `create_supplier_operation_entries` | 448 |
-| `create_send_to_subcontractor_entry` | 468 |
-| `get_sco_pending_items` | 564 |
-| `create_partial_transfer` | 674 |
-| `create_cnc_to_supplier_entry` | 735 |
-| `get_soe_summary` | 838 |
-| `create_return_stock_entry` | 884 |
-| `create_finished_goods_entry` | 942 |
+| `create_work_order_from_pp` | 294 |
+| `create_supplier_operation_entries` | 454 |
+| `create_send_to_subcontractor_entry` | 474 |
+| `get_sco_pending_items` | 570 |
+| `create_partial_transfer` | 680 |
+| `create_cnc_to_supplier_entry` | 741 |
+| `get_soe_summary` | 844 |
+| `create_return_stock_entry` | 890 |
+| `create_finished_goods_entry` | 948 |
 
 ## Total
 
-_107 whitelisted methods_
+_109 whitelisted methods_

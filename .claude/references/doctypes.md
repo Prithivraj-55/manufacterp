@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-08-10 23:30:27_
+_Generated: 2026-08-11 04:08:49_
 
 ## drawing
 
@@ -279,13 +279,14 @@ _Generated: 2026-08-10 23:30:27_
 | Method | Whitelisted |
 |--------|-------------|
 | ` validate` | no |
+| ` _warn_undersized_purchase_dimensions` | no |
 | ` _sync_batch_remarks` | no |
 | ` _consolidate_unavailable_items` | no |
 | ` _recalculate_consolidate_items` | no |
 | ` _auto_update_planning_status` | no |
 | ` _validate_no_cross_table_batch_duplicate` | no |
 | ` _update_weight_summary` | no |
-| ` _apply_rwd_group_allocations` | no |
+| ` _apply_rwd_fractional_nos` | no |
 | ` _move_skipped_arm_to_mapping` | no |
 | ` _validate_batch_calc_qty` | no |
 | ` _validate_alternate_item_qty` | no |
@@ -318,7 +319,9 @@ _Generated: 2026-08-10 23:30:27_
 | ` _calc_kg_per_nos` | no |
 | ` _calc_usable_nos_split` | no |
 | ` _row_get` | no |
-| ` _calc_group_rwd_allocations` | no |
+| ` validate_planned_stock` | no |
+| ` _add` | no |
+| ` _sec_nos_for_weight` | no |
 | ` reserve_batches` | no |
 | ` _get_batch_reserved_by_self` | no |
 | ` get_available_excess_batches` | no |
