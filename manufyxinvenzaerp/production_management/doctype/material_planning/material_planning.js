@@ -455,8 +455,94 @@ frappe.ui.form.on("Material Planning", {
 				}, __("Status"));
 			}
 		}
+
+		// ── Validate Stock — planned Kg / Sec Nos per item, for reference ───
+		if (!frm.doc.__islocal) {
+			frm.add_custom_button(__("Validate Stock"), function () {
+				_show_planned_stock_validation(frm);
+			});
+		}
 	},
 });
+
+// Reference view of everything this plan has committed, per item + batch: how
+// many Kg and how many Sec Nos, against what the batch actually holds. A
+// fractional Sec Nos total is highlighted rather than hidden — it means several
+// drawings share that bar/sheet, and someone has to decide at transfer time
+// whether to hand over the lower or the higher whole piece count.
+function _show_planned_stock_validation(frm) {
+	frappe.call({
+		method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.validate_planned_stock",
+		args: { material_planning_name: frm.doc.name },
+		freeze: true,
+		freeze_message: __("Checking planned stock…"),
+		callback(r) {
+			let rows = r.message || [];
+			if (!rows.length) {
+				frappe.msgprint({
+					title: __("Validate Stock"),
+					message: __("No batches are assigned on this plan yet."),
+					indicator: "orange",
+				});
+				return;
+			}
+
+			// Full width, no horizontal scrollbar: only the two text columns are
+			// allowed to wrap, every numeric column is nowrap + right-aligned so
+			// the whole table settles inside the extra-large dialog.
+			let num = "text-align:right;white-space:nowrap;";
+			let html = '<table class="table table-bordered table-condensed" style="font-size:12px;width:100%;table-layout:auto;margin-bottom:0;">';
+			html += "<thead><tr>" + [
+				[__("Item"), ""], [__("Batch"), ""], [__("Planned Kg"), num],
+				[__("Planned Sec Nos"), num], [__("Drawings"), num],
+				[__("Batch Stock (Kg)"), num], [__("Short By"), num],
+			].map(([h, st]) => '<th style="' + st + '">' + h + "</th>").join("") + "</tr></thead><tbody>";
+
+			rows.forEach(function (d) {
+				let sec = d.is_fractional
+					? '<span style="color:#b45309;font-weight:600;">' + flt(d.planned_sec_qty, 3) +
+					  "</span> <span class='text-muted'>(" + __("or {0} whole", [flt(d.whole_sec_qty, 0)]) + ")</span>"
+					: flt(d.planned_sec_qty, 3);
+				let short = d.short_by > 0
+					? '<span style="color:#b91c1c;font-weight:600;">' + flt(d.short_by, 3) + "</span>"
+					: "—";
+				html += "<tr>" +
+					'<td style="white-space:nowrap;">' + frappe.utils.escape_html(d.item_code) + "</td>" +
+					'<td style="word-break:break-all;">' + frappe.utils.escape_html(d.batch) + "</td>" +
+					'<td style="' + num + '">' + flt(d.planned_qty, 3) + "</td>" +
+					'<td style="' + num + '">' + sec + "</td>" +
+					'<td style="' + num + '">' + d.drawings + "</td>" +
+					'<td style="' + num + '">' + flt(d.batch_stock_qty, 3) + "</td>" +
+					'<td style="' + num + '">' + short + "</td>" +
+					"</tr>";
+			});
+			html += "</tbody></table>";
+
+			let fractional = rows.filter((d) => d.is_fractional).length;
+			let short_rows = rows.filter((d) => d.short_by > 0).length;
+			let notes = [];
+			if (fractional) {
+				notes.push(__("{0} item(s) have a fractional Sec Nos — one batch shared across several drawings. Choose whole pieces when you transfer; the surplus is recorded as excess to return.", [fractional]));
+			}
+			if (short_rows) {
+				notes.push(__("{0} item(s) need more Kg than the batch currently holds.", [short_rows]));
+			}
+			if (notes.length) {
+				html += '<p class="text-muted" style="margin-top:10px;">' + notes.join("<br>") + "</p>";
+			}
+
+			// A plain msgprint caps its own width and forces the table to scroll
+			// sideways; an extra-large Dialog fits every column on screen.
+			let dlg = new frappe.ui.Dialog({
+				title: __("Validate Stock"),
+				size: "extra-large",
+				fields: [{ fieldtype: "HTML", fieldname: "content" }],
+			});
+			dlg.fields_dict.content.$wrapper.html(html);
+			dlg.show();
+		},
+	});
+}
 
 // ── Batch Mapping Completed — run validation then set status ────────────────
 function _run_batch_mapping_complete(frm) {
@@ -1859,54 +1945,19 @@ function _kg_per_nos(group, L, W, T, UW) {
 	return 0;
 }
 
-// Preview how much Kg must actually be reserved for rows under "Reserve stock
-// without dimensions" + "Allocate based on Sec Nos". Stock can only be
-// physically transferred in whole Sec Qty (Nos) pieces, so every row sharing
-// the SAME batch is grouped, their required Kg summed, rounded UP to the
-// nearest whole piece as a GROUP, then split back across the rows
-// proportional to each row's own required-Kg share — mirrors the server-side
-// _calc_group_rwd_allocations (rounding per row independently would
-// over-reserve an extra sheet per row instead of one extra sheet per group).
-// Recalculates every row in the group, not just the one that changed, since
-// the group total depends on all of them.
+// Mirror of the server-side _apply_rwd_fractional_nos / _sec_nos_for_weight:
+// a "Reserve stock without dimensions" row reserves exactly its Required Qty in
+// Kg, and Sec Nos is that weight expressed in pieces of the assigned batch --
+// deliberately fractional (2.5 stays 2.5). Nothing is rounded here; turning a
+// fraction into whole pieces is a transfer-time decision made on the Material
+// Issue Plan, which books the surplus as excess to return.
 function _calc_rwd_preview(frm, cdt, cdn) {
 	let row = locals[cdt][cdn];
 	if (!row.reserve_without_dimensions || !row.batch) return;
 
-	if (!row.allocate_based_on_sec_qty) {
-		frappe.model.set_value(cdt, cdn, "batch_sec_qty", 0);
-		frappe.model.set_value(cdt, cdn, "batch_calc_qty", 0);
-		return;
-	}
-
-	let group_rows = (frm.doc.material_mapping || []).filter(function(r) {
-		return r.batch === row.batch && !r.is_reserved
-			&& r.reserve_without_dimensions && r.allocate_based_on_sec_qty
-			&& (r.batch_parent_item_group === "Structurals" || r.batch_parent_item_group === "Plates");
-	});
-	if (!group_rows.length) return;
-
 	let kg_per_nos = _kg_per_nos(row.batch_parent_item_group, row.batch_length, row.batch_width, row.batch_thickness, row.batch_unit_weight);
-	let group_required = group_rows.reduce(function(sum, r) { return sum + flt(r.qty); }, 0);
-
-	if (!kg_per_nos || !group_required) {
-		group_rows.forEach(function(r) {
-			frappe.model.set_value(r.doctype, r.name, "batch_sec_qty", 0);
-			frappe.model.set_value(r.doctype, r.name, "batch_calc_qty", flt(r.qty, 3));
-		});
-		return;
-	}
-
-	let sec_qty_needed = Math.ceil(flt(group_required / kg_per_nos, 9));
-	let group_kg_to_reserve = flt(sec_qty_needed * kg_per_nos, 3);
-
-	group_rows.forEach(function(r) {
-		let share = flt(r.qty) / group_required;
-		let row_kg = flt(share * group_kg_to_reserve, 3);
-		let row_sec = flt(row_kg / kg_per_nos, 3);
-		frappe.model.set_value(r.doctype, r.name, "batch_sec_qty", row_sec);
-		frappe.model.set_value(r.doctype, r.name, "batch_calc_qty", row_kg);
-	});
+	frappe.model.set_value(cdt, cdn, "batch_calc_qty", flt(row.qty, 3));
+	frappe.model.set_value(cdt, cdn, "batch_sec_qty", kg_per_nos ? flt(flt(row.qty) / kg_per_nos, 3) : 0);
 }
 
 // Fetch and populate batch stock summary (total / reserved / free) for a mapping row
@@ -2096,19 +2147,11 @@ frappe.ui.form.on("Material Planning Material Mapping", {
 	reserve_without_dimensions(frm, cdt, cdn) {
 		let row = locals[cdt][cdn];
 		if (row.reserve_without_dimensions) {
-			frappe.model.set_value(cdt, cdn, "allocate_based_on_sec_qty", 1);
-			// set_value above won't re-fire its own handler if the value was
-			// already 1 (e.g. row default) — calculate directly too.
 			_calc_rwd_preview(frm, cdt, cdn);
 		} else {
 			frappe.model.set_value(cdt, cdn, "batch_sec_qty", 0);
 			frappe.model.set_value(cdt, cdn, "batch_calc_qty", 0);
 		}
-		frm.fields_dict["material_mapping"].grid.refresh_row(cdn);
-	},
-
-	allocate_based_on_sec_qty(frm, cdt, cdn) {
-		_calc_rwd_preview(frm, cdt, cdn);
 		frm.fields_dict["material_mapping"].grid.refresh_row(cdn);
 	},
 
@@ -2706,7 +2749,6 @@ const _TABLE_VIEW_CONFIG = {
 			{ fieldname: "batch_mapped",      label: "Status" },
 			{ fieldname: "batch_length",      label: "Batch Length" },
 			{ fieldname: "reserve_without_dimensions", label: "Reserve w/o Dimensions" },
-			{ fieldname: "allocate_based_on_sec_qty",  label: "Allocate by Sec Nos" },
 			{ fieldname: "batch_sec_qty",     label: "Batch Sec Qty" },
 			{ fieldname: "batch_calc_qty",    label: "Calc Qty (Kg)" },
 			{ fieldname: "is_reserved",       label: "Reserved" },
@@ -3066,7 +3108,7 @@ frappe.ui.form.on("Material Planning Consolidate Item", {
 const _AM_ALLOC_FIELDS = [
 	"current_batch", "current_sec_qty", "current_qty",
 	"new_batch_no", "length", "width", "thickness", "sec_qty", "calculated_qty",
-	"reserve_without_dimensions", "allocate_based_on_sec_qty",
+	"reserve_without_dimensions",
 ];
 
 function _am_row_matches_filters(r, f) {
@@ -3223,7 +3265,6 @@ function _show_exact_match_reassign_dialog(frm, preselect_row_name) {
 			{ fieldname: "sec_qty", fieldtype: "Float", label: __("Sec Qty (Nos)") },
 			{ fieldname: "calculated_qty", fieldtype: "Float", label: __("Calculated Qty (Kg)"), read_only: 1 },
 			{ fieldname: "reserve_without_dimensions", fieldtype: "Check", label: __("Reserve Without Dimensions") },
-			{ fieldname: "allocate_based_on_sec_qty", fieldtype: "Check", label: __("Allocate based on Sec Nos"), default: "1" },
 		],
 		primary_action_label: __("Reassign Batch"),
 		primary_action(values) {
@@ -3245,7 +3286,6 @@ function _show_exact_match_reassign_dialog(frm, preselect_row_name) {
 					dimensions: JSON.stringify({ length: values.length, width: values.width, thickness: values.thickness }),
 					sec_qty: values.sec_qty,
 					reserve_without_dimensions: values.reserve_without_dimensions ? 1 : 0,
-					allocate_based_on_sec_qty: values.allocate_based_on_sec_qty ? 1 : 0,
 				},
 				freeze: true,
 				freeze_message: __("Reassigning batch…"),
@@ -3342,13 +3382,9 @@ function _show_exact_match_reassign_dialog(frm, preselect_row_name) {
 	dialog.fields_dict.sec_qty.$input && dialog.fields_dict.sec_qty.$input.on("input", _calc_new_qty);
 
 	function _toggle_rwd(checked) {
-		dialog.fields_dict.allocate_based_on_sec_qty.toggle(!!checked);
 		dialog.fields_dict.sec_qty.df.read_only = checked ? 1 : 0;
 		dialog.fields_dict.sec_qty.refresh();
-		if (checked) {
-			dialog.set_value("allocate_based_on_sec_qty", 1);
-			dialog.set_value("sec_qty", 0);
-		}
+		if (checked) dialog.set_value("sec_qty", 0);
 	}
 	dialog.fields_dict.reserve_without_dimensions.df.onchange = () =>
 		_toggle_rwd(dialog.get_value("reserve_without_dimensions"));
@@ -3370,7 +3406,6 @@ function _show_exact_match_reassign_dialog(frm, preselect_row_name) {
 		dialog.set_value("sec_qty", 0);
 		dialog.set_value("calculated_qty", 0);
 		dialog.set_value("reserve_without_dimensions", 0);
-		dialog.set_value("allocate_based_on_sec_qty", 1);
 		dialog.fields_dict.cross_item_notice_html.$wrapper.html("");
 		_toggle_allocation_fields(true);
 		_toggle_rwd(0);
