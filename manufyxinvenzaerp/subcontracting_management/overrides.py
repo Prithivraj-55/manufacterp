@@ -15,6 +15,26 @@ def _is_pp_flow_sco(sco_name):
     )
 
 
+def resolve_supplier_warehouse(supplier, company):
+    """The Warehouse a Job Worker's material sits in, by this site's naming
+    convention: '<Job Worker> - <Company Abbr>' (e.g. 'INTERNATIONAL STEEL PRO -
+    MIPL'). Returns "" when the supplier/company is missing or no such Warehouse
+    has been created yet.
+
+    Shared so the Material Issue Plan can resolve the same warehouse the
+    Subcontracting Order would, rather than restating the convention -- an MIP is
+    created in the same click as its SCO, before the SCO has had a chance to fill
+    the field in, and a blank warehouse there blocks every transfer later on.
+    """
+    if not (supplier and company):
+        return ""
+    abbr = frappe.db.get_value("Company", company, "abbr")
+    if not abbr:
+        return ""
+    warehouse = f"{supplier} - {abbr}"
+    return warehouse if frappe.db.exists("Warehouse", warehouse) else ""
+
+
 class CustomStockEntry(StockEntry):
     """Stock Entry override that relaxes ERPNext's standard subcontracting checks for
     'Send to Subcontractor' entries tied to a Production-Plan-flow Subcontracting Order,
@@ -73,12 +93,7 @@ class CustomSubcontractingOrder(SubcontractingOrder):
         surface the standard "create it first" error)."""
         if self.supplier_warehouse or not self.supplier:
             return
-        abbr = frappe.db.get_value("Company", self.company, "abbr")
-        if not abbr:
-            return
-        warehouse = f"{self.supplier} - {abbr}"
-        if frappe.db.exists("Warehouse", warehouse):
-            self.supplier_warehouse = warehouse
+        self.supplier_warehouse = resolve_supplier_warehouse(self.supplier, self.company) or None
 
     # ── on_submit / on_cancel overrides ──────────────────────────────────────
 
