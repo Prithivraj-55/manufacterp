@@ -151,8 +151,7 @@ const MP_MANUAL_SECTIONS = [
 			{ name: "Planned Item (from Batch)", note: "The item the assigned batch actually is — will differ from Item Code if you've substituted an alternate item." },
 			{ name: "Batch Length / Width / Thickness / Unit Weight", note: "The ASSIGNED BATCH's own dimensions — this is what the Kg formula actually uses, not the required dimensions." },
 			{ name: "Sec Qty (NOS) / Calc Qty (Kg)", note: "How many pieces you're taking from the batch, and the Kg that works out to." },
-			{ name: "Reserve stock without dimensions", note: "Explained with a worked example below." },
-			{ name: "Allocate based on Sec Nos", note: "Explained with a worked example below — only relevant once dimensions are skipped." },
+			{ name: "Reserve stock without dimensions", note: "Explained with a worked example below — one batch shared across several rows." },
 			{ name: "CNC Process", note: "Same meaning as on Available Raw Materials — see that section for the full example." },
 			{ name: "Reserved / Reserved Qty / Shortfall Qty / Reserved On", note: "Same reservation bookkeeping as Exact Match — and the same rule: only the quantity ON THIS ROW gets reserved, never the whole batch." },
 			{ name: "Batch Total / Reserved / Free Qty", note: "A live snapshot of that batch's stock position across the whole system, not just this row." },
@@ -167,29 +166,26 @@ const MP_MANUAL_SECTIONS = [
 				note: "If the drawing only actually needed the weight of a 3000mm length (184.8 Kg), the rest of this 739.2 Kg is off-cut — tracked later as excess once the job physically cuts it, in Material Issue Plan's Excess Return, not here.",
 			},
 			{
-				title: "“Reserve stock without dimensions” — ON, whole-piece rounding",
+				title: "“Reserve stock without dimensions” — ON, exact Kg, fractional pieces",
 				item: "Alternate item (different profile)", group: "Structurals",
-				length: 6000, sec_qty: "rounded up, see below", unit_weight: 10,
+				length: 6000, sec_qty: "fractional, see below", unit_weight: 10,
 				formula:
 					"Requirement is 500 Kg. This batch's own shape gives Kg-per-piece = (6000÷1000) × 10 = 60 Kg. " +
-					"Pieces needed = 500 ÷ 60 = 8.33 → rounded UP to 9 whole pieces (you can't reserve part of a bar). " +
-					"Reserved Kg = 9 × 60",
-				result: "540.0",
-				note: "540 Kg reserved to cover a 500 Kg requirement — the 40 Kg difference is the unavoidable rounding-up to whole pieces, same idea as the Consolidate Item “Difference” column.",
+					"Sec Nos = 500 ÷ 60 = 8.333 pieces. Reserved Kg = exactly 500",
+				result: "500.0 Kg  (8.333 Nos)",
+				note: "Nothing is rounded here. Planning reserves precisely the 500 Kg the drawing needs — never a gram more — so the rest of that bar stays free for other rows. Turning 8.333 into whole bars is a physical decision, taken at transfer time in the Material Issue Plan.",
 			},
 			{
-				title: "Same batch shared by SEVERAL rows — the GROUP rounds once, not each row",
-				item: "5 drawing rows, one shared batch", group: "Structurals",
-				length: 6000, sec_qty: "5 rows, see below", unit_weight: 10,
+				title: "Same batch shared by SEVERAL rows — each keeps its own exact share",
+				item: "2 drawing rows, one shared bar", group: "Structurals",
+				length: 1000, sec_qty: "2 rows, see below", unit_weight: 25.38,
 				formula:
-					"Kg-per-piece for this batch = (6000÷1000) × 10 = 60. " +
-					"5 different rows all reserve from this same batch with “Allocate based on Sec Nos” on — " +
-					"their own required Kg add up to a combined 838.92 Kg (13.982 pieces-worth). " +
-					"The GROUP's combined total is rounded up ONCE — 13.982 → 14 whole pieces — then that " +
-					"14-piece total (840 Kg) is split back across the 5 rows proportional to each row's own " +
-					"share of the 838.92 Kg group requirement.",
-				result: "14 pieces total, shared across all 5 rows",
-				note: "No single row “absorbs” the rounding, and no row is skipped — each row still gets its own (often fractional-looking) share, e.g. 2.8 + 2.8 + 2.8 + 2.8 + 2.6 = 14 exactly. Rounding once per BATCH GROUP — not once per row — avoids over-reserving up to 4 extra pieces that 5 independent round-ups would otherwise have caused.",
+					"Kg-per-piece for this batch = (1000÷1000) × 25.38 = 25.38 Kg. " +
+					"Row 1 needs 33 Kg → 33 ÷ 25.38 = 1.3 Nos. " +
+					"Row 2 needs 33 Kg → 1.3 Nos. " +
+					"Together: 66 Kg = 2.6 Nos reserved",
+				result: "66.0 Kg  (2.6 Nos across 2 rows)",
+				note: "Both rows keep their exact 33 Kg / 1.3 Nos. At transfer you can hand over 2.6 pieces-worth as calculated, or raise it to 3 whole pieces — that adds 0.4 × 25.38 = 10.15 Kg, and THAT surplus is what becomes excess to return. Planning stays honest; the rounding decision (and its excess) is recorded where the material physically moves.",
 			},
 		],
 		examples: [
@@ -201,17 +197,18 @@ const MP_MANUAL_SECTIONS = [
 			{
 				type: "do",
 				label: "“Reserve stock without dimensions” — ON",
-				text: "You're substituting a completely different profile (an Alternate Item), or you simply want to reserve in whole pieces rather than an exact fractional cut. Tick this box and, with “Allocate based on Sec Nos” also on, the system rounds up to the nearest whole number of pieces of the assigned batch needed to cover the requirement — see the worked calculation above. This is exactly what happens automatically when a Purchase Receipt fulfils an Alternate Item — you'll see this box already ticked on rows created that way.",
+				text: "One bar or sheet is being shared across several rows, or you're substituting a different profile (an Alternate Item). Tick this box and the row reserves its exact Required Kg, with Sec Nos shown as that weight in pieces of the assigned batch — fractional on purpose (2.5 stays 2.5). This is exactly what happens automatically when a Purchase Receipt fulfils a consolidated or alternate-item line — you'll see this box already ticked on rows created that way.",
 			},
 			{
 				type: "dont",
-				label: "Don't expect an exact, unrounded Kg with this box ON",
-				text: "With “Reserve stock without dimensions” + “Allocate based on Sec Nos” both ON, the reserved Kg is always rounded UP to a whole number of pieces of the assigned batch — it will usually be slightly MORE than the bare requirement, never less. If you need the exact unrounded Kg instead, turn “Allocate based on Sec Nos” off (see below) or use dimension-driven assignment instead.",
+				label: "Don't expect whole pieces at planning stage",
+				text: "A fractional Sec Nos such as 2.5 or 8.333 is correct, not a bug — it is the exact weight the drawings need, expressed in pieces of the batch you assigned. Nothing rounds it up automatically any more. Use “Validate Stock” to see every fractional total at a glance, and settle them at transfer time.",
 			},
 		],
 		notes: [
-			"“Allocate based on Sec Nos” only matters once “Reserve stock without dimensions” is ON. Left ON (its own default): the reserved Kg rounds up to whole pieces of the batch, as shown above. Turned OFF: the exact Required Kg (row.qty) is reserved directly with no rounding — and the later Transfer step will ask you to enter Sec Qty again there, for its own weight calculation.",
-			"Mixed group — some rows on, some off: to get the group-rounding behaviour above, EVERY row sharing that batch needs “Reserve stock without dimensions” AND “Allocate based on Sec Nos” both ON. If, say, 4 of 5 rows sharing a batch have both ON and the 5th doesn't, the 5th row is simply left OUT of the group — it does NOT end up with a fractional Sec Qty. The other 4 still round together as their own group of 4, unaffected. The 5th row's own Sec Qty is set to exactly 0 (not a fraction) and its Kg reserves at the exact Required Qty with no rounding at all — Sec Qty for that one row is left for you to fill in by hand later, at Transfer.",
+			"Where rounding now happens: NOWHERE automatically. Material Planning always reserves the exact Required Kg and reports Sec Nos as a plain fraction of the assigned batch. The only place a fraction becomes whole pieces is the Material Issue Plan transfer popup, where you type the number yourself — the system re-checks free stock for the new figure and books the extra weight as excess to return.",
+			"Partial transfers are why fractions matter. A Material Planning covering 10 drawings feeds a separate Material Issue Plan per drawing, and each plan only pulls its own drawings' reserved rows. So a batch planned across 5 rows (8 Nos in total) may well present as 4.5 Nos when only 3 of those drawings are being issued — that is expected. Raise it to 5 in the transfer popup if you must hand over whole bars, and the 0.5 piece of surplus is recorded for return.",
+			"Case 1 vs Case 2. Case 1 — leave “Reserve stock without dimensions” OFF, pick a batch and type Sec Qty yourself; the system reserves exactly that and never overwrites your number. Case 2 — tick it when one large bar or sheet serves several rows; the system derives the fractional Sec Nos for you from each row's required Kg.",
 			"Status legend — “Mapped”: a real batch is assigned. “Not Mapped”: nothing assigned yet. “Virtual (At Supplier)”: fulfilled from another job's excess material that's staying at the supplier and will never come back to your warehouse — no batch, nothing to transfer. “Claimed (Pending Return)”: fulfilled from another job's excess that HASN'T physically returned to stock yet, but is already promised to this row.",
 		],
 		buttons: [
@@ -219,6 +216,10 @@ const MP_MANUAL_SECTIONS = [
 			{
 				name: "Excess Material Mapping",
 				note: "Opens the excess-material picker — see the dedicated section below for the full explanation and worked examples of both cases it covers.",
+			},
+			{
+				name: "Validate Stock  (top of the form)",
+				note: "A read-only roll-up per item and batch: planned Kg, planned Sec Nos, how many drawings share that batch, the batch's own stock, and any shortfall. Fractional Sec Nos totals show in amber with the whole-piece figure beside them, and shortfalls in red. It changes nothing — it is the quickest way to see which batches still need a whole-piece decision before the job reaches transfer.",
 			},
 		],
 	},
@@ -310,6 +311,7 @@ const MP_MANUAL_SECTIONS = [
 			{ name: "Purchase Kg", note: "Auto-calculated, same formula as everywhere else — the Alternate Item's Unit Weight is used instead of the original's, whenever an Alternate Item is set." },
 			{ name: "Difference (Purchase Kg − Required Kg)", note: "Almost always a small positive surplus, because you can usually only buy whole pieces/standard lengths, not the exact fractional Kg required. This is normal purchasing rounding, NOT excess material to be returned." },
 			{ name: "Alternate Item section", note: "Set once for the whole consolidated line to substitute a different item for every drawing it represents — once set, Length/Width/Thickness/Sec Qty above describe the ALTERNATE item, not the original." },
+			{ name: "Purchase size check (on save)", note: "Every time you save, each line's Length/Width/Thickness is compared against the biggest piece it has to produce. Anything too short or the wrong thickness is listed in an information popup — see the second worked example below. It never blocks the save." },
 		],
 		calcs: [
 			{
@@ -319,6 +321,20 @@ const MP_MANUAL_SECTIONS = [
 				formula: "You'll buy 32 whole 12m bars. Purchase Kg = (12000÷1000) × 61.6 × 32",
 				result: "23,654.40",
 				note: "Required Kg across every drawing was 23,039.40 — so Difference = 23,654.40 − 23,039.40 = 614.998 Kg of purchasing surplus, purely from rounding up to whole bars.",
+			},
+			{
+				title: "Buying SHORTER than the longest piece — the size warning",
+				item: "ISMB400", group: "Structurals",
+				length: 4000, sec_qty: 50, unit_weight: 61.6,
+				formula:
+					"You enter Length 4000 and Sec Qty 50. Purchase Kg = (4000÷1000) × 61.6 × 50 = 12,320 Kg, " +
+					"which comfortably covers the 11,519.701 Kg required — so on WEIGHT alone this looks fine. " +
+					"But the longest single ISMB400 piece the drawings need is 6936.01 mm",
+				result: "12,320 Kg bought — but no 6936 mm piece can ever be cut from a 4000 mm bar",
+				note:
+					"On save you'll get an information popup: “ISMB400 — Length ≥ 6936.01 mm (now 4000)”. " +
+					"It does NOT block the save — buying short stock is sometimes deliberate — it simply makes sure " +
+					"the clash is never silent. Enough total weight is not the same as usable material.",
 			},
 		],
 		steps: [
@@ -352,7 +368,7 @@ const MP_MANUAL_SECTIONS = [
 			"allocation happens AUTOMATICALLY — there is no button to click for this part.",
 		steps: [
 			"The original item was purchased (no substitution) → the received batch lands in Available Raw Materials, exactly like a real exact match.",
-			"An Alternate Item was purchased → the received batch lands in Material Mapping instead, with “Reserve stock without dimensions” already switched on for you, and “Allocate based on Sec Nos” on alongside it — same whole-piece rounding as the worked example above.",
+			"A consolidated purchase, or an Alternate Item, was received → the batch lands in Material Mapping instead of Exact Match, with “Reserve stock without dimensions” already switched on for you. Sec Nos comes through as an exact fraction of the purchased piece size — settle it into whole pieces at transfer time.",
 			"If the purchase was consolidated across several drawings' worth of the same item, the received quantity is split sequentially — the first drawing (by row order) is filled completely, then the next, and so on. Any purchasing surplus left after every drawing is fully covered simply becomes free warehouse stock (see the Consolidate Item section above) — it isn't assigned to any one drawing.",
 		],
 	},
@@ -420,14 +436,36 @@ const MP_MANUAL_SECTIONS = [
 			{ name: "Finished Goods Warehouse", note: "Receives BOTH the finished good (via Make Final Stock Entry) and any unconsumed/off-cut material (via Return Excess Entry). Must be set before either button will work." },
 		],
 		buttons: [
-			{ name: "Select Materials to Transfer / To CNC Warehouse", note: "Move reserved batches out to the supplier — or, for CNC-flagged rows, to the CNC Warehouse first. Only batches that are BOTH purchased AND reserved are ever offered, filtered by Item Code only, since one consolidated batch can legitimately serve several drawings at once." },
+			{ name: "Select Materials to Transfer / To CNC Warehouse", note: "Move reserved batches out to the supplier — or, for CNC-flagged rows, to the CNC Warehouse first. Only batches that are BOTH purchased AND reserved are ever offered, filtered by Item Code only, since one consolidated batch can legitimately serve several drawings at once. Sec Nos is EDITABLE in this popup — see the worked example below." },
+			{ name: "Validate Stock", note: "A read-only preview of exactly what this plan will hand over: Kg and Sec Nos per item and batch, with any fractional Sec Nos highlighted in amber. Nothing is created or changed — use it before transferring to see which rows still need a whole-piece decision." },
 			{ name: "CNC to Supplier/WIP", note: "Forwards material on from the CNC Warehouse once machining is done." },
 			{ name: "PDF", note: "A shareable batch plan — DUNO/Mark No, Customer Drawing No, Planned Kg, batch details and Sec Qty — for the production or supplier team, with its own Download button in the popup's corner." },
 			{ name: "Return Excess Entry", note: "Review Qty/dimensions and enter a mandatory Reason for every row, confirm that the material will be received into the Finished Goods Warehouse, then the return Stock Entry is created." },
 			{ name: "Make Final Stock Entry", note: "Appears once Job work order 1's operations are ALL complete. Creates a draft Manufacture Stock Entry that consumes the supplier-warehouse raw material and produces the finished good into the Finished Goods Warehouse — review and submit it from there." },
 		],
+		calcs: [
+			{
+				title: "Fractional Sec Nos at transfer — keep 4.5, or round to 5?",
+				item: "ISMB450", group: "Structurals",
+				length: 900, sec_qty: "4.5 planned", unit_weight: 72.4,
+				formula:
+					"One purchased batch is shared by 5 drawings — 8 Nos in total across the whole Material Planning. " +
+					"But this Material Issue Plan covers only 3 of those drawings, so it pulls 4.5 Nos " +
+					"(Kg-per-piece = (900÷1000) × 72.4 = 65.16, so 4.5 × 65.16 = 293.22 Kg). " +
+					"Leave it at 4.5 to issue the exact planned weight, or type 5 to hand over whole bars: " +
+					"5 × 65.16 = 325.80 Kg",
+				result: "293.22 Kg (4.5 Nos)  →  or 325.80 Kg (5 Nos), excess 32.58 Kg",
+				note:
+					"A fractional 4.5 is expected, not an error — it is simply this plan's share of a bar that " +
+					"several drawings sub-divide. If you type 5, the system re-checks free stock for the higher " +
+					"figure, refuses it outright if the batch can't cover it, and books the extra 32.58 Kg " +
+					"straight into Excess Material Return so it comes back to the batch later.",
+			},
+		],
 		notes: [
 			"Nothing is ever offered for transfer unless it's BOTH purchased (a Purchase Receipt allocated it) AND reserved (a manual step back on Material Planning 1) — after a Purchase Receipt submits, its popup tells you exactly which Material Planning to open and reserve if anything's still pending.",
+			"Why fractions turn up here and not in Material Planning: a Material Planning covering 10 drawings feeds a SEPARATE Material Issue Plan per drawing, and each plan only ever pulls its own drawings' reserved rows. A batch planned across 5 rows can therefore present as 4.5 Nos when only 3 of those drawings are being issued. That is the whole reason Sec Nos is editable here — this is the first point at which anyone knows how many physical bars are actually going out of the door.",
+			"Nothing rounds automatically, anywhere. Material Planning reserves the exact Kg each drawing needs; this popup is the ONLY place a fraction becomes whole pieces, and only because you typed it. Whatever you add on top is recorded as excess to return, never quietly absorbed.",
 		],
 	},
 	{
