@@ -1,6 +1,6 @@
 # hooks — manufyxinvenzaerp
 
-_Generated: 2026-08-10 00:31:56_
+_Generated: 2026-08-10 22:53:52_
 
 ## doc_events
 
@@ -97,6 +97,13 @@ doc_events = {
 	"Inspection Entry": {
 		"on_submit": "manufyxinvenzaerp.production_management.inspection.on_submit_inspection_entry",
 	},
+	"Payment Request": {
+		"validate": "manufyxinvenzaerp.accounts_management.payment_request.validate_payment_request",
+	},
+	"Payment Entry": {
+		"on_submit": "manufyxinvenzaerp.accounts_management.payment_entry.on_submit_payment_entry",
+		"on_cancel": "manufyxinvenzaerp.accounts_management.payment_entry.on_cancel_payment_entry",
+	},
 }
 ```
 
@@ -134,6 +141,7 @@ doctype_js = {
     # DISABLED (client change request Phase 0.4): Job Card reverted to standard.
     "Supplier Operation Entry": "public/js/supplier_operation_entry.js",
     "Inspection Entry": "public/js/inspection_entry.js",
+    "Payment Request": "public/js/payment_request.js",
 }
 ```
 
