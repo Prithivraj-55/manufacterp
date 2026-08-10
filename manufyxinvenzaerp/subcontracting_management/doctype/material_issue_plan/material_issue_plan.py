@@ -3,6 +3,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
 
+from manufyxinvenzaerp.subcontracting_management.overrides import resolve_supplier_warehouse
 from manufyxinvenzaerp.utils.dimension_formula import calculate_qty
 
 
@@ -123,9 +124,16 @@ def populate_from_production_plan(mip_name):
     # refresh, which also broke SCO/SOE transfer tracking downstream (see
     # _update_sco_transferred_weight in stock_entry.py).
     if mip.subcontracting_order and not mip.supplier_warehouse:
-        mip.supplier_warehouse = frappe.db.get_value(
-            "Subcontracting Order", mip.subcontracting_order, "supplier_warehouse"
-        ) or ""
+        sco_row = frappe.db.get_value(
+            "Subcontracting Order", mip.subcontracting_order,
+            ["supplier_warehouse", "supplier", "company"], as_dict=True) or {}
+        # Fall back to resolving the Job Worker's own warehouse by name when the
+        # SCO has not filled the field in yet -- an SCO created by hand, or one
+        # created in this very click, is still blank at this point, and a blank
+        # Supplier Warehouse blocks every transfer this plan would later make.
+        mip.supplier_warehouse = sco_row.get("supplier_warehouse") or resolve_supplier_warehouse(
+            sco_row.get("supplier"), sco_row.get("company") or mip.company
+        )
 
     mip.set("drawing_items", [])
     for row in (pp.po_items or []):
@@ -631,9 +639,16 @@ def refresh_weight_summary(mip_name):
     # _refresh_linked_mip_weight) wiped out a manually-entered WIP Warehouse right
     # after the user transferred material into it.
     if mip.subcontracting_order and not mip.supplier_warehouse:
-        mip.supplier_warehouse = frappe.db.get_value(
-            "Subcontracting Order", mip.subcontracting_order, "supplier_warehouse"
-        ) or ""
+        sco_row = frappe.db.get_value(
+            "Subcontracting Order", mip.subcontracting_order,
+            ["supplier_warehouse", "supplier", "company"], as_dict=True) or {}
+        # Fall back to resolving the Job Worker's own warehouse by name when the
+        # SCO has not filled the field in yet -- an SCO created by hand, or one
+        # created in this very click, is still blank at this point, and a blank
+        # Supplier Warehouse blocks every transfer this plan would later make.
+        mip.supplier_warehouse = sco_row.get("supplier_warehouse") or resolve_supplier_warehouse(
+            sco_row.get("supplier"), sco_row.get("company") or mip.company
+        )
 
     # Actual transferred weight — read from the linked SCO or WO
     actual_transferred = 0.0

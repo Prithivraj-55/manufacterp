@@ -14,7 +14,7 @@ class MaterialPlanning(Document):
         self.available_raw_materials = [r for r in (self.available_raw_materials or []) if r.item_code]
         self.material_mapping = [r for r in (self.material_mapping or []) if r.item_code]
         self.unavailable_items = [r for r in (self.unavailable_items or []) if r.item_code]
-        self._apply_rwd_group_allocations()
+        self._apply_rwd_fractional_nos()
         self._validate_no_cross_table_batch_duplicate()
         if self.material_mapping and self.for_warehouse:
             self._validate_batch_calc_qty()
@@ -26,6 +26,56 @@ class MaterialPlanning(Document):
         _update_bom_item_weights(self)
         self._auto_update_planning_status()
         self._sync_batch_remarks()
+        self._warn_undersized_purchase_dimensions()
+
+    def _warn_undersized_purchase_dimensions(self):
+        """Point out, on save, any Consolidate Item bought in a size smaller than
+        the largest piece it has to produce — a 4000 mm bar can never yield the
+        6936 mm member it was consolidated for, and a 6 mm plate can never yield
+        a 10 mm one.
+
+        Informational only, never blocking: buying short stock is sometimes a
+        deliberate call (offcuts, stock already on hand), so this states the
+        minimum each line needs and leaves the decision to the buyer.
+        """
+        if not self.consolidate_items or not self.unavailable_items:
+            return
+
+        needed = {}
+        for row in self.unavailable_items:
+            if not row.item_code:
+                continue
+            agg = needed.setdefault(row.item_code, {"length": 0.0, "width": 0.0, "thickness": set()})
+            agg["length"] = max(agg["length"], flt(row.length))
+            agg["width"] = max(agg["width"], flt(row.width))
+            if flt(row.thickness):
+                agg["thickness"].add(flt(row.thickness))
+
+        messages = []
+        for c in self.consolidate_items:
+            agg = needed.get(c.item_code)
+            if not agg:
+                continue
+            shortfalls = []
+            if flt(c.length) and flt(c.length) < agg["length"]:
+                shortfalls.append(_("Length ≥ {0} mm (now {1})").format(agg["length"], flt(c.length)))
+            if flt(c.width) and flt(c.width) < agg["width"]:
+                shortfalls.append(_("Width ≥ {0} mm (now {1})").format(agg["width"], flt(c.width)))
+            # Thickness is never cut down, so it has to match exactly -- and only
+            # one required thickness can be satisfied by a single purchase.
+            if agg["thickness"] and flt(c.thickness) not in agg["thickness"]:
+                shortfalls.append(_("Thickness = {0} mm (now {1})").format(
+                    ", ".join(str(t) for t in sorted(agg["thickness"])), flt(c.thickness)))
+            if shortfalls:
+                messages.append("<b>{0}</b> — {1}".format(c.item_code, "; ".join(shortfalls)))
+
+        if messages:
+            frappe.msgprint(
+                _("For physically valid stock, set purchase sizes at least as large as the "
+                  "biggest piece each item must produce:<br><br>{0}").format("<br>".join(messages)),
+                title=_("Purchase Size Smaller Than Requirement"),
+                indicator="blue",
+            )
 
     def _sync_batch_remarks(self):
         """Mirror each reserved/assigned row's Batch Remarks (client change
@@ -149,28 +199,33 @@ class MaterialPlanning(Document):
         self.expected_weight_material_mapping = flt(expected_mapping, 3)
         self.weight_cross_item_mapped = flt(cross_mapped, 3)
 
-    def _apply_rwd_group_allocations(self):
-        """Keep batch_sec_qty/batch_calc_qty correct for every 'Reserve stock
-        without dimensions' + 'Allocate based on Sec Nos' row on EVERY save —
-        not only when the Reserve button is clicked. Without this, a row can
-        sit with reserve_without_dimensions checked but batch_calc_qty stuck
-        at 0 (its pre-checkbox value) indefinitely, which silently corrupts
-        the Difference in Kg summary and the BOM Items excess weight."""
+    def _apply_rwd_fractional_nos(self):
+        """Keep batch_sec_qty/batch_calc_qty in step with the requirement for every
+        'Reserve stock without dimensions' row on EVERY save — not only when the
+        Reserve button is clicked. Without this, a row can sit with the checkbox
+        ticked but batch_calc_qty stuck at 0 (its pre-checkbox value) indefinitely,
+        which silently corrupts the Difference in Kg summary and the BOM Items
+        excess weight.
+
+        The row reserves its exact Required Qty in Kg, and Sec Nos is that same
+        weight expressed in pieces of the assigned batch — deliberately left
+        FRACTIONAL (2.5 stays 2.5). Planning never reserves more than the drawing
+        actually needs; rounding up to whole physical pieces is a transfer-time
+        decision, made by hand on the Material Issue Plan, where the surplus is
+        recorded as excess to return.
+
+        Rows WITHOUT this checkbox are untouched here, so a manually entered
+        Sec Nos on a dimension-matched row is never overwritten.
+        """
         if not self.material_mapping:
             return
-        allocations = _calc_group_rwd_allocations(self.material_mapping)
         for row in self.material_mapping:
             if row.is_reserved or not row.batch:
                 continue
             if row.batch_parent_item_group not in ("Structurals", "Plates") or not row.reserve_without_dimensions:
                 continue
-            if row.allocate_based_on_sec_qty:
-                to_reserve, sec_qty = allocations.get(row.name, (flt(row.qty), 0))
-                row.batch_sec_qty = sec_qty
-                row.batch_calc_qty = to_reserve
-            else:
-                row.batch_sec_qty = 0
-                row.batch_calc_qty = 0
+            row.batch_calc_qty = flt(row.qty, 3)
+            row.batch_sec_qty = _sec_nos_for_weight(row, row.qty)
 
     def _move_skipped_arm_to_mapping(self):
         """On save, move Available Raw Material rows with skip_auto_suggest_batch
@@ -261,16 +316,11 @@ class MaterialPlanning(Document):
                 continue
 
             if row.reserve_without_dimensions:
-                # Bypass dimension/calc check. When "Allocate based on Sec Nos"
-                # is on, batch_calc_qty (freshly recomputed by
-                # _apply_rwd_group_allocations just above) already holds the
-                # whole-Sec-Qty-rounded Kg that will actually be reserved —
-                # validate against that, not the smaller raw Required Qty,
-                # or a rounding-driven shortfall would slip past this check.
-                if row.allocate_based_on_sec_qty:
-                    required_qty = flt(row.batch_calc_qty) or flt(row.qty)
-                else:
-                    required_qty = flt(row.qty)
+                # Bypass the dimension/calc check — this row shares a batch whose
+                # size deliberately differs from the requirement. Exactly the
+                # Required Qty is reserved (see _apply_rwd_fractional_nos), so
+                # that is what has to fit in free stock.
+                required_qty = flt(row.qty)
                 if required_qty > available:
                     difference = flt(required_qty - available, 3)
                     frappe.throw(
@@ -2084,59 +2134,99 @@ def _row_get(row, key, default=None):
     return row.get(key, default) if isinstance(row, dict) else getattr(row, key, default)
 
 
-def _calc_group_rwd_allocations(rows):
+@frappe.whitelist()
+def validate_planned_stock(material_planning_name):
+    """Per-item summary of what this plan has committed: planned Kg and Sec Nos,
+    against the batch's free stock — the reference view behind the "Validate
+    Stock" button.
+
+    Sec Nos is reported exactly as planned, so a figure like 4.5 is expected and
+    flagged rather than hidden: it means several drawings share one bar or sheet
+    and someone has to decide, at transfer time, whether to hand over 4 or 5
+    whole pieces. Read-only; it changes nothing.
     """
-    Group not-yet-reserved "Reserve stock without dimensions" rows (with
-    "Allocate based on Sec Nos" enabled) by the batch they share, round the
-    GROUP's *combined* required Kg up to the nearest whole Sec Qty (Nos) of
-    that batch, then split the rounded total back across the group's rows
-    proportional to each row's own required-Kg share — mirrors
-    _alloc_sec_qty()'s proportional-split pattern.
+    mp = frappe.get_doc("Material Planning", material_planning_name)
+    warehouse = mp.for_warehouse
+    rows = []
 
-    Rounding must happen on the combined total, not per row: 4 rows each
-    needing a fraction of a sheet can add up to needing whole sheets between
-    them, and rounding each row up independently would over-reserve an extra
-    sheet per row instead of one extra sheet for the whole group.
+    def _add(table_label, item_code, batch, qty, sec_qty, duno, is_reserved):
+        if not (item_code and batch):
+            return
+        rows.append({
+            "table": table_label, "item_code": item_code, "batch": batch,
+            "duno_mark_no": duno or "", "qty": flt(qty, 3), "sec_qty": flt(sec_qty, 3),
+            "is_reserved": 1 if is_reserved else 0,
+        })
 
-    Returns {row.name: (to_reserve_kg, sec_qty)} for every row in such a group.
+    for r in (mp.material_mapping or []):
+        _add("Material Mapping", r.item_code, r.batch,
+             r.reserved_qty if r.is_reserved else r.batch_calc_qty,
+             r.batch_sec_qty, r.duno_mark_no, r.is_reserved)
+    for r in (mp.available_raw_materials or []):
+        _add("Exact Match", r.item_code, r.batch_no,
+             r.reserved_qty if r.is_reserved else r.required_qty,
+             r.sec_qty, r.duno_mark_no, r.is_reserved)
+
+    # Roll the per-drawing rows up per item+batch -- that is the grouping a
+    # transfer actually moves, and the level at which a fractional Sec Nos total
+    # becomes a real decision.
+    summary = {}
+    for r in rows:
+        key = (r["item_code"], r["batch"])
+        agg = summary.setdefault(key, {
+            "item_code": r["item_code"], "batch": r["batch"], "qty": 0.0,
+            "sec_qty": 0.0, "rows": 0, "reserved_rows": 0, "dunos": set(),
+        })
+        agg["qty"] = flt(agg["qty"] + r["qty"], 3)
+        agg["sec_qty"] = flt(agg["sec_qty"] + r["sec_qty"], 3)
+        agg["rows"] += 1
+        agg["reserved_rows"] += r["is_reserved"]
+        if r["duno_mark_no"]:
+            agg["dunos"].add(r["duno_mark_no"])
+
+    result = []
+    for agg in summary.values():
+        free_qty = flt(_get_batch_total_stock(agg["batch"], warehouse), 3) if warehouse else 0.0
+        sec_qty = agg["sec_qty"]
+        result.append({
+            "item_code": agg["item_code"],
+            "batch": agg["batch"],
+            "planned_qty": agg["qty"],
+            "planned_sec_qty": sec_qty,
+            "is_fractional": abs(sec_qty - round(sec_qty)) > 0.001,
+            "whole_sec_qty": float(ceil(sec_qty - 0.001)) if sec_qty > 0 else 0.0,
+            "drawings": len(agg["dunos"]),
+            "rows": agg["rows"],
+            "reserved_rows": agg["reserved_rows"],
+            "batch_stock_qty": free_qty,
+            "short_by": flt(max(0.0, agg["qty"] - free_qty), 3),
+        })
+
+    result.sort(key=lambda r: (r["item_code"], r["batch"]))
+    return result
+
+
+def _sec_nos_for_weight(row, weight_kg):
+    """Express `weight_kg` as a Sec Qty (Nos) count of the batch assigned to
+    `row` — the exact, deliberately FRACTIONAL piece count (2.5 stays 2.5).
+
+    Planning reserves precisely the weight a drawing needs and nothing more, so
+    a shared bar/sheet is never over-reserved just to reach a whole piece.
+    Turning a fraction into whole physical pieces is a transfer-time decision,
+    taken by hand on the Material Issue Plan, which records the resulting
+    surplus as excess material to return.
+
+    Returns 0.0 when the batch's dimensions can't yield a per-piece weight
+    (unset dimensions, or a group where Sec Qty isn't a discrete piece).
     """
-    groups = {}
-    for row in rows:
-        batch = _row_get(row, "batch")
-        if _row_get(row, "is_reserved") or not batch:
-            continue
-        if not (_row_get(row, "reserve_without_dimensions") and _row_get(row, "allocate_based_on_sec_qty")):
-            continue
-        group = _row_get(row, "batch_parent_item_group") or ""
-        if group not in ("Structurals", "Plates"):
-            continue
-        groups.setdefault(batch, []).append(row)
-
-    allocations = {}
-    for batch, group_rows in groups.items():
-        r0 = group_rows[0]
-        group = _row_get(r0, "batch_parent_item_group") or ""
-        kg_per_nos = _calc_kg_per_nos(
-            group, _row_get(r0, "batch_length"), _row_get(r0, "batch_width"),
-            _row_get(r0, "batch_thickness"), _row_get(r0, "batch_unit_weight"),
-        )
-        group_required = sum(flt(_row_get(r, "qty")) for r in group_rows)
-
-        if not kg_per_nos or not group_required:
-            for r in group_rows:
-                allocations[_row_get(r, "name")] = (flt(_row_get(r, "qty"), 3), 0)
-            continue
-
-        sec_qty_needed = int(_nos_from_weight(group_required, kg_per_nos))
-        group_kg_to_reserve = flt(sec_qty_needed * kg_per_nos, 3)
-
-        for r in group_rows:
-            share = flt(_row_get(r, "qty")) / group_required
-            row_kg = flt(share * group_kg_to_reserve, 3)
-            row_sec = flt(row_kg / kg_per_nos, 3)
-            allocations[_row_get(r, "name")] = (row_kg, row_sec)
-
-    return allocations
+    kg_per_nos = _calc_kg_per_nos(
+        _row_get(row, "batch_parent_item_group") or "",
+        _row_get(row, "batch_length"), _row_get(row, "batch_width"),
+        _row_get(row, "batch_thickness"), _row_get(row, "batch_unit_weight"),
+    )
+    if not kg_per_nos:
+        return 0.0
+    return flt(flt(weight_kg) / kg_per_nos, 3)
 
 
 @frappe.whitelist()
@@ -2164,11 +2254,6 @@ def reserve_batches(material_planning_name):
     # rows is not double-counted against available stock.
     batch_allocated_here = {}
 
-    # Rows sharing a batch under "Reserve stock without dimensions" + "Allocate
-    # based on Sec Nos" must be rounded up to whole Sec Qty as a GROUP (not
-    # independently per row) — see _calc_group_rwd_allocations for why.
-    rwd_allocations = _calc_group_rwd_allocations(mp.material_mapping)
-
     for row in mp.material_mapping:
         if not row.batch:
             continue
@@ -2192,19 +2277,13 @@ def reserve_batches(material_planning_name):
         required_qty = flt(row.qty)
 
         if row.reserve_without_dimensions and row.batch_parent_item_group in ("Structurals", "Plates"):
-            if row.allocate_based_on_sec_qty:
-                # Stock can't be physically transferred as a fractional Kg
-                # amount — reserve this row's proportional share of the
-                # group's whole-Sec-Qty rounded-up total instead.
-                to_reserve, sec_qty = rwd_allocations.get(row.name, (required_qty, 0))
-                row.batch_sec_qty = sec_qty
-                row.batch_calc_qty = to_reserve
-            else:
-                # Opted out — reserve the exact Required Qty; Sec Qty is
-                # entered manually later, at transfer time.
-                to_reserve = required_qty
-                row.batch_sec_qty = 0
-                row.batch_calc_qty = 0
+            # Shared batch: reserve exactly the Required Qty and show that weight
+            # as a fractional piece count of this batch. Whole-piece rounding is
+            # done by hand at transfer time on the Material Issue Plan, which
+            # books the surplus as excess to return.
+            to_reserve = required_qty
+            row.batch_calc_qty = flt(required_qty, 3)
+            row.batch_sec_qty = _sec_nos_for_weight(row, required_qty)
         elif batch_calc_qty > 0 and row.batch_parent_item_group in ("Structurals", "Plates"):
             # When a different-dimension batch is assigned, batch_calc_qty is the
             # Kg we actually take from that batch (Structurals/Plates only).
@@ -2890,11 +2969,6 @@ def check_mapping_batch_availability(doc):
     warnings = []
     batch_allocated_here = {}
 
-    # Rows sharing a batch under "Reserve stock without dimensions" + "Allocate
-    # based on Sec Nos" round up to whole Sec Qty as a GROUP, not per row —
-    # see _calc_group_rwd_allocations.
-    rwd_allocations = _calc_group_rwd_allocations(doc.get("material_mapping") or [])
-
     for row in doc.get("material_mapping") or []:
         batch = row.get("batch") if isinstance(row, dict) else getattr(row, "batch", None)
         if not batch:
@@ -2905,8 +2979,8 @@ def check_mapping_batch_availability(doc):
         group = (row.get("batch_parent_item_group") if isinstance(row, dict) else getattr(row, "batch_parent_item_group", "")) or ""
         reserve_without_dim = int(row.get("reserve_without_dimensions") if isinstance(row, dict) else getattr(row, "reserve_without_dimensions", 0))
         if reserve_without_dim and group in ("Structurals", "Plates"):
-            row_name = row.get("name") if isinstance(row, dict) else getattr(row, "name", None)
-            required_qty, _ = rwd_allocations.get(row_name, (base_qty, 0))
+            # Shared batch — exactly the Required Qty is reserved, no rounding.
+            required_qty = base_qty
         else:
             required_qty = batch_calc_qty if (batch_calc_qty > 0 and group in ("Structurals", "Plates")) else base_qty
 
@@ -3092,7 +3166,7 @@ def _batch_change_remarks(item_code, old_batch, new_batch_no, material_issue_pla
 @frappe.whitelist()
 def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
                     dimensions=None, sec_qty=None, reserve_without_dimensions=0,
-                    allocate_based_on_sec_qty=1, material_issue_plan=None):
+                    material_issue_plan=None):
     """Change the batch (and optionally dimensions/Sec Qty) already assigned to a
     Material Mapping / Available Raw Material row, in three explicit steps:
     (1) verify the new batch's stock and required-qty match (warn only), (2) unreserve
@@ -3106,7 +3180,6 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
         dimensions = json.loads(dimensions) if dimensions else {}
     dimensions = dimensions or {}
     reserve_without_dimensions = int(reserve_without_dimensions)
-    allocate_based_on_sec_qty = int(allocate_based_on_sec_qty)
 
     if source_table not in ("Material Planning Material Mapping", "Material Planning Available Raw Material"):
         frappe.throw(_("Unsupported source table for batch reassignment: {0}").format(source_table))
@@ -3144,8 +3217,7 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
             mp = frappe.get_doc("Material Planning", material_planning_name)
             row = next(r for r in mp.material_mapping if r.name == row_name)
 
-        _apply_batch_to_mapping_row(row, new_batch_no, new_item, dimensions, sec_qty, reserve_without_dimensions,
-                                     allocate_based_on_sec_qty)
+        _apply_batch_to_mapping_row(row, new_batch_no, new_item, dimensions, sec_qty, reserve_without_dimensions)
 
         mp.append("batch_change_log", {
             "material_issue_plan": material_issue_plan or "",
@@ -3210,8 +3282,7 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
                 "width": row.width,
                 "thickness": row.thickness,
             })
-            _apply_batch_to_mapping_row(new_row, new_batch_no, new_item, dimensions, sec_qty, reserve_without_dimensions,
-                                         allocate_based_on_sec_qty)
+            _apply_batch_to_mapping_row(new_row, new_batch_no, new_item, dimensions, sec_qty, reserve_without_dimensions)
             new_sec_qty, new_qty = flt(new_row.batch_sec_qty), flt(new_row.batch_calc_qty)
             planned_item_for_log = new_item
             target_row_name = new_row.name
@@ -3280,15 +3351,13 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
     return {"warnings": warnings}
 
 
-def _apply_batch_to_mapping_row(row, new_batch_no, new_item, dimensions, sec_qty, reserve_without_dimensions,
-                                 allocate_based_on_sec_qty=1):
+def _apply_batch_to_mapping_row(row, new_batch_no, new_item, dimensions, sec_qty, reserve_without_dimensions):
     """Set a Material Planning Material Mapping row's batch + recompute its
     batch_calc_qty, mirroring material_planning.js's _recalc_batch_qty formula."""
     row.batch = new_batch_no or ""
     row.planned_item = new_item or ""
     row.batch_mapped = "Mapped" if new_batch_no else "Not Mapped"
     row.reserve_without_dimensions = reserve_without_dimensions
-    row.allocate_based_on_sec_qty = allocate_based_on_sec_qty
 
     if dimensions.get("length") is not None:
         row.length = flt(dimensions.get("length"))

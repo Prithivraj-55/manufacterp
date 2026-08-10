@@ -253,6 +253,71 @@ const CASE_STUDIES = [
 		`,
 	},
 	{
+		id: "shared-batch",
+		nav_label: "Shared Batch — Fractional Sec Nos",
+		title: "Shared Batch — One Bar, Several Drawings",
+		kicker: "Worked scenario — how fractional Sec Nos flow through to transfer",
+		scenario: true,
+		docs: {
+			"Applies to": "Any row with “Reserve stock without dimensions” ticked",
+			"Typical trigger": "A consolidated purchase, or an alternate item, covering several drawings",
+			"Where fractions appear": "Material Issue Plan → Select Materials to Transfer",
+			"Where they are settled": "The same popup — you type the whole number yourself",
+		},
+		overview:
+			"Illustrative walkthrough (not a historical document record) of the single behaviour that " +
+			"most often causes confusion: why a Sec Nos figure can read 2.6 or 4.5 instead of a whole " +
+			"number, and what to do about it. The short version — Material Planning always reserves the " +
+			"EXACT weight a drawing needs and never rounds; turning that weight into whole physical " +
+			"pieces is a decision taken once, by hand, at transfer time, and whatever you add on top is " +
+			"recorded as excess to return.",
+		weight_examples: [
+			{
+				group: "Structurals", item: "ISMB450 — planning", duno: "shared",
+				length: 900, sec_qty: "1.3 + 1.3", unit_weight: 72.4,
+				formula:
+					"One purchased bar is 900 mm, so Kg-per-piece = (900÷1000) × 72.4 = 65.16 Kg. " +
+					"Drawing A needs 84.7 Kg → 84.7 ÷ 65.16 = 1.3 Nos. Drawing B needs the same. " +
+					"Material Planning reserves 84.7 + 84.7",
+				result: "169.4  (2.6 Nos — deliberately NOT rounded to 3)",
+			},
+			{
+				group: "Structurals", item: "ISMB450 — transfer", duno: "shared",
+				length: 900, sec_qty: "2.6 → 3", unit_weight: 72.4,
+				formula:
+					"At transfer you may only be able to hand over whole bars. Typing 3 in place of 2.6 " +
+					"gives 3 × 65.16 = 195.48 Kg. The extra = 195.48 − 169.4",
+				result: "26.08  (excess Kg, booked for return)",
+			},
+		],
+		walkthrough: `
+			<table class="mpc-doc-table">
+				<tbody>
+					<tr><td class="mpc-doc-key">Planned (Material Planning)</td><td>169.4 Kg — 2.6 Nos — exact requirement, nothing rounded</td></tr>
+					<tr><td class="mpc-doc-key">Option A — issue as planned</td><td>169.4 Kg (2.6 Nos). No excess. Use when the bar is genuinely sub-divided across jobs.</td></tr>
+					<tr><td class="mpc-doc-key">Option B — issue whole bars</td><td>195.48 Kg (3 Nos). 26.08 Kg excess recorded for return.</td></tr>
+					<tr><td class="mpc-doc-key">Stock check</td><td>Typing 3 re-checks free stock on that batch; if it cannot cover 195.48 Kg the change is refused outright and the field snaps back.</td></tr>
+				</tbody>
+			</table>
+			<p class="mpc-note-inline">
+				<b>Why the fraction appears at transfer and not before.</b> A Material Planning covering
+				10 drawings feeds a <b>separate</b> Material Issue Plan per drawing, and each plan pulls
+				only its own drawings' reserved rows. So a batch planned across 5 rows — 8 Nos in total —
+				can present as <b>4.5 Nos</b> when only 3 of those drawings are being issued. That is
+				expected, not an error: it is simply this plan's share of a bar the other jobs also draw
+				from. Use <b>Validate Stock</b> (on either Material Planning or Material Issue Plan) to
+				see every fractional total, in amber, before you start transferring.
+			</p>
+			<p class="mpc-note-inline">
+				<b>Two ways to work.</b> <i>Case 1</i> — leave “Reserve stock without dimensions” OFF,
+				pick a batch and type Sec Qty yourself; the system reserves exactly that and never
+				overwrites your number. <i>Case 2</i> — tick it when one large bar or sheet serves several
+				rows, and the fractional Sec Nos is derived for you from each row's required Kg. If
+				fractional issues are impractical for a given item, Case 1 is the cleaner choice.
+			</p>
+		`,
+	},
+	{
 		id: "case-2",
 		status: "pending",
 		nav_label: "Case 2 — Coming Soon",
@@ -394,14 +459,23 @@ function render_case(c) {
 	}
 
 	// --- Production Plan / Material Issue Plan / Operations & Inspection ---
-	parts.push(`
-		<h3>${__("Production Plan")}</h3>
-		${render_pending_or(c.production_plan, __("Not run yet for this case — will be added here once Production Plan entries are made for MP-2026-00010."))}
-		<h3>${__("Material Issue Plan")}</h3>
-		${render_pending_or(c.material_issue_plan, __("Not run yet for this case — will be added here once Material Issue Plan entries are made for MP-2026-00010."))}
-		<h3>${__("Operations & Inspection")}</h3>
-		${render_pending_or(c.operations, __("Not run yet for this case — will be added here once the Job work order's operations are run."))}
-	`);
+	// A scenario entry illustrates one behaviour rather than recording a real
+	// run, so it has no document trail to show and skips this block entirely.
+	if (c.scenario) {
+		parts.push(`
+			<h3>${__("Planning vs. Transfer")}</h3>
+			${c.walkthrough}
+		`);
+	} else {
+		parts.push(`
+			<h3>${__("Production Plan")}</h3>
+			${render_pending_or(c.production_plan, __("Not run yet for this case — will be added here once Production Plan entries are made for MP-2026-00010."))}
+			<h3>${__("Material Issue Plan")}</h3>
+			${render_pending_or(c.material_issue_plan, __("Not run yet for this case — will be added here once Material Issue Plan entries are made for MP-2026-00010."))}
+			<h3>${__("Operations & Inspection")}</h3>
+			${render_pending_or(c.operations, __("Not run yet for this case — will be added here once the Job work order's operations are run."))}
+		`);
+	}
 
 	return `<section id="mpc-${c.id}" class="mpc-card">${parts.join("\n")}</section>`;
 }

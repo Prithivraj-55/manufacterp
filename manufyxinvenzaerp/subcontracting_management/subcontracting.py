@@ -163,6 +163,12 @@ def create_sco_from_production_plan(pp_name):
     # time, so an inactive/missing BOM is caught here, not deferred to the
     # next unrelated-looking save (see IMM-03 / Report 3 Finding C-02).
     sco._pp_validate_items()
+    # Same reason as _pp_validate_items above: ignore_validate skips validate()
+    # wholesale, and this is the other piece of it that has to happen AT creation.
+    # The Material Issue Plan is built in the same click and copies this field
+    # across -- left until the next save, the MIP starts with a blank Supplier
+    # Warehouse and every transfer from it fails.
+    sco._auto_set_supplier_warehouse()
     sco.flags.ignore_validate = True
     sco.insert(ignore_permissions=True, ignore_mandatory=True)
 

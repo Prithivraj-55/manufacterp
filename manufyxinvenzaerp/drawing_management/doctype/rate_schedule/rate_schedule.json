@@ -1,0 +1,162 @@
+{
+ "actions": [],
+ "autoname": "field:rs_no",
+ "creation": "2026-08-10 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "type",
+  "rs_no",
+  "column_break_top",
+  "job_nature",
+  "details",
+  "section_work",
+  "work_content",
+  "job_reference",
+  "section_rate",
+  "rate_per_kg",
+  "column_break_rate",
+  "created_on",
+  "last_updated_on",
+  "section_price_log",
+  "price_log"
+ ],
+ "fields": [
+  {
+   "default": "Inhouse",
+   "fieldname": "type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Type",
+   "options": "Inhouse\nOutsource",
+   "reqd": 1
+  },
+  {
+   "fieldname": "rs_no",
+   "fieldtype": "Data",
+   "in_global_search": 1,
+   "in_list_view": 1,
+   "label": "RS No",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "column_break_top",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "job_nature",
+   "fieldtype": "Link",
+   "in_global_search": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Job Nature",
+   "options": "Job Nature",
+   "reqd": 1
+  },
+  {
+   "fieldname": "details",
+   "fieldtype": "Data",
+   "in_global_search": 1,
+   "in_list_view": 1,
+   "label": "Details"
+  },
+  {
+   "depends_on": "eval:doc.type != \"Outsource\"",
+   "fieldname": "section_work",
+   "fieldtype": "Section Break",
+   "label": "Work Details"
+  },
+  {
+   "depends_on": "eval:doc.type != \"Outsource\"",
+   "fieldname": "work_content",
+   "fieldtype": "Data",
+   "label": "Work Content"
+  },
+  {
+   "depends_on": "eval:doc.type != \"Outsource\"",
+   "fieldname": "job_reference",
+   "fieldtype": "Data",
+   "in_global_search": 1,
+   "label": "Job Reference"
+  },
+  {
+   "fieldname": "section_rate",
+   "fieldtype": "Section Break",
+   "label": "Rate"
+  },
+  {
+   "fieldname": "rate_per_kg",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Rate/KG",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_rate",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "created_on",
+   "fieldtype": "Datetime",
+   "label": "Created On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_updated_on",
+   "fieldtype": "Datetime",
+   "label": "Last Updated On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_price_log",
+   "fieldtype": "Section Break",
+   "label": "Price Change Log"
+  },
+  {
+   "fieldname": "price_log",
+   "fieldtype": "Table",
+   "label": "Price Change Log",
+   "options": "Rate Schedule Price Log",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-08-10 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Drawing Management",
+ "name": "Rate Schedule",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "All",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "job_nature,details,job_reference,rs_no",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

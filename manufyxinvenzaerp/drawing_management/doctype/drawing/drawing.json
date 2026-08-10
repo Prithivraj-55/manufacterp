@@ -30,6 +30,15 @@
   "column_break_fg",
   "no_of_qty_to_manufacture",
   "nature_of_work",
+  "section_rate_schedule",
+  "type",
+  "rate_schedule",
+  "column_break_rs",
+  "rs_job_nature",
+  "rs_details",
+  "rs_work_content",
+  "rs_job_reference",
+  "rs_rate_per_kg",
   "tab_materials",
   "items",
   "section_items_view",
@@ -204,6 +213,71 @@
    "fieldtype": "Link",
    "label": "Nature of Work",
    "options": "Nature of Work"
+  },
+  {
+   "fieldname": "section_rate_schedule",
+   "fieldtype": "Section Break",
+   "label": "Rate Schedule"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "type",
+   "fieldtype": "Select",
+   "label": "Type",
+   "options": "\nInhouse\nOutsource"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "rate_schedule",
+   "fieldtype": "Link",
+   "label": "Rate Schedule",
+   "options": "Rate Schedule"
+  },
+  {
+   "fieldname": "column_break_rs",
+   "fieldtype": "Column Break"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "rs_job_nature",
+   "fieldtype": "Data",
+   "fetch_from": "rate_schedule.job_nature",
+   "label": "Job Nature",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "rs_details",
+   "fieldtype": "Data",
+   "fetch_from": "rate_schedule.details",
+   "label": "Details",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "depends_on": "eval:doc.type != \"Outsource\"",
+   "fieldname": "rs_work_content",
+   "fieldtype": "Data",
+   "fetch_from": "rate_schedule.work_content",
+   "label": "Work Content",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "depends_on": "eval:doc.type != \"Outsource\"",
+   "fieldname": "rs_job_reference",
+   "fieldtype": "Data",
+   "fetch_from": "rate_schedule.job_reference",
+   "label": "Job Reference",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "rs_rate_per_kg",
+   "fieldtype": "Currency",
+   "fetch_from": "rate_schedule.rate_per_kg",
+   "label": "Rate/KG",
+   "read_only": 1
   },
   {
    "fieldname": "tab_materials",

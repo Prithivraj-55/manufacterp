@@ -11,7 +11,6 @@ instead of the old SCO-button-created ones.
 """
 
 import json as _json
-import math
 
 import frappe
 from frappe import _
@@ -34,6 +33,116 @@ def _ensure_mip_editable(mip):
     this guard is what stops a direct/scripted call from bypassing that."""
     if mip.status == "Completed":
         frappe.throw(_("{0} is Completed and locked for further changes.").format(mip.name))
+
+
+def _cnc_rows_missing_warehouse(mip):
+    """CNC Process rows on this plan that have no CNC Warehouse to go to."""
+    if mip.cnc_warehouse:
+        return []
+    return [r for r in (mip.raw_materials or []) if r.cnc_process and r.item_code]
+
+
+def _ensure_cnc_routing(mip):
+    """CNC Process is a routing instruction, not a preference: material flagged for
+    it must reach the CNC warehouse before the supplier/WIP warehouse, never skip
+    straight there.
+
+    Transfer resolves the target as `cnc_process AND cnc_warehouse`, so with no CNC
+    Warehouse set the flag would be quietly dropped and the stock issued directly to
+    the supplier -- physically past the CNC step, and only correctable afterwards
+    with a reverse Stock Entry. Refuse the transfer instead, and say which rows and
+    which two ways out (set the warehouse, or untick CNC Process on the Material
+    Planning row if the step genuinely isn't needed).
+    """
+    rows = _cnc_rows_missing_warehouse(mip)
+    if not rows:
+        return
+
+    listed = "".join(
+        "<li>{0} — {1} ({2} {3}){4}</li>".format(
+            frappe.utils.escape_html(r.item_code),
+            frappe.utils.escape_html(r.batch_no or _("no batch")),
+            flt(r.qty, 3), frappe.utils.escape_html(r.uom or "Kg"),
+            " — DUNO {0}".format(frappe.utils.escape_html(r.duno_mark_no)) if r.duno_mark_no else "",
+        )
+        for r in rows[:15]
+    )
+    more = _("<li>… and {0} more</li>").format(len(rows) - 15) if len(rows) > 15 else ""
+
+    frappe.throw(
+        _("{0} item(s) are marked <b>CNC Process</b> but this Material Issue Plan has no "
+          "<b>CNC Warehouse</b>. They must reach CNC before the supplier/WIP warehouse, so "
+          "this transfer cannot proceed.<br><br><ul>{1}{2}</ul>"
+          "Either set <b>CNC Warehouse</b> in the Warehouses section, or untick "
+          "<b>CNC Process</b> on those rows in the Material Planning if the CNC step "
+          "is not required.").format(len(rows), listed, more),
+        title=_("CNC Warehouse Required"),
+    )
+
+
+def _validate_selected_against_stock(mip, selected):
+    """Re-check every selected line against real free stock, and against what is
+    still outstanding, immediately before the Stock Entry is built.
+
+    The transfer popup lets Sec Nos and Qty be edited by hand, and the figures it
+    was opened with can be minutes old -- another plan may have transferred from
+    the same batch in between. Validating here, server-side, is what makes the
+    edited numbers safe: a browser-side check alone would be trivially stale, and
+    a partial transfer that quietly over-issues is only discoverable once the
+    stock has physically moved.
+    """
+    if not selected:
+        return
+
+    # Keyed by CNC leg as well as item+batch: one batch feeding both a CNC drawing
+    # and a direct one appears TWICE in the pending list, and collapsing those two
+    # into one key silently validates a line against the other leg's figures.
+    pending_by_key = {
+        (p["item_code"], p.get("batch_no") or "", 1 if p.get("cnc_process") else 0): p
+        for p in get_mip_pending_items(mip.name)
+    }
+
+    problems = []
+    wanted_by_batch = {}
+    for item in selected:
+        item_code = item["item_code"]
+        batch_no = item.get("batch_no") or ""
+        key = (item_code, batch_no, 1 if item.get("cnc_process") else 0)
+        qty = flt(item.get("qty"))
+        if qty <= 0:
+            problems.append(_("{0} ({1}): transfer qty must be greater than zero.").format(item_code, batch_no or "-"))
+            continue
+
+        row = pending_by_key.get(key)
+        if not row:
+            problems.append(
+                _("{0} ({1}): nothing is pending transfer for this item/batch any more.").format(item_code, batch_no or "-"))
+            continue
+
+        if qty > flt(row["qty"]) + 0.001:
+            problems.append(
+                _("{0} ({1}): {2} {3} selected but only {4} still pending.").format(
+                    item_code, batch_no or "-", qty, row.get("uom") or "Kg", flt(row["qty"], 3)))
+        # Free stock is per physical batch, so both legs share one running total.
+        bkey = (item_code, batch_no)
+        wanted_by_batch[bkey] = flt(wanted_by_batch.get(bkey, 0) + qty, 3)
+
+    # One batch can appear on several selected lines -- check the batch's free
+    # stock against their combined total, not each line on its own.
+    for (item_code, batch_no), wanted in wanted_by_batch.items():
+        available = flt(_batch_free_qty(item_code, batch_no, mip.source_warehouse), 3)
+        if wanted > available + 0.001:
+            problems.append(
+                _("{0} ({1}): {2} Kg selected but only {3} Kg is in {4}.").format(
+                    item_code, batch_no or "-", wanted, available, mip.source_warehouse))
+
+    if problems:
+        frappe.throw(
+            _("Stock validation failed — nothing has been transferred:<br><br><ul>{0}</ul>"
+              "Reopen <b>Select Materials to Transfer</b> to see the current pending and "
+              "available quantities.").format("".join("<li>%s</li>" % p for p in problems)),
+            title=_("Cannot Transfer"),
+        )
 
 
 def _linked_mp_names(mip):
@@ -97,14 +206,11 @@ def get_mip_pending_items(mip_name):
 
     raw_items = []
     mp_names, duno_scope = _linked_mp_names_and_duno_scope(mip)
-    # Round Up Sec Qty for Transfer (Material Planning field, default on): when several
-    # drawings share one purchased batch, the combined Sec Qty needed for one transfer can
-    # come out fractional (e.g. 13.982 Nos) -- physically impossible to hand over. If ANY
-    # linked Material Planning has this enabled, round up below; off keeps the exact
-    # fractional Kg calculation this function has always returned.
-    round_up_enabled = any(
-        frappe.db.get_value("Material Planning", m, "round_up_transfer_sec_qty") for m in mp_names
-    )
+    # Sec Qty is returned exactly as planned -- fractional when several drawings
+    # share one batch (e.g. 4.5 Nos). Nothing is rounded automatically: turning a
+    # fraction into whole physical pieces is the user's call, made row by row in
+    # the transfer popup, which books the resulting surplus as excess to return
+    # (see update_transfer_sec_qty).
     for mp_name in mp_names:
         raw_items.extend(_get_mp_reserved_batches(
             mp_name, source_warehouse, primary_warehouse, duno_filter=duno_scope.get(mp_name)
@@ -195,6 +301,16 @@ def get_mip_pending_items(mip_name):
             "item_name": frappe.db.get_value("Item", item_code, "item_name") or item_code,
             "batch_no": batch_no,
             "qty": pending_qty,
+            # Progress so far, so a second visit to the transfer popup can show what
+            # an earlier partial transfer already sent rather than only what is left.
+            "planned_qty": total_qty,
+            "transferred_qty": flt(done_qty, 3),
+            # What the batch physically holds in the source warehouse right now. A
+            # Material Issue Plan is often created before the Purchase Receipt lands,
+            # so a row can be planned and reserved while the stock is not in yet --
+            # showing 0 here is the difference between "nothing to send" and "not
+            # arrived yet".
+            "available_qty": flt(_batch_free_qty(item_code, batch_no, source_warehouse), 3),
             "uom": item.get("uom") or "Kg",
             "custom_sec_qty": flt(flt(item.get("custom_sec_qty", 0)) * ratio, 3),
             "custom_sec_uom": item.get("custom_sec_uom") or "",
@@ -213,43 +329,73 @@ def get_mip_pending_items(mip_name):
             "customer_drawing_number": cdn_by_key.get((item_code, batch_no), ""),
         })
 
-    if round_up_enabled:
-        _round_up_sec_qty(result)
+    for row in result:
+        # No automatic rounding -- these stay 0 unless the user chooses to round
+        # a row up in the transfer popup (update_transfer_sec_qty fills them in).
+        row["round_up_excess_kg"] = 0.0
+        row["round_up_excess_pieces"] = 0.0
 
     return result
 
 
-def _round_up_sec_qty(rows):
-    """Round each row's Sec Qty up to the next whole piece (Structurals/Plates only --
-    the only groups where Sec Qty means a discrete physical piece), bumping its Kg to
-    match via this row's own Kg-per-piece. The bump (round_up_excess_kg, 0 when no
-    rounding was needed) travels with the row through the transfer popup's client-side
-    selection and back into create_mip_partial_transfer/create_mip_transfer_entry, which
-    log it as excess material to return once the transfer is actually created -- this
-    function only computes the numbers, it never writes anything itself."""
-    for row in rows:
-        row["round_up_excess_kg"] = 0.0
-        row["round_up_excess_pieces"] = 0.0
-        if row.get("custom_parent_item_group") not in _DIMENSION_DRIVEN_GROUPS:
-            continue
-        sec_qty = flt(row.get("custom_sec_qty"))
-        qty = flt(row.get("qty"))
-        if sec_qty <= 0 or qty <= 0:
-            continue
-        kg_per_piece = qty / sec_qty
-        rounded = math.ceil(flt(sec_qty, 6) - 0.001)
-        if rounded <= sec_qty + 0.001:
-            continue
-        excess_pieces = rounded - sec_qty
-        excess_kg = flt(excess_pieces * kg_per_piece, 3)
-        row["qty"] = flt(qty + excess_kg, 3)
-        row["custom_sec_qty"] = flt(rounded, 3)
-        row["round_up_excess_kg"] = excess_kg
-        row["round_up_excess_pieces"] = flt(excess_pieces, 3)
+@frappe.whitelist()
+def update_transfer_sec_qty(mip_name, item_code, batch_no, planned_sec_qty, planned_qty, new_sec_qty):
+    """Recalculate one transfer row after the user edits its Sec Qty by hand.
+
+    Nothing rounds automatically any more: the plan hands over the exact
+    fractional Sec Qty a drawing needs (e.g. 2.5 Nos), and it is the user who
+    decides — here, in the transfer popup — whether to hand over whole pieces
+    instead. Raising 2.5 to 3 issues one extra half-piece worth of weight, and
+    that surplus is what comes back through Return Excess Entry.
+
+    Validates the new figure against real free stock in the source warehouse
+    before accepting it, so a manual bump can never plan a transfer the batch
+    cannot cover. Returns the recomputed Kg/excess plus a `blocked` flag and
+    message; it only computes, it never writes.
+    """
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+    planned_sec_qty, planned_qty, new_sec_qty = flt(planned_sec_qty), flt(planned_qty), flt(new_sec_qty)
+
+    if new_sec_qty <= 0:
+        frappe.throw(_("Sec Qty must be greater than zero."))
+    if planned_sec_qty <= 0 or planned_qty <= 0:
+        frappe.throw(_("This row has no planned Sec Qty to recalculate from."))
+
+    kg_per_piece = planned_qty / planned_sec_qty
+    new_qty = flt(new_sec_qty * kg_per_piece, 3)
+    excess_pieces = flt(new_sec_qty - planned_sec_qty, 3)
+    excess_kg = flt(new_qty - planned_qty, 3)
+
+    available = flt(_batch_free_qty(item_code, batch_no, mip.source_warehouse), 3)
+    blocked = new_qty > available + 0.001
+    message = None
+    if blocked:
+        message = _(
+            "Batch {0} has only {1} Kg free in {2}. {3} Nos needs {4} Kg."
+        ).format(batch_no, available, mip.source_warehouse, flt(new_sec_qty, 3), new_qty)
+
+    return {
+        "qty": new_qty,
+        "custom_sec_qty": flt(new_sec_qty, 3),
+        "round_up_excess_kg": max(0.0, excess_kg),
+        "round_up_excess_pieces": max(0.0, excess_pieces),
+        "available_qty": available,
+        "blocked": blocked,
+        "message": message,
+    }
+
+
+def _batch_free_qty(item_code, batch_no, warehouse):
+    """Physical qty of `batch_no` sitting in `warehouse` right now."""
+    if not (batch_no and warehouse):
+        return 0.0
+    from erpnext.stock.doctype.batch.batch import get_batch_qty
+
+    return flt(get_batch_qty(batch_no=batch_no, warehouse=warehouse, item_code=item_code) or 0)
 
 
 def _log_round_up_excess(mip, items):
-    """After a transfer whose Sec Qty was rounded up (see _round_up_sec_qty), log the
+    """After a transfer whose Sec Qty the user rounded up (see update_transfer_sec_qty), log the
     rounding surplus into excess_return_items so it flows through the existing Return
     Excess Entry workflow once physically confirmed. Keyed by (item_code, batch_no) via
     the same source_table/source_row find-or-update pattern
@@ -468,10 +614,48 @@ def get_mip_readiness_check(mip_name):
                     "uom": r.uom or "Kg",
                 })
 
+    # CNC Process rows with nowhere to route to. Transfer decides the target
+    # warehouse as `cnc_process AND cnc_warehouse` -- so with the CNC Warehouse
+    # left blank the flag is quietly ignored and the material is issued straight
+    # to the supplier, skipping CNC altogether. Nothing errors, and by the time
+    # anyone notices the stock has physically moved, so surface it here, before
+    # the transfer, rather than letting it pass silently.
+    cnc_without_warehouse = []
+    if not mip.cnc_warehouse:
+        for r in (mip.raw_materials or []):
+            if r.cnc_process and r.item_code:
+                cnc_without_warehouse.append({
+                    "material_planning": r.material_planning or "",
+                    "table": "Raw Materials",
+                    "row": r.idx,
+                    "item_code": r.item_code,
+                    "item_name": r.item_name or "",
+                    "batch": r.batch_no or "",
+                    "duno_mark_no": r.duno_mark_no or "",
+                    "qty": flt(r.qty, 3),
+                    "uom": r.uom or "Kg",
+                })
+
+    # Which Material Plannings the unreserved rows sit on, and how much they hold --
+    # a reservation is a separate deliberate step there, and stock that is mapped but
+    # not reserved is simply never offered for transfer, with nothing on this page to
+    # say why. Name the plan and the weight so the fix is one click away.
+    unreserved_by_mp = {}
+    for r in unreserved:
+        agg = unreserved_by_mp.setdefault(r["material_planning"], {"rows": 0, "qty": 0.0})
+        agg["rows"] += 1
+        agg["qty"] = flt(agg["qty"] + flt(r["qty"]), 3)
+    unreserved_summary = [
+        {"material_planning": k, "rows": v["rows"], "qty": v["qty"]}
+        for k, v in sorted(unreserved_by_mp.items())
+    ]
+
     return {
         "unmapped": unmapped,
         "unreserved": unreserved,
-        "has_issues": bool(unmapped or unreserved),
+        "unreserved_summary": unreserved_summary,
+        "cnc_without_warehouse": cnc_without_warehouse,
+        "has_issues": bool(unmapped or unreserved or cnc_without_warehouse),
     }
 
 
@@ -492,6 +676,7 @@ def create_mip_transfer_entry(mip_name):
     """
     mip = frappe.get_doc("Material Issue Plan", mip_name)
     _ensure_mip_editable(mip)
+    _ensure_cnc_routing(mip)
     ctx = get_target_context(mip)
     pending = get_mip_pending_items(mip_name)
     if not pending:
@@ -542,6 +727,7 @@ def create_mip_partial_transfer(mip_name, selected_items_json, transfer_type):
 
     mip = frappe.get_doc("Material Issue Plan", mip_name)
     _ensure_mip_editable(mip)
+    _ensure_cnc_routing(mip)
     ctx = get_target_context(mip)
     if not mip.source_warehouse:
         frappe.throw(_("Please set the Source Warehouse (RM) on this Material Issue Plan first."))
@@ -554,6 +740,8 @@ def create_mip_partial_transfer(mip_name, selected_items_json, transfer_type):
     else:
         t_warehouse = ctx.primary_warehouse
         se_type = ctx.primary_se_type
+
+    _validate_selected_against_stock(mip, selected)
 
     se_items = []
     for item in selected:
@@ -591,22 +779,136 @@ def create_mip_partial_transfer(mip_name, selected_items_json, transfer_type):
 
 
 @frappe.whitelist()
-def create_mip_cnc_forward_entry(mip_name):
-    """Forward material currently sitting in the CNC warehouse on to the
-    supplier/WIP warehouse — nets already-forwarded qty against what was sent.
+def get_mip_cnc_pending_items(mip_name):
+    """Material sitting in the CNC warehouse still waiting to go on to the
+    supplier/WIP warehouse.
 
-    WARNING (Phase 1 H-07 / Report 3 Finding H-07): same manual mid-request
-    frappe.db.commit() pattern as create_mip_transfer_entry above -- do NOT
-    add a write above that commit() call without re-reading its warning there
-    first.
+    The CNC leg is deliberately a SECOND, separate Stock Entry: nothing can be
+    forwarded that has not physically arrived at CNC first, so this reads only
+    submitted transfers INTO the CNC warehouse and nets off whatever has already
+    been forwarded out of it. Same row shape as get_mip_pending_items so the
+    transfer popup can render either leg without knowing which it is.
     """
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+    ctx = get_target_context(mip)
+    if not mip.cnc_warehouse:
+        frappe.throw(_("No CNC Warehouse set on this Material Issue Plan."))
+
+    sent, already = _cnc_sent_and_forwarded(mip_name, mip.cnc_warehouse, ctx.primary_warehouse)
+
+    result = []
+    for r in sent:
+        key = (r.item_code, r.batch_no or "")
+        done = flt(already.get(key, 0), 3)
+        total = flt(r.qty, 3)
+        pending = flt(total - done, 3)
+        if pending <= 0:
+            continue
+        ratio = pending / total if total else 0
+        result.append({
+            "item_code": r.item_code,
+            "item_name": frappe.db.get_value("Item", r.item_code, "item_name") or r.item_code,
+            "batch_no": r.batch_no or "",
+            "qty": pending,
+            "planned_qty": total,
+            "transferred_qty": done,
+            "available_qty": flt(_batch_free_qty(r.item_code, r.batch_no, mip.cnc_warehouse), 3),
+            "uom": r.uom or frappe.db.get_value("Item", r.item_code, "stock_uom") or "Kg",
+            "custom_sec_qty": flt(flt(r.custom_sec_qty) * ratio, 3),
+            "custom_sec_uom": r.custom_sec_uom or "",
+            "s_warehouse": mip.cnc_warehouse,
+            "t_warehouse": ctx.primary_warehouse,
+            "cnc_process": 0,
+            "use_serial_batch_fields": 1,
+            "custom_length": flt(r.custom_length, 3),
+            "custom_width": flt(r.custom_width, 3),
+            "custom_thickness": flt(r.custom_thickness, 3),
+            "custom_unit_weight": flt(r.custom_unit_weight, 4),
+            "custom_parent_item_group": r.custom_parent_item_group or "",
+            "duno_mark_no": r.custom_duno_mark_no or "",
+            "drawing": r.custom_drawing or "",
+            "sales_order": r.custom_sales_order or "",
+            "customer_drawing_number": r.custom_customer_drawing_number or "",
+            "round_up_excess_kg": 0.0,
+            "round_up_excess_pieces": 0.0,
+        })
+    return result
+
+
+@frappe.whitelist()
+def create_mip_cnc_partial_forward(mip_name, selected_items_json):
+    """Forward a caller-selected subset out of the CNC warehouse -- the partial
+    counterpart to create_mip_cnc_forward_entry, so a CNC batch can be released to
+    the supplier in stages as machining finishes rather than all at once."""
+    selected = _json.loads(selected_items_json) if isinstance(selected_items_json, str) else selected_items_json
+    if not selected:
+        frappe.throw(_("No items selected for transfer."))
+
     mip = frappe.get_doc("Material Issue Plan", mip_name)
     _ensure_mip_editable(mip)
     ctx = get_target_context(mip)
-    cnc_warehouse = mip.cnc_warehouse
-    if not cnc_warehouse:
+    if not mip.cnc_warehouse:
         frappe.throw(_("No CNC Warehouse set on this Material Issue Plan."))
 
+    pending_by_key = {
+        (p["item_code"], p.get("batch_no") or ""): p for p in get_mip_cnc_pending_items(mip_name)
+    }
+    problems, se_items = [], []
+    for item in selected:
+        key = (item["item_code"], item.get("batch_no") or "")
+        qty = flt(item.get("qty"))
+        row = pending_by_key.get(key)
+        if qty <= 0:
+            problems.append(_("{0} ({1}): qty must be greater than zero.").format(key[0], key[1] or "-"))
+            continue
+        if not row:
+            problems.append(_("{0} ({1}): nothing is waiting at CNC for this item/batch.").format(key[0], key[1] or "-"))
+            continue
+        if qty > flt(row["qty"]) + 0.001:
+            problems.append(_("{0} ({1}): {2} selected but only {3} is still at CNC.").format(
+                key[0], key[1] or "-", qty, flt(row["qty"], 3)))
+            continue
+        se_items.append({
+            "item_code": row["item_code"],
+            "batch_no": row["batch_no"],
+            "use_serial_batch_fields": 1,
+            "qty": flt(qty, 3),
+            "uom": row["uom"],
+            "s_warehouse": mip.cnc_warehouse,
+            "t_warehouse": ctx.primary_warehouse,
+            "custom_sec_qty": flt(item.get("custom_sec_qty") or row["custom_sec_qty"], 3),
+            "custom_sec_uom": row["custom_sec_uom"],
+            "custom_length": row["custom_length"],
+            "custom_width": row["custom_width"],
+            "custom_thickness": row["custom_thickness"],
+            "custom_unit_weight": row["custom_unit_weight"],
+            "custom_parent_item_group": row["custom_parent_item_group"],
+            "custom_drawing": row["drawing"],
+            "custom_duno_mark_no": row["duno_mark_no"],
+            "custom_customer_drawing_number": row["customer_drawing_number"],
+            "custom_sales_order": row["sales_order"],
+        })
+
+    if problems:
+        frappe.throw(
+            _("Cannot forward from CNC — nothing has been transferred:<br><br><ul>{0}</ul>").format(
+                "".join("<li>%s</li>" % p for p in problems)),
+            title=_("Cannot Transfer"),
+        )
+
+    se = frappe.get_doc(_tag_stock_entry({
+        "doctype": "Stock Entry",
+        "stock_entry_type": "Material Transfer",
+        "company": ctx.company,
+        "items": se_items,
+    }, mip_name, ctx))
+    frappe.db.commit()
+    se.insert(ignore_permissions=True)
+    return se.name
+
+
+def _cnc_sent_and_forwarded(mip_name, cnc_warehouse, primary_warehouse):
+    """(rows submitted INTO the CNC warehouse, qty already forwarded OUT of it)."""
     sent_rows = frappe.db.sql(
         """
         SELECT sed.item_code, sed.batch_no,
@@ -635,8 +937,6 @@ def create_mip_cnc_forward_entry(mip_name):
         (mip_name, cnc_warehouse),
         as_dict=True,
     )
-    if not sent_rows:
-        frappe.throw(_("No CNC materials found. Ensure the CNC stock entry has been submitted."))
 
     fwd_rows = frappe.db.sql(
         """
@@ -650,10 +950,33 @@ def create_mip_cnc_forward_entry(mip_name):
           AND sed.t_warehouse = %s
         GROUP BY sed.item_code, sed.batch_no
         """,
-        (mip_name, cnc_warehouse, ctx.primary_warehouse),
+        (mip_name, cnc_warehouse, primary_warehouse),
         as_dict=True,
     )
     already = {(r.item_code, r.batch_no or ""): flt(r.qty) for r in fwd_rows}
+    return sent_rows, already
+
+
+@frappe.whitelist()
+def create_mip_cnc_forward_entry(mip_name):
+    """Forward EVERYTHING still sitting at CNC on to the supplier/WIP warehouse.
+    create_mip_cnc_partial_forward covers releasing it in stages instead.
+
+    WARNING (Phase 1 H-07 / Report 3 Finding H-07): same manual mid-request
+    frappe.db.commit() pattern as create_mip_transfer_entry above -- do NOT
+    add a write above that commit() call without re-reading its warning there
+    first.
+    """
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+    _ensure_mip_editable(mip)
+    ctx = get_target_context(mip)
+    cnc_warehouse = mip.cnc_warehouse
+    if not cnc_warehouse:
+        frappe.throw(_("No CNC Warehouse set on this Material Issue Plan."))
+
+    sent_rows, already = _cnc_sent_and_forwarded(mip_name, cnc_warehouse, ctx.primary_warehouse)
+    if not sent_rows:
+        frappe.throw(_("No CNC materials found. Ensure the CNC stock entry has been submitted."))
 
     se_items = []
     for r in sent_rows:
