@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-08-10 22:53:52_
+_Generated: 2026-08-10 23:30:27_
 
 ## drawing
 
@@ -51,6 +51,17 @@ _Generated: 2026-08-10 22:53:52_
 
 ---
 
+## job_nature
+
+| Key | Value |
+|-----|-------|
+| Module | drawing_management |
+| Path | `drawing_management/doctype/job_nature` |
+| Controller | `drawing_management/doctype/job_nature/job_nature.py` |
+| Client script | none |
+
+---
+
 ## nature_of_work
 
 | Key | Value |
@@ -70,6 +81,36 @@ _Generated: 2026-08-10 22:53:52_
 | Path | `drawing_management/doctype/production_plan_bom_raw_material` |
 | Controller | `drawing_management/doctype/production_plan_bom_raw_material/production_plan_bom_raw_material.py` |
 | Client script | none |
+
+---
+
+## rate_schedule_price_log
+
+| Key | Value |
+|-----|-------|
+| Module | drawing_management |
+| Path | `drawing_management/doctype/rate_schedule_price_log` |
+| Controller | `drawing_management/doctype/rate_schedule_price_log/rate_schedule_price_log.py` |
+| Client script | none |
+
+---
+
+## rate_schedule
+
+| Key | Value |
+|-----|-------|
+| Module | drawing_management |
+| Path | `drawing_management/doctype/rate_schedule` |
+| Controller | `drawing_management/doctype/rate_schedule/rate_schedule.py` |
+| Client script | none |
+
+### Methods
+
+| Method | Whitelisted |
+|--------|-------------|
+| ` before_insert` | no |
+| ` validate` | no |
+| ` _track_rate_change` | no |
 
 ---
 

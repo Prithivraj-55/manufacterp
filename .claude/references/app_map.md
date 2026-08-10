@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-10 22:53:52_
+_Generated: 2026-08-10 23:30:27_
 
 ## Modules
 
@@ -26,7 +26,7 @@ _Generated: 2026-08-10 22:53:52_
 
 ## Python files
 
-_Total: 191_
+_Total: 197_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -43,10 +43,16 @@ _Total: 191_
 - drawing_management/doctype/drawing_weight_change_log/drawing_weight_change_log.py
 - drawing_management/doctype/drawing_weight_change_log/__init__.py
 - drawing_management/doctype/__init__.py
+- drawing_management/doctype/job_nature/__init__.py
+- drawing_management/doctype/job_nature/job_nature.py
 - drawing_management/doctype/nature_of_work/__init__.py
 - drawing_management/doctype/nature_of_work/nature_of_work.py
 - drawing_management/doctype/production_plan_bom_raw_material/__init__.py
 - drawing_management/doctype/production_plan_bom_raw_material/production_plan_bom_raw_material.py
+- drawing_management/doctype/rate_schedule/__init__.py
+- drawing_management/doctype/rate_schedule_price_log/__init__.py
+- drawing_management/doctype/rate_schedule_price_log/rate_schedule_price_log.py
+- drawing_management/doctype/rate_schedule/rate_schedule.py
 - drawing_management/doctype/sales_order_drawing_raw_material/__init__.py
 - drawing_management/doctype/sales_order_drawing_raw_material/sales_order_drawing_raw_material.py
 - drawing_management/doctype/sales_order_duno_item/__init__.py
@@ -248,14 +254,17 @@ _Total: 21_
 
 ## JSON files
 
-_Total: 44_
+_Total: 47_
 
 - accounts_management/report/customer_fund_usage/customer_fund_usage.json
 - drawing_management/doctype/drawing/drawing.json
 - drawing_management/doctype/drawing_item/drawing_item.json
 - drawing_management/doctype/drawing_weight_change_log/drawing_weight_change_log.json
+- drawing_management/doctype/job_nature/job_nature.json
 - drawing_management/doctype/nature_of_work/nature_of_work.json
 - drawing_management/doctype/production_plan_bom_raw_material/production_plan_bom_raw_material.json
+- drawing_management/doctype/rate_schedule_price_log/rate_schedule_price_log.json
+- drawing_management/doctype/rate_schedule/rate_schedule.json
 - drawing_management/doctype/sales_order_drawing_raw_material/sales_order_drawing_raw_material.json
 - drawing_management/doctype/sales_order_duno_item/sales_order_duno_item.json
 - fixtures/custom_field.json
@@ -324,6 +333,11 @@ _Total: 44_
 - Controller: `drawing_management/doctype/drawing_weight_change_log/drawing_weight_change_log.py`
 - Client script: none
 
+### job_nature
+- Path: `drawing_management/doctype/job_nature`
+- Controller: `drawing_management/doctype/job_nature/job_nature.py`
+- Client script: none
+
 ### nature_of_work
 - Path: `drawing_management/doctype/nature_of_work`
 - Controller: `drawing_management/doctype/nature_of_work/nature_of_work.py`
@@ -333,6 +347,20 @@ _Total: 44_
 - Path: `drawing_management/doctype/production_plan_bom_raw_material`
 - Controller: `drawing_management/doctype/production_plan_bom_raw_material/production_plan_bom_raw_material.py`
 - Client script: none
+
+### rate_schedule_price_log
+- Path: `drawing_management/doctype/rate_schedule_price_log`
+- Controller: `drawing_management/doctype/rate_schedule_price_log/rate_schedule_price_log.py`
+- Client script: none
+
+### rate_schedule
+- Path: `drawing_management/doctype/rate_schedule`
+- Controller: `drawing_management/doctype/rate_schedule/rate_schedule.py`
+- Client script: none
+- Methods:
+  - before_insert:
+  - validate:
+  - _track_rate_change:
 
 ### sales_order_drawing_raw_material
 - Path: `drawing_management/doctype/sales_order_drawing_raw_material`

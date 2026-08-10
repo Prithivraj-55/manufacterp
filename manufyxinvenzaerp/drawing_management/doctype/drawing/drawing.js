@@ -106,6 +106,10 @@ frappe.ui.form.on("Drawing", {
 			});
 		}
 
+		frm.set_query("rate_schedule", function () {
+			return { filters: { type: frm.doc.type || "" } };
+		});
+
 		frm.set_query("batch", "items", function (doc, cdt, cdn) {
 			var row = locals[cdt][cdn];
 			return {
@@ -139,6 +143,17 @@ frappe.ui.form.on("Drawing", {
 
 	customer(frm) {
 		frm.set_value("customer_no", frm.doc.customer || "");
+	},
+
+	type(frm) {
+		if (frm.doc.rate_schedule) frm.set_value("rate_schedule", "");
+	},
+
+	rate_schedule(frm) {
+		if (frm.doc.rate_schedule) return;
+		["rs_job_nature", "rs_details", "rs_work_content", "rs_job_reference", "rs_rate_per_kg"].forEach(function (f) {
+			frm.set_value(f, "");
+		});
 	},
 
 	sales_order(frm) {
