@@ -1,10 +1,16 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-08-10 00:31:56_
+_Generated: 2026-08-10 22:53:52_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
 
+## accounts_management/payment_request.py
+
+| Method | Line |
+|--------|------|
+| `@frappe.validate_and_sanitize_search_inputs` | 28 |
+| `get_fund_usage` | 56 |
 ## drawing_management/bom_class_override.py
 
 | Method | Line |
@@ -177,4 +183,4 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 ## Total
 
-_105 whitelisted methods_
+_107 whitelisted methods_

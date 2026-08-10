@@ -1,9 +1,10 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-10 00:31:56_
+_Generated: 2026-08-10 22:53:52_
 
 ## Modules
 
+- accounts_management
 - config
 - drawing_management
 - fixtures
@@ -25,8 +26,14 @@ _Generated: 2026-08-10 00:31:56_
 
 ## Python files
 
-_Total: 184_
+_Total: 191_
 
+- accounts_management/__init__.py
+- accounts_management/payment_entry.py
+- accounts_management/payment_request.py
+- accounts_management/report/customer_fund_usage/customer_fund_usage.py
+- accounts_management/report/customer_fund_usage/__init__.py
+- accounts_management/report/__init__.py
 - config/__init__.py
 - drawing_management/bom_class_override.py
 - drawing_management/doctype/drawing/drawing.py
@@ -59,6 +66,7 @@ _Total: 184_
 - material_request_management/__init__.py
 - material_request_management/material_request.py
 - patches/__init__.py
+- patches/v1/backfill_payment_entry_created_flag.py
 - patches/v1/fix_bom_item_number_field_type.py
 - patches/v1/__init__.py
 - patches/v1/remove_sco_transfer_fields.py
@@ -214,8 +222,9 @@ _Total: 184_
 
 ## JavaScript files
 
-_Total: 19_
+_Total: 21_
 
+- accounts_management/report/customer_fund_usage/customer_fund_usage.js
 - drawing_management/doctype/drawing/drawing.js
 - production_management/doctype/material_planning/material_planning.js
 - production_management/page/material_planning_case_studies/material_planning_case_studies.js
@@ -229,6 +238,7 @@ _Total: 19_
 - public/js/inspection_entry.js
 - public/js/item.js
 - public/js/job_card.js
+- public/js/payment_request.js
 - public/js/production_plan.js
 - public/js/purchase_order.js
 - public/js/purchase_receipt.js
@@ -238,8 +248,9 @@ _Total: 19_
 
 ## JSON files
 
-_Total: 43_
+_Total: 44_
 
+- accounts_management/report/customer_fund_usage/customer_fund_usage.json
 - drawing_management/doctype/drawing/drawing.json
 - drawing_management/doctype/drawing_item/drawing_item.json
 - drawing_management/doctype/drawing_weight_change_log/drawing_weight_change_log.json
@@ -578,6 +589,18 @@ _Total: 43_
 
 ## Module-level controllers
 
+### accounts_management/payment_entry.py
+Functions:
+  - 4:on_submit_payment_entry:
+  - 8:on_cancel_payment_entry:
+  - 12:_sync_payment_entry_created_flag:
+
+### accounts_management/payment_request.py
+Functions:
+  - 5:validate_payment_request:
+  - 29:payment_entry_query:
+  - 56:get_fund_usage:
+
 ### drawing_management/bom_class_override.py
 Functions:
   - 1060:get_bom_item_rate:
@@ -790,50 +813,51 @@ Functions:
 Functions:
   - 1231:create_default_warehouse_types:
   - 1245:after_install:
-  - 1299:after_migrate:
-  - 1354:setup_storage_location:
-  - 1376:create_item_client_script:
-  - 1392:create_item_custom_fields:
-  - 1477:create_purchase_order_custom_fields:
-  - 1583:hide_purchase_order_weight_fields:
-  - 1597:create_purchase_order_client_script:
-  - 1613:create_purchase_receipt_custom_fields:
-  - 1792:create_batch_custom_fields:
-  - 1877:create_purchase_receipt_client_script:
-  - 1893:create_material_request_custom_fields:
-  - 2018:create_material_request_client_script:
-  - 2034:create_rfq_custom_fields:
-  - 2110:create_rfq_client_script:
-  - 2126:create_sq_custom_fields:
-  - 2205:create_sq_client_script:
-  - 2221:create_bom_custom_fields:
-  - 2328:create_so_custom_fields:
-  - 2405:create_so_client_script:
-  - 2421:create_bom_client_script:
-  - 2441:create_production_plan_custom_fields:
-  - 2757:create_production_plan_client_script:
-  - 2780:create_job_card_custom_fields:
-  - 3048:create_job_card_client_script:
-  - 3066:create_stock_entry_custom_fields:
-  - 3258:create_stock_entry_client_script:
-  - 3280:create_subcontracting_order_translation:
-  - 3305:remove_sco_purchase_order_mandatory:
-  - 3316:hide_sco_job_worker_warehouse:
-  - 3345:make_sco_job_worker_conditional:
-  - 3380:create_sco_custom_fields:
-  - 3842:create_sco_client_script:
-  - 3858:create_sco_ops_client_script:
-  - 3874:create_soe_client_script:
-  - 3890:create_manufacturing_settings_custom_fields:
-  - 3918:create_work_order_custom_fields:
-  - 4031:layout_work_order_fields:
-  - 4127:create_job_card_drawing_fields:
-  - 4200:create_job_card_inspection_fields:
-  - 4256:layout_job_card_fields:
-  - 4542:create_wo_client_script:
-  - 4560:create_wo_ops_client_script:
-  - 4578:create_jc_drawing_client_script:
-  - 4599:create_material_planning_auto_purchase_fields:
+  - 1300:after_migrate:
+  - 1359:setup_storage_location:
+  - 1381:create_item_client_script:
+  - 1397:create_item_custom_fields:
+  - 1482:create_purchase_order_custom_fields:
+  - 1588:hide_purchase_order_weight_fields:
+  - 1602:create_purchase_order_client_script:
+  - 1618:create_purchase_receipt_custom_fields:
+  - 1797:create_batch_custom_fields:
+  - 1882:create_purchase_receipt_client_script:
+  - 1898:create_material_request_custom_fields:
+  - 2023:create_material_request_client_script:
+  - 2039:create_rfq_custom_fields:
+  - 2115:create_rfq_client_script:
+  - 2131:create_sq_custom_fields:
+  - 2210:create_sq_client_script:
+  - 2226:create_bom_custom_fields:
+  - 2333:create_so_custom_fields:
+  - 2410:create_so_client_script:
+  - 2426:create_bom_client_script:
+  - 2446:create_production_plan_custom_fields:
+  - 2762:create_production_plan_client_script:
+  - 2785:create_job_card_custom_fields:
+  - 3053:create_job_card_client_script:
+  - 3071:create_stock_entry_custom_fields:
+  - 3263:create_stock_entry_client_script:
+  - 3285:create_subcontracting_order_translation:
+  - 3310:remove_sco_purchase_order_mandatory:
+  - 3321:hide_sco_job_worker_warehouse:
+  - 3350:make_sco_job_worker_conditional:
+  - 3385:create_sco_custom_fields:
+  - 3847:create_sco_client_script:
+  - 3863:create_sco_ops_client_script:
+  - 3879:create_soe_client_script:
+  - 3895:create_manufacturing_settings_custom_fields:
+  - 3923:create_work_order_custom_fields:
+  - 4036:layout_work_order_fields:
+  - 4132:create_job_card_drawing_fields:
+  - 4205:create_job_card_inspection_fields:
+  - 4261:layout_job_card_fields:
+  - 4547:create_wo_client_script:
+  - 4565:create_wo_ops_client_script:
+  - 4583:create_jc_drawing_client_script:
+  - 4604:create_material_planning_auto_purchase_fields:
+  - 4651:create_payment_request_custom_fields:
 
 ### sq_management/supplier_quotation.py
 Functions:
@@ -1192,6 +1216,8 @@ Functions:
 ## Whitelisted API methods
 
 - `item_management/item.py:125` — `has_item_transactions`
+- `accounts_management/payment_request.py:28` — `@frappe.validate_and_sanitize_search_inputs`
+- `accounts_management/payment_request.py:56` — `get_fund_usage`
 - `purchase_order_management/purchase_order.py:10` — `get_po_item_uom`
 - `sq_management/supplier_quotation.py:19` — `get_sq_item_uom`
 - `drawing_management/drawing_utils.py:8` — `create_drawings_from_so`
@@ -1390,6 +1416,13 @@ doc_events = {
 	},
 	"Inspection Entry": {
 		"on_submit": "manufyxinvenzaerp.production_management.inspection.on_submit_inspection_entry",
+	},
+	"Payment Request": {
+		"validate": "manufyxinvenzaerp.accounts_management.payment_request.validate_payment_request",
+	},
+	"Payment Entry": {
+		"on_submit": "manufyxinvenzaerp.accounts_management.payment_entry.on_submit_payment_entry",
+		"on_cancel": "manufyxinvenzaerp.accounts_management.payment_entry.on_cancel_payment_entry",
 	},
 }
 
