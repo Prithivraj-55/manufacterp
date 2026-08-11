@@ -218,13 +218,99 @@ const MP_MANUAL_SECTIONS = [
 				note: "Opens the excess-material picker — see the dedicated section below for the full explanation and worked examples of both cases it covers.",
 			},
 			{
-				name: "Cut Sheet  (on the row)",
-				note: "Tick it when only part of a batch is being used, and enter the piece to cut (To Use) plus what is left (Balance) — Thickness always comes from the batch, since a cut changes Length and Width but never how thick the steel is. Nothing moves here: this seeds the Material Issue Plan, where the cut actually happens and the numbers can still be adjusted against what the saw really produced. Available on both Material Mapping and Exact Match rows.",
+				name: "Excess Material  (tick on the row)",
+				note: "Only appears on a row with NO batch — excess is a promise against a specific off-cut, not stock in your warehouse. Ticking it reveals <b>Select Item</b>, which opens the same picker described in the section below.",
+			},
+			{
+				name: "Cut Sheet  (tick on the row — read-only)",
+				note: "You never tick this yourself: it appears by itself the moment you pick a batch that has a Cut Sheet against it, and names that sheet plus how many pieces are still free. A batch either has a nesting plan or it does not, and a row claiming otherwise would be describing steel that does not exist in that shape. The row then takes on the PIECE's dimensions (W1), not the whole plate's.",
+			},
+			{
+				name: "Reserve stock without dimensions  (on a Cut Sheet row)",
+				note: "Chooses how the take is sized, and both ways are valid. <b>Ticked</b> — the row reserves exactly its Required Qty, and Sec Nos becomes that weight as a fraction of one W1 piece (read-only; 18 Kg of a 4.90625 Kg piece is 3.669). <b>Unticked</b> — you type whole pieces, and the weight follows (4 pieces = 19.625 Kg); anything above the Required Qty is excess. A suggested count is filled in for you but never overwrites a figure you typed.",
 			},
 			{
 				name: "Validate Stock  (top of the form)",
 				note: "A read-only roll-up per item and batch: planned Kg, planned Sec Nos, how many drawings share that batch, the batch's own stock, and any shortfall. Fractional Sec Nos totals show in amber with the whole-piece figure beside them, and shortfalls in red. It changes nothing — it is the quickest way to see which batches still need a whole-piece decision before the job reaches transfer.",
 			},
+		],
+	},
+	{
+		id: "cut-sheet",
+		title: "Cut Sheet",
+		kicker: "One nesting plan per plate, shared across jobs",
+		purpose:
+			"A plate arrives as one batch and gets cut into repeated pieces, leaving a remnant. " +
+			"The Cut Sheet is where that plan is written down ONCE, against the batch: this " +
+			"piece (W1), this many of them, this remnant (W2). Jobs then take pieces from it " +
+			"the same way they reserve batch stock, and the same plate can serve several " +
+			"Material Plannings. It is its own document — open it from the Cut Sheet list, not " +
+			"from inside a Material Planning.",
+		fields: [
+			{ name: "Batch", note: "The physical plate being cut. One batch can have only ONE Cut Sheet — two plans for the same steel would each hand out material the other had already promised." },
+			{ name: "Sheet (as received)", note: "Length/Width/Thickness/Sec Nos read straight from the batch, never typed, so the two can't disagree." },
+			{ name: "W1 — Piece to Cut", note: "Length and Width of the piece. Thickness always comes from the batch: cutting changes Length and Width, never how thick the steel is." },
+			{ name: "W1 Sec Nos (available)", note: "How many of that piece this plate yields. YOU enter this — a suggestion is offered from the geometry, but the nesting is your call. It is deliberately not derived from weight; see the worked example." },
+			{ name: "Kg per Piece / W1 Total", note: "Calculated. One piece's weight, and all the pieces together." },
+			{ name: "W2 — Balance", note: "What is left once the cutting is done. Entered by hand. Written onto the batch when the FIRST transfer from this sheet is submitted." },
+			{ name: "Availability", note: "Allocated and Available, in both Sec Nos and Kg — what other jobs have taken and what is still free to claim." },
+			{ name: "Allocations", note: "Every Material Planning drawing from this sheet, how many pieces each took, and whether it has physically moved yet." },
+		],
+		calcs: [
+			{
+				title: "Why the piece count is yours to enter, not calculated from weight",
+				item: "Plate 5mm", group: "Plates",
+				length: 1800, sec_qty: 2, unit_weight: 7.85,
+				formula:
+					"A 1800 × 6300 × 5 plate weighs 445.095 Kg. A 1800 × 3000 piece weighs 211.95 Kg. " +
+					"Divide one by the other and you get 2.1",
+				result: "but the plate yields 2 pieces, plus a 1800 × 300 remnant",
+				note:
+					"Steel is cut, not poured. Weight says 2.1 pieces fit; geometry says 2. If the system " +
+					"took the weight figure it would over-issue on every single plate, and the shortfall " +
+					"would only show up when someone went to the rack. So the count is entered by hand, " +
+					"with the geometric answer offered as a starting point.",
+			},
+			{
+				title: "One plate, two jobs, sized two different ways",
+				item: "Plate 5mm", group: "Plates",
+				length: 500, sec_qty: 4, unit_weight: 7.85,
+				formula:
+					"W1 is 500 × 250 × 5 = 4.90625 Kg per piece, 10 pieces on the sheet. " +
+					"Job A needs 18 Kg and ticks Reserve stock without dimensions: 18 ÷ 4.90625. " +
+					"Job B unticks it and types 4 pieces: 4 × 4.90625",
+				result: "Job A — 18.000 Kg (3.669 Nos)   ·   Job B — 19.625 Kg (4 Nos, 1.625 Kg excess)",
+				note:
+					"Both are correct, they just answer different questions. Job A reserves exactly what " +
+					"the drawing needs and accepts a fractional share of a piece. Job B takes whole pieces " +
+					"because that is what the saw will actually produce, and the 1.625 Kg over the " +
+					"requirement is excess. Between them they have taken 7.669 of the 10 pieces, and the " +
+					"sheet shows 2.331 still free for anyone else.",
+			},
+		],
+		examples: [
+			{
+				type: "do",
+				label: "Let the batch decide",
+				text: "You never tick Cut Sheet on a Material Mapping row. Pick the batch, and if a Cut Sheet exists the tick appears with the sheet's name and its free-piece count, and the row takes on W1's dimensions.",
+			},
+			{
+				type: "dont",
+				label: "Don't expect the plate's dimensions on the row",
+				text: "A cut row shows the PIECE — 500 × 250, not the 2000 × 1000 plate. If you see the plate's size there, the row has not picked up its Cut Sheet; re-select the batch.",
+			},
+			{
+				type: "dont",
+				label: "Don't delete a sheet other jobs are drawing from",
+				text: "It refuses, and names the Material Plannings holding pieces. Release those allocations first — otherwise their rows would be left reserving pieces of a plan that no longer exists.",
+			},
+		],
+		notes: [
+			"W2 goes onto the batch at the FIRST transfer, not the last. From the moment anyone cuts a piece out, the plate in the rack IS the remnant — whether or not the other jobs have collected their pieces yet. Those pieces are still theirs; the Cut Sheet tracks them independently of the batch's size. Cancel that transfer and the batch goes back to its uncut size.",
+			"The batch keeps its original NAME throughout, and that name still spells out the original dimensions. Only the batch's Length/Width/Sec Nos are rewritten. This is known and accepted for now.",
+			"Nothing here is physical. There is no stock behind W1: the batch still holds its own Kg, and the real movement is the ordinary Material Issue Plan transfer — it simply carries W1's dimensions instead of the plate's. The Cut Sheet owns the arithmetic and the bookkeeping of who has claimed what.",
+			"If W1 × count + W2 does not add up to the plate you get a warning naming the row — never a block, since some loss to the saw is normal. The allowance is Cut Sheet Tolerance (%) in Manufyxinvenza Settings, 2% by default; set it to 0 to be told about any difference at all.",
+			"Reducing W1 Sec Nos below what jobs have already taken is refused, naming how many are spoken for. Release an allocation first.",
 		],
 	},
 	{
@@ -258,12 +344,13 @@ const MP_MANUAL_SECTIONS = [
 				note: "The other piece (4.47 Kg) stays free on that same batch for someone else to claim later — same “only the selected quantity” rule as a normal reservation.",
 			},
 			{
-				title: "Case 2 — Not Yet Returned (all-or-nothing)",
+				title: "Case 2 — Not Yet Returned (claim as many pieces as you need)",
 				item: "ZZTEST-VIRTUAL-EXCESS", group: "Structurals",
-				length: 1000, sec_qty: 1, unit_weight: 5,
-				formula: "This row is claimed WHOLE — Sec Qty is locked, not editable. Kg claimed = the row's full (1000÷1000) × 5 × 1",
-				result: "5.0",
-				note: "No Stock Entry is created by claiming this — it's a soft promise only. The Material Mapping row's Batch stays blank, and its Status shows “Virtual (At Supplier)” or “Claimed (Pending Return)” depending on how the source row was flagged.",
+				length: 1000, sec_qty: 6, unit_weight: 5,
+				formula: "A 6-piece off-cut at (1000÷1000) × 5 = 5 Kg each. Take 2 for this job: 2 × 5. " +
+					"Another job takes 3, and 1 stays free",
+				result: "10.0 Kg claimed · 5.0 Kg still free for anyone else",
+				note: "Shared out in pieces, exactly like a Cut Sheet. The picker shows Planned Sec Nos beside Free Sec Nos, and an off-cut disappears from it once nothing is left. No Stock Entry is created by claiming: the Material Mapping row's Batch stays blank and its Status reads “Excess Mapped (At Supplier)” or “Excess Mapped (Pending Return)”. When the off-cut physically returns, the new batch attaches itself to EVERY row holding a piece.",
 			},
 		],
 		examples: [
@@ -273,9 +360,9 @@ const MP_MANUAL_SECTIONS = [
 				text: "A “Returned Batch” row's Sec Qty field is editable, defaulting to the smaller of the batch's own Sec Qty or its free quantity. You can take less than what's on offer, exactly like a normal batch reservation.",
 			},
 			{
-				type: "dont",
-				label: "Don't expect to partially claim a “Not Yet Returned” row",
-				text: "Its Sec Qty field is locked read-only to the row's full amount the moment you select it — this kind of excess can only be claimed in full, never split across two jobs.",
+				type: "do",
+				label: "Take only what you need",
+				text: "Sec Qty in the picker defaults to everything still free, but it is yours to edit. Whatever you leave stays free for another job — the Availability figures on the Excess Material Items row show Allocated and Available in both Sec Nos and Kg, the same way a Cut Sheet does.",
 			},
 			{
 				type: "do",
@@ -453,7 +540,7 @@ const MP_MANUAL_SECTIONS = [
 			"actually leave your warehouse — the physical stock movement that Material Planning's " +
 			"“Reserve” only ever soft-claimed.",
 		fields: [
-			{ name: "Raw Materials", note: "Every reserved batch pulled in for this job's drawings, with Reqd Qty (the mapped batch's weight), Issued Qty (cumulative transferred so far across every Stock Entry), Excess Qty (the mapped batch measured against the drawing's own planned weight), Transfer Excess Kg (surplus created by rounding Sec Nos up at transfer time), and per-row Cut Sheet / Excess Return fields." },
+			{ name: "Raw Materials", note: "Every reserved batch pulled in for this job's drawings, with Reqd Qty (the mapped batch's weight), Issued Qty (cumulative transferred so far across every Stock Entry), Excess Qty (the mapped batch measured against the drawing's own planned weight), Transfer Excess Kg (surplus created by rounding Sec Nos up at transfer time), and per-row Excess Return fields. (Cut plans are no longer entered per row — they live on the Cut Sheet against the batch.)" },
 			{ name: "Finished Goods Warehouse", note: "Receives BOTH the finished good (via Make Final Stock Entry) and any unconsumed/off-cut material (via Return Excess Entry). Must be set before either button will work." },
 		],
 		buttons: [
@@ -483,23 +570,6 @@ const MP_MANUAL_SECTIONS = [
 					"straight into Excess Material Return so it comes back to the batch later.",
 			},
 			{
-				title: "Cut Sheet — one plate, two marks, cut in order",
-				item: "Plate 5mm", group: "Plates",
-				length: 1800, sec_qty: 1, unit_weight: 7.85,
-				formula:
-					"Sheet 1800 × 6300 × 5 = (1800÷1000) × (6300÷1000) × 5 × 7.85 = 445.095 Kg. " +
-					"Cut 1 uses 1800 × 3000 = 211.95 Kg and leaves 1800 × 3300 = 233.145 Kg. " +
-					"Cut 2 takes 1800 × 2000 = 141.3 Kg out of that balance, leaving 1800 × 1300",
-				result: "91.845 Kg left on the batch (2 cuts, 353.25 Kg issued)",
-				note:
-					"Enter the two cuts as two Cut Sheet rows against the same batch; they chain in row " +
-					"order, so cut 2 comes out of what cut 1 left rather than out of the full sheet again. " +
-					"Only 211.95 then 141.3 Kg are offered for transfer — never the whole 445.095. The batch " +
-					"keeps its number throughout; only its Length/Width/Sec Qty are rewritten, and only once " +
-					"a cut has been issued in full. Issue half of cut 1 and the sheet stays 6300 wide until " +
-					"the rest goes.",
-			},
-			{
 				title: "Where that 32.58 Kg of surplus shows up",
 				item: "ISMB450", group: "Structurals",
 				length: 900, sec_qty: "3 rows sharing the batch", unit_weight: 72.4,
@@ -519,10 +589,7 @@ const MP_MANUAL_SECTIONS = [
 			},
 		],
 		notes: [
-			"Cut Sheet — one sheet, several marks. A 1800 × 6300 × 5 plate is 445.095 Kg. Cut 1 takes 1800 × 3000 (211.95 Kg) and leaves 1800 × 3300. Cut 2 takes 1800 × 2000 (141.3 Kg) out of THAT, leaving 1800 × 1300. Enter them as two Cut Sheet rows on the same batch and they chain in row order: each cut takes its piece from what the one before it left. Only the To Use (W1) weight is ever offered for transfer, and the batch's own Length/Width/Sec Qty are rewritten in place — same batch, no new batch number — to the Balance of the last cut that has actually been issued.",
-			"A cut only resizes the batch once it is FULLY issued. Transfer half of a cut's W1 and the batch keeps its current size; it shrinks when the remainder goes. Cancel that transfer and the batch goes back to the size it was before the cut, because the stock is back too.",
-			"If To Use + Balance does not add up to the sheet, you get a warning naming the row — never a block, since some loss to the saw is normal and the client's own process adjusts Length and Width during cutting. The allowance is Cut Sheet Tolerance (%) in Manufyxinvenza Settings, 2% by default; set it to 0 to be told about any difference at all.",
-			"Where to enter the cut. Both places work and they are the same fields: Material Planning (either raw-material table) is where a cut can be PLANNED, and it seeds the Material Issue Plan row. The Material Issue Plan is where it is CUT, and once a cut plan has been entered there it survives every later refresh — a late Purchase Receipt re-pulling rows will not overwrite the shop floor's numbers with the planner's.",
+			"Cut plates arrive here already sized to the PIECE. The cut is planned once on the Cut Sheet against the batch (see that section), so a row reaching this plan already carries W1's dimensions and its share of the pieces — there is nothing to re-enter here, and the transfer moves that piece rather than the whole plate. The plate's own Length/Width/Sec Nos are rewritten to the remnant when the first transfer from that sheet is submitted, and restored if it is cancelled.",
 			"Nothing is ever offered for transfer unless it's BOTH purchased (a Purchase Receipt allocated it) AND reserved (a manual step back on Material Planning 1) — after a Purchase Receipt submits, its popup tells you exactly which Material Planning to open and reserve if anything's still pending.",
 			"Why fractions turn up here and not in Material Planning: a Material Planning covering 10 drawings feeds a SEPARATE Material Issue Plan per drawing, and each plan only ever pulls its own drawings' reserved rows. A batch planned across 5 rows can therefore present as 4.5 Nos when only 3 of those drawings are being issued. That is the whole reason Sec Nos is editable here — this is the first point at which anyone knows how many physical bars are actually going out of the door.",
 			"Nothing rounds automatically, anywhere. Material Planning reserves the exact Kg each drawing needs; this popup is the ONLY place a fraction becomes whole pieces, and only because you typed it. Whatever you add on top is recorded as excess to return, never quietly absorbed.",
