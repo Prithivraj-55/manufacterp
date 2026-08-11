@@ -82,6 +82,24 @@ function _add_io_buttons(frm, fieldname) {
 	// );
 }
 
+// Every Status that means "this row has material against it" — including rows
+// fulfilled from another job's excess, which may carry no batch for weeks while
+// the off-cut is still at the supplier. Mirrors MAPPED_BATCH_STATUSES in
+// material_planning.py, last two entries being the pre-rename spellings kept so
+// documents saved before the rename still total correctly.
+const _MP_MAPPED_STATUSES = [
+	"Mapped",
+	"Excess Mapped",
+	"Excess Mapped (At Supplier)",
+	"Excess Mapped (Pending Return)",
+	"Virtual (At Supplier)",
+	"Claimed (Pending Return)",
+];
+
+function _MP_IS_MAPPED_STATUS(value) {
+	return _MP_MAPPED_STATUSES.indexOf(value) !== -1;
+}
+
 function _update_weight_summary(frm) {
 	let total_raw = 0;
 	(frm.doc.raw_materials || []).forEach(r => {
@@ -104,7 +122,7 @@ function _update_weight_summary(frm) {
 	let mapped_expected = 0;
 	let mapped_cross    = 0;
 	mapping_rows.forEach(r => {
-		if (r.batch_mapped === "Mapped") {
+		if (_MP_IS_MAPPED_STATUS(r.batch_mapped)) {
 			mapped_expected += flt(r.qty);
 			mapped_cross    += flt(r.batch_calc_qty);
 		}
@@ -124,7 +142,7 @@ function _update_weight_summary(frm) {
 	let html = "";
 
 	// Show difference as soon as at least one Material Mapping row is mapped
-	let any_mapped = mapping_rows.some(r => r.batch_mapped === "Mapped");
+	let any_mapped = mapping_rows.some(r => _MP_IS_MAPPED_STATUS(r.batch_mapped));
 
 	if (!any_mapped) {
 		$wrap.html("");
@@ -140,7 +158,7 @@ function _update_weight_summary(frm) {
 	let color   = diff >= 0 ? "#2e7d32" : "#c62828";
 	let val_str = sign + flt(diff, 3).toFixed(3) + " Kg";
 
-	let mapped_count = mapping_rows.filter(r => r.batch_mapped === "Mapped").length;
+	let mapped_count = mapping_rows.filter(r => _MP_IS_MAPPED_STATUS(r.batch_mapped)).length;
 	let total_count  = mapping_rows.length;
 	html = `<div style="margin-top:6px;">
 		<label class="control-label" style="font-size:11px;color:#8d99a6;">
@@ -189,12 +207,10 @@ frappe.ui.form.on("Material Planning", {
 		frm.add_custom_button(frappe.utils.icon("book", "xs") + " " + __("Manual"), () => {
 			frappe.set_route("material-planning-manual");
 		});
-		// Real-document, case-by-case walkthrough (separate from the
-		// feature-by-feature Manual above) -- kept in its own page too.
-		// Update material_planning_case_studies.js whenever a new case is added.
-		frm.add_custom_button(frappe.utils.icon("repo", "xs") + " " + __("Over all Manual"), () => {
-			frappe.set_route("material-planning-case-studies");
-		});
+		// "Over all Manual" (the case-by-case walkthrough page) is hidden from this
+		// nav bar at the client's request. The page itself is untouched and still
+		// reachable at /app/material-planning-case-studies -- only the button is
+		// gone, so nothing is lost if it is wanted back.
 
 		// Always keep the Stock Analysis tab visible regardless of table data
 		frm.set_df_property("tab_stock_analysis", "hidden", 0); // fieldname stays, label changed to "Stock Details"
@@ -291,13 +307,15 @@ frappe.ui.form.on("Material Planning", {
 			let _status_df = _mm_meta.fields.find(function(f) { return f.fieldname === "batch_mapped"; });
 			if (_status_df) {
 				_status_df.formatter = function(value) {
-					if (value === "Mapped") {
-						return `<span class="indicator-pill green" style="display:inline-block;font-size:11px;padding:2px 8px">${__("Mapped")}</span>`;
-					}
-					if (value) {
-						return `<span class="indicator-pill red" style="display:inline-block;font-size:11px;padding:2px 8px">${__("Not Mapped")}</span>`;
-					}
-					return "";
+					if (!value) return "";
+					// Render the actual status. This used to print "Not Mapped" for
+					// ANY value other than "Mapped", which meant a row fulfilled from
+					// another job's excess — genuinely mapped, just with no batch
+					// against it yet — was shown as if nothing had been done to it.
+					let colour = value === "Mapped" ? "green"
+						: _MP_IS_MAPPED_STATUS(value) ? "blue"
+						: "red";
+					return `<span class="indicator-pill ${colour}" style="display:inline-block;font-size:11px;padding:2px 8px">${__(value)}</span>`;
 				};
 			}
 		}
@@ -2085,6 +2103,9 @@ frappe.ui.form.on("Material Planning Material Mapping", {
 			frappe.model.set_value(cdt, cdn, "batch_reserved_qty", 0);
 			frappe.model.set_value(cdt, cdn, "batch_free_qty", 0);
 			frappe.model.set_value(cdt, cdn, "batch_mapped", "Not Mapped");
+			frappe.model.set_value(cdt, cdn, "cut_sheet", 0);
+			frappe.model.set_value(cdt, cdn, "cut_sheet_ref", "");
+			frappe.model.set_value(cdt, cdn, "cut_sheet_avail_sec_qty", 0);
 			return;
 		}
 
@@ -2105,6 +2126,7 @@ frappe.ui.form.on("Material Planning Material Mapping", {
 					frappe.model.set_value(cdt, cdn, "batch_width",     flt(d.custom_width));
 					frappe.model.set_value(cdt, cdn, "batch_thickness", flt(d.custom_thickness));
 					_recalc_batch_qty(frm, cdt, cdn);
+					_mp_apply_cut_sheet_to_row(frm, cdt, cdn);
 				}
 			);
 
@@ -2125,6 +2147,7 @@ frappe.ui.form.on("Material Planning Material Mapping", {
 							frappe.model.set_value(cdt, cdn, "batch_unit_weight",        flt(d.custom_unit_weight));
 							frappe.model.set_value(cdt, cdn, "batch_parent_item_group",  d.custom_parent_item_group || "");
 							_recalc_batch_qty(frm, cdt, cdn);
+							_mp_apply_cut_sheet_to_row(frm, cdt, cdn);
 							let group = d.custom_parent_item_group || "";
 							if (group === "Structurals" || group === "Plates") {
 								frappe.show_alert({
@@ -2151,6 +2174,10 @@ frappe.ui.form.on("Material Planning Material Mapping", {
 		} else {
 			frappe.model.set_value(cdt, cdn, "batch_sec_qty", 0);
 			frappe.model.set_value(cdt, cdn, "batch_calc_qty", 0);
+			// On a Cut Sheet row, switching back to whole pieces should offer a
+			// starting count rather than leaving the row empty for the user to
+			// work out by hand.
+			if (row.cut_sheet_ref) _mp_apply_cut_sheet_to_row(frm, cdt, cdn);
 		}
 		frm.fields_dict["material_mapping"].grid.refresh_row(cdn);
 	},
@@ -2182,6 +2209,105 @@ frappe.ui.form.on("Material Planning Material Mapping", {
 	excess_material_mapping_btn(frm, cdt, cdn) {
 		_show_excess_material_mapping_dialog(frm, locals[cdt][cdn]);
 	},
+	// "Select Item" — the same picker, reached from the Excess Material tick rather
+	// than the section button, so the row you are filling is already the target.
+	select_excess_item_btn(frm, cdt, cdn) {
+		let row = locals[cdt][cdn];
+		if (row.batch) {
+			frappe.msgprint({
+				title: __("This Row Already Has a Batch"),
+				message: __("Excess Material is for rows with no batch of their own. Clear the batch first, or use <b>Update Batch</b> to change what it draws from."),
+				indicator: "orange",
+			});
+			return;
+		}
+		_show_excess_material_mapping_dialog(frm, row);
+	},
+	excess_material(frm, cdt, cdn) {
+		let row = locals[cdt][cdn];
+		if (row.excess_material && row.batch) {
+			frappe.model.set_value(cdt, cdn, "excess_material", 0);
+			frappe.msgprint(__("This row already has a batch, so it does not need excess material."));
+		}
+	},
+});
+
+function _mp_apply_cut_sheet_to_row(frm, cdt, cdn) {
+	let row = locals[cdt][cdn];
+	if (!row.batch) {
+		frappe.model.set_value(cdt, cdn, "cut_sheet", 0);
+		frappe.model.set_value(cdt, cdn, "cut_sheet_ref", "");
+		frappe.model.set_value(cdt, cdn, "cut_sheet_avail_sec_qty", 0);
+		return;
+	}
+	frappe.call({
+		method: "manufyxinvenzaerp.production_management.doctype.cut_sheet.cut_sheet.get_cut_sheet_for_batch",
+		args: { batch_no: row.batch, exclude_row: row.name },
+		callback(r) {
+			let cs = r.message;
+			if (!cs) {
+				frappe.model.set_value(cdt, cdn, "cut_sheet", 0);
+				frappe.model.set_value(cdt, cdn, "cut_sheet_ref", "");
+				frappe.model.set_value(cdt, cdn, "cut_sheet_avail_sec_qty", 0);
+				return;
+			}
+			frappe.model.set_value(cdt, cdn, "cut_sheet", 1);
+			frappe.model.set_value(cdt, cdn, "cut_sheet_ref", cs.name);
+			frappe.model.set_value(cdt, cdn, "cut_sheet_avail_sec_qty", flt(cs.available_sec_qty));
+			if (row.is_reserved) return;
+
+			// The row describes the PIECE, not the plate it came off.
+			frappe.model.set_value(cdt, cdn, "batch_mapped", "Cut Sheet Mapped");
+			frappe.model.set_value(cdt, cdn, "batch_parent_item_group", cs.parent_item_group || "");
+			frappe.model.set_value(cdt, cdn, "batch_length", flt(cs.w1_length));
+			frappe.model.set_value(cdt, cdn, "batch_width", flt(cs.w1_width));
+			frappe.model.set_value(cdt, cdn, "batch_thickness", flt(cs.sheet_thickness));
+			frappe.model.set_value(cdt, cdn, "batch_unit_weight", flt(cs.unit_weight));
+			// Suggest a piece count when the row has none yet: enough whole pieces to
+			// cover what this row needs, capped at what the sheet still has. Only ever
+			// a suggestion — the client's rule is that the figure is entered by hand,
+			// so an existing value is never touched.
+			if (!row.reserve_without_dimensions && !flt(row.batch_sec_qty)
+					&& flt(cs.w1_qty_per_nos) && flt(row.qty)) {
+				let needed = Math.ceil(flt(row.qty) / flt(cs.w1_qty_per_nos));
+				let suggestion = Math.min(needed, flt(cs.available_sec_qty));
+				if (suggestion > 0) {
+					frappe.model.set_value(cdt, cdn, "batch_sec_qty", suggestion);
+					row.batch_sec_qty = suggestion;
+				}
+			}
+
+			if (row.reserve_without_dimensions) {
+				// Fractional mode: the row reserves exactly what it needs, shown as a
+				// fraction of a W1 piece. _calc_rwd_preview owns both figures.
+				_calc_rwd_preview(frm, cdt, cdn);
+				return;
+			}
+
+			// Whole-piece mode. Computed from the dimensions, not count x the rounded
+			// per-piece Kg -- that loses a milligram per piece and can make a
+			// requirement of exactly N pieces' weight look uncovered.
+			let _n = flt(row.batch_sec_qty);
+			let _g = cs.parent_item_group;
+			let _kg = 0;
+			if (_g === "Structurals") _kg = (flt(cs.w1_length) / 1000) * flt(cs.unit_weight) * _n;
+			else if (_g === "Plates") _kg = (flt(cs.w1_length) / 1000) * (flt(cs.w1_width) / 1000) * flt(cs.sheet_thickness) * flt(cs.unit_weight) * _n;
+			else if (_g === "Nuts and Bolts") _kg = _n * flt(cs.unit_weight);
+			if (_kg) frappe.model.set_value(cdt, cdn, "batch_calc_qty", flt(_kg, 3));
+			// This runs at the tail of two separate lookups, so announce it once.
+			if (row.__cut_sheet_announced !== cs.name) {
+				row.__cut_sheet_announced = cs.name;
+				frappe.show_alert({
+					message: __("Batch {0} is cut per {1} — W1 {2} × {3}, {4} piece(s) free. Enter Sec Nos in PIECES.", [
+						row.batch, cs.name, flt(cs.w1_length), flt(cs.w1_width), flt(cs.available_sec_qty)]),
+					indicator: "blue",
+				}, 7);
+			}
+		},
+	});
+}
+
+frappe.ui.form.on("Material Planning Material Mapping", {
 });
 
 // Shared helper: build the partial-reservation warning table HTML
@@ -2452,7 +2578,7 @@ function _show_excess_material_mapping_dialog(frm, existing_row) {
 		{
 			fieldtype: "HTML",
 			fieldname: "excess_legend",
-			options: `<div style="font-size:12px;color:#888;margin-bottom:4px;">${__("Returned Batch")} = ${__("physically back in your own warehouse")}. ${__("Not Yet Returned")} = ${__("still just a row in some Material Issue Plan's Excess Material Items table -- not present in any warehouse yet, either because it's flagged Retain at Supplier (never will be) or it simply hasn't been returned yet. Claimed whole (no partial split), no Stock Entry created by claiming it.")}</div>`,
+			options: `<div style="font-size:12px;color:#888;margin-bottom:4px;">${__("Returned Batch")} = ${__("physically back in your own warehouse")}. ${__("Not Yet Returned")} = ${__("still just a row in some Material Issue Plan's Excess Material Items table -- not present in any warehouse yet, either because it's flagged Retain at Supplier (never will be) or it simply hasn't been returned yet. Claim as many pieces as you need -- the rest stays free for other jobs. No Stock Entry is created by claiming it.")}</div>`,
 		},
 		{ fieldtype: "HTML", fieldname: "excess_html" },
 		{ fieldtype: "Section Break" },
@@ -2460,7 +2586,7 @@ function _show_excess_material_mapping_dialog(frm, existing_row) {
 			fieldtype: "Float",
 			fieldname: "sec_qty_to_use",
 			label: __("Sec Qty to Use"),
-			description: __("Locked to the full quantity for 'Not Yet Returned' rows -- those are claimed whole, not split."),
+			description: __("How many pieces to take. Whatever you leave stays free for another job to claim."),
 		},
 		{ fieldtype: "Column Break" },
 		{
@@ -2490,6 +2616,7 @@ function _show_excess_material_mapping_dialog(frm, existing_row) {
 						excess_row_name: d._selected_virtual.excess_row,
 						row_name: existing_row ? existing_row.name : null,
 						unavailable_item_row: unavailable_row_name,
+						sec_qty: flt(values.sec_qty_to_use),
 					},
 					freeze: true,
 					freeze_message: __("Claiming excess held at supplier…"),
@@ -2598,7 +2725,7 @@ function _show_excess_material_mapping_dialog(frm, existing_row) {
 		}
 		let th = "white-space:nowrap;padding:6px 10px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;";
 		let td = "padding:5px 10px;white-space:nowrap;border-bottom:1px solid #f0f0f0;";
-		let cols = [__("Item Code"), __("Item Name"), __("Source"), __("Batch / MIP"), __("L (mm)"), __("W (mm)"), __("T (mm)"), __("Sec Qty"), __("Free/Qty (Kg)"), __("Supplier")];
+		let cols = [__("Item Code"), __("Item Name"), __("Source"), __("Batch / MIP"), __("L (mm)"), __("W (mm)"), __("T (mm)"), __("Planned Sec Nos"), __("Free Sec Nos"), __("Free (Kg)"), __("Supplier")];
 		let thead = "<tr>" + cols.map(c => `<th style="${th}">${c}</th>`).join("") + "</tr>";
 		let tbody = rows.map((r, i) => {
 			if (r._kind === "batch") {
@@ -2612,6 +2739,7 @@ function _show_excess_material_mapping_dialog(frm, existing_row) {
 				<td style="${td}">${format_number(flt(r.width), null, 1)}</td>
 				<td style="${td}">${format_number(flt(r.thickness), null, 1)}</td>
 				<td style="${td}">${format_number(flt(r.batch_sec_qty), null, 3)}</td>
+				<td style="${td};font-weight:600;">${format_number(flt(r.batch_sec_qty), null, 3)}</td>
 				<td style="${td}">${format_number(flt(r.free_qty), null, 3)}</td>
 				<td style="${td}">-</td>
 			</tr>`;
@@ -2627,8 +2755,9 @@ function _show_excess_material_mapping_dialog(frm, existing_row) {
 				<td style="${td}">${format_number(flt(r.length), null, 1)}</td>
 				<td style="${td}">${format_number(flt(r.width), null, 1)}</td>
 				<td style="${td}">${format_number(flt(r.thickness), null, 1)}</td>
-				<td style="${td}">${format_number(flt(r.sec_qty), null, 3)}</td>
-				<td style="${td}">${format_number(flt(r.qty), null, 3)}</td>
+				<td style="${td}">${format_number(flt(r.planned_sec_qty != null ? r.planned_sec_qty : r.sec_qty), null, 3)}</td>
+				<td style="${td};font-weight:600;color:${flt(r.available_sec_qty) < flt(r.planned_sec_qty) ? "#b8860b" : "inherit"};">${format_number(flt(r.available_sec_qty != null ? r.available_sec_qty : r.sec_qty), null, 3)}</td>
+				<td style="${td}">${format_number(flt(r.available_qty != null ? r.available_qty : r.qty), null, 3)}</td>
 				<td style="${td}">${frappe.utils.escape_html(r.supplier || "-")}</td>
 			</tr>`;
 		}).join("");
@@ -2651,8 +2780,10 @@ function _show_excess_material_mapping_dialog(frm, existing_row) {
 				d.set_value("sec_qty_to_use", default_sec_qty);
 			} else {
 				d._selected_virtual = row;
-				d.set_df_property("sec_qty_to_use", "read_only", 1);
-				d.set_value("sec_qty_to_use", flt(row.sec_qty));
+				// Partial claims: an off-cut is shared out in pieces like a Cut Sheet,
+				// so this is editable and defaults to everything still free.
+				d.set_df_property("sec_qty_to_use", "read_only", 0);
+				d.set_value("sec_qty_to_use", flt(row.available_sec_qty || row.sec_qty));
 				d.set_value("kg_preview", flt(row.qty, 3));
 			}
 			_update_kg_preview();
@@ -2663,7 +2794,9 @@ function _show_excess_material_mapping_dialog(frm, existing_row) {
 
 	function _update_kg_preview() {
 		if (d._selected_virtual) {
-			d.set_value("kg_preview", flt(d._selected_virtual.qty, 3));
+			let per = flt(d._selected_virtual.qty_per_nos);
+			let n = flt(d.get_value("sec_qty_to_use"));
+			d.set_value("kg_preview", flt(per && n ? per * n : d._selected_virtual.qty, 3));
 			return;
 		}
 		let row = d._selected_batch;
@@ -3425,3 +3558,36 @@ function _show_exact_match_reassign_dialog(frm, preselect_row_name) {
 
 	dialog.show();
 }
+
+// ── Cut Sheet live preview (both raw-material tables) ────────────────────────
+// A cut plan can now be decided here at planning time and seeds the Material
+// Issue Plan's own row. This is immediate feedback only: the authoritative Kg
+// recompute is material_planning.py's validate() -> _sync_cut_sheet_calc, and
+// the actual transfer cap / batch resize happen on the Material Issue Plan side.
+// Thickness comes from the batch, never from the requirement — a cut changes
+// Length and Width, never how thick the steel is.
+function _mp_recalc_cut_sheet_qty(cdt, cdn, prefix) {
+	let row = locals[cdt][cdn];
+	let g = row.batch_parent_item_group || row.parent_item_group;
+	let T = row.batch_thickness || row.thickness;
+	let uw = row.batch_unit_weight || row.unit_weight;
+	let L = row[prefix + "_length"], W = row[prefix + "_width"], S = row[prefix + "_sec_qty"];
+	let qty = null;
+	if (g === "Structurals") {
+		if (L && uw && S) qty = (L / 1000) * uw * S;
+	} else if (g === "Plates") {
+		if (L && W && T && uw && S) qty = (L / 1000) * (W / 1000) * T * uw * S;
+	}
+	frappe.model.set_value(cdt, cdn, prefix + "_calc_qty", qty !== null ? flt(qty, 3) : 0);
+}
+
+["Material Planning Material Mapping", "Material Planning Available Raw Material"].forEach(function (dt) {
+	frappe.ui.form.on(dt, {
+		use_length(frm, cdt, cdn)      { _mp_recalc_cut_sheet_qty(cdt, cdn, "use"); },
+		use_width(frm, cdt, cdn)       { _mp_recalc_cut_sheet_qty(cdt, cdn, "use"); },
+		use_sec_qty(frm, cdt, cdn)     { _mp_recalc_cut_sheet_qty(cdt, cdn, "use"); },
+		balance_length(frm, cdt, cdn)  { _mp_recalc_cut_sheet_qty(cdt, cdn, "balance"); },
+		balance_width(frm, cdt, cdn)   { _mp_recalc_cut_sheet_qty(cdt, cdn, "balance"); },
+		balance_sec_qty(frm, cdt, cdn) { _mp_recalc_cut_sheet_qty(cdt, cdn, "balance"); },
+	});
+});

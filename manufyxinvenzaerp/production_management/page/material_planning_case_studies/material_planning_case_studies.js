@@ -318,6 +318,65 @@ const CASE_STUDIES = [
 		`,
 	},
 	{
+		id: "excess-claim-lifecycle",
+		nav_label: "Excess Claim — Supplier to Stock",
+		title: "Claiming an Off-Cut That Is Still at the Supplier",
+		kicker: "Worked scenario — a paper promise becoming a real batch",
+		scenario: true,
+		docs: {
+			"Applies to": "Any Material Mapping row fulfilled from another job's excess",
+			"Typical trigger": "Job A has a usable off-cut; Job B needs that item and does not want to buy fresh",
+			"Where it is claimed": "Material Planning → Material Mapping → Excess Material Mapping",
+			"Where it becomes real": "Material Issue Plan (Job A) → Return Excess Entry, on submit",
+		},
+		overview:
+			"Illustrative walkthrough of what happens between claiming an off-cut and actually holding " +
+			"it. Job A finishes with a 2000 mm ISA100 off-cut worth 20 Kg that is still physically at " +
+			"the supplier. Job B claims it rather than purchasing new material. The point of the " +
+			"scenario is the gap in the middle: for days or weeks Job B has a reservation but no batch, " +
+			"and the system has to keep that promise honest at both ends — nobody else may take the " +
+			"material, and nobody may quietly change its size underneath Job B.",
+		weight_examples: [
+			{
+				group: "Structurals", item: "ISA100 — the off-cut", duno: "Job A",
+				length: 2000, sec_qty: 1, unit_weight: 10,
+				formula: "Job A's leftover, entered on its raw-material row as Excess Length 2000, Excess Sec Qty 1. Kg = (2000÷1000) × 10 × 1",
+				result: "20.0  (booked into Excess Material Items, still at the supplier)",
+			},
+			{
+				group: "Structurals", item: "ISA100 — remeasured", duno: "Job A",
+				length: 1800, sec_qty: 1, unit_weight: 10,
+				formula: "It actually measures 1800 mm. Only correctable after Unlink Claim. Kg = (1800÷1000) × 10 × 1",
+				result: "18.0  (Job B re-claims at the true size)",
+			},
+		],
+		walkthrough: `
+			<table class="mpc-doc-table">
+				<tbody>
+					<tr><td class="mpc-doc-key">1. Job B claims it</td><td>Excess Material Mapping → “Not Yet Returned (Pending)”. Claimed whole, never split. Job B's row: Batch <b>blank</b>, Status <b>Claimed (Pending Return)</b>, Reserved <b>ticked</b>.</td></tr>
+					<tr><td class="mpc-doc-key">2. Job B tries to transfer</td><td>The row is absent from the transfer popup — there is no stock in Job B's source warehouse to move. A blue panel says “1 item is already at INTERNATIONAL STEEL PRO — no transfer needed” and lists it. The rest of the transfer proceeds normally.</td></tr>
+					<tr><td class="mpc-doc-key">3. Someone edits the size</td><td>Refused, naming Job B's Material Planning — from the Excess Material Items grid, from Job A's raw-material Excess fields, and from the Return Excess Entry dialog alike.</td></tr>
+					<tr><td class="mpc-doc-key">4. Unlink, correct, re-claim</td><td><b>Unlink Claim</b> drops Job B's reservation and returns the off-cut to the picker. Correct Excess Length to 1800 on Job A's raw-material row (20 Kg → 18 Kg), then Job B claims it again. While unlinked, another job could take it first.</td></tr>
+					<tr><td class="mpc-doc-key">5. The material comes back</td><td>Job A presses <b>Return Excess Entry</b>. The Material Receipt is created and submitted, producing batch ZZ-L1800-SR014.</td></tr>
+					<tr><td class="mpc-doc-key">6. It attaches itself</td><td>On submit, that batch writes into Job B's row: Batch set, Status <b>Mapped</b>, still reserved. A green message confirms it. No re-picking, and the batch never sat free.</td></tr>
+				</tbody>
+			</table>
+			<p class="mpc-note-inline">
+				<b>Why the size is frozen while claimed.</b> Job B planned around a specific piece. Shrinking
+				it from 2000 mm to 1800 mm without telling anyone would leave Job B reserving material that
+				does not exist in the shape it planned for — the shortfall would only surface at transfer,
+				long after it could be fixed cheaply. Unlink → correct → re-claim keeps every job's numbers
+				truthful at each step, at the cost of one deliberate extra click.
+			</p>
+			<p class="mpc-note-inline">
+				<b>“Retain at Supplier (Virtual)” is different.</b> That flag means the material will never
+				come back at all — it is consumed at the supplier. Such rows are skipped by Return Excess
+				Entry entirely. If one does unexpectedly come back, change its Return Type to “Return to Own
+				Warehouse” first, and it then follows the flow above.
+			</p>
+		`,
+	},
+	{
 		id: "case-2",
 		status: "pending",
 		nav_label: "Case 2 — Coming Soon",

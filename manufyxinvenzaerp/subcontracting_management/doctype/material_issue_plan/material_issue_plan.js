@@ -30,6 +30,7 @@ frappe.ui.form.on("Material Issue Plan", {
 		});
 		_add_view_all_raw_materials_button(frm);
 		_add_update_batch_button(frm);
+		_add_manual_button(frm);
 		_add_transfer_buttons(frm);
 		_add_pdf_button(frm);
 		_render_excess_action_btn(frm);
@@ -338,6 +339,14 @@ function _check_transfer_readiness(frm, on_proceed) {
 		args: { mip_name: frm.doc.name },
 		callback(r) {
 			let d = r.message || {};
+			// Off-cuts claimed through Excess Material Mapping that are still at the
+			// supplier never reach the transfer list (there is no batch in the source
+			// warehouse to move). Stashed on the form so the transfer popup can say so
+			// outright, instead of the user hunting for a row that will never appear.
+			// Not an "issue" -- it is a correct, finished state -- so it must be picked
+			// up here, before the has_issues early return.
+			frm.__mip_at_supplier = d.at_supplier || [];
+			frm.__mip_supplier_warehouse = d.supplier_warehouse || "";
 			if (!d.has_issues) {
 				on_proceed();
 				return;
@@ -495,6 +504,14 @@ function _show_mip_batch_plan_popup(frm) {
 }
 
 // ── Transfer / CNC buttons ───────────────────────────────────────────────────
+
+function _add_manual_button(frm) {
+	// Mirrors the Material Planning form's Manual button. Kept in its own page
+	// rather than a dialog so it can be read alongside the form.
+	frm.add_custom_button(frappe.utils.icon("book", "xs") + " " + __("Manual"), () => {
+		frappe.set_route("material-issue-plan-manual");
+	});
+}
 
 function _add_transfer_buttons(frm) {
 	if (frm.is_new() || !frm.doc.source_warehouse) return;
@@ -918,6 +935,34 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 			+ "</div>";
 	}
 
+	// Material already sitting at the supplier: an off-cut this plan claimed through
+	// Excess Material Mapping while it was still at their end. There is nothing to
+	// move -- it is already where the transfer would have sent it -- so the row is
+	// absent from the list below by design, and this says so rather than leaving a
+	// silent gap between what was planned and what is on offer.
+	// Only on the legs that leave the source warehouse. The CNC-to-supplier leg does
+	// not run the readiness check at all, so its stash would be whatever the last
+	// transfer dialog left behind — and material already at the supplier says nothing
+	// about what is waiting at CNC anyway.
+	var at_supplier = is_cnc_fwd ? [] : (frm.__mip_at_supplier || []);
+	if (at_supplier.length) {
+		var at_rows = at_supplier.map(function(s) {
+			return "<li>" + frappe.utils.escape_html(s.item_code)
+				+ (s.duno_mark_no ? " · " + frappe.utils.escape_html(s.duno_mark_no) : "")
+				+ " — " + format_number(flt(s.qty), null, 3) + " " + frappe.utils.escape_html(s.uom || "Kg")
+				+ (s.source_mip ? " (" + __("from") + " " + frappe.utils.escape_html(s.source_mip) + ")" : "")
+				+ "</li>";
+		}).join("");
+		summary += "<div style='background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#1e3a8a'>"
+			+ "ℹ <b>" + __("{0} item(s) are already at {1} — no transfer needed", [
+				at_supplier.length,
+				frappe.utils.escape_html(frm.__mip_supplier_warehouse || frm.doc.supplier_warehouse || __("the supplier"))]) + "</b><br>"
+			+ __("These are excess off-cuts this plan claimed through <b>Excess Material Mapping</b> while they were still at the supplier. They are not listed below because there is no stock in {0} to move.", [
+				frappe.utils.escape_html(frm.doc.source_warehouse || __("the source warehouse"))])
+			+ "<ul style='margin:6px 0 0 18px'>" + at_rows + "</ul>"
+			+ "</div>";
+	}
+
 	var $content = $("<div>").append($(summary), $filter_row, $actions, $table);
 
 	var dlg = new frappe.ui.Dialog({
@@ -1138,6 +1183,38 @@ frappe.ui.form.on("SCO Excess Material Item", {
 			frappe.model.set_value(cdt, cdn, "sec_qty", flt(row.unit_weight * flt(row.qty), 3));
 		}
 		_mip_excess_totals(frm);
+	},
+	// The way out of the "already reserved" block: release the claim, correct the
+	// dimensions, then map the off-cut again from the Material Planning. Confirmed
+	// first because releasing it puts the off-cut back in front of every other job's
+	// picker, so the claiming plan can lose it to someone else.
+	unlink_claim_btn(frm, cdt, cdn) {
+		if (frm.doctype !== "Material Issue Plan") return;
+		var row = locals[cdt][cdn];
+		if (!row.mapped_material_planning) {
+			frappe.msgprint(__("This excess item is not claimed by any Material Planning."));
+			return;
+		}
+		frappe.confirm(
+			__("Release <b>{0}</b> from Material Planning <b>{1}</b>?<br><br>Its reservation there will be dropped and the off-cut becomes available for any job to claim again.",
+				[frappe.utils.escape_html(row.item_code || ""), frappe.utils.escape_html(row.mapped_material_planning)]),
+			function() {
+				frappe.call({
+					method: "manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.unlink_excess_claim",
+					args: { mip_name: frm.doc.name, excess_row_name: row.name },
+					freeze: true,
+					freeze_message: __("Releasing claim…"),
+					callback(r) {
+						if (!r.message) return;
+						frappe.show_alert({
+							message: __("Claim released from {0}. Dimensions can now be edited.", [r.message.released_from]),
+							indicator: "green",
+						});
+						frm.reload_doc();
+					},
+				});
+			}
+		);
 	},
 });
 

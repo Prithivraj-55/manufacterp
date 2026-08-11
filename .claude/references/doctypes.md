@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-08-11 04:58:22_
+_Generated: 2026-08-11 19:40:38_
 
 ## drawing
 
@@ -147,6 +147,46 @@ _Generated: 2026-08-11 04:58:22_
 
 ---
 
+## cut_sheet_allocation
+
+| Key | Value |
+|-----|-------|
+| Module | production_management |
+| Path | `production_management/doctype/cut_sheet_allocation` |
+| Controller | `production_management/doctype/cut_sheet_allocation/cut_sheet_allocation.py` |
+| Client script | none |
+
+---
+
+## cut_sheet
+
+| Key | Value |
+|-----|-------|
+| Module | production_management |
+| Path | `production_management/doctype/cut_sheet` |
+| Controller | `production_management/doctype/cut_sheet/cut_sheet.py` |
+| Client script | none |
+
+### Methods
+
+| Method | Whitelisted |
+|--------|-------------|
+| ` validate` | no |
+| ` on_trash` | no |
+| ` _fetch_batch_dimensions` | no |
+| ` _calculate` | no |
+| ` _validate_allocations_fit` | no |
+| ` _set_status` | no |
+| ` suggest_w1_sec_qty` | no |
+| ` get_available_cut_sheets` | no |
+| ` get_cut_sheet_for_batch` | no |
+| ` allocate_cut_sheet` | no |
+| ` release_cut_sheet_allocation` | no |
+| ` apply_w2_to_batch` | no |
+| ` revert_w2_from_batch` | no |
+
+---
+
 ## inspection_call_log
 
 | Key | Value |
@@ -278,8 +318,14 @@ _Generated: 2026-08-11 04:58:22_
 
 | Method | Whitelisted |
 |--------|-------------|
+| ` excess_row_availability` | no |
+| ` _release_row_pool_claims` | no |
+| ` _cut_sheet_thickness` | no |
+| ` excess_aware_mapped_status` | no |
 | ` validate` | no |
 | ` _warn_undersized_purchase_dimensions` | no |
+| ` _sync_cut_sheet_flag` | no |
+| ` _sync_cut_sheet_calc` | no |
 | ` _sync_batch_remarks` | no |
 | ` _consolidate_unavailable_items` | no |
 | ` _recalculate_consolidate_items` | no |
@@ -329,6 +375,7 @@ _Generated: 2026-08-11 04:58:22_
 | ` get_available_virtual_excess_items` | no |
 | ` _release_virtual_excess_source` | no |
 | ` claim_virtual_excess_mapping` | no |
+| ` materialize_virtual_excess_claim` | no |
 | ` reserve_exact_match_batches` | no |
 | ` unreserve_exact_match_batches` | no |
 | ` check_mapping_batch_availability` | no |
@@ -456,10 +503,17 @@ _Generated: 2026-08-11 04:58:22_
 | ` check_mip_raw_materials_refreshable` | no |
 | ` refresh_mip_raw_materials_manual` | no |
 | ` refresh_mip_raw_materials` | no |
+| ` _sync_excess_availability` | no |
+| ` _cut_sheet_seed` | no |
 | ` _carry_forward_editable_fields` | no |
 | ` _lookup_drawing_planned_weight` | no |
+| ` _throw_claimed_excess_locked` | no |
+| ` _claimed_excess_differs` | no |
+| ` _assert_claimed_excess_unchanged` | no |
+| ` unlink_excess_claim` | no |
 | ` _sync_excess_return_from_raw_materials` | no |
 | ` _sync_cut_sheet_calc` | no |
+| ` _warn_cut_sheet_mismatch` | no |
 | ` _sync_batch_remarks` | no |
 | ` _maybe_mark_completed` | no |
 | ` recheck_mip_completion` | no |

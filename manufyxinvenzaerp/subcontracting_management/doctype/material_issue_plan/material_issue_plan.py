@@ -26,8 +26,10 @@ class MaterialIssuePlan(Document):
         same save. Also mirrors each row's batch Remarks (Phase 6.3)."""
         _sync_cut_sheet_calc(self)
         _auto_suggest_excess_from_cut_sheet(self)
+        _assert_claimed_excess_unchanged(self)
         _sync_excess_return_from_raw_materials(self)
         _sync_batch_remarks(self)
+        _sync_excess_availability(self)
         _maybe_mark_completed(self)
 
     def on_trash(self):
@@ -162,11 +164,17 @@ def populate_from_production_plan(mip_name):
 # call, so anything the user typed here must be explicitly carried forward onto the
 # freshly-rebuilt row or it would silently vanish the next time a Purchase Receipt
 # (or anything else) triggers a refresh.
+# The cut plan, which Material Planning can now seed -- see _carry_forward_editable_fields
+# for why these are carried over conditionally rather than always.
+_CUT_SHEET_FIELDS = [
+    "cut_sheet", "use_length", "use_width", "use_sec_qty", "use_calc_qty",
+    "balance_length", "balance_width", "balance_sec_qty", "balance_calc_qty",
+]
+
 _RAW_MATERIAL_EDITABLE_FIELDS = [
     "excess_return_applicable", "excess_length", "excess_width", "excess_sec_qty",
     "excess_calc_qty", "excess_return_date",
-    "cut_sheet", "use_length", "use_width", "use_sec_qty", "use_calc_qty",
-    "balance_length", "balance_width", "balance_sec_qty", "balance_calc_qty",
+    *_CUT_SHEET_FIELDS,
 ]
 
 
@@ -320,6 +328,10 @@ def refresh_mip_raw_materials(mip_name):
                 "is_reserved": row.is_reserved,
                 "is_unavailable": 0,
                 "cnc_process": row.cnc_process,
+                # Cut plan seeded from Material Planning. _carry_forward_editable_fields
+                # below replaces these only if the row being rebuilt already carried a
+                # cut plan of its own -- see its docstring for the precedence rule.
+                **_cut_sheet_seed(row),
             })
             _carry_forward_editable_fields(new_row, old_rows_by_key, "Material Planning Material Mapping", row.name)
 
@@ -353,6 +365,10 @@ def refresh_mip_raw_materials(mip_name):
                 "is_reserved": row.is_reserved,
                 "is_unavailable": 0,
                 "cnc_process": row.cnc_process,
+                # Cut plan seeded from Material Planning. _carry_forward_editable_fields
+                # below replaces these only if the row being rebuilt already carried a
+                # cut plan of its own -- see its docstring for the precedence rule.
+                **_cut_sheet_seed(row),
             })
             _carry_forward_editable_fields(new_row, old_rows_by_key, "Material Planning Available Raw Material", row.name)
 
@@ -387,14 +403,59 @@ def refresh_mip_raw_materials(mip_name):
     return mip.name
 
 
+def _sync_excess_availability(mip):
+    """Show, on each Excess Material Items row, how much of that off-cut is still up
+    for grabs -- the same Availability block a Cut Sheet carries.
+
+    An off-cut can now be shared out in pieces across several jobs, so "is this
+    claimed?" is no longer a yes/no question. These three figures are display copies
+    of a live count taken from the rows actually holding the pieces (see
+    excess_row_availability); they are refreshed on every save rather than maintained
+    incrementally, so they cannot drift when a claiming plan is deleted."""
+    from manufyxinvenzaerp.production_management.doctype.material_planning.material_planning import (
+        excess_row_availability,
+    )
+
+    for row in (mip.excess_return_items or []):
+        if not row.name or row.get("__islocal"):
+            continue
+        avail = excess_row_availability(row.name)
+        row.allocated_sec_qty = avail["allocated_sec_qty"]
+        row.allocated_qty = avail["allocated_qty"]
+        row.available_sec_qty = avail["available_sec_qty"]
+        row.available_qty = avail["available_qty"]
+
+
+def _cut_sheet_seed(mp_row):
+    """The cut plan a Material Planning row carries, shaped for a raw_materials row.
+
+    Both Material Planning raw-material tables (Material Mapping and Available Raw
+    Material / Exact Match) now hold the same fields, so a cut decided at planning
+    time reaches whichever kind of row it produced. Empty dict when nothing is
+    planned, so a row with no cut plan is left exactly as it was."""
+    if not mp_row.get("cut_sheet"):
+        return {}
+    return {f: mp_row.get(f) for f in _CUT_SHEET_FIELDS}
+
+
 def _carry_forward_editable_fields(new_row, old_rows_by_key, source_table, source_row):
     """Copy the Excess Return / Cut Sheet fields a user may have entered directly
     onto the raw_materials row being replaced, matched by (source_table, source_row)
-    -- see _RAW_MATERIAL_EDITABLE_FIELDS. No-op if no matching old row existed."""
+    -- see _RAW_MATERIAL_EDITABLE_FIELDS. No-op if no matching old row existed.
+
+    Cut Sheet is the one exception to a straight copy. A cut plan can now also be set
+    in Material Planning, which seeds this row when it is built -- so carrying the old
+    values over unconditionally would wipe a planner's cut plan with the blanks of a
+    row that never had one. The rule is that Material Planning seeds it and the
+    Material Issue Plan wins once someone has entered a cut plan HERE: the cut
+    physically happens at issue time, so the shop floor's numbers must survive a
+    refresh triggered by a late purchase."""
     old_row = old_rows_by_key.get((source_table, source_row))
     if not old_row:
         return
     for fieldname in _RAW_MATERIAL_EDITABLE_FIELDS:
+        if fieldname in _CUT_SHEET_FIELDS and not old_row.get("cut_sheet"):
+            continue
         new_row.set(fieldname, old_row.get(fieldname))
 
 
@@ -419,6 +480,130 @@ def _lookup_drawing_planned_weight(sales_order, customer_drawing_number, item_co
         },
         "total_weight",
     )
+
+
+#  Claimed-off-cut lock ────────────────────────────────────────────────────────
+#  A claim reserves ONE specific off-cut, of specific dimensions, for another
+#  job's Material Planning. Once claimed, those numbers are frozen until the
+#  claim is released -- see _assert_claimed_excess_unchanged for why.
+
+# Compared field-for-field between an excess row and its committed DB values.
+_CLAIMED_EXCESS_FIELDS = ("length", "width", "thickness", "sec_qty", "qty")
+
+# The raw-material row's own excess fields, paired with the excess row field each
+# one feeds. Thickness has no excess_* twin -- an off-cut is cut to length and
+# width, never re-rolled thinner -- so it comes straight off the batch.
+_RAW_TO_EXCESS_FIELDS = (
+    ("excess_length", "length"),
+    ("excess_width", "width"),
+    ("excess_sec_qty", "sec_qty"),
+    ("thickness", "thickness"),
+)
+
+
+def _throw_claimed_excess_locked(excess_row):
+    """The single message every blocked path shows, naming the Material Planning
+    holding the claim and the one way out of it."""
+    frappe.throw(
+        _("<b>{0}</b> in the Excess Material Items table is already reserved for "
+          "Material Planning <b>{1}</b>, so its dimensions are locked.<br><br>"
+          "Use <b>Unlink Claim</b> on that row to release it, change the dimensions, "
+          "then map it again from the Material Planning.")
+        .format(excess_row.item_code or _("This excess item"),
+                excess_row.mapped_material_planning),
+        title=_("Excess Item Already Reserved"),
+    )
+
+
+def _claimed_excess_differs(raw_row, excess_row):
+    """True when a raw-material row's Excess Length/Width/Sec Qty (or the batch
+    thickness behind it) no longer match the excess row they feed."""
+    return any(
+        flt(raw_row.get(raw_field), 3) != flt(excess_row.get(excess_field), 3)
+        for raw_field, excess_field in _RAW_TO_EXCESS_FIELDS
+    )
+
+
+def _assert_claimed_excess_unchanged(mip):
+    """Refuse any edit that moves the dimensions or quantity of an excess row some
+    Material Planning has already reserved.
+
+    Every route into the Excess Material Items table ends here -- typing straight
+    into the grid, editing a raw-material row's Excess Length/Width/Sec Qty (which
+    _sync_excess_return_from_raw_materials would propagate), or the Return Excess
+    Entry dialog's per-row overrides. Validating at the table itself catches all of
+    them with one message instead of three near-copies at three call sites, which
+    is what the client asked for: the check belongs where the numbers land.
+
+    Compares against the committed DB row rather than trusting a dirty flag, so it
+    fires on the actual change and stays silent on saves that touch other things."""
+    for row in (mip.excess_return_items or []):
+        if not row.get("mapped_material_planning"):
+            continue
+        committed = frappe.db.get_value(
+            "SCO Excess Material Item", row.name, _CLAIMED_EXCESS_FIELDS, as_dict=True,
+        )
+        if not committed:
+            # Row was appended in this very save; it cannot already be claimed by
+            # anyone, so there is no committed state to protect.
+            continue
+        if any(flt(row.get(f), 3) != flt(committed.get(f), 3) for f in _CLAIMED_EXCESS_FIELDS):
+            _throw_claimed_excess_locked(row)
+
+
+@frappe.whitelist()
+def unlink_excess_claim(mip_name, excess_row_name):
+    """Release a Material Planning's claim on an excess row so its dimensions can be
+    corrected (the "Unlink Claim" button _throw_claimed_excess_locked points at).
+
+    Clears both ends in one go: the claiming Material Mapping row's virtual-excess
+    markers and reservation, and this row's mapped_material_planning pointer, which
+    puts the off-cut back in front of Excess Material Mapping's picker for anyone to
+    claim again.
+
+    Refuses once the off-cut has physically returned -- by then it is a real batch
+    reserved like any other, and the ordinary unreserve buttons on the Material
+    Planning are the right tool."""
+    excess = frappe.db.get_value(
+        "SCO Excess Material Item", excess_row_name,
+        ["name", "parent", "mapped_material_planning", "mapped_row_name", "stock_entry_created"],
+        as_dict=True,
+    )
+    if not excess or excess.parent != mip_name:
+        frappe.throw(_("Excess Material Item row {0} not found on {1}.").format(excess_row_name, mip_name))
+    if not frappe.has_permission("Material Issue Plan", "write", doc=mip_name):
+        frappe.throw(_("Not permitted to modify this Material Issue Plan"), frappe.PermissionError)
+    if not excess.mapped_material_planning:
+        frappe.throw(_("This excess item is not claimed by any Material Planning."))
+    if excess.stock_entry_created:
+        frappe.throw(
+            _("This off-cut has already been returned to stock as a real batch. "
+              "Unreserve it from Material Planning {0} instead.")
+            .format(excess.mapped_material_planning)
+        )
+
+    if excess.mapped_row_name:
+        row = frappe.db.get_value(
+            "Material Planning Material Mapping", excess.mapped_row_name,
+            ["name", "parent", "is_virtual_excess"], as_dict=True,
+        )
+        if row and row.parent == excess.mapped_material_planning and row.is_virtual_excess:
+            frappe.db.set_value(
+                "Material Planning Material Mapping", row.name,
+                {
+                    "is_virtual_excess": 0, "virtual_excess_source_row": "",
+                    "virtual_excess_source_mip": "", "batch_mapped": "Not Mapped",
+                    "is_reserved": 0, "reserved_qty": 0, "reserved_on": None,
+                },
+                update_modified=False,
+            )
+
+    frappe.db.set_value(
+        "SCO Excess Material Item", excess_row_name,
+        {"mapped_material_planning": "", "mapped_row_name": ""}, update_modified=False,
+    )
+    frappe.db.commit()
+    return {"released_from": excess.mapped_material_planning}
 
 
 def _sync_excess_return_from_raw_materials(mip):
@@ -456,11 +641,19 @@ def _sync_excess_return_from_raw_materials(mip):
 
         key = (row.source_table, row.source_row)
         target = by_source.get(key)
-        if target and (target.stock_entry_created or target.mapped_material_planning):
-            # Already returned to stock, or already claimed (real batch or
-            # Retain-at-Supplier virtual claim) -- leave the historical entry
-            # alone so a later resave can't drift it out from under whatever
-            # already reserved it.
+        if target and target.mapped_material_planning:
+            # Claimed by a Material Planning. Propagating an edit here would
+            # silently reshape material another job is counting on, so refuse
+            # rather than drop it on the floor -- but only when the user actually
+            # changed something, otherwise every unrelated save of this document
+            # would throw.
+            if _claimed_excess_differs(row, target):
+                _throw_claimed_excess_locked(target)
+            continue
+        if target and target.stock_entry_created:
+            # Already physically returned. create_mip_excess_return_entry has
+            # pushed the real measured dimensions back onto `row` already, so
+            # there is nothing to propagate and re-syncing would rewrite history.
             continue
 
         if not target:
@@ -522,6 +715,67 @@ def _sync_cut_sheet_calc(mip):
             row.thickness, row.unit_weight, row.balance_sec_qty,
         )
         row.balance_calc_qty = flt(balance_qty, 3) if balance_qty is not None else 0
+
+    _warn_cut_sheet_mismatch(mip)
+
+
+def _warn_cut_sheet_mismatch(mip):
+    """Flag a Cut Sheet whose two halves do not add back up to the sheet they came from.
+
+    Cutting always loses a little to the saw, and the client explicitly expects Length
+    and Width to be adjusted during the process -- so this can never block a save. It
+    exists to catch the typo: entering a Balance of 5 Kg where the geometry says 11.7
+    silently resizes the batch to a piece that does not exist, and nothing else in the
+    chain would notice. The allowance is Cut Sheet Tolerance (%) in Manufyxinvenza
+    Settings, so it can be tightened to 0 or loosened without a code change.
+
+    Measured against the sheet's PRE-CUT size where that is known: once a transfer has
+    resized the batch to the Balance, comparing against its current dimensions would
+    accuse every already-cut row of being wrong."""
+    tolerance = flt(frappe.db.get_single_value(
+        "Manufyxinvenza Settings", "cut_sheet_tolerance_percent"
+    ))
+
+    problems = []
+    for row in (mip.raw_materials or []):
+        if not row.cut_sheet or not row.batch_no:
+            continue
+        cut_total = flt(row.use_calc_qty) + flt(row.balance_calc_qty)
+        if cut_total <= 0:
+            continue
+
+        if flt(row.precut_length) or flt(row.precut_width):
+            length, width, sec_qty = row.precut_length, row.precut_width, row.precut_sec_qty
+        else:
+            batch = frappe.db.get_value(
+                "Batch", row.batch_no,
+                ["custom_length", "custom_width", "custom_sec_qty"], as_dict=True,
+            ) or {}
+            length = batch.get("custom_length")
+            width = batch.get("custom_width")
+            sec_qty = batch.get("custom_sec_qty")
+
+        sheet_qty = calculate_qty(
+            row.parent_item_group, length, width, row.thickness, row.unit_weight, sec_qty,
+        )
+        if not sheet_qty:
+            continue
+
+        gap = abs(cut_total - flt(sheet_qty))
+        if gap > flt(sheet_qty) * tolerance / 100.0:
+            problems.append(_("Row {0} ({1}, batch {2}): cut plan totals {3} Kg but the sheet is {4} Kg — a difference of {5} Kg.")
+                            .format(row.idx, row.item_code, row.batch_no,
+                                    flt(cut_total, 3), flt(sheet_qty, 3), flt(gap, 3)))
+
+    if problems:
+        frappe.msgprint(
+            "<br>".join(problems) + "<br><br>" + _(
+                "Check the To Use and Balance dimensions. Some loss to the saw is normal — "
+                "raise Cut Sheet Tolerance (%) in Manufyxinvenza Settings if this is expected."
+            ),
+            title=_("Cut Sheet Does Not Add Up"),
+            indicator="orange",
+        )
 
 
 def _sync_batch_remarks(mip):

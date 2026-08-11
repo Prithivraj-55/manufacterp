@@ -6,6 +6,119 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import ceil, flt, now, today
 
+#  Material Mapping "Status" (batch_mapped) ────────────────────────────────────
+#  A plain Data field, so these strings ARE the vocabulary. Rows fulfilled from
+#  another job's leftovers read "Excess Mapped ..." so the screen says where the
+#  material came from -- a claim can sit for weeks with no batch against it, and
+#  "Not Mapped" made that look like nothing had been done at all.
+BATCH_MAPPED = "Mapped"
+BATCH_NOT_MAPPED = "Not Mapped"
+BATCH_EXCESS_MAPPED = "Excess Mapped"
+BATCH_EXCESS_AT_SUPPLIER = "Excess Mapped (At Supplier)"
+BATCH_EXCESS_PENDING_RETURN = "Excess Mapped (Pending Return)"
+BATCH_CUT_SHEET_MAPPED = "Cut Sheet Mapped"
+
+# Every status that counts as "this row has material against it". Used wherever
+# mapped rows are totalled -- the Difference in Kg figure on the form and the
+# per-DUNO excess the Subcontracting Order banner shows -- so adding a status
+# above can never silently drop rows out of those sums. The last two are the
+# pre-rename spellings, kept so documents saved before the rename still total
+# correctly without needing a data patch.
+MAPPED_BATCH_STATUSES = (
+    BATCH_MAPPED,
+    BATCH_EXCESS_MAPPED,
+    BATCH_EXCESS_AT_SUPPLIER,
+    BATCH_EXCESS_PENDING_RETURN,
+    BATCH_CUT_SHEET_MAPPED,
+    "Virtual (At Supplier)",
+    "Claimed (Pending Return)",
+)
+
+
+def excess_row_availability(excess_row_name, exclude_row=None):
+    """How much of an off-cut is still free, and how much is spoken for.
+
+    Deliberately COMPUTED from the rows holding it rather than stored on the off-cut
+    itself. An off-cut can now be shared out in pieces across several jobs, so there
+    is no single "who claimed this" any more -- and a stored counter would drift the
+    first time a Material Planning was deleted or a row rebuilt. The claiming rows
+    are the truth; this just adds them up. Same reasoning as batch reservations,
+    which have always been counted this way.
+
+    exclude_row lets a row ask "what could I take?" without its own current claim
+    counting against it."""
+    excess = frappe.db.get_value(
+        "SCO Excess Material Item", excess_row_name,
+        ["sec_qty", "qty", "stock_entry_created"], as_dict=True,
+    )
+    if not excess:
+        return {"total_sec_qty": 0.0, "allocated_sec_qty": 0.0, "available_sec_qty": 0.0,
+                "qty_per_nos": 0.0, "available_qty": 0.0, "allocated_qty": 0.0}
+
+    total_sec = flt(excess.sec_qty)
+    # Kg per piece, so a partial claim is a plain multiplication and can never drift
+    # from what a full claim would have produced.
+    qty_per_nos = flt(flt(excess.qty) / total_sec, 3) if total_sec else 0.0
+
+    claims = frappe.get_all(
+        "Material Planning Material Mapping",
+        filters={"virtual_excess_source_row": excess_row_name, "is_reserved": 1},
+        fields=["name", "batch_sec_qty"],
+    )
+    allocated = flt(sum(
+        flt(c.batch_sec_qty) for c in claims if c.name != exclude_row
+    ), 3)
+
+    available = flt(max(0.0, total_sec - allocated), 3)
+    return {
+        "total_sec_qty": total_sec,
+        "allocated_sec_qty": allocated,
+        "available_sec_qty": available,
+        "qty_per_nos": qty_per_nos,
+        "allocated_qty": flt(allocated * qty_per_nos, 3),
+        "available_qty": flt(available * qty_per_nos, 3),
+    }
+
+
+def _release_row_pool_claims(row):
+    """Hand back whatever dimensioned pool a Material Mapping row is drawing from,
+    before it takes something else or stops being reserved.
+
+    Excess Material and Cut Sheet are the same idea wearing different clothes: a
+    quantity of pieces, of known dimensions, with no stock ledger of its own, shared
+    out across jobs until it runs out. A row can hold pieces from one or the other,
+    never both, and either way the pool has to be told when the row lets go --
+    otherwise it goes on counting those pieces as taken and the rest of the sheet or
+    off-cut is quietly lost to everyone else."""
+    from manufyxinvenzaerp.production_management.doctype.cut_sheet.cut_sheet import (
+        release_cut_sheet_allocation,
+    )
+
+    _release_virtual_excess_source(row)
+    release_cut_sheet_allocation(row)
+
+
+def _cut_sheet_thickness(row):
+    """A cut only ever changes Length and Width -- a sheet is never re-rolled thinner --
+    so both halves of the plan take the batch's own thickness. Material Mapping keeps
+    the batch's dimensions separately from the requirement's (batch_thickness vs
+    thickness); Exact Match has only the one, because there the two are equal by
+    definition."""
+    return row.get("batch_thickness") or row.get("thickness")
+
+
+def excess_aware_mapped_status(batch_no):
+    """"Excess Mapped" when this batch was recovered from another job's off-cut
+    (it carries custom_source_mip_excess_row, stamped by create_mip_excess_return_
+    entry), otherwise plain "Mapped". Keeps the origin visible no matter which
+    route assigned the batch -- the excess picker, Update Batch, or the automatic
+    attach when a claimed off-cut finally comes back."""
+    if not batch_no:
+        return BATCH_NOT_MAPPED
+    if frappe.db.get_value("Batch", batch_no, "custom_source_mip_excess_row"):
+        return BATCH_EXCESS_MAPPED
+    return BATCH_MAPPED
+
 
 class MaterialPlanning(Document):
     def validate(self):
@@ -14,6 +127,7 @@ class MaterialPlanning(Document):
         self.available_raw_materials = [r for r in (self.available_raw_materials or []) if r.item_code]
         self.material_mapping = [r for r in (self.material_mapping or []) if r.item_code]
         self.unavailable_items = [r for r in (self.unavailable_items or []) if r.item_code]
+        self._sync_cut_sheet_flag()
         self._apply_rwd_fractional_nos()
         self._validate_no_cross_table_batch_duplicate()
         if self.material_mapping and self.for_warehouse:
@@ -26,6 +140,7 @@ class MaterialPlanning(Document):
         _update_bom_item_weights(self)
         self._auto_update_planning_status()
         self._sync_batch_remarks()
+        self._sync_cut_sheet_calc()
         self._warn_undersized_purchase_dimensions()
 
     def _warn_undersized_purchase_dimensions(self):
@@ -76,6 +191,120 @@ class MaterialPlanning(Document):
                 title=_("Purchase Size Smaller Than Requirement"),
                 indicator="blue",
             )
+
+    def _sync_cut_sheet_flag(self):
+        """Drive the Cut Sheet tick from the batch, and hold the row's Sec Nos to what
+        that sheet still has free.
+
+        The tick is never the user's to set: a batch either has a nesting plan against
+        it or it does not, and a row claiming otherwise would be describing steel that
+        does not exist in that shape. Setting it here rather than only in
+        allocate_cut_sheet also covers the row whose batch was typed in by hand
+        through Update Batch, which never goes near the Cut Sheet picker."""
+        from manufyxinvenzaerp.production_management.doctype.cut_sheet.cut_sheet import QTY_EPSILON
+
+        for row in (self.material_mapping or []):
+            if not row.batch:
+                # Excess claims and empty rows keep whatever they were given; only a
+                # batch can imply a Cut Sheet.
+                if not row.get("is_virtual_excess"):
+                    row.cut_sheet = 0
+                    row.cut_sheet_ref = ""
+                    row.cut_sheet_avail_sec_qty = 0
+                continue
+
+            cs = frappe.db.get_value(
+                "Cut Sheet", {"batch_no": row.batch},
+                ["name", "w1_sec_qty", "w1_length", "w1_width", "w1_qty_per_nos",
+                 "sheet_thickness", "parent_item_group", "unit_weight"], as_dict=True,
+            )
+            if not cs:
+                row.cut_sheet = 0
+                row.cut_sheet_ref = ""
+                row.cut_sheet_avail_sec_qty = 0
+                continue
+
+            row.cut_sheet = 1
+            row.cut_sheet_ref = cs.name
+            # What this row could take: the sheet's yield less what OTHER rows hold.
+            #
+            # Counted from the ROWS holding pieces, not from the Cut Sheet's own
+            # allocation table. That table is written by allocate_cut_sheet, but a
+            # batch can also be put on a row by hand through Update Batch, which never
+            # goes near it -- and counting only explicit allocations would let two
+            # plans each take the whole sheet that way. The rows are the truth, same
+            # as excess_row_availability and batch reservations.
+            taken_by_others = flt(sum(
+                flt(c.batch_sec_qty) for c in frappe.get_all(
+                    "Material Planning Material Mapping",
+                    filters={"cut_sheet_ref": cs.name, "is_reserved": 1},
+                    fields=["name", "batch_sec_qty"])
+                if c.name != row.name
+            ), 3)
+            free_for_row = flt(flt(cs.w1_sec_qty) - taken_by_others, 3)
+            row.cut_sheet_avail_sec_qty = free_for_row
+
+            # Adopt the PIECE's geometry, not the sheet's. A row given this batch by
+            # hand through Update Batch would otherwise be flagged as a cut while
+            # still describing the whole uncut plate -- and its Sec Nos would be a
+            # weight-derived fraction of the sheet rather than a count of pieces.
+            # Only for rows still being planned: a reserved row already went through
+            # allocate_cut_sheet, and _validate_batch_calc_qty forbids changing a
+            # reserved row's quantity anyway.
+            if not row.is_reserved:
+                row.batch_mapped = BATCH_CUT_SHEET_MAPPED
+                row.batch_parent_item_group = cs.parent_item_group or row.batch_parent_item_group
+                row.batch_length = flt(cs.w1_length)
+                row.batch_width = flt(cs.w1_width)
+                row.batch_thickness = flt(cs.sheet_thickness)
+                row.batch_unit_weight = flt(cs.unit_weight) or flt(row.batch_unit_weight)
+                # Two ways to size the take, and the tick chooses between them.
+                # Reserve-without-dimensions: reserve exactly what the row needs and
+                # express it as a fraction of a W1 piece -- _apply_rwd_fractional_nos
+                # does that immediately after this, off the W1 dimensions just set.
+                # Otherwise the user names whole pieces and the weight follows.
+                if not row.reserve_without_dimensions and flt(cs.w1_qty_per_nos):
+                    from manufyxinvenzaerp.utils.dimension_formula import calculate_qty
+                    row.batch_calc_qty = flt(calculate_qty(
+                        cs.parent_item_group, cs.w1_length, cs.w1_width,
+                        cs.sheet_thickness, flt(cs.unit_weight), flt(row.batch_sec_qty),
+                    ) or 0, 3)
+
+            if not row.reserve_without_dimensions and flt(row.batch_sec_qty) - free_for_row > QTY_EPSILON:
+                frappe.throw(
+                    _("Row {0}: Cut Sheet {1} has only {2} piece(s) free, but this row asks for {3}.")
+                    .format(row.idx, cs.name, flt(free_for_row, 3), flt(row.batch_sec_qty, 3)),
+                    title=_("Not Enough Pieces on the Cut Sheet"),
+                )
+
+    def _sync_cut_sheet_calc(self):
+        """Recompute To Use (W1) and Balance (W2) Kg for every Cut Sheet row in BOTH
+        raw-material tables, using the same shared Structurals/Plates formula as the
+        Material Issue Plan does.
+
+        This is planning-side only: nothing here moves stock or resizes a batch. The
+        numbers seed the Material Issue Plan's own rows, where the cut actually happens
+        and where they can still be adjusted against what the saw really produced."""
+        from manufyxinvenzaerp.utils.dimension_formula import calculate_qty
+
+        for table in ("material_mapping", "available_raw_materials"):
+            for row in (self.get(table) or []):
+                if not row.get("cut_sheet"):
+                    continue
+                thickness = _cut_sheet_thickness(row)
+                unit_weight = row.get("batch_unit_weight") or row.get("unit_weight")
+                group = row.get("batch_parent_item_group") or row.get("parent_item_group")
+
+                use_qty = calculate_qty(
+                    group, row.use_length, row.use_width, thickness, unit_weight, row.use_sec_qty,
+                )
+                row.use_calc_qty = flt(use_qty, 3) if use_qty is not None else 0
+
+                balance_qty = calculate_qty(
+                    group, row.balance_length, row.balance_width, thickness, unit_weight,
+                    row.balance_sec_qty,
+                )
+                row.balance_calc_qty = flt(balance_qty, 3) if balance_qty is not None else 0
 
     def _sync_batch_remarks(self):
         """Mirror each reserved/assigned row's Batch Remarks (client change
@@ -341,6 +570,14 @@ class MaterialPlanning(Document):
                 continue
 
             if not flt(row.batch_sec_qty):
+                if row.get("cut_sheet_ref"):
+                    # On a cut row Sec Nos is a count of W1 pieces, not a weight in
+                    # disguise -- say so, and say how many are there to take.
+                    frappe.throw(
+                        _("Row {0}: Enter Sec Qty (NOS) as the number of pieces to cut from "
+                          "Cut Sheet {1}. {2} piece(s) are free.")
+                        .format(row.idx, row.cut_sheet_ref, flt(row.cut_sheet_avail_sec_qty, 3))
+                    )
                 frappe.throw(
                     _("Row {0}: Enter Sec Qty (NOS) for batch {1} to calculate the required weight "
                       "before saving.").format(row.idx, row.batch)
@@ -1550,7 +1787,7 @@ def finalize_mapping(doc):
                     base,
                     batch="",
                     planned_item=row.get("planned_item"),
-                    batch_mapped=row.get("batch_mapped") or "Virtual (At Supplier)",
+                    batch_mapped=row.get("batch_mapped") or BATCH_EXCESS_AT_SUPPLIER,
                     batch_parent_item_group=row.get("batch_parent_item_group") or "",
                     batch_length=flt(row.get("batch_length")),
                     batch_width=flt(row.get("batch_width")),
@@ -2536,7 +2773,7 @@ def add_excess_material_mapping(mp_name, batch_no, sec_qty, unavailable_item_row
         qty=flt(calc_qty, 3), uom="Kg", sec_qty=sec_qty, sec_uom=batch.custom_sec_uom or "",
         parent_item_group=group, length=flt(batch.custom_length), width=flt(batch.custom_width),
         thickness=flt(batch.custom_thickness), unit_weight=unit_weight,
-        batch=batch_no, planned_item=item_code, batch_mapped="Mapped",
+        batch=batch_no, planned_item=item_code, batch_mapped=BATCH_EXCESS_MAPPED,
         batch_parent_item_group=group, batch_length=flt(batch.custom_length),
         batch_width=flt(batch.custom_width), batch_thickness=flt(batch.custom_thickness),
         batch_unit_weight=unit_weight, batch_sec_qty=sec_qty, batch_calc_qty=flt(calc_qty, 3),
@@ -2576,7 +2813,6 @@ def get_available_virtual_excess_items(mp_name, item_code=None):
     filters = {
         "parenttype": "Material Issue Plan",
         "stock_entry_created": 0,
-        "mapped_material_planning": ["in", ["", None]],
     }
     if item_code:
         filters["item_code"] = item_code
@@ -2589,6 +2825,11 @@ def get_available_virtual_excess_items(mp_name, item_code=None):
                 "qty", "uom", "return_type"],
     )
     rows = [r for r in rows if r.item_code and flt(r.qty) > 0]
+    # Drop the ones already fully spoken for. Availability is counted from the rows
+    # holding the pieces, so a partly-claimed off-cut still shows, offering only what
+    # is genuinely left.
+    availability = {r.name: excess_row_availability(r.name) for r in rows}
+    rows = [r for r in rows if flt(availability[r.name]["available_sec_qty"]) > 0.001]
     if not rows:
         return []
 
@@ -2628,6 +2869,13 @@ def get_available_virtual_excess_items(mp_name, item_code=None):
             "uom": r.uom or "Kg",
             "supplier": supplier_by_sco.get(sco_by_mip.get(r.parent)) or "",
             "return_type": r.return_type or "Return to Own Warehouse",
+            # What the picker actually offers: the planned Sec Nos alongside how many
+            # of those pieces are still free.
+            "planned_sec_qty": flt(availability[r.name]["total_sec_qty"]),
+            "allocated_sec_qty": flt(availability[r.name]["allocated_sec_qty"]),
+            "available_sec_qty": flt(availability[r.name]["available_sec_qty"]),
+            "available_qty": flt(availability[r.name]["available_qty"]),
+            "qty_per_nos": flt(availability[r.name]["qty_per_nos"]),
         })
     return result
 
@@ -2648,7 +2896,8 @@ def _release_virtual_excess_source(row):
 
 
 @frappe.whitelist()
-def claim_virtual_excess_mapping(mp_name, excess_row_name, row_name=None, unavailable_item_row=None):
+def claim_virtual_excess_mapping(mp_name, excess_row_name, row_name=None, unavailable_item_row=None,
+                                 sec_qty=None):
     """Reserve an excess-material-items row that isn't physically in any
     warehouse yet (stock_entry_created still 0 -- whether flagged 'Retain at
     Supplier' or just still-Pending under the default return type) into a
@@ -2674,16 +2923,40 @@ def claim_virtual_excess_mapping(mp_name, excess_row_name, row_name=None, unavai
         frappe.throw(_("Excess Material Item row {0} not found.").format(excess_row_name))
     if excess.stock_entry_created:
         frappe.throw(_("This row has already been physically returned to stock -- use the normal batch-based Excess Material Mapping instead."))
-    if excess.mapped_material_planning:
-        frappe.throw(_("This excess item has already been claimed by {0}.").format(excess.mapped_material_planning))
     if flt(excess.qty) <= 0:
         frappe.throw(_("Excess item has no quantity to claim."))
+
+    # Partial claims (client change request): 6 pieces of an off-cut can go 2 to this
+    # job and 4 to the next, exactly like a Cut Sheet. Omitting sec_qty still takes
+    # everything that is left, which is what every caller written before this did.
+    avail = excess_row_availability(excess_row_name, exclude_row=row_name)
+    claim_sec_qty = flt(sec_qty) if sec_qty not in (None, "") else flt(avail["available_sec_qty"])
+    if claim_sec_qty <= 0:
+        frappe.throw(_("Enter how many pieces to claim (Sec Nos greater than 0)."))
+    if claim_sec_qty - flt(avail["available_sec_qty"]) > 0.001:
+        frappe.throw(
+            _("Only {0} piece(s) of this excess item are still free — {1} requested.")
+            .format(flt(avail["available_sec_qty"], 3), flt(claim_sec_qty, 3))
+        )
+    claim_qty = flt(claim_sec_qty * flt(avail["qty_per_nos"]), 3)
 
     if row_name:
         row = next((r for r in mp.material_mapping if r.name == row_name), None)
         if not row:
             frappe.throw(_("Row {0} not found.").format(row_name))
-        _release_virtual_excess_source(row)
+        # The other two claim paths (add_excess_material_mapping and the
+        # unavailable_item_row branch below) both check this. Without it here, an
+        # off-cut of one item could be claimed into a row planned for a completely
+        # different one -- the row kept its own Item Code while silently taking on
+        # the off-cut's weight and dimensions, so the job looked satisfied while
+        # reserving the wrong material entirely.
+        if row.item_code and row.item_code != excess.item_code:
+            frappe.throw(
+                _("This excess item is <b>{0}</b>, but row {1} is planned for <b>{2}</b>. "
+                  "Pick an excess item of the same item code.")
+                .format(excess.item_code, row.idx, row.item_code)
+            )
+        _release_row_pool_claims(row)
         # Drop any prior reservation on this row FIRST, in the same save that
         # changes qty/dims below -- _validate_batch_calc_qty blocks a save
         # that changes a row's qty/batch while row.is_reserved is still true,
@@ -2713,7 +2986,7 @@ def claim_virtual_excess_mapping(mp_name, excess_row_name, row_name=None, unavai
                 "duno_mark_no": src.duno_mark_no, "customer_drawing_number": src.customer_drawing_number,
             })
             old_qty = flt(src.qty)
-            remaining = flt(old_qty - flt(excess.qty), 3)
+            remaining = flt(old_qty - claim_qty, 3)
             if remaining <= 0.001:
                 mp.unavailable_items = [r for r in mp.unavailable_items if r.name != unavailable_item_row]
             else:
@@ -2722,9 +2995,9 @@ def claim_virtual_excess_mapping(mp_name, excess_row_name, row_name=None, unavai
                 src.sec_qty = flt(flt(src.sec_qty) * ratio, 3)
         row = mp.append("material_mapping", base)
 
-    row.qty = flt(excess.qty, 3)
+    row.qty = claim_qty
     row.uom = excess.uom or "Kg"
-    row.sec_qty = flt(excess.sec_qty)
+    row.sec_qty = claim_sec_qty
     row.sec_uom = excess.sec_uom or ""
     row.parent_item_group = excess.parent_item_group or ""
     row.length = flt(excess.length)
@@ -2735,16 +3008,16 @@ def claim_virtual_excess_mapping(mp_name, excess_row_name, row_name=None, unavai
     row.batch = ""
     row.planned_item = excess.item_code
     row.batch_mapped = (
-        "Virtual (At Supplier)" if excess.return_type == "Retain at Supplier (Virtual)"
-        else "Claimed (Pending Return)"
+        BATCH_EXCESS_AT_SUPPLIER if excess.return_type == "Retain at Supplier (Virtual)"
+        else BATCH_EXCESS_PENDING_RETURN
     )
     row.batch_parent_item_group = excess.parent_item_group or ""
     row.batch_length = flt(excess.length)
     row.batch_width = flt(excess.width)
     row.batch_thickness = flt(excess.thickness)
     row.batch_unit_weight = flt(excess.unit_weight)
-    row.batch_sec_qty = flt(excess.sec_qty)
-    row.batch_calc_qty = flt(excess.qty, 3)
+    row.batch_sec_qty = claim_sec_qty
+    row.batch_calc_qty = claim_qty
 
     row.is_virtual_excess = 1
     row.virtual_excess_source_row = excess_row_name
@@ -2759,7 +3032,7 @@ def claim_virtual_excess_mapping(mp_name, excess_row_name, row_name=None, unavai
 
     frappe.db.set_value(
         "Material Planning Material Mapping", row.name,
-        {"is_reserved": 1, "reserved_qty": flt(excess.qty, 3), "shortfall_qty": 0, "reserved_on": now()},
+        {"is_reserved": 1, "reserved_qty": claim_qty, "shortfall_qty": 0, "reserved_on": now()},
         update_modified=False,
     )
     frappe.db.set_value(
@@ -2774,6 +3047,64 @@ def claim_virtual_excess_mapping(mp_name, excess_row_name, row_name=None, unavai
     frappe.db.commit()
 
     return {"row_name": row.name, "mp_name": mp_name}
+
+
+def materialize_virtual_excess_claim(excess_row_name, batch_no):
+    """Turn an already-claimed virtual excess reservation into a real, batch-backed
+    one, once the off-cut that was only promised at the supplier physically arrives.
+
+    Called from on_submit_stock_entry for every batch created by a Return Excess
+    Entry (the batch carries custom_source_mip_excess_row, copied by ERPNext from
+    the Stock Entry Detail). Until this runs, a claimed row reserves material that
+    exists on paper only -- is_virtual_excess=1, batch empty -- which is exactly
+    what Excess Material Mapping's virtual picker hands out.
+
+    Only the batch link changes. Qty and dimensions are deliberately left alone:
+    _assert_claimed_excess_unchanged (material_issue_plan.py) blocks any dimension
+    edit on a claimed excess row, so what physically returned is guaranteed to be
+    what was claimed -- if the user needed different dimensions they had to unlink
+    the claim first, which clears is_virtual_excess and takes this path out of play.
+
+    is_reserved stays 1 throughout (set when the claim was made): the row simply
+    stops being a paper promise and starts pointing at real stock, so there is no
+    moment where the material is unreserved and someone else could take it. Written
+    with raw field writes rather than mp.save() for the same reason
+    claim_virtual_excess_mapping does it -- _validate_batch_calc_qty refuses a save
+    that changes a reserved row's batch.
+
+    Returns the Material Planning name it attached to, or None when there was
+    nothing to attach (ordinary batch, unclaimed row, or a claim someone has since
+    released). Never throws: a bookkeeping link must not be able to block material
+    physically arriving in the warehouse."""
+    if not (excess_row_name and batch_no):
+        return None
+
+    # EVERY row holding a piece of this off-cut, not just the first claimer. Since an
+    # off-cut can be shared out, one returning batch can satisfy several jobs at once
+    # -- which is fine, because that is exactly what an ordinary shared batch is: each
+    # row keeps its own reserved Kg against the same batch number.
+    rows = frappe.get_all(
+        "Material Planning Material Mapping",
+        filters={"virtual_excess_source_row": excess_row_name, "is_virtual_excess": 1},
+        fields=["name", "parent"],
+    )
+    if not rows:
+        return None
+
+    for row in rows:
+        frappe.db.set_value(
+            "Material Planning Material Mapping", row.name,
+            {
+                "batch": batch_no,
+                "batch_mapped": BATCH_EXCESS_MAPPED,
+                "is_virtual_excess": 0,
+            },
+            update_modified=False,
+        )
+
+    # Report the first plan for the on-screen message; the rest are visible on the
+    # off-cut's own row.
+    return sorted({r.parent for r in rows})[0]
 
 
 @frappe.whitelist()
@@ -3030,8 +3361,11 @@ def unreserve_batches(material_planning_name, row_names):
             row.reserved_qty = 0
             row.shortfall_qty = 0
             row.reserved_on = None
-            if row.get("is_virtual_excess"):
-                _release_virtual_excess_source(row)
+            if row.get("is_virtual_excess") or row.get("cut_sheet_ref"):
+                # Both pools hand their pieces back the same way, and the row is
+                # emptied rather than left pointing at stock it no longer holds.
+                _release_row_pool_claims(row)
+                row.batch = ""
                 row.batch_mapped = "Not Mapped"
                 row.batch_calc_qty = 0
                 row.batch_sec_qty = 0
@@ -3356,7 +3690,7 @@ def _apply_batch_to_mapping_row(row, new_batch_no, new_item, dimensions, sec_qty
     batch_calc_qty, mirroring material_planning.js's _recalc_batch_qty formula."""
     row.batch = new_batch_no or ""
     row.planned_item = new_item or ""
-    row.batch_mapped = "Mapped" if new_batch_no else "Not Mapped"
+    row.batch_mapped = excess_aware_mapped_status(new_batch_no)
     row.reserve_without_dimensions = reserve_without_dimensions
 
     if dimensions.get("length") is not None:
@@ -3740,7 +4074,7 @@ def _update_so_difference_kg_for_pair(sales_order, duno_mark_no):
         filters={
             "sales_order": sales_order,
             "duno_mark_no": duno_mark_no,
-            "batch_mapped": "Mapped",
+            "batch_mapped": ["in", MAPPED_BATCH_STATUSES],
         },
         fields=["batch_calc_qty", "qty"],
     )

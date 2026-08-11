@@ -66,6 +66,11 @@ def run():
         "parent_item_group": "Structurals", "unit_weight": 10,
         "qty": 50, "uom": "Kg", "sec_qty": 1, "sec_uom": "Nos",
         "duno_mark_no": "DUNO-EXBTN-1",
+        # Must match the purchased length below. Allocation routes a receipt to
+        # Available Raw Materials only on an exact dimension match, and sends
+        # anything else to Material Mapping -- a requirement with no length at all
+        # can never be an exact match, which is what this test needs it to be.
+        "length": 5000,
     })
     mp1.insert(ignore_permissions=True)
     print("Created MP1:", mp1.name)
@@ -113,7 +118,10 @@ def run():
     mr.insert(ignore_permissions=True)
     mr.submit()
 
-    supplier = frappe.db.get_value("Supplier", {}, "name")
+    # Skip any demo Supplier whose represents_company points at a Company that no
+    # longer exists -- an arbitrary get_value can land on one and fail the PO with a
+    # link error that has nothing to do with what this test covers.
+    supplier = frappe.db.get_value("Supplier", {"represents_company": ["in", ["", None]]}, "name")
     from erpnext.stock.doctype.material_request.material_request import make_purchase_order
     po = make_purchase_order(mr.name)
     po.supplier = supplier

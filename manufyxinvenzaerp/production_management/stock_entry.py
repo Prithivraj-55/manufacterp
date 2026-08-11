@@ -96,6 +96,15 @@ def on_submit_stock_entry(doc, method):
 				_reduce_batch_sec_qty(row.batch_no, row.custom_sec_qty)
 
 	elif doc.stock_entry_type == "Material Receipt":
+		# Off-cuts coming back from a Return Excess Entry may already be spoken for:
+		# another job can claim one through Excess Material Mapping's virtual picker
+		# while it is still physically at the supplier. Collected here and reported
+		# once at the end, so the user learns the paper reservation just became real.
+		from manufyxinvenzaerp.production_management.doctype.material_planning.material_planning import (
+			materialize_virtual_excess_claim,
+		)
+
+		materialized = []
 		for row in doc.items:
 			batch_nos = set()
 			if row.batch_no:
@@ -123,9 +132,25 @@ def on_submit_stock_entry(doc, method):
 					updates["custom_existing_invoice_wt"] = row.custom_existing_invoice_wt
 				if row.get("custom_existing_inward_date"):
 					updates["custom_existing_inward_date"] = row.custom_existing_inward_date
+			excess_row = row.get("custom_source_mip_excess_row")
 			for batch_no in batch_nos:
 				if updates:
 					frappe.db.set_value("Batch", batch_no, updates)
+				if excess_row:
+					mp_name = materialize_virtual_excess_claim(excess_row, batch_no)
+					if mp_name:
+						materialized.append((batch_no, mp_name))
+
+		if materialized:
+			frappe.msgprint(
+				_("These returned off-cuts were already reserved and are now backed by a real batch:")
+				+ "<br>" + "<br>".join(
+					_("Batch {0} → {1}").format(frappe.bold(b), frappe.utils.get_link_to_form("Material Planning", m))
+					for b, m in materialized
+				),
+				title=_("Excess Claims Fulfilled"),
+				indicator="green",
+			)
 
 	# Release reservations for all consumed batches
 	_release_material_planning_reservations(doc)
@@ -134,6 +159,10 @@ def on_submit_stock_entry(doc, method):
 	# only partially moved (To Use / W1) down to its Balance (W2) dimensions --
 	# same batch, no new one created.
 	_resize_cut_sheet_batches(doc)
+
+	# Cut Sheet doctype: the sheet is cut the moment the first piece leaves, so its
+	# balance goes onto the batch now (see _apply_cut_sheet_w2).
+	_apply_cut_sheet_w2(doc)
 
 	# When materials are sent to supplier (or routed via CNC warehouse), update SCO weight fields.
 	# We track via custom_sco_ref (not the standard subcontracting_order) to avoid
@@ -167,38 +196,163 @@ def _reduce_batch_sec_qty(batch_no, consumed_qty):
 	frappe.db.set_value("Batch", batch_no, "custom_sec_qty", flt(current - flt(consumed_qty), 3))
 
 
+# A cut is treated as finished once this much of its To Use (W1) weight has moved.
+_CUT_SHEET_TOLERANCE_KG = 0.01
+
+
 def _resize_cut_sheet_batches(doc):
-	"""After a MIP-tracked transfer Stock Entry submits, resize (in place --
-	no new batch) any batch whose corresponding MIP raw_materials row has Cut
-	Sheet enabled: the batch's own Length/Width/Sec Qty update to the Balance
-	(W2) dimensions, since only the To Use (W1) portion actually left the
-	warehouse (client change request Phase 5.2). Only Material Issue Plan
-	transfers carry custom_mip_ref, so this is a no-op for every other Stock
-	Entry in the system."""
+	"""Resize (in place -- no new batch) every Cut Sheet batch this Stock Entry
+	touched. Only Material Issue Plan transfers carry custom_mip_ref, so this is a
+	no-op for every other Stock Entry in the system."""
+	_reapply_cut_sheet_batch_sizes(doc)
+
+
+def _restore_cut_sheet_batches(doc):
+	"""Cancelling a transfer puts the stock back, so the batch must go back to the
+	size it was before that cut -- otherwise the batch keeps advertising the offcut's
+	dimensions while holding the full uncut piece again. Runs the same recomputation
+	as submit: with this Stock Entry now cancelled its weight drops out of the
+	transferred total, so any cut it had completed is simply no longer complete."""
+	_reapply_cut_sheet_batch_sizes(doc)
+
+
+def _apply_cut_sheet_w2(doc, cancelling=False):
+	"""Write each Cut Sheet's balance onto its batch on the FIRST transfer taken from
+	that sheet, and take it back off if that transfer is cancelled.
+
+	The trigger is the first transfer rather than the last, because that is when the
+	sheet is physically cut: from that moment the plate in the rack IS the remnant,
+	even though other jobs have not collected their pieces yet. Those pieces are still
+	theirs -- the Cut Sheet keeps track of them independently of the batch's size.
+
+	Which sheets this entry touched is read from the Material Planning rows behind it,
+	since cancelling clears batch_no off the Stock Entry's own rows."""
+	from manufyxinvenzaerp.production_management.doctype.cut_sheet.cut_sheet import (
+		apply_w2_to_batch, revert_w2_from_batch,
+	)
+
 	mip_name = doc.get("custom_mip_ref")
 	if not mip_name:
 		return
 
-	cut_sheet_rows = frappe.get_all(
-		"Material Issue Plan Raw Material",
-		filters={"parent": mip_name, "cut_sheet": 1},
-		fields=["item_code", "batch_no", "balance_length", "balance_width", "balance_sec_qty"],
-	)
-	if not cut_sheet_rows:
+	item_codes = {row.item_code for row in doc.items if row.item_code}
+	if not item_codes:
 		return
-	by_key = {(r.item_code, r.batch_no): r for r in cut_sheet_rows if r.batch_no}
 
-	for row in doc.items:
-		if not row.batch_no:
+	mp_names = {r.material_planning for r in frappe.get_all(
+		"Material Issue Plan Raw Material", filters={"parent": mip_name},
+		fields=["material_planning"]) if r.material_planning}
+	if not mp_names:
+		return
+
+	cut_sheets = {r.cut_sheet_ref for r in frappe.get_all(
+		"Material Planning Material Mapping",
+		filters={"parent": ["in", list(mp_names)], "item_code": ["in", list(item_codes)],
+		         "cut_sheet_ref": ["!=", ""]},
+		fields=["cut_sheet_ref"]) if r.cut_sheet_ref}
+
+	for cs_name in cut_sheets:
+		if not frappe.db.exists("Cut Sheet", cs_name):
 			continue
-		match = by_key.get((row.item_code, row.batch_no))
-		if not match:
-			continue
-		frappe.db.set_value("Batch", row.batch_no, {
-			"custom_length": flt(match.balance_length),
-			"custom_width": flt(match.balance_width),
-			"custom_sec_qty": flt(match.balance_sec_qty),
-		})
+		if cancelling:
+			# Only undo what THIS entry did; another transfer may have been the one
+			# that cut the sheet, and its write-back must stand.
+			if frappe.db.get_value("Cut Sheet", cs_name, "w2_applied_stock_entry") == doc.name:
+				revert_w2_from_batch(cs_name)
+		else:
+			apply_w2_to_batch(cs_name, doc.name)
+
+
+def _reapply_cut_sheet_batch_sizes(doc):
+	"""Which Cut Sheet batches this Stock Entry affects, taken from the PLAN rather
+	than from the entry's own rows: cancelling clears batch_no and unlinks the Serial
+	and Batch Bundle on every row, so by the time on_cancel runs the entry no longer
+	says which batch it moved. The plan still does, and matching on item code is
+	enough -- a Cut Sheet row names exactly one batch."""
+	mip_name = doc.get("custom_mip_ref")
+	if not mip_name:
+		return
+
+	item_codes = {row.item_code for row in doc.items if row.item_code}
+	if not item_codes:
+		return
+
+	pairs = frappe.get_all(
+		"Material Issue Plan Raw Material",
+		filters={"parent": mip_name, "cut_sheet": 1, "item_code": ["in", list(item_codes)]},
+		fields=["item_code", "batch_no"],
+	)
+	for item_code, batch_no in {(p.item_code, p.batch_no) for p in pairs if p.batch_no}:
+		_apply_cut_sheet_batch_size(mip_name, item_code, batch_no)
+
+
+def _apply_cut_sheet_batch_size(mip_name, item_code, batch_no):
+	"""Set a batch's dimensions from however much of its cut plan has actually been
+	cut, derived from the ledger rather than from "a transfer just happened".
+
+	Two things made the previous version wrong. One sheet is routinely cut for
+	several marks, so a batch can carry SEVERAL Cut Sheet rows -- they are read here
+	in row order and treated as a chain, each cut taking its piece out of what the
+	one before it left. And W1 can now be transferred in stages, so a cut that is
+	only half issued must not shrink the batch yet.
+
+	Both fall out of one rule: walk the rows in order accumulating their To Use (W1)
+	weights, and the batch takes the Balance of the last row whose accumulated weight
+	has actually left the warehouse. Nothing moved yet (or moved and was cancelled)
+	means the batch goes back to its pre-cut size."""
+	rows = frappe.get_all(
+		"Material Issue Plan Raw Material",
+		filters={"parent": mip_name, "cut_sheet": 1, "item_code": item_code, "batch_no": batch_no},
+		fields=["name", "idx", "use_calc_qty", "balance_length", "balance_width", "balance_sec_qty",
+		        "precut_length", "precut_width", "precut_sec_qty"],
+		order_by="idx asc",
+	)
+	if not rows:
+		return
+
+	first = rows[0]
+	if not (flt(first.precut_length) or flt(first.precut_width) or flt(first.precut_sec_qty)):
+		# First time this batch is cut: remember the uncut size so a cancel has
+		# something to restore to.
+		batch = frappe.db.get_value(
+			"Batch", batch_no, ["custom_length", "custom_width", "custom_sec_qty"], as_dict=True
+		) or {}
+		first.precut_length = flt(batch.get("custom_length"))
+		first.precut_width = flt(batch.get("custom_width"))
+		first.precut_sec_qty = flt(batch.get("custom_sec_qty"))
+		frappe.db.set_value(
+			"Material Issue Plan Raw Material", first.name,
+			{"precut_length": first.precut_length, "precut_width": first.precut_width,
+			 "precut_sec_qty": first.precut_sec_qty},
+			update_modified=False,
+		)
+
+	moved = flt(frappe.db.sql("""
+		SELECT COALESCE(SUM(sed.qty), 0)
+		FROM `tabStock Entry Detail` sed
+		JOIN `tabStock Entry` se ON se.name = sed.parent
+		WHERE se.custom_mip_ref = %s AND se.docstatus = 1
+		  AND sed.item_code = %s AND sed.batch_no = %s
+	""", (mip_name, item_code, batch_no))[0][0])
+
+	completed = None
+	cumulative = 0.0
+	for r in rows:
+		cumulative += flt(r.use_calc_qty)
+		if moved + _CUT_SHEET_TOLERANCE_KG < cumulative:
+			break
+		completed = r
+
+	if completed:
+		target = (completed.balance_length, completed.balance_width, completed.balance_sec_qty)
+	else:
+		target = (first.precut_length, first.precut_width, first.precut_sec_qty)
+
+	frappe.db.set_value("Batch", batch_no, {
+		"custom_length": flt(target[0]),
+		"custom_width": flt(target[1]),
+		"custom_sec_qty": flt(target[2]),
+	})
 
 
 def _batch_total_kg_all_wh(batch_no):
@@ -400,6 +554,12 @@ def on_cancel_stock_entry(doc, method):
 	reservations and the consumed Sec Qty (Nos) on the batch."""
 	_restore_material_planning_reservations(doc)
 	_restore_batch_sec_qty(doc)
+
+	# Cut Sheet: the stock is back, so the batch must stop advertising the offcut's
+	# dimensions. Runs after _restore_batch_sec_qty, which would otherwise overwrite
+	# the Sec Qty this puts back.
+	_restore_cut_sheet_batches(doc)
+	_apply_cut_sheet_w2(doc, cancelling=True)
 
 	# Recalculate transferred weight on SCO if a relevant SE is cancelled
 	if doc.stock_entry_type == "Send to Subcontractor" and doc.get("custom_sco_ref"):

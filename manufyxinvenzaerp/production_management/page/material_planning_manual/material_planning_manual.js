@@ -8,14 +8,19 @@
 frappe.pages["material-planning-manual"].on_page_load = function (wrapper) {
 	let page = frappe.ui.make_app_page({
 		parent: wrapper,
-		title: "Material Planning — User Manual",
+		title: "Manufyxinvenza Manual",
 		single_column: true,
 	});
 	// Standard Frappe page header (title + back navigation) stays visible above
 	// our custom-styled content -- keeps a reliable way back to the Material
 	// Planning form instead of trapping the user in a fully custom shell.
 
-	render_manual(page);
+	manufyx_render_manual(page, {
+		kicker: __("Material Planning"),
+		heading: __("The Complete Guide"),
+		intro: __("A step-by-step walkthrough of every table, field, and button — with worked examples — written so a first-time user can follow it start to finish, from Material Planning all the way through Production Plan, Job work order, Material Issue Plan, and Inspection."),
+		sections: MP_MANUAL_SECTIONS,
+	});
 };
 
 // ─── Content model ────────────────────────────────────────────────────────
@@ -209,7 +214,7 @@ const MP_MANUAL_SECTIONS = [
 			"Where rounding now happens: NOWHERE automatically. Material Planning always reserves the exact Required Kg and reports Sec Nos as a plain fraction of the assigned batch. The only place a fraction becomes whole pieces is the Material Issue Plan transfer popup, where you type the number yourself — the system re-checks free stock for the new figure and books the extra weight as excess to return.",
 			"Partial transfers are why fractions matter. A Material Planning covering 10 drawings feeds a separate Material Issue Plan per drawing, and each plan only pulls its own drawings' reserved rows. So a batch planned across 5 rows (8 Nos in total) may well present as 4.5 Nos when only 3 of those drawings are being issued — that is expected. Raise it to 5 in the transfer popup if you must hand over whole bars, and the 0.5 piece of surplus is recorded for return.",
 			"Case 1 vs Case 2. Case 1 — leave “Reserve stock without dimensions” OFF, pick a batch and type Sec Qty yourself; the system reserves exactly that and never overwrites your number. Case 2 — tick it when one large bar or sheet serves several rows; the system derives the fractional Sec Nos for you from each row's required Kg.",
-			"Status legend — “Mapped”: a real batch is assigned. “Not Mapped”: nothing assigned yet. “Virtual (At Supplier)”: fulfilled from another job's excess material that's staying at the supplier and will never come back to your warehouse — no batch, nothing to transfer. “Claimed (Pending Return)”: fulfilled from another job's excess that HASN'T physically returned to stock yet, but is already promised to this row.",
+			"Status legend — “Mapped” (green): an ordinary purchased batch is assigned. “Excess Mapped” (blue): a real batch is assigned and it came back from another job as an off-cut. “Excess Mapped (At Supplier)” (blue): fulfilled from another job's excess that's staying at the supplier and will never reach your warehouse — no batch, nothing to transfer. “Excess Mapped (Pending Return)” (blue): fulfilled from another job's excess that HASN'T physically returned to stock yet, but is already promised to this row; the batch attaches itself automatically the day it does return. “Not Mapped” (red): nothing assigned yet. Every blue status counts as mapped — it is material you already have a claim on, so it is included in the Difference in Kg figure and never sent back through purchasing.",
 		],
 		buttons: [
 			{ name: "Reserve / Unreserve", note: "Same soft-claim mechanism as Available Raw Materials — works whether the row has a real batch or is a Virtual/Pending-Return excess claim." },
@@ -218,9 +223,99 @@ const MP_MANUAL_SECTIONS = [
 				note: "Opens the excess-material picker — see the dedicated section below for the full explanation and worked examples of both cases it covers.",
 			},
 			{
+				name: "Excess Material  (tick on the row)",
+				note: "Only appears on a row with NO batch — excess is a promise against a specific off-cut, not stock in your warehouse. Ticking it reveals <b>Select Item</b>, which opens the same picker described in the section below.",
+			},
+			{
+				name: "Cut Sheet  (tick on the row — read-only)",
+				note: "You never tick this yourself: it appears by itself the moment you pick a batch that has a Cut Sheet against it, and names that sheet plus how many pieces are still free. A batch either has a nesting plan or it does not, and a row claiming otherwise would be describing steel that does not exist in that shape. The row then takes on the PIECE's dimensions (W1), not the whole plate's.",
+			},
+			{
+				name: "Reserve stock without dimensions  (on a Cut Sheet row)",
+				note: "Chooses how the take is sized, and both ways are valid. <b>Ticked</b> — the row reserves exactly its Required Qty, and Sec Nos becomes that weight as a fraction of one W1 piece (read-only; 18 Kg of a 4.90625 Kg piece is 3.669). <b>Unticked</b> — you type whole pieces, and the weight follows (4 pieces = 19.625 Kg); anything above the Required Qty is excess. A suggested count is filled in for you but never overwrites a figure you typed.",
+			},
+			{
 				name: "Validate Stock  (top of the form)",
 				note: "A read-only roll-up per item and batch: planned Kg, planned Sec Nos, how many drawings share that batch, the batch's own stock, and any shortfall. Fractional Sec Nos totals show in amber with the whole-piece figure beside them, and shortfalls in red. It changes nothing — it is the quickest way to see which batches still need a whole-piece decision before the job reaches transfer.",
 			},
+		],
+	},
+	{
+		id: "cut-sheet",
+		title: "Cut Sheet",
+		kicker: "One nesting plan per plate, shared across jobs",
+		purpose:
+			"A plate arrives as one batch and gets cut into repeated pieces, leaving a remnant. " +
+			"The Cut Sheet is where that plan is written down ONCE, against the batch: this " +
+			"piece (W1), this many of them, this remnant (W2). Jobs then take pieces from it " +
+			"the same way they reserve batch stock, and the same plate can serve several " +
+			"Material Plannings. It is its own document — open it from the Cut Sheet list, not " +
+			"from inside a Material Planning.",
+		fields: [
+			{ name: "Batch", note: "The physical plate being cut. One batch can have only ONE Cut Sheet — two plans for the same steel would each hand out material the other had already promised." },
+			{ name: "Sheet (as received)", note: "Length/Width/Thickness/Sec Nos read straight from the batch, never typed, so the two can't disagree." },
+			{ name: "W1 — Piece to Cut", note: "Length and Width of the piece. Thickness always comes from the batch: cutting changes Length and Width, never how thick the steel is." },
+			{ name: "W1 Sec Nos (available)", note: "How many of that piece this plate yields. YOU enter this — a suggestion is offered from the geometry, but the nesting is your call. It is deliberately not derived from weight; see the worked example." },
+			{ name: "Kg per Piece / W1 Total", note: "Calculated. One piece's weight, and all the pieces together." },
+			{ name: "W2 — Balance", note: "What is left once the cutting is done. Entered by hand. Written onto the batch when the FIRST transfer from this sheet is submitted." },
+			{ name: "Availability", note: "Allocated and Available, in both Sec Nos and Kg — what other jobs have taken and what is still free to claim." },
+			{ name: "Allocations", note: "Every Material Planning drawing from this sheet, how many pieces each took, and whether it has physically moved yet." },
+		],
+		calcs: [
+			{
+				title: "Why the piece count is yours to enter, not calculated from weight",
+				item: "Plate 5mm", group: "Plates",
+				length: 1800, sec_qty: 2, unit_weight: 7.85,
+				formula:
+					"A 1800 × 6300 × 5 plate weighs 445.095 Kg. A 1800 × 3000 piece weighs 211.95 Kg. " +
+					"Divide one by the other and you get 2.1",
+				result: "but the plate yields 2 pieces, plus a 1800 × 300 remnant",
+				note:
+					"Steel is cut, not poured. Weight says 2.1 pieces fit; geometry says 2. If the system " +
+					"took the weight figure it would over-issue on every single plate, and the shortfall " +
+					"would only show up when someone went to the rack. So the count is entered by hand, " +
+					"with the geometric answer offered as a starting point.",
+			},
+			{
+				title: "One plate, two jobs, sized two different ways",
+				item: "Plate 5mm", group: "Plates",
+				length: 500, sec_qty: 4, unit_weight: 7.85,
+				formula:
+					"W1 is 500 × 250 × 5 = 4.90625 Kg per piece, 10 pieces on the sheet. " +
+					"Job A needs 18 Kg and ticks Reserve stock without dimensions: 18 ÷ 4.90625. " +
+					"Job B unticks it and types 4 pieces: 4 × 4.90625",
+				result: "Job A — 18.000 Kg (3.669 Nos)   ·   Job B — 19.625 Kg (4 Nos, 1.625 Kg excess)",
+				note:
+					"Both are correct, they just answer different questions. Job A reserves exactly what " +
+					"the drawing needs and accepts a fractional share of a piece. Job B takes whole pieces " +
+					"because that is what the saw will actually produce, and the 1.625 Kg over the " +
+					"requirement is excess. Between them they have taken 7.669 of the 10 pieces, and the " +
+					"sheet shows 2.331 still free for anyone else.",
+			},
+		],
+		examples: [
+			{
+				type: "do",
+				label: "Let the batch decide",
+				text: "You never tick Cut Sheet on a Material Mapping row. Pick the batch, and if a Cut Sheet exists the tick appears with the sheet's name and its free-piece count, and the row takes on W1's dimensions.",
+			},
+			{
+				type: "dont",
+				label: "Don't expect the plate's dimensions on the row",
+				text: "A cut row shows the PIECE — 500 × 250, not the 2000 × 1000 plate. If you see the plate's size there, the row has not picked up its Cut Sheet; re-select the batch.",
+			},
+			{
+				type: "dont",
+				label: "Don't delete a sheet other jobs are drawing from",
+				text: "It refuses, and names the Material Plannings holding pieces. Release those allocations first — otherwise their rows would be left reserving pieces of a plan that no longer exists.",
+			},
+		],
+		notes: [
+			"W2 goes onto the batch at the FIRST transfer, not the last. From the moment anyone cuts a piece out, the plate in the rack IS the remnant — whether or not the other jobs have collected their pieces yet. Those pieces are still theirs; the Cut Sheet tracks them independently of the batch's size. Cancel that transfer and the batch goes back to its uncut size.",
+			"The batch keeps its original NAME throughout, and that name still spells out the original dimensions. Only the batch's Length/Width/Sec Nos are rewritten. This is known and accepted for now.",
+			"Nothing here is physical. There is no stock behind W1: the batch still holds its own Kg, and the real movement is the ordinary Material Issue Plan transfer — it simply carries W1's dimensions instead of the plate's. The Cut Sheet owns the arithmetic and the bookkeeping of who has claimed what.",
+			"If W1 × count + W2 does not add up to the plate you get a warning naming the row — never a block, since some loss to the saw is normal. The allowance is Cut Sheet Tolerance (%) in Manufyxinvenza Settings, 2% by default; set it to 0 to be told about any difference at all.",
+			"Reducing W1 Sec Nos below what jobs have already taken is refused, naming how many are spoken for. Release an allocation first.",
 		],
 	},
 	{
@@ -254,12 +349,13 @@ const MP_MANUAL_SECTIONS = [
 				note: "The other piece (4.47 Kg) stays free on that same batch for someone else to claim later — same “only the selected quantity” rule as a normal reservation.",
 			},
 			{
-				title: "Case 2 — Not Yet Returned (all-or-nothing)",
+				title: "Case 2 — Not Yet Returned (claim as many pieces as you need)",
 				item: "ZZTEST-VIRTUAL-EXCESS", group: "Structurals",
-				length: 1000, sec_qty: 1, unit_weight: 5,
-				formula: "This row is claimed WHOLE — Sec Qty is locked, not editable. Kg claimed = the row's full (1000÷1000) × 5 × 1",
-				result: "5.0",
-				note: "No Stock Entry is created by claiming this — it's a soft promise only. The Material Mapping row's Batch stays blank, and its Status shows “Virtual (At Supplier)” or “Claimed (Pending Return)” depending on how the source row was flagged.",
+				length: 1000, sec_qty: 6, unit_weight: 5,
+				formula: "A 6-piece off-cut at (1000÷1000) × 5 = 5 Kg each. Take 2 for this job: 2 × 5. " +
+					"Another job takes 3, and 1 stays free",
+				result: "10.0 Kg claimed · 5.0 Kg still free for anyone else",
+				note: "Shared out in pieces, exactly like a Cut Sheet. The picker shows Planned Sec Nos beside Free Sec Nos, and an off-cut disappears from it once nothing is left. No Stock Entry is created by claiming: the Material Mapping row's Batch stays blank and its Status reads “Excess Mapped (At Supplier)” or “Excess Mapped (Pending Return)”. When the off-cut physically returns, the new batch attaches itself to EVERY row holding a piece.",
 			},
 		],
 		examples: [
@@ -269,13 +365,30 @@ const MP_MANUAL_SECTIONS = [
 				text: "A “Returned Batch” row's Sec Qty field is editable, defaulting to the smaller of the batch's own Sec Qty or its free quantity. You can take less than what's on offer, exactly like a normal batch reservation.",
 			},
 			{
+				type: "do",
+				label: "Take only what you need",
+				text: "Sec Qty in the picker defaults to everything still free, but it is yours to edit. Whatever you leave stays free for another job — the Availability figures on the Excess Material Items row show Allocated and Available in both Sec Nos and Kg, the same way a Cut Sheet does.",
+			},
+			{
+				type: "do",
+				label: "A claim turns real by itself when the off-cut comes back",
+				text: "Worked example. Job A ends with a 2000mm ISA100 off-cut (20 Kg) still at the supplier, entered in its Excess Material Items table. Job B claims it — Job B's row shows Status “Claimed (Pending Return)”, Batch blank, but Reserved ticked. Weeks later Job A actually walks the material back: its “Return Excess Entry” button creates the Material Receipt as normal, and the moment that Stock Entry is submitted the new batch (ZZ-L2000-SR014) writes itself into Job B's row, Status flips to “Mapped”, and a green message says so. Nobody re-picks anything, and the material is never free for a third job to grab in between.",
+			},
+			{
 				type: "dont",
-				label: "Don't expect to partially claim a “Not Yet Returned” row",
-				text: "Its Sec Qty field is locked read-only to the row's full amount the moment you select it — this kind of excess can only be claimed in full, never split across two jobs.",
+				label: "Don't try to change the size of an off-cut someone has claimed",
+				text: "Once Job B has claimed it, the off-cut's Length/Width/Sec Qty/Kg are frozen — in the Excess Material Items grid, on the raw-material row's Excess fields, and in the Return Excess Entry dialog alike. All three refuse with the same message naming Job B's Material Planning. This is deliberate: Job B reserved a 2000mm piece, and quietly shrinking it to 1800mm would leave Job B planning around material that no longer exists in that shape.",
+			},
+			{
+				type: "do",
+				label: "The measurement was wrong — use Unlink Claim",
+				text: "Continuing the example: the off-cut actually measures 1800mm, not 2000mm. Press <b>Unlink Claim</b> on that Excess Material Items row. Job B's reservation is dropped, the off-cut returns to this picker, and the dimensions unlock. Correct them on the raw-material row's Excess Length (the Excess Material Items row recomputes from it — 1.8m × 10 kg/m = 18 Kg), then claim it again. Note the risk the confirmation warns you about: while unlinked, any other job can claim it first.",
 			},
 		],
 		notes: [
 			"“Retain at Supplier (Virtual)” material is flagged that way because it will NEVER physically return to your warehouse — it's used/consumed directly at the supplier. “Pending Return” material is just excess that hasn't been walked back to stock yet, but eventually will be — claiming it now doesn't stop that from happening later; it just reserves the outcome in advance.",
+			"Where these rows go at transfer time. A claimed off-cut still at the supplier has no batch in your source warehouse, so it can never appear in the transfer popup's list — there is physically nothing to move, and it is already sitting where the transfer would have sent it. Rather than leaving a silent gap, the popup shows a blue panel: “N item(s) are already at <supplier warehouse> — no transfer needed”, listing each one. It is information, not a problem: it never blocks the rest of the transfer.",
+			"Edit dimensions on the raw-material row, not in the Excess Material Items grid. For any excess row created from a raw-material row, the Excess Length/Width/Sec Qty fields on that raw-material row are the source of truth — the Excess Material Items row is recalculated from them on every save, so typing directly into the grid gets overwritten. The exception is a rounding-surplus row (Return Reason mentions “Round Up Sec Qty for Transfer”), which has no raw-material row behind it and is edited in the grid directly.",
 		],
 	},
 	{
@@ -432,7 +545,7 @@ const MP_MANUAL_SECTIONS = [
 			"actually leave your warehouse — the physical stock movement that Material Planning's " +
 			"“Reserve” only ever soft-claimed.",
 		fields: [
-			{ name: "Raw Materials", note: "Every reserved batch pulled in for this job's drawings, with Reqd Qty (the mapped batch's weight), Issued Qty (cumulative transferred so far across every Stock Entry), and per-row Cut Sheet / Excess Return fields." },
+			{ name: "Raw Materials", note: "Every reserved batch pulled in for this job's drawings, with Reqd Qty (the mapped batch's weight), Issued Qty (cumulative transferred so far across every Stock Entry), Excess Qty (the mapped batch measured against the drawing's own planned weight), Transfer Excess Kg (surplus created by rounding Sec Nos up at transfer time), and per-row Excess Return fields. (Cut plans are no longer entered per row — they live on the Cut Sheet against the batch.)" },
 			{ name: "Finished Goods Warehouse", note: "Receives BOTH the finished good (via Make Final Stock Entry) and any unconsumed/off-cut material (via Return Excess Entry). Must be set before either button will work." },
 		],
 		buttons: [
@@ -461,8 +574,27 @@ const MP_MANUAL_SECTIONS = [
 					"figure, refuses it outright if the batch can't cover it, and books the extra 32.58 Kg " +
 					"straight into Excess Material Return so it comes back to the batch later.",
 			},
+			{
+				title: "Where that 32.58 Kg of surplus shows up",
+				item: "ISMB450", group: "Structurals",
+				length: 900, sec_qty: "3 rows sharing the batch", unit_weight: 72.4,
+				formula:
+					"The same transfer, seen from the item table. Those 4.5 Nos were not one row — they were " +
+					"3 drawings sharing the batch, at 2 Nos, 1.5 Nos and 1 Nos. The 32.58 Kg surplus belongs " +
+					"to all three, so it is split in proportion to their Sec Nos: " +
+					"2÷4.5 × 32.58, 1.5÷4.5 × 32.58, 1÷4.5 × 32.58",
+				result: "14.48 Kg + 10.86 Kg + 7.24 Kg = 32.58 Kg",
+				note:
+					"Each figure lands in that row's Transfer Excess Kg column, so the surplus is visible against " +
+					"the drawings that caused it instead of only as one lump in Excess Material Items. The parts " +
+					"always add back to the total. Transfer again later and round up again, and the column " +
+					"accumulates rather than resetting. Do not confuse it with Excess Qty next to it: Excess Qty " +
+					"compares the mapped batch against the drawing's planned weight and is set when the row is " +
+					"fetched; Transfer Excess Kg is created purely by your whole-piece decision at transfer time.",
+			},
 		],
 		notes: [
+			"Cut plates arrive here already sized to the PIECE. The cut is planned once on the Cut Sheet against the batch (see that section), so a row reaching this plan already carries W1's dimensions and its share of the pieces — there is nothing to re-enter here, and the transfer moves that piece rather than the whole plate. The plate's own Length/Width/Sec Nos are rewritten to the remnant when the first transfer from that sheet is submitted, and restored if it is cancelled.",
 			"Nothing is ever offered for transfer unless it's BOTH purchased (a Purchase Receipt allocated it) AND reserved (a manual step back on Material Planning 1) — after a Purchase Receipt submits, its popup tells you exactly which Material Planning to open and reserve if anything's still pending.",
 			"Why fractions turn up here and not in Material Planning: a Material Planning covering 10 drawings feeds a SEPARATE Material Issue Plan per drawing, and each plan only ever pulls its own drawings' reserved rows. A batch planned across 5 rows can therefore present as 4.5 Nos when only 3 of those drawings are being issued. That is the whole reason Sec Nos is editable here — this is the first point at which anyone knows how many physical bars are actually going out of the door.",
 			"Nothing rounds automatically, anywhere. Material Planning reserves the exact Kg each drawing needs; this popup is the ONLY place a fraction becomes whole pieces, and only because you typed it. Whatever you add on top is recorded as excess to return, never quietly absorbed.",
@@ -580,540 +712,3 @@ const MP_MANUAL_SECTIONS = [
 	},
 ];
 
-function render_manual(page) {
-	inject_styles();
-
-	let nav_html = MP_MANUAL_SECTIONS.map(
-		// No real "#..." href on purpose -- Frappe's router intercepts anchor
-		// clicks with hash hrefs and tries to resolve them as a page route
-		// (showing a "Page #mpm-... not found" dialog), even with
-		// preventDefault() in our own handler below. Navigation is done purely
-		// via the click handler + scrollIntoView instead.
-		(s) => `<a href="javascript:void(0)" class="mpm-nav-link" data-id="${s.id}">${frappe.utils.escape_html(s.title)}</a>`
-	).join("");
-
-	let sections_html = MP_MANUAL_SECTIONS.map(render_section).join("");
-
-	page.main.html(`
-		<div class="mpm-root">
-			<header class="mpm-hero">
-				<div class="mpm-hero-kicker">${__("Material Planning")}</div>
-				<h1>${__("The Complete Guide")}</h1>
-				<p>${__("A step-by-step walkthrough of every table, field, and button — with worked examples — written so a first-time user can follow it start to finish, from Material Planning all the way through Production Plan, Job work order, Material Issue Plan, and Inspection.")}</p>
-			</header>
-			<div class="mpm-body">
-				<nav class="mpm-nav">${nav_html}</nav>
-				<main class="mpm-content">${sections_html}</main>
-			</div>
-		</div>
-	`);
-
-	setup_scrollspy(page);
-}
-
-function render_section(s) {
-	if (s.kind === "overview") {
-		return `
-		<section id="mpm-${s.id}" class="mpm-card mpm-overview">
-			<div class="mpm-kicker">${frappe.utils.escape_html(s.kicker)}</div>
-			<h2>${frappe.utils.escape_html(s.title)}</h2>
-			<p class="mpm-purpose">${s.purpose}</p>
-			${render_flow_diagram()}
-		</section>`;
-	}
-
-	let parts = [];
-	parts.push(`<div class="mpm-kicker">${frappe.utils.escape_html(s.kicker || "")}</div>`);
-	parts.push(`<h2>${frappe.utils.escape_html(s.title)}</h2>`);
-	if (s.purpose) parts.push(`<p class="mpm-purpose">${s.purpose}</p>`);
-
-	if (s.fields && s.fields.length) {
-		parts.push(`
-			<h3>${s.kind === "glossary" ? __("Terms") : __("Fields")}</h3>
-			<table class="mpm-field-table">
-				<tbody>
-					${s.fields.map((f) => `
-						<tr>
-							<td class="mpm-field-name">${frappe.utils.escape_html(f.name)}</td>
-							<td class="mpm-field-note">${f.note}</td>
-						</tr>
-					`).join("")}
-				</tbody>
-			</table>
-		`);
-	}
-
-	if (s.steps && s.steps.length) {
-		parts.push(`
-			<h3>${__("How It Works")}</h3>
-			<ol class="mpm-steps">
-				${s.steps.map((step) => `<li>${step}</li>`).join("")}
-			</ol>
-		`);
-	}
-
-	if (s.calcs && s.calcs.length) {
-		parts.push(`
-			<h3>${__("Worked Example")}</h3>
-			<div class="mpm-calcs">
-				${s.calcs.map(render_calc).join("")}
-			</div>
-		`);
-	}
-
-	if (s.examples && s.examples.length) {
-		parts.push(`
-			<h3>${__("Examples")}</h3>
-			<div class="mpm-examples">
-				${s.examples.map((ex) => `
-					<div class="mpm-example mpm-example-${ex.type}">
-						<div class="mpm-example-icon">${ex.type === "do" ? "✓" : "✕"}</div>
-						<div class="mpm-example-body">
-							<div class="mpm-example-label">${frappe.utils.escape_html(ex.label)}</div>
-							<div class="mpm-example-text">${ex.text}</div>
-						</div>
-					</div>
-				`).join("")}
-			</div>
-		`);
-	}
-
-	if (s.buttons && s.buttons.length) {
-		parts.push(`
-			<h3>${__("Buttons")}</h3>
-			<div class="mpm-buttons">
-				${s.buttons.map((b) => `
-					<div class="mpm-button-row">
-						<span class="mpm-button-pill">${frappe.utils.escape_html(b.name)}</span>
-						<span class="mpm-button-note">${b.note}</span>
-					</div>
-				`).join("")}
-			</div>
-		`);
-	}
-
-	if (s.notes && s.notes.length) {
-		parts.push(`
-			<div class="mpm-notes">
-				${s.notes.map((n) => `<div class="mpm-note">${n}</div>`).join("")}
-			</div>
-		`);
-	}
-
-	return `<section id="mpm-${s.id}" class="mpm-card">${parts.join("\n")}</section>`;
-}
-
-function render_calc(c) {
-	let dim_rows = [];
-	if (c.length !== undefined) dim_rows.push(["Length", c.length + " mm"]);
-	if (c.width !== undefined) dim_rows.push(["Width", c.width + " mm"]);
-	if (c.thickness !== undefined) dim_rows.push(["Thickness", c.thickness + " mm"]);
-	dim_rows.push(["Sec Qty", c.sec_qty]);
-	dim_rows.push(["Unit Weight", c.unit_weight]);
-
-	return `
-	<div class="mpm-calc">
-		<div class="mpm-calc-title">${frappe.utils.escape_html(c.title)}</div>
-		<div class="mpm-calc-item">${frappe.utils.escape_html(c.item)} <span>· ${frappe.utils.escape_html(c.group)}</span></div>
-		<table class="mpm-calc-dims">
-			${dim_rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("")}
-		</table>
-		<div class="mpm-calc-formula">${c.formula}</div>
-		<div class="mpm-calc-result">= ${c.result} Kg</div>
-		${c.note ? `<div class="mpm-calc-note">${c.note}</div>` : ""}
-	</div>`;
-}
-
-function render_flow_diagram() {
-	return `
-	<div class="mpm-flow">
-		<div class="mpm-flow-box mpm-flow-start">${__("Raw Materials")}</div>
-		<div class="mpm-flow-arrow">↓ ${__("Check Stock Availability")}</div>
-		<div class="mpm-flow-split">
-			<div class="mpm-flow-box mpm-flow-good">${__("Available Raw Materials")}<span>${__("exact size, ready to reserve")}</span></div>
-			<div class="mpm-flow-box mpm-flow-mid">${__("Material Mapping")}<span>${__("needs cutting, substitution, or excess reuse")}</span></div>
-			<div class="mpm-flow-box mpm-flow-bad">${__("Unavailable Items")}<span>${__("nothing in stock")}</span></div>
-		</div>
-		<div class="mpm-flow-arrow">↓ ${__("grouped by item code")}</div>
-		<div class="mpm-flow-box mpm-flow-mid">${__("Consolidate Item")}<span>${__("one line per item, ready to purchase")}</span></div>
-		<div class="mpm-flow-arrow">↓ ${__("Create Material Request → Purchase Order → Purchase Receipt")}</div>
-		<div class="mpm-flow-box mpm-flow-good">${__("Allocated back automatically")}<span>${__("into Available Raw Materials or Material Mapping")}</span></div>
-	</div>`;
-}
-
-function setup_scrollspy(page) {
-	let $links = page.main.find(".mpm-nav-link");
-
-	$links.on("click", function (e) {
-		e.preventDefault();
-		let id = $(this).data("id");
-		let $target = page.main.find("#mpm-" + id);
-		if ($target.length) {
-			$target[0].scrollIntoView({ behavior: "smooth", block: "start" });
-		}
-	});
-
-	let sections = MP_MANUAL_SECTIONS.map((s) => page.main.find("#mpm-" + s.id)[0]).filter(Boolean);
-	if (!sections.length || !window.IntersectionObserver) return;
-
-	let observer = new IntersectionObserver(
-		(entries) => {
-			entries.forEach((entry) => {
-				if (entry.isIntersecting) {
-					let id = entry.target.id.replace("mpm-", "");
-					$links.removeClass("active");
-					page.main.find(`.mpm-nav-link[data-id="${id}"]`).addClass("active");
-				}
-			});
-		},
-		{ root: null, rootMargin: "-15% 0px -70% 0px", threshold: 0 }
-	);
-	sections.forEach((el) => observer.observe(el));
-}
-
-function inject_styles() {
-	if (document.getElementById("mpm-styles")) return;
-	let style = document.createElement("style");
-	style.id = "mpm-styles";
-	style.innerHTML = `
-		.mpm-root {
-			--mpm-bg: #FBEDE8;
-			--mpm-card-bg: #FFFFFF;
-			--mpm-heading: #3B1730;
-			--mpm-accent: #E8613C;
-			--mpm-accent-soft: #FCE3D8;
-			--mpm-text: #4A4550;
-			--mpm-text-muted: #948C97;
-			--mpm-good: #1F9254;
-			--mpm-good-bg: #E7F6EE;
-			--mpm-bad: #C6462F;
-			--mpm-bad-bg: #FBEAE6;
-			--mpm-border: #F0DDD5;
-			background: var(--mpm-bg);
-			min-height: 100%;
-			margin: -15px -25px;
-			padding: 0 0 60px 0;
-			font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-			color: var(--mpm-text);
-		}
-		.mpm-hero {
-			text-align: center;
-			padding: 56px 20px 40px;
-			max-width: 720px;
-			margin: 0 auto;
-		}
-		.mpm-hero-kicker {
-			text-transform: uppercase;
-			letter-spacing: 2px;
-			font-size: 12px;
-			font-weight: 700;
-			color: var(--mpm-accent);
-			margin-bottom: 10px;
-		}
-		.mpm-hero h1 {
-			font-family: Georgia, "Times New Roman", serif;
-			font-weight: 700;
-			font-size: 40px;
-			color: var(--mpm-heading);
-			margin: 0 0 14px;
-		}
-		.mpm-hero p {
-			font-size: 15px;
-			color: var(--mpm-text-muted);
-			line-height: 1.6;
-			margin: 0;
-		}
-		.mpm-body {
-			display: flex;
-			max-width: 1100px;
-			margin: 0 auto;
-			padding: 0 20px;
-			gap: 32px;
-			align-items: flex-start;
-		}
-		.mpm-nav {
-			position: sticky;
-			top: 20px;
-			flex: 0 0 220px;
-			display: flex;
-			flex-direction: column;
-			gap: 2px;
-			background: var(--mpm-card-bg);
-			border: 1px solid var(--mpm-border);
-			border-radius: 12px;
-			padding: 10px;
-			max-height: calc(100vh - 40px);
-			overflow-y: auto;
-		}
-		.mpm-nav-link {
-			display: block;
-			padding: 9px 12px;
-			border-radius: 8px;
-			font-size: 13px;
-			font-weight: 500;
-			color: var(--mpm-text);
-			text-decoration: none;
-			border-left: 3px solid transparent;
-			transition: background .15s, color .15s;
-		}
-		.mpm-nav-link:hover {
-			background: var(--mpm-accent-soft);
-			color: var(--mpm-heading);
-			text-decoration: none;
-		}
-		.mpm-nav-link.active {
-			background: var(--mpm-accent-soft);
-			color: var(--mpm-accent);
-			border-left-color: var(--mpm-accent);
-			font-weight: 700;
-		}
-		.mpm-content {
-			flex: 1;
-			min-width: 0;
-			display: flex;
-			flex-direction: column;
-			gap: 24px;
-		}
-		.mpm-card {
-			background: var(--mpm-card-bg);
-			border: 1px solid var(--mpm-border);
-			border-radius: 16px;
-			padding: 32px 36px;
-			box-shadow: 0 2px 10px rgba(59, 23, 48, 0.04);
-			scroll-margin-top: 20px;
-		}
-		.mpm-kicker {
-			text-transform: uppercase;
-			letter-spacing: 1.5px;
-			font-size: 11px;
-			font-weight: 700;
-			color: var(--mpm-accent);
-			margin-bottom: 6px;
-		}
-		.mpm-card h2 {
-			font-family: Georgia, "Times New Roman", serif;
-			font-weight: 700;
-			font-size: 26px;
-			color: var(--mpm-heading);
-			margin: 0 0 14px;
-		}
-		.mpm-card h3 {
-			font-size: 14px;
-			font-weight: 700;
-			color: var(--mpm-heading);
-			text-transform: uppercase;
-			letter-spacing: .5px;
-			margin: 26px 0 12px;
-		}
-		.mpm-purpose {
-			font-size: 15px;
-			line-height: 1.7;
-			color: var(--mpm-text);
-			margin: 0;
-		}
-		.mpm-field-table {
-			width: 100%;
-			border-collapse: collapse;
-		}
-		.mpm-field-table tr {
-			border-top: 1px solid var(--mpm-border);
-		}
-		.mpm-field-table tr:first-child { border-top: none; }
-		.mpm-field-table td {
-			padding: 10px 0;
-			vertical-align: top;
-			font-size: 13.5px;
-			line-height: 1.6;
-		}
-		.mpm-field-name {
-			width: 240px;
-			font-weight: 700;
-			color: var(--mpm-heading);
-			padding-right: 20px !important;
-		}
-		.mpm-field-note { color: var(--mpm-text); }
-		.mpm-steps {
-			margin: 0;
-			padding-left: 22px;
-			font-size: 14px;
-			line-height: 1.8;
-			color: var(--mpm-text);
-		}
-		.mpm-steps li { margin-bottom: 6px; }
-		.mpm-calcs {
-			display: flex;
-			flex-direction: column;
-			gap: 16px;
-		}
-		.mpm-calc {
-			background: #fffaf7;
-			border: 1.5px dashed var(--mpm-accent);
-			border-radius: 12px;
-			padding: 18px 20px;
-		}
-		.mpm-calc-title {
-			font-weight: 700;
-			font-size: 13.5px;
-			color: var(--mpm-heading);
-			margin-bottom: 8px;
-		}
-		.mpm-calc-item {
-			font-size: 13px;
-			font-weight: 600;
-			color: var(--mpm-accent);
-			margin-bottom: 10px;
-		}
-		.mpm-calc-item span { font-weight: 400; color: var(--mpm-text-muted); }
-		.mpm-calc-dims {
-			border-collapse: collapse;
-			margin-bottom: 12px;
-		}
-		.mpm-calc-dims td {
-			font-size: 12.5px;
-			padding: 3px 14px 3px 0;
-			color: var(--mpm-text);
-		}
-		.mpm-calc-dims td:first-child { color: var(--mpm-text-muted); }
-		.mpm-calc-formula {
-			font-family: "SFMono-Regular", Consolas, Menlo, monospace;
-			font-size: 12.5px;
-			line-height: 1.6;
-			color: var(--mpm-text);
-			background: var(--mpm-accent-soft);
-			border-radius: 8px;
-			padding: 10px 12px;
-			margin-bottom: 10px;
-		}
-		.mpm-calc-result {
-			font-size: 18px;
-			font-weight: 700;
-			color: var(--mpm-good);
-		}
-		.mpm-calc-note {
-			margin-top: 10px;
-			font-size: 12.5px;
-			line-height: 1.6;
-			color: var(--mpm-text-muted);
-			font-style: italic;
-		}
-		.mpm-examples {
-			display: flex;
-			flex-direction: column;
-			gap: 14px;
-		}
-		.mpm-example {
-			display: flex;
-			gap: 14px;
-			padding: 16px 18px;
-			border-radius: 12px;
-			align-items: flex-start;
-		}
-		.mpm-example-do { background: var(--mpm-good-bg); }
-		.mpm-example-dont { background: var(--mpm-bad-bg); }
-		.mpm-example-icon {
-			flex: 0 0 26px;
-			width: 26px;
-			height: 26px;
-			border-radius: 50%;
-			display: flex;
-			align-items: center;
-			justify-content: center;
-			font-weight: 700;
-			font-size: 14px;
-			color: #fff;
-			margin-top: 1px;
-		}
-		.mpm-example-do .mpm-example-icon { background: var(--mpm-good); }
-		.mpm-example-dont .mpm-example-icon { background: var(--mpm-bad); }
-		.mpm-example-label {
-			font-weight: 700;
-			font-size: 13.5px;
-			margin-bottom: 4px;
-		}
-		.mpm-example-do .mpm-example-label { color: var(--mpm-good); }
-		.mpm-example-dont .mpm-example-label { color: var(--mpm-bad); }
-		.mpm-example-text {
-			font-size: 13.5px;
-			line-height: 1.65;
-			color: var(--mpm-text);
-		}
-		.mpm-buttons {
-			display: flex;
-			flex-direction: column;
-			gap: 10px;
-		}
-		.mpm-button-row {
-			display: flex;
-			align-items: flex-start;
-			gap: 14px;
-			font-size: 13.5px;
-			line-height: 1.6;
-		}
-		.mpm-button-pill {
-			flex: 0 0 auto;
-			white-space: nowrap;
-			background: var(--mpm-heading);
-			color: #fff;
-			font-size: 12px;
-			font-weight: 600;
-			padding: 5px 12px;
-			border-radius: 20px;
-		}
-		.mpm-button-note { color: var(--mpm-text); padding-top: 3px; }
-		.mpm-notes { margin-top: 22px; display: flex; flex-direction: column; gap: 10px; }
-		.mpm-note {
-			font-size: 13px;
-			line-height: 1.6;
-			color: var(--mpm-heading);
-			background: var(--mpm-accent-soft);
-			border-radius: 10px;
-			padding: 12px 16px;
-		}
-		.mpm-flow {
-			margin-top: 28px;
-			display: flex;
-			flex-direction: column;
-			align-items: center;
-			gap: 6px;
-		}
-		.mpm-flow-box {
-			background: #fff;
-			border: 1.5px solid var(--mpm-border);
-			border-radius: 12px;
-			padding: 12px 18px;
-			text-align: center;
-			font-weight: 700;
-			font-size: 13.5px;
-			color: var(--mpm-heading);
-			min-width: 220px;
-		}
-		.mpm-flow-box span {
-			display: block;
-			font-weight: 400;
-			font-size: 11.5px;
-			color: var(--mpm-text-muted);
-			margin-top: 3px;
-		}
-		.mpm-flow-start { background: var(--mpm-heading); color: #fff; }
-		.mpm-flow-good { border-color: var(--mpm-good); background: var(--mpm-good-bg); }
-		.mpm-flow-mid { border-color: var(--mpm-accent); background: var(--mpm-accent-soft); }
-		.mpm-flow-bad { border-color: var(--mpm-bad); background: var(--mpm-bad-bg); }
-		.mpm-flow-arrow {
-			font-size: 12px;
-			color: var(--mpm-text-muted);
-			font-weight: 600;
-			margin: 2px 0;
-		}
-		.mpm-flow-split {
-			display: flex;
-			gap: 14px;
-			flex-wrap: wrap;
-			justify-content: center;
-		}
-		@media (max-width: 900px) {
-			.mpm-body { flex-direction: column; }
-			.mpm-nav { position: static; flex: none; width: 100%; flex-direction: row; overflow-x: auto; max-height: none; }
-		}
-	`;
-	document.head.appendChild(style);
-}

@@ -17,6 +17,12 @@
   "sec_uom",
   "qty",
   "uom",
+  "section_excess_availability",
+  "allocated_sec_qty",
+  "allocated_qty",
+  "col_break_excess_avail",
+  "available_sec_qty",
+  "available_qty",
   "return_reason",
   "return_type",
   "stock_entry_created",
@@ -24,7 +30,8 @@
   "source_row",
   "source_mip_raw_material_row",
   "mapped_material_planning",
-  "mapped_row_name"
+  "mapped_row_name",
+  "unlink_claim_btn"
  ],
  "fields": [
   {
@@ -123,6 +130,42 @@
    "read_only": 1
   },
   {
+   "fieldname": "section_excess_availability",
+   "fieldtype": "Section Break",
+   "label": "Availability"
+  },
+  {
+   "fieldname": "allocated_sec_qty",
+   "fieldtype": "Float",
+   "label": "Allocated Sec Nos",
+   "read_only": 1,
+   "description": "Pieces of this off-cut already claimed by Material Plannings."
+  },
+  {
+   "fieldname": "allocated_qty",
+   "fieldtype": "Float",
+   "label": "Allocated (Kg)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_excess_avail",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "available_sec_qty",
+   "fieldtype": "Float",
+   "label": "Available Sec Nos",
+   "read_only": 1,
+   "in_list_view": 1,
+   "description": "Still free for another job to claim. An off-cut can be shared out in pieces, the same way a Cut Sheet is."
+  },
+  {
+   "fieldname": "available_qty",
+   "fieldtype": "Float",
+   "label": "Available (Kg)",
+   "read_only": 1
+  },
+  {
    "allow_on_submit": 1,
    "description": "Mandatory before the Return Excess Entry can be created (client change request Phase 5.6) -- why the actual returned Qty is what it is, especially when edited away from the auto-suggested value.",
    "fieldname": "return_reason",
@@ -192,6 +235,13 @@
    "label": "Mapped Material Mapping Row",
    "read_only": 1,
    "description": "Row name of the Material Planning Material Mapping row the batch was reserved into."
+  },
+  {
+   "fieldname": "unlink_claim_btn",
+   "fieldtype": "Button",
+   "label": "Unlink Claim",
+   "depends_on": "eval:doc.mapped_material_planning && !doc.stock_entry_created",
+   "description": "Release the Material Planning reservation holding this off-cut, so its dimensions can be corrected. The off-cut goes back into the Excess Material Mapping picker for anyone to claim again."
   }
  ],
  "istable": 1,

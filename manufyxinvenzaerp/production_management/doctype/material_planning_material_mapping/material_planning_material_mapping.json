@@ -51,7 +51,23 @@
   "cnc_process",
   "store_location",
   "purchase_receipt",
+  "section_cut_sheet",
+  "cut_sheet",
+  "cut_sheet_avail_sec_qty",
+  "cut_sheet_ref",
+  "col_break_cut_sheet_use",
+  "use_length",
+  "use_width",
+  "use_sec_qty",
+  "use_calc_qty",
+  "col_break_cut_sheet_balance",
+  "balance_length",
+  "balance_width",
+  "balance_sec_qty",
+  "balance_calc_qty",
   "section_excess_mapping",
+  "excess_material",
+  "select_excess_item_btn",
   "excess_material_mapping_btn",
   "is_virtual_excess",
   "virtual_excess_source_row",
@@ -212,7 +228,7 @@
   },
   {
    "default": "0",
-   "description": "One batch shared across several rows. Reserves the exact Required Qty in Kg; Sec Nos is that weight in pieces of this batch and stays fractional (e.g. 2.5). Round to whole pieces at transfer time in the Material Issue Plan, where the surplus is recorded as excess to return.",
+   "description": "One batch shared across several rows. Reserves the exact Required Qty in Kg, and Sec Nos becomes that weight expressed in pieces — fractional (e.g. 2.5). On a Cut Sheet row the piece is W1, so the fraction is of the CUT piece, not the whole plate. Untick it to enter a whole piece count yourself; the weight then follows, and anything above the Required Qty is excess.",
    "fieldname": "reserve_without_dimensions",
    "fieldtype": "Check",
    "label": "Reserve stock without dimensions"
@@ -369,15 +385,131 @@
    "read_only": 1
   },
   {
+   "fieldname": "section_cut_sheet",
+   "fieldtype": "Section Break",
+   "label": "Cut Sheet",
+   "collapsible": 1,
+   "depends_on": "eval:doc.batch"
+  },
+  {
+   "fieldname": "cut_sheet",
+   "fieldtype": "Check",
+   "label": "Cut Sheet",
+   "description": "Set automatically when the chosen batch has a Cut Sheet against it. Sec Nos on this row is then checked against the pieces still free on that sheet.",
+   "read_only": 1,
+   "depends_on": "eval:doc.batch"
+  },
+  {
+   "fieldname": "cut_sheet_avail_sec_qty",
+   "fieldtype": "Float",
+   "label": "W1 Free Sec Nos",
+   "read_only": 1,
+   "depends_on": "eval:doc.cut_sheet",
+   "description": "Pieces still free on that Cut Sheet, counting this row's own claim."
+  },
+  {
+   "fieldname": "cut_sheet_ref",
+   "fieldtype": "Link",
+   "label": "Cut Sheet",
+   "options": "Cut Sheet",
+   "read_only": 1,
+   "depends_on": "eval:doc.cut_sheet",
+   "description": "The nesting plan these pieces come from."
+  },
+  {
+   "fieldname": "col_break_cut_sheet_use",
+   "fieldtype": "Column Break",
+   "label": "To Use (W1 — Transferred)",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "use_length",
+   "fieldtype": "Float",
+   "label": "To Use Length (mm)",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "use_width",
+   "fieldtype": "Float",
+   "label": "To Use Width (mm)",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "use_sec_qty",
+   "fieldtype": "Float",
+   "label": "To Use Sec Qty",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "use_calc_qty",
+   "fieldtype": "Float",
+   "label": "To Use Calc Qty (Kg) — W1",
+   "read_only": 1,
+   "hidden": 1
+  },
+  {
+   "fieldname": "col_break_cut_sheet_balance",
+   "fieldtype": "Column Break",
+   "label": "Balance (W2 — Remains)",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "balance_length",
+   "fieldtype": "Float",
+   "label": "Balance Length (mm)",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "balance_width",
+   "fieldtype": "Float",
+   "label": "Balance Width (mm)",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "balance_sec_qty",
+   "fieldtype": "Float",
+   "label": "Balance Sec Qty",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "balance_calc_qty",
+   "fieldtype": "Float",
+   "label": "Balance Calc Qty (Kg) — W2",
+   "read_only": 1,
+   "hidden": 1
+  },
+  {
    "fieldname": "section_excess_mapping",
    "fieldtype": "Section Break",
    "label": "Excess Material Mapping"
   },
   {
+   "fieldname": "excess_material",
+   "fieldtype": "Check",
+   "label": "Excess Material",
+   "depends_on": "eval:!doc.batch",
+   "description": "Fill this requirement from another job's left-over material instead of buying new. Only for rows with no batch of their own — excess is a promise against a specific off-cut, not stock in your warehouse."
+  },
+  {
+   "fieldname": "select_excess_item_btn",
+   "fieldtype": "Button",
+   "label": "Select Item",
+   "depends_on": "eval:doc.excess_material && !doc.batch"
+  },
+  {
    "description": "Reserve a batch recovered via another job's excess material return into THIS row instead of buying fresh raw material.",
    "fieldname": "excess_material_mapping_btn",
    "fieldtype": "Button",
-   "label": "Excess Material Mapping"
+   "label": "Excess Material Mapping",
+   "hidden": 1
   },
   {
    "default": "0",
