@@ -209,13 +209,17 @@ const MP_MANUAL_SECTIONS = [
 			"Where rounding now happens: NOWHERE automatically. Material Planning always reserves the exact Required Kg and reports Sec Nos as a plain fraction of the assigned batch. The only place a fraction becomes whole pieces is the Material Issue Plan transfer popup, where you type the number yourself — the system re-checks free stock for the new figure and books the extra weight as excess to return.",
 			"Partial transfers are why fractions matter. A Material Planning covering 10 drawings feeds a separate Material Issue Plan per drawing, and each plan only pulls its own drawings' reserved rows. So a batch planned across 5 rows (8 Nos in total) may well present as 4.5 Nos when only 3 of those drawings are being issued — that is expected. Raise it to 5 in the transfer popup if you must hand over whole bars, and the 0.5 piece of surplus is recorded for return.",
 			"Case 1 vs Case 2. Case 1 — leave “Reserve stock without dimensions” OFF, pick a batch and type Sec Qty yourself; the system reserves exactly that and never overwrites your number. Case 2 — tick it when one large bar or sheet serves several rows; the system derives the fractional Sec Nos for you from each row's required Kg.",
-			"Status legend — “Mapped”: a real batch is assigned. “Not Mapped”: nothing assigned yet. “Virtual (At Supplier)”: fulfilled from another job's excess material that's staying at the supplier and will never come back to your warehouse — no batch, nothing to transfer. “Claimed (Pending Return)”: fulfilled from another job's excess that HASN'T physically returned to stock yet, but is already promised to this row.",
+			"Status legend — “Mapped” (green): an ordinary purchased batch is assigned. “Excess Mapped” (blue): a real batch is assigned and it came back from another job as an off-cut. “Excess Mapped (At Supplier)” (blue): fulfilled from another job's excess that's staying at the supplier and will never reach your warehouse — no batch, nothing to transfer. “Excess Mapped (Pending Return)” (blue): fulfilled from another job's excess that HASN'T physically returned to stock yet, but is already promised to this row; the batch attaches itself automatically the day it does return. “Not Mapped” (red): nothing assigned yet. Every blue status counts as mapped — it is material you already have a claim on, so it is included in the Difference in Kg figure and never sent back through purchasing.",
 		],
 		buttons: [
 			{ name: "Reserve / Unreserve", note: "Same soft-claim mechanism as Available Raw Materials — works whether the row has a real batch or is a Virtual/Pending-Return excess claim." },
 			{
 				name: "Excess Material Mapping",
 				note: "Opens the excess-material picker — see the dedicated section below for the full explanation and worked examples of both cases it covers.",
+			},
+			{
+				name: "Cut Sheet  (on the row)",
+				note: "Tick it when only part of a batch is being used, and enter the piece to cut (To Use) plus what is left (Balance) — Thickness always comes from the batch, since a cut changes Length and Width but never how thick the steel is. Nothing moves here: this seeds the Material Issue Plan, where the cut actually happens and the numbers can still be adjusted against what the saw really produced. Available on both Material Mapping and Exact Match rows.",
 			},
 			{
 				name: "Validate Stock  (top of the form)",
@@ -273,9 +277,26 @@ const MP_MANUAL_SECTIONS = [
 				label: "Don't expect to partially claim a “Not Yet Returned” row",
 				text: "Its Sec Qty field is locked read-only to the row's full amount the moment you select it — this kind of excess can only be claimed in full, never split across two jobs.",
 			},
+			{
+				type: "do",
+				label: "A claim turns real by itself when the off-cut comes back",
+				text: "Worked example. Job A ends with a 2000mm ISA100 off-cut (20 Kg) still at the supplier, entered in its Excess Material Items table. Job B claims it — Job B's row shows Status “Claimed (Pending Return)”, Batch blank, but Reserved ticked. Weeks later Job A actually walks the material back: its “Return Excess Entry” button creates the Material Receipt as normal, and the moment that Stock Entry is submitted the new batch (ZZ-L2000-SR014) writes itself into Job B's row, Status flips to “Mapped”, and a green message says so. Nobody re-picks anything, and the material is never free for a third job to grab in between.",
+			},
+			{
+				type: "dont",
+				label: "Don't try to change the size of an off-cut someone has claimed",
+				text: "Once Job B has claimed it, the off-cut's Length/Width/Sec Qty/Kg are frozen — in the Excess Material Items grid, on the raw-material row's Excess fields, and in the Return Excess Entry dialog alike. All three refuse with the same message naming Job B's Material Planning. This is deliberate: Job B reserved a 2000mm piece, and quietly shrinking it to 1800mm would leave Job B planning around material that no longer exists in that shape.",
+			},
+			{
+				type: "do",
+				label: "The measurement was wrong — use Unlink Claim",
+				text: "Continuing the example: the off-cut actually measures 1800mm, not 2000mm. Press <b>Unlink Claim</b> on that Excess Material Items row. Job B's reservation is dropped, the off-cut returns to this picker, and the dimensions unlock. Correct them on the raw-material row's Excess Length (the Excess Material Items row recomputes from it — 1.8m × 10 kg/m = 18 Kg), then claim it again. Note the risk the confirmation warns you about: while unlinked, any other job can claim it first.",
+			},
 		],
 		notes: [
 			"“Retain at Supplier (Virtual)” material is flagged that way because it will NEVER physically return to your warehouse — it's used/consumed directly at the supplier. “Pending Return” material is just excess that hasn't been walked back to stock yet, but eventually will be — claiming it now doesn't stop that from happening later; it just reserves the outcome in advance.",
+			"Where these rows go at transfer time. A claimed off-cut still at the supplier has no batch in your source warehouse, so it can never appear in the transfer popup's list — there is physically nothing to move, and it is already sitting where the transfer would have sent it. Rather than leaving a silent gap, the popup shows a blue panel: “N item(s) are already at <supplier warehouse> — no transfer needed”, listing each one. It is information, not a problem: it never blocks the rest of the transfer.",
+			"Edit dimensions on the raw-material row, not in the Excess Material Items grid. For any excess row created from a raw-material row, the Excess Length/Width/Sec Qty fields on that raw-material row are the source of truth — the Excess Material Items row is recalculated from them on every save, so typing directly into the grid gets overwritten. The exception is a rounding-surplus row (Return Reason mentions “Round Up Sec Qty for Transfer”), which has no raw-material row behind it and is edited in the grid directly.",
 		],
 	},
 	{
@@ -432,7 +453,7 @@ const MP_MANUAL_SECTIONS = [
 			"actually leave your warehouse — the physical stock movement that Material Planning's " +
 			"“Reserve” only ever soft-claimed.",
 		fields: [
-			{ name: "Raw Materials", note: "Every reserved batch pulled in for this job's drawings, with Reqd Qty (the mapped batch's weight), Issued Qty (cumulative transferred so far across every Stock Entry), and per-row Cut Sheet / Excess Return fields." },
+			{ name: "Raw Materials", note: "Every reserved batch pulled in for this job's drawings, with Reqd Qty (the mapped batch's weight), Issued Qty (cumulative transferred so far across every Stock Entry), Excess Qty (the mapped batch measured against the drawing's own planned weight), Transfer Excess Kg (surplus created by rounding Sec Nos up at transfer time), and per-row Cut Sheet / Excess Return fields." },
 			{ name: "Finished Goods Warehouse", note: "Receives BOTH the finished good (via Make Final Stock Entry) and any unconsumed/off-cut material (via Return Excess Entry). Must be set before either button will work." },
 		],
 		buttons: [
@@ -461,8 +482,47 @@ const MP_MANUAL_SECTIONS = [
 					"figure, refuses it outright if the batch can't cover it, and books the extra 32.58 Kg " +
 					"straight into Excess Material Return so it comes back to the batch later.",
 			},
+			{
+				title: "Cut Sheet — one plate, two marks, cut in order",
+				item: "Plate 5mm", group: "Plates",
+				length: 1800, sec_qty: 1, unit_weight: 7.85,
+				formula:
+					"Sheet 1800 × 6300 × 5 = (1800÷1000) × (6300÷1000) × 5 × 7.85 = 445.095 Kg. " +
+					"Cut 1 uses 1800 × 3000 = 211.95 Kg and leaves 1800 × 3300 = 233.145 Kg. " +
+					"Cut 2 takes 1800 × 2000 = 141.3 Kg out of that balance, leaving 1800 × 1300",
+				result: "91.845 Kg left on the batch (2 cuts, 353.25 Kg issued)",
+				note:
+					"Enter the two cuts as two Cut Sheet rows against the same batch; they chain in row " +
+					"order, so cut 2 comes out of what cut 1 left rather than out of the full sheet again. " +
+					"Only 211.95 then 141.3 Kg are offered for transfer — never the whole 445.095. The batch " +
+					"keeps its number throughout; only its Length/Width/Sec Qty are rewritten, and only once " +
+					"a cut has been issued in full. Issue half of cut 1 and the sheet stays 6300 wide until " +
+					"the rest goes.",
+			},
+			{
+				title: "Where that 32.58 Kg of surplus shows up",
+				item: "ISMB450", group: "Structurals",
+				length: 900, sec_qty: "3 rows sharing the batch", unit_weight: 72.4,
+				formula:
+					"The same transfer, seen from the item table. Those 4.5 Nos were not one row — they were " +
+					"3 drawings sharing the batch, at 2 Nos, 1.5 Nos and 1 Nos. The 32.58 Kg surplus belongs " +
+					"to all three, so it is split in proportion to their Sec Nos: " +
+					"2÷4.5 × 32.58, 1.5÷4.5 × 32.58, 1÷4.5 × 32.58",
+				result: "14.48 Kg + 10.86 Kg + 7.24 Kg = 32.58 Kg",
+				note:
+					"Each figure lands in that row's Transfer Excess Kg column, so the surplus is visible against " +
+					"the drawings that caused it instead of only as one lump in Excess Material Items. The parts " +
+					"always add back to the total. Transfer again later and round up again, and the column " +
+					"accumulates rather than resetting. Do not confuse it with Excess Qty next to it: Excess Qty " +
+					"compares the mapped batch against the drawing's planned weight and is set when the row is " +
+					"fetched; Transfer Excess Kg is created purely by your whole-piece decision at transfer time.",
+			},
 		],
 		notes: [
+			"Cut Sheet — one sheet, several marks. A 1800 × 6300 × 5 plate is 445.095 Kg. Cut 1 takes 1800 × 3000 (211.95 Kg) and leaves 1800 × 3300. Cut 2 takes 1800 × 2000 (141.3 Kg) out of THAT, leaving 1800 × 1300. Enter them as two Cut Sheet rows on the same batch and they chain in row order: each cut takes its piece from what the one before it left. Only the To Use (W1) weight is ever offered for transfer, and the batch's own Length/Width/Sec Qty are rewritten in place — same batch, no new batch number — to the Balance of the last cut that has actually been issued.",
+			"A cut only resizes the batch once it is FULLY issued. Transfer half of a cut's W1 and the batch keeps its current size; it shrinks when the remainder goes. Cancel that transfer and the batch goes back to the size it was before the cut, because the stock is back too.",
+			"If To Use + Balance does not add up to the sheet, you get a warning naming the row — never a block, since some loss to the saw is normal and the client's own process adjusts Length and Width during cutting. The allowance is Cut Sheet Tolerance (%) in Manufyxinvenza Settings, 2% by default; set it to 0 to be told about any difference at all.",
+			"Where to enter the cut. Both places work and they are the same fields: Material Planning (either raw-material table) is where a cut can be PLANNED, and it seeds the Material Issue Plan row. The Material Issue Plan is where it is CUT, and once a cut plan has been entered there it survives every later refresh — a late Purchase Receipt re-pulling rows will not overwrite the shop floor's numbers with the planner's.",
 			"Nothing is ever offered for transfer unless it's BOTH purchased (a Purchase Receipt allocated it) AND reserved (a manual step back on Material Planning 1) — after a Purchase Receipt submits, its popup tells you exactly which Material Planning to open and reserve if anything's still pending.",
 			"Why fractions turn up here and not in Material Planning: a Material Planning covering 10 drawings feeds a SEPARATE Material Issue Plan per drawing, and each plan only ever pulls its own drawings' reserved rows. A batch planned across 5 rows can therefore present as 4.5 Nos when only 3 of those drawings are being issued. That is the whole reason Sec Nos is editable here — this is the first point at which anyone knows how many physical bars are actually going out of the door.",
 			"Nothing rounds automatically, anywhere. Material Planning reserves the exact Kg each drawing needs; this popup is the ONLY place a fraction becomes whole pieces, and only because you typed it. Whatever you add on top is recorded as excess to return, never quietly absorbed.",
