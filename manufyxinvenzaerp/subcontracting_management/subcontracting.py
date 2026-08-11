@@ -1909,12 +1909,16 @@ def _get_mp_excess_by_duno(mp_name):
     'Difference in Kg' the Material Planning screen shows: weight mapped beyond what
     was planned (cross-item over-mapping) that the supplier must return.
     """
+    from manufyxinvenzaerp.production_management.doctype.material_planning.material_planning import (
+        MAPPED_BATCH_STATUSES,
+    )
+
     excess = defaultdict(float)
     if not mp_name:
         return excess
     for r in frappe.get_all(
         "Material Planning Material Mapping",
-        filters={"parent": mp_name, "batch_mapped": "Mapped"},
+        filters={"parent": mp_name, "batch_mapped": ["in", MAPPED_BATCH_STATUSES]},
         fields=["duno_mark_no", "batch_calc_qty", "qty"],
     ):
         excess[r.duno_mark_no or ""] += flt(r.batch_calc_qty) - flt(r.qty)

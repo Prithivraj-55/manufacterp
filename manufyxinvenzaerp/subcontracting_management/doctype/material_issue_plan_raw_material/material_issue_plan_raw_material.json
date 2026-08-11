@@ -40,6 +40,7 @@
   "transferred_qty",
   "col_break_stock_tracking",
   "excess_qty",
+  "transfer_excess_kg",
   "drawing_planned_weight",
   "section_flags",
   "is_reserved",
@@ -66,7 +67,10 @@
   "balance_length",
   "balance_width",
   "balance_sec_qty",
-  "balance_calc_qty"
+  "balance_calc_qty",
+  "precut_length",
+  "precut_width",
+  "precut_sec_qty"
  ],
  "fields": [
   {
@@ -299,6 +303,14 @@
    "description": "Reqd Qty minus the drawing's planned raw material weight — the surplus this mapped batch carries beyond what the drawing actually needs."
   },
   {
+   "fieldname": "transfer_excess_kg",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Transfer Excess Kg",
+   "read_only": 1,
+   "description": "Surplus created by rounding this row's Sec Nos up to whole pieces at transfer time — the difference between the whole pieces actually issued and the fractional Sec Nos planned. Accumulates across partial transfers, and is booked into the Excess Material Items table to be returned. Separate from Excess Qty, which measures the mapped batch against the drawing instead."
+  },
+  {
    "fieldname": "drawing_planned_weight",
    "fieldtype": "Float",
    "hidden": 1,
@@ -460,6 +472,28 @@
    "read_only": 1,
    "depends_on": "eval:doc.cut_sheet",
    "description": "Auto-calculated from Balance Length/Width/Sec Qty. This is what the SAME batch's own dimensions get resized to once the transfer Stock Entry submits."
+  },
+  {
+   "fieldname": "precut_length",
+   "fieldtype": "Float",
+   "label": "Pre-Cut Length (mm)",
+   "hidden": 1,
+   "read_only": 1,
+   "description": "The batch's Length before this Cut Sheet resized it. Written when the transfer submits and used to put the batch back if that Stock Entry is cancelled."
+  },
+  {
+   "fieldname": "precut_width",
+   "fieldtype": "Float",
+   "label": "Pre-Cut Width (mm)",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "precut_sec_qty",
+   "fieldtype": "Float",
+   "label": "Pre-Cut Sec Qty",
+   "hidden": 1,
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,

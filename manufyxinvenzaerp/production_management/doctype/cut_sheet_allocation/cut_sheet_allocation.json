@@ -1,0 +1,118 @@
+{
+ "actions": [],
+ "creation": "2026-08-11 14:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "material_planning",
+  "duno_mark_no",
+  "col_break_alloc_1",
+  "source_table",
+  "source_row",
+  "col_break_alloc_2",
+  "sec_qty",
+  "qty",
+  "section_alloc_status",
+  "allocated_on",
+  "col_break_alloc_3",
+  "stock_entry",
+  "is_consumed"
+ ],
+ "fields": [
+  {
+   "fieldname": "material_planning",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Material Planning",
+   "options": "Material Planning",
+   "read_only": 1
+  },
+  {
+   "fieldname": "duno_mark_no",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "DUNO/Mark No",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_alloc_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "source_table",
+   "fieldtype": "Select",
+   "label": "Source Table",
+   "options": "Material Planning Material Mapping\nMaterial Planning Available Raw Material",
+   "read_only": 1
+  },
+  {
+   "description": "Row this cut is reserved against, so releasing it can find its way back.",
+   "fieldname": "source_row",
+   "fieldtype": "Data",
+   "label": "Source Row",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_alloc_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "How many W1 pieces this Material Planning has taken.",
+   "fieldname": "sec_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Sec Nos",
+   "read_only": 1
+  },
+  {
+   "fieldname": "qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Weight (Kg)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_alloc_status",
+   "fieldtype": "Section Break",
+   "label": "Status"
+  },
+  {
+   "fieldname": "allocated_on",
+   "fieldtype": "Datetime",
+   "label": "Allocated On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_alloc_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The transfer that actually moved this cut out of the warehouse.",
+   "fieldname": "stock_entry",
+   "fieldtype": "Link",
+   "label": "Stock Entry",
+   "options": "Stock Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "is_consumed",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Transferred",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-11 14:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Production Management",
+ "name": "Cut Sheet Allocation",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "creation",
+ "sort_order": "ASC",
+ "states": []
+}

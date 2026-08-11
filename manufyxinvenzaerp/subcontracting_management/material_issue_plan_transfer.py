@@ -19,6 +19,7 @@ from frappe.utils import flt
 from manufyxinvenzaerp.subcontracting_management.subcontracting import _get_mp_reserved_batches
 from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
     get_target_context,
+    _throw_claimed_excess_locked,
 )
 from manufyxinvenzaerp.utils.dimension_formula import calculate_qty
 
@@ -394,6 +395,43 @@ def _batch_free_qty(item_code, batch_no, warehouse):
     return flt(get_batch_qty(batch_no=batch_no, warehouse=warehouse, item_code=item_code) or 0)
 
 
+def _apply_transfer_excess_to_raw_materials(mip, item, excess_kg):
+    """Book a transfer's rounding surplus onto the raw-material rows it came from, so
+    the difference between the whole pieces issued and the fractional Sec Nos planned
+    is visible on the item table itself and not only in Excess Material Items.
+
+    One batch is routinely shared by several DUNO rows, and the transfer popup shows
+    them as a single aggregated line -- so the surplus that line produces belongs to
+    all of its contributors, not to whichever row happens to sort first. It is split
+    in proportion to each row's Sec Qty, which is the same weighting the popup used
+    to aggregate them in the first place, so the parts add back up to the whole.
+
+    Accumulates: a second partial transfer that rounds up again adds to what is
+    already booked, matching how _log_round_up_excess accumulates its own row."""
+    rows = [
+        r for r in (mip.raw_materials or [])
+        if r.item_code == item["item_code"]
+        and (r.batch_no or "") == (item.get("batch_no") or "")
+        and bool(r.cnc_process) == bool(item.get("cnc_process"))
+    ]
+    if not rows:
+        return
+
+    total_sec = sum(flt(r.sec_qty) for r in rows)
+    shares = [
+        flt(excess_kg * flt(r.sec_qty) / total_sec, 3) if total_sec
+        else flt(excess_kg / len(rows), 3)
+        for r in rows
+    ]
+    # The last row absorbs the rounding remainder, so the parts always sum to
+    # excess_kg exactly instead of drifting a few grams away from the Excess
+    # Material Items row they are supposed to reconcile against.
+    shares[-1] = flt(excess_kg - sum(shares[:-1]), 3)
+
+    for r, share in zip(rows, shares):
+        r.transfer_excess_kg = flt(flt(r.transfer_excess_kg) + share, 3)
+
+
 def _log_round_up_excess(mip, items):
     """After a transfer whose Sec Qty the user rounded up (see update_transfer_sec_qty), log the
     rounding surplus into excess_return_items so it flows through the existing Return
@@ -422,6 +460,7 @@ def _log_round_up_excess(mip, items):
         excess_kg = flt(item.get("round_up_excess_kg"))
         if excess_kg <= 0:
             continue
+        _apply_transfer_excess_to_raw_materials(mip, item, excess_kg)
         excess_pieces = flt(item.get("round_up_excess_pieces"))
         length = flt(item.get("custom_length"))
         width = flt(item.get("custom_width"))
@@ -539,6 +578,7 @@ def get_mip_readiness_check(mip_name):
 
     unmapped = []
     unreserved = []
+    at_supplier = []
 
     for mp_name in mp_names:
         mp = frappe.get_doc("Material Planning", mp_name)
@@ -573,6 +613,23 @@ def get_mip_readiness_check(mip_name):
                         "qty": flt(r.qty, 3),
                         "uom": r.uom or "Kg",
                     })
+            elif r.item_code and not r.batch and r.is_virtual_excess:
+                # Not unmapped at all -- this row is an off-cut claimed through
+                # Excess Material Mapping that is still physically at the supplier.
+                # There is no batch in the source warehouse to move, so it can never
+                # appear in the transfer list (_get_mp_reserved_batches skips rows
+                # with no batch); reported separately so the popup can say why
+                # rather than leaving the user hunting for a missing line.
+                at_supplier.append({
+                    "material_planning": mp_name,
+                    "row": r.idx,
+                    "item_code": r.item_code,
+                    "item_name": r.item_name or "",
+                    "duno_mark_no": r.duno_mark_no or "",
+                    "qty": flt(r.qty, 3),
+                    "uom": r.uom or "Kg",
+                    "source_mip": r.virtual_excess_source_mip or "",
+                })
             elif r.item_code and not r.batch:
                 unmapped.append({
                     "material_planning": mp_name,
@@ -655,6 +712,11 @@ def get_mip_readiness_check(mip_name):
         "unreserved": unreserved,
         "unreserved_summary": unreserved_summary,
         "cnc_without_warehouse": cnc_without_warehouse,
+        # Informational, deliberately NOT part of has_issues: material already at
+        # the supplier is a correct, finished state, not something to fix before
+        # transferring the rest.
+        "at_supplier": at_supplier,
+        "supplier_warehouse": mip.supplier_warehouse or "",
         "has_issues": bool(unmapped or unreserved or cnc_without_warehouse),
     }
 
@@ -1019,6 +1081,17 @@ def create_mip_cnc_forward_entry(mip_name):
     return se.name
 
 
+def _override_changes_dimensions(excess_row, override, group):
+    """True when a Return Excess Entry dialog override would actually move an excess
+    row's numbers. A return reason is not a dimension, so adding one to a claimed row
+    stays allowed -- only the measurements are frozen by a claim."""
+    fields = ("length", "width", "sec_qty") if group in _DIMENSION_DRIVEN_GROUPS else ("qty",)
+    return any(
+        override.get(f) not in (None, "") and flt(override.get(f), 3) != flt(excess_row.get(f), 3)
+        for f in fields
+    )
+
+
 @frappe.whitelist()
 def create_mip_excess_return_entry(mip_name, rows_json=None):
     """Receive unconsumed/off-cut material back into stock as fresh Material
@@ -1069,18 +1142,21 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
             # for this row at all; it's claimed directly from this table via
             # Excess Material Mapping's virtual-excess picker instead.
             continue
-        if r.get("mapped_material_planning"):
-            # Already claimed straight off this table (client feedback: the
-            # picker now also surfaces still-Pending default-return-type rows,
-            # not just ones explicitly flagged Retain-at-Supplier -- see
-            # get_available_virtual_excess_items). Once claimed, its eventual
-            # physical return is the claiming job's own business, not a fresh
-            # batch this button should hand out to someone else.
-            continue
+        # A claimed row is deliberately NOT skipped: bringing the off-cut back is
+        # exactly how a virtual claim stops being a paper promise. The batch this
+        # creates is attached to the claiming Material Mapping row automatically on
+        # submit (materialize_virtual_excess_claim), so it never lands in the free
+        # pool where another job could take it. Dimension overrides on such a row
+        # are refused below -- what returns must be what was claimed.
 
         override = overrides.get(r.name)
         if override:
             group = r.parent_item_group
+            if r.get("mapped_material_planning") and _override_changes_dimensions(r, override, group):
+                # Caught here rather than by the same guard on mip.save() below,
+                # because that save runs AFTER the Stock Entry is inserted -- by
+                # then a refused edit would already have left a stray draft behind.
+                _throw_claimed_excess_locked(r)
             if group in _DIMENSION_DRIVEN_GROUPS:
                 if override.get("length") not in (None, ""):
                     r.length = flt(override.get("length"), 3)

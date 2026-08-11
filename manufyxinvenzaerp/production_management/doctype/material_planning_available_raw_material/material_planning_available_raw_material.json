@@ -33,7 +33,20 @@
   "reserved_on",
   "cnc_process",
   "skip_auto_suggest_batch",
-  "store_location"
+  "store_location",
+  "section_cut_sheet",
+  "cut_sheet",
+  "cut_sheet_ref",
+  "col_break_cut_sheet_use",
+  "use_length",
+  "use_width",
+  "use_sec_qty",
+  "use_calc_qty",
+  "col_break_cut_sheet_balance",
+  "balance_length",
+  "balance_width",
+  "balance_sec_qty",
+  "balance_calc_qty"
  ],
  "fields": [
   {
@@ -254,6 +267,98 @@
    "label": "Store Location",
    "options": "Store Location",
    "read_only": 1
+  },
+  {
+   "fieldname": "section_cut_sheet",
+   "fieldtype": "Section Break",
+   "label": "Cut Sheet",
+   "collapsible": 1,
+   "depends_on": "eval:doc.cut_sheet"
+  },
+  {
+   "fieldname": "cut_sheet",
+   "fieldtype": "Check",
+   "label": "Cut Sheet",
+   "description": "Take this requirement from a Cut Sheet -- a nesting plan stated once against the batch. Pick the sheet, enter how many pieces, and the weight follows. The same sheet can serve other rows and other Material Plannings until its pieces run out."
+  },
+  {
+   "fieldname": "cut_sheet_ref",
+   "fieldtype": "Link",
+   "label": "Cut Sheet",
+   "options": "Cut Sheet",
+   "read_only": 1,
+   "depends_on": "eval:doc.cut_sheet",
+   "description": "The nesting plan these pieces come from."
+  },
+  {
+   "fieldname": "col_break_cut_sheet_use",
+   "fieldtype": "Column Break",
+   "label": "To Use (W1 — Transferred)",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "use_length",
+   "fieldtype": "Float",
+   "label": "To Use Length (mm)",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "use_width",
+   "fieldtype": "Float",
+   "label": "To Use Width (mm)",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "use_sec_qty",
+   "fieldtype": "Float",
+   "label": "To Use Sec Qty",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "use_calc_qty",
+   "fieldtype": "Float",
+   "label": "To Use Calc Qty (Kg) — W1",
+   "read_only": 1,
+   "hidden": 1
+  },
+  {
+   "fieldname": "col_break_cut_sheet_balance",
+   "fieldtype": "Column Break",
+   "label": "Balance (W2 — Remains)",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "balance_length",
+   "fieldtype": "Float",
+   "label": "Balance Length (mm)",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "balance_width",
+   "fieldtype": "Float",
+   "label": "Balance Width (mm)",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "balance_sec_qty",
+   "fieldtype": "Float",
+   "label": "Balance Sec Qty",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "balance_calc_qty",
+   "fieldtype": "Float",
+   "label": "Balance Calc Qty (Kg) — W2",
+   "read_only": 1,
+   "hidden": 1
   }
  ],
  "istable": 1,

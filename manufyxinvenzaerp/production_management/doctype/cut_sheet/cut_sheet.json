@@ -1,0 +1,364 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-11 14:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "company",
+  "status",
+  "col_break_head_1",
+  "item_code",
+  "item_name",
+  "parent_item_group",
+  "unit_weight",
+  "col_break_head_2",
+  "batch_no",
+  "warehouse",
+  "section_sheet",
+  "sheet_length",
+  "sheet_width",
+  "col_break_sheet_1",
+  "sheet_thickness",
+  "sheet_sec_qty",
+  "col_break_sheet_2",
+  "sheet_qty",
+  "section_w1",
+  "w1_length",
+  "w1_width",
+  "col_break_w1_1",
+  "w1_sec_qty",
+  "w1_qty_per_nos",
+  "col_break_w1_2",
+  "w1_total_qty",
+  "section_w1_availability",
+  "allocated_sec_qty",
+  "allocated_qty",
+  "col_break_avail",
+  "available_sec_qty",
+  "available_qty",
+  "section_w2",
+  "w2_length",
+  "w2_width",
+  "col_break_w2_1",
+  "w2_sec_qty",
+  "w2_calc_qty",
+  "col_break_w2_2",
+  "w2_applied",
+  "w2_applied_stock_entry",
+  "w2_applied_on",
+  "section_allocations",
+  "allocations"
+ ],
+ "fields": [
+  {
+   "default": "CS-.YYYY.-",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "CS-.YYYY.-",
+   "reqd": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "default": "Draft",
+   "description": "Draft while the cut is being planned. Active once pieces can be taken. Fully Allocated when every piece is spoken for. Consumed once the balance has been written back to the batch.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Draft\nActive\nFully Allocated\nConsumed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_head_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Item Code",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "item_code.item_name",
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "label": "Item Name",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "item_code.custom_parent_item_group",
+   "fieldname": "parent_item_group",
+   "fieldtype": "Data",
+   "label": "Item Group",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "item_code.custom_unit_weight",
+   "fieldname": "unit_weight",
+   "fieldtype": "Float",
+   "label": "Unit Weight",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_head_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The physical sheet being cut. One batch can have only one Cut Sheet.",
+   "fieldname": "batch_no",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Batch",
+   "options": "Batch",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "warehouse",
+   "fieldtype": "Link",
+   "label": "Warehouse",
+   "options": "Warehouse"
+  },
+  {
+   "description": "The sheet as it stands today, read from the batch.",
+   "fieldname": "section_sheet",
+   "fieldtype": "Section Break",
+   "label": "Sheet (as received)"
+  },
+  {
+   "fieldname": "sheet_length",
+   "fieldtype": "Float",
+   "label": "Length (mm)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sheet_width",
+   "fieldtype": "Float",
+   "label": "Width (mm)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_sheet_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "sheet_thickness",
+   "fieldtype": "Float",
+   "label": "Thickness (mm)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sheet_sec_qty",
+   "fieldtype": "Float",
+   "label": "Sec Nos",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_sheet_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "sheet_qty",
+   "fieldtype": "Float",
+   "label": "Weight (Kg)",
+   "read_only": 1
+  },
+  {
+   "description": "The piece this sheet is cut into. Thickness always comes from the batch — a cut changes Length and Width, never how thick the steel is.",
+   "fieldname": "section_w1",
+   "fieldtype": "Section Break",
+   "label": "W1 — Piece to Cut"
+  },
+  {
+   "fieldname": "w1_length",
+   "fieldtype": "Float",
+   "label": "W1 Length (mm)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "w1_width",
+   "fieldtype": "Float",
+   "label": "W1 Width (mm)"
+  },
+  {
+   "fieldname": "col_break_w1_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "How many of these pieces this sheet yields. Entered by hand — a suggestion is offered from the geometry, but the nesting is yours to decide.",
+   "fieldname": "w1_sec_qty",
+   "fieldtype": "Float",
+   "label": "W1 Sec Nos (available)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "w1_qty_per_nos",
+   "fieldtype": "Float",
+   "label": "Kg per Piece",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_w1_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "w1_total_qty",
+   "fieldtype": "Float",
+   "label": "W1 Total (Kg)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_w1_availability",
+   "fieldtype": "Section Break",
+   "label": "Availability"
+  },
+  {
+   "fieldname": "allocated_sec_qty",
+   "fieldtype": "Float",
+   "label": "Allocated Sec Nos",
+   "read_only": 1
+  },
+  {
+   "fieldname": "allocated_qty",
+   "fieldtype": "Float",
+   "label": "Allocated (Kg)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_avail",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Still free for another Material Planning to take.",
+   "fieldname": "available_sec_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Available Sec Nos",
+   "read_only": 1
+  },
+  {
+   "fieldname": "available_qty",
+   "fieldtype": "Float",
+   "label": "Available (Kg)",
+   "read_only": 1
+  },
+  {
+   "description": "What is left of the sheet once the cutting is done. Entered by hand. Written onto the batch when the first transfer from this Cut Sheet is submitted.",
+   "fieldname": "section_w2",
+   "fieldtype": "Section Break",
+   "label": "W2 — Balance"
+  },
+  {
+   "fieldname": "w2_length",
+   "fieldtype": "Float",
+   "label": "W2 Length (mm)"
+  },
+  {
+   "fieldname": "w2_width",
+   "fieldtype": "Float",
+   "label": "W2 Width (mm)"
+  },
+  {
+   "fieldname": "col_break_w2_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "w2_sec_qty",
+   "fieldtype": "Float",
+   "label": "W2 Sec Nos"
+  },
+  {
+   "fieldname": "w2_calc_qty",
+   "fieldtype": "Float",
+   "label": "W2 Balance (Kg)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_w2_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "w2_applied",
+   "fieldtype": "Check",
+   "label": "W2 Written to Batch",
+   "read_only": 1
+  },
+  {
+   "fieldname": "w2_applied_stock_entry",
+   "fieldtype": "Link",
+   "label": "Applied By Stock Entry",
+   "options": "Stock Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "w2_applied_on",
+   "fieldtype": "Datetime",
+   "label": "Applied On",
+   "read_only": 1
+  },
+  {
+   "description": "Every Material Planning that has taken pieces from this sheet, and whether each has physically moved yet.",
+   "fieldname": "section_allocations",
+   "fieldtype": "Section Break",
+   "label": "Allocations"
+  },
+  {
+   "fieldname": "allocations",
+   "fieldtype": "Table",
+   "label": "Allocations",
+   "options": "Cut Sheet Allocation",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-11 14:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Production Management",
+ "name": "Cut Sheet",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Manufacturing User",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "batch_no",
+ "track_changes": 1
+}
