@@ -18,8 +18,11 @@ def get_data(filters):
 	if filters.get("item_code"):
 		row_filters["item_code"] = filters["item_code"]
 
-	status = filters.get("status") or "Pending"
-	if status == "Pending":
+	# The point of this report is "what is still out there to fetch back", so
+	# anything already returned drops out by default -- a returned off-cut is a real
+	# batch in stock now and has nothing left to chase.
+	status = filters.get("status") or "Pending Return"
+	if status in ("Pending Return", "Pending"):
 		row_filters["stock_entry_created"] = 0
 	elif status == "Returned":
 		row_filters["stock_entry_created"] = 1
@@ -36,8 +39,27 @@ def get_data(filters):
 				"stock_entry_created", "return_type", "return_reason",
 				"source_mip_raw_material_row", "mapped_material_planning"],
 	)
+
+	if status == "Pending Return":
+		# Retain-at-Supplier material is never coming back by definition, so it is
+		# not a missed return -- listing it here would pad the chase-list with rows
+		# nobody can act on.
+		rows = [r for r in rows if r.return_type != "Retain at Supplier (Virtual)"]
+
 	if not rows:
 		return []
+
+	# Who is holding pieces of each off-cut. An off-cut can now be shared out across
+	# several Material Plannings, so this is a LIST -- counted from the rows actually
+	# holding the pieces rather than the single mapped_material_planning pointer,
+	# which only ever recorded the first claimer.
+	claims_by_row = {}
+	for c in frappe.get_all(
+		"Material Planning Material Mapping",
+		filters={"virtual_excess_source_row": ["in", [r.name for r in rows]], "is_reserved": 1},
+		fields=["parent", "virtual_excess_source_row", "batch_sec_qty", "duno_mark_no"],
+	):
+		claims_by_row.setdefault(c.virtual_excess_source_row, []).append(c)
 
 	mip_filters = {"name": ["in", list({r.parent for r in rows})]}
 	if filters.get("material_issue_plan"):
@@ -118,6 +140,17 @@ def get_data(filters):
 		sco = sco_map.get(mip.subcontracting_order, frappe._dict())
 		pp = pp_map.get(mip.production_plan, frappe._dict())
 		days_pending = (today - getdate(mip.posting_date)).days if mip.posting_date and not r.stock_entry_created else 0
+
+		claims = claims_by_row.get(r.name, [])
+		allocated_sec = flt(sum(flt(c.batch_sec_qty) for c in claims), 3)
+		available_sec = flt(max(0.0, flt(r.sec_qty) - allocated_sec), 3)
+		per_piece = flt(flt(r.qty) / flt(r.sec_qty), 3) if flt(r.sec_qty) else 0.0
+		# Named individually rather than counted: when someone chases a missing
+		# off-cut the useful answer is WHICH jobs are waiting on it.
+		reserved_mps = ", ".join(sorted({
+			(c.parent + (" (" + c.duno_mark_no + ")" if c.duno_mark_no else ""))
+            for c in claims
+		}))
 		data.append({
 			"material_issue_plan": mip.name,
 			"posting_date": mip.posting_date,
@@ -141,10 +174,17 @@ def get_data(filters):
 			"uom": r.uom,
 			"return_type": r.return_type or "Return to Own Warehouse",
 			"status": _("Returned") if r.stock_entry_created else (
-				_("Claimed (via Excess Material Mapping)") if r.mapped_material_planning else _("Pending")
+				_("Fully Claimed") if claims and available_sec <= 0.001
+				else _("Partly Claimed") if claims
+				else _("Pending")
 			),
 			"return_reason": r.return_reason or "",
 			"days_pending": days_pending,
+			"reserved_material_plannings": reserved_mps,
+			"reserved_count": len(claims),
+			"allocated_sec_qty": allocated_sec,
+			"available_sec_qty": available_sec,
+			"available_kg": flt(available_sec * per_piece, 3),
 		})
 
 	data.sort(key=lambda d: (d["material_issue_plan"], d["item_code"]))
@@ -172,6 +212,11 @@ def get_columns():
 		{"label": _("Sec Qty"), "fieldname": "sec_qty", "fieldtype": "Float", "width": 90},
 		{"label": _("Sec UOM"), "fieldname": "sec_uom", "fieldtype": "Link", "options": "UOM", "width": 80},
 		{"label": _("Weight (Kg)"), "fieldname": "weight_kg", "fieldtype": "Float", "width": 100},
+		{"label": _("Reserved For (Material Planning)"), "fieldname": "reserved_material_plannings", "fieldtype": "Data", "width": 260},
+		{"label": _("Claims"), "fieldname": "reserved_count", "fieldtype": "Int", "width": 70},
+		{"label": _("Allocated Sec Nos"), "fieldname": "allocated_sec_qty", "fieldtype": "Float", "width": 130},
+		{"label": _("Free Sec Nos"), "fieldname": "available_sec_qty", "fieldtype": "Float", "width": 110},
+		{"label": _("Free (Kg)"), "fieldname": "available_kg", "fieldtype": "Float", "width": 100},
 		{"label": _("UOM"), "fieldname": "uom", "fieldtype": "Link", "options": "UOM", "width": 80},
 		{"label": _("Return Type"), "fieldname": "return_type", "fieldtype": "Data", "width": 170},
 		{"label": _("Status"), "fieldname": "status", "fieldtype": "Data", "width": 120},

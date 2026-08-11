@@ -48,7 +48,12 @@ fixtures = ["Custom Field", "Property Setter"]
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-app_include_js = "/assets/manufyxinvenzaerp/js/item.js"
+app_include_js = [
+	"/assets/manufyxinvenzaerp/js/item.js",
+	# Shared layout/scrollspy/CSS for the manual pages (Material Planning, Material
+	# Issue Plan). Each page supplies only its own content.
+	"/assets/manufyxinvenzaerp/js/manual_renderer.js",
+]
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}

@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-11 19:09:21_
+_Generated: 2026-08-11 19:40:38_
 
 ## Modules
 
@@ -26,7 +26,7 @@ _Generated: 2026-08-11 19:09:21_
 
 ## Python files
 
-_Total: 206_
+_Total: 209_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -123,6 +123,8 @@ _Total: 206_
 - production_management/page/material_planning_case_studies/__init__.py
 - production_management/page/material_planning_manual/__init__.py
 - production_management/production_utils.py
+- production_management/report/cut_sheet_report/cut_sheet_report.py
+- production_management/report/cut_sheet_report/__init__.py
 - production_management/report/__init__.py
 - production_management/report/inspection_status_report/__init__.py
 - production_management/report/inspection_status_report/inspection_status_report.py
@@ -169,6 +171,7 @@ _Total: 206_
 - subcontracting_management/__init__.py
 - subcontracting_management/material_issue_plan_transfer.py
 - subcontracting_management/overrides.py
+- subcontracting_management/page/material_issue_plan_manual/__init__.py
 - subcontracting_management/report/excess_material_return_report/excess_material_return_report.py
 - subcontracting_management/report/excess_material_return_report/__init__.py
 - subcontracting_management/report/__init__.py
@@ -237,13 +240,14 @@ _Total: 206_
 
 ## JavaScript files
 
-_Total: 21_
+_Total: 24_
 
 - accounts_management/report/customer_fund_usage/customer_fund_usage.js
 - drawing_management/doctype/drawing/drawing.js
 - production_management/doctype/material_planning/material_planning.js
 - production_management/page/material_planning_case_studies/material_planning_case_studies.js
 - production_management/page/material_planning_manual/material_planning_manual.js
+- production_management/report/cut_sheet_report/cut_sheet_report.js
 - production_management/report/inspection_status_report/inspection_status_report.js
 - production_management/report/inventory_report/inventory_report.js
 - production_management/report/manufyxinvenza_stock_balance/manufyxinvenza_stock_balance.js
@@ -253,17 +257,19 @@ _Total: 21_
 - public/js/inspection_entry.js
 - public/js/item.js
 - public/js/job_card.js
+- public/js/manual_renderer.js
 - public/js/payment_request.js
 - public/js/production_plan.js
 - public/js/purchase_order.js
 - public/js/purchase_receipt.js
 - public/js/supplier_operation_entry.js
 - subcontracting_management/doctype/material_issue_plan/material_issue_plan.js
+- subcontracting_management/page/material_issue_plan_manual/material_issue_plan_manual.js
 - subcontracting_management/report/excess_material_return_report/excess_material_return_report.js
 
 ## JSON files
 
-_Total: 49_
+_Total: 51_
 
 - accounts_management/report/customer_fund_usage/customer_fund_usage.json
 - drawing_management/doctype/drawing/drawing.json
@@ -299,6 +305,7 @@ _Total: 49_
 - production_management/doctype/store_location/store_location.json
 - production_management/page/material_planning_case_studies/material_planning_case_studies.json
 - production_management/page/material_planning_manual/material_planning_manual.json
+- production_management/report/cut_sheet_report/cut_sheet_report.json
 - production_management/report/inspection_status_report/inspection_status_report.json
 - production_management/report/inventory_report/inventory_report.json
 - production_management/report/manufyxinvenza_stock_balance/manufyxinvenza_stock_balance.json
@@ -313,6 +320,7 @@ _Total: 49_
 - subcontracting_management/doctype/soe_inspection_item/soe_inspection_item.json
 - subcontracting_management/doctype/supplier_operation_entry/supplier_operation_entry.json
 - subcontracting_management/doctype/supplier_operation_item/supplier_operation_item.json
+- subcontracting_management/page/material_issue_plan_manual/material_issue_plan_manual.json
 - subcontracting_management/report/excess_material_return_report/excess_material_return_report.json
 
 ## Doctypes
