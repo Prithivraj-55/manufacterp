@@ -91,6 +91,26 @@ def get_data(filters):
 		fields=["parent", "drawing", "customer_drawing_number", "duno_mark_no", "sales_order",
 				"qty_to_manufacture", "planned_weight_kg", "transferred_weight_kg", "completed_qty_nos"],
 	)
+	# Fall back to the Drawing master for Sales Order. The copy held on the drawing rows
+	# is blank in practice -- it is only populated when the Production Plan item carried
+	# one -- which left the Sales Order column empty, the Customer column empty (it is
+	# looked up FROM the sales order) and the Sales Order filter matching nothing at all,
+	# on a report whose whole point is to be readable sales-order-wise.
+	missing_so = {d.drawing for d in drawing_rows if d.drawing and not d.sales_order}
+	if missing_so:
+		so_by_drawing = {
+			dr.name: dr.sales_order
+			for dr in frappe.get_all(
+				"Drawing",
+				filters={"name": ["in", list(missing_so)]},
+				fields=["name", "sales_order"],
+			)
+			if dr.sales_order
+		}
+		for d in drawing_rows:
+			if not d.sales_order:
+				d.sales_order = so_by_drawing.get(d.drawing) or ""
+
 	drawings_by_soe = {}
 	for d in drawing_rows:
 		drawings_by_soe.setdefault(d.parent, []).append(d)
