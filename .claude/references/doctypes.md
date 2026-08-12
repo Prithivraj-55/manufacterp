@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-08-12 11:31:32_
+_Generated: 2026-08-12 23:32:34_
 
 ## drawing
 
@@ -165,13 +165,14 @@ _Generated: 2026-08-12 11:31:32_
 | Module | production_management |
 | Path | `production_management/doctype/cut_sheet` |
 | Controller | `production_management/doctype/cut_sheet/cut_sheet.py` |
-| Client script | none |
+| Client script | `production_management/doctype/cut_sheet/cut_sheet.js` |
 
 ### Methods
 
 | Method | Whitelisted |
 |--------|-------------|
 | ` validate` | no |
+| ` _sync_allocations_from_rows` | no |
 | ` on_trash` | no |
 | ` _fetch_batch_dimensions` | no |
 | ` _calculate` | no |
@@ -181,6 +182,7 @@ _Generated: 2026-08-12 11:31:32_
 | ` get_available_cut_sheets` | no |
 | ` get_cut_sheet_for_batch` | no |
 | ` allocate_cut_sheet` | no |
+| ` refresh_cut_sheet_allocations` | no |
 | ` release_cut_sheet_allocation` | no |
 | ` apply_w2_to_batch` | no |
 | ` revert_w2_from_batch` | no |
@@ -368,6 +370,7 @@ _Generated: 2026-08-12 11:31:32_
 | ` validate_planned_stock` | no |
 | ` _add` | no |
 | ` _sec_nos_for_weight` | no |
+| ` _refresh_touched_cut_sheets` | no |
 | ` reserve_batches` | no |
 | ` _get_batch_reserved_by_self` | no |
 | ` get_available_excess_batches` | no |
@@ -504,6 +507,8 @@ _Generated: 2026-08-12 11:31:32_
 | ` refresh_mip_raw_materials_manual` | no |
 | ` refresh_mip_raw_materials` | no |
 | ` _sync_excess_availability` | no |
+| ` _sync_transferred_qty` | no |
+| ` key` | no |
 | ` _cut_sheet_seed` | no |
 | ` _carry_forward_editable_fields` | no |
 | ` _lookup_drawing_planned_weight` | no |
