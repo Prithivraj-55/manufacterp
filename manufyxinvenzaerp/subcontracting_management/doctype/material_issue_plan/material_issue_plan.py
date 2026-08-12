@@ -33,6 +33,9 @@ class MaterialIssuePlan(Document):
         _sync_batch_remarks(self)
         _sync_excess_availability(self)
         _sync_transferred_qty(self)
+        # After _sync_transferred_qty -- the consolidated rows carry Issued Qty forward
+        # from the raw-material rows, so they have to be refreshed first.
+        _sync_consolidate_items(self)
         _maybe_mark_completed(self)
 
     def on_trash(self):
@@ -488,6 +491,94 @@ def _sync_transferred_qty(mip):
             r.transferred_qty = share
             running += share
         rows[-1].transferred_qty = flt(total_moved - running, 3)
+
+
+def _sync_consolidate_items(mip):
+    """Rebuild the Consolidate Items table: one row per item + batch, merged.
+
+    Same shape as the transfer popup, because it describes the same thing -- what will
+    physically move. Grouped by (item, batch, CNC leg), which is as far as consolidation
+    can go: a Stock Entry has to name a specific batch, so two batches of one item stay
+    two rows. Merging them would produce a line that cannot be turned into a transfer.
+
+    Keyed on the BATCH's item (planned_item), not the requirement's, so an alternate-item
+    row lands under the item actually being moved -- the same rule the Stock Entry and
+    the transfer popup use.
+
+    Batch-assigned rows are included whether or not they are still flagged reserved:
+    submitting the transfer clears that flag, and a table that emptied itself the moment
+    material shipped would be useless for seeing what a plan did. Rows with no batch yet
+    (nothing allocated) are left out -- there is nothing to move.
+
+    Sorted by item then batch so a batch's siblings sit together; scattering them is
+    what made two legitimate lines read as a duplicate.
+    """
+    groups = {}
+    for row in (mip.raw_materials or []):
+        if not row.batch_no:
+            continue
+        item_code = row.planned_item or row.item_code
+        key = (item_code, row.batch_no, 1 if row.cnc_process else 0)
+        g = groups.get(key)
+        if not g:
+            g = groups[key] = {
+                "item_code": item_code,
+                "item_name": frappe.db.get_value("Item", item_code, "item_name") or item_code,
+                "batch_no": row.batch_no,
+                "cnc_process": 1 if row.cnc_process else 0,
+                "parent_item_group": row.parent_item_group or "",
+                "length": flt(row.length), "width": flt(row.width),
+                "thickness": flt(row.thickness), "unit_weight": flt(row.unit_weight),
+                "sec_uom": row.sec_uom or "", "uom": row.uom or "Kg",
+                "sec_qty": 0.0, "qty": 0.0, "transferred_qty": 0.0,
+                "source_rows": 0, "dunos": [],
+            }
+        g["sec_qty"] += flt(row.sec_qty)
+        g["qty"] += flt(row.qty)
+        g["transferred_qty"] += flt(row.transferred_qty)
+        g["source_rows"] += 1
+        if row.duno_mark_no and row.duno_mark_no not in g["dunos"]:
+            g["dunos"].append(row.duno_mark_no)
+
+    mip.set("consolidate_items", [])
+    for key in sorted(groups, key=lambda k: (k[0], k[1], k[2])):
+        g = groups[key]
+        qty = flt(g["qty"], 3)
+        done = flt(g["transferred_qty"], 3)
+        mip.append("consolidate_items", {
+            "item_code": g["item_code"], "item_name": g["item_name"],
+            "batch_no": g["batch_no"], "cnc_process": g["cnc_process"],
+            "parent_item_group": g["parent_item_group"],
+            "length": g["length"], "width": g["width"],
+            "thickness": g["thickness"], "unit_weight": g["unit_weight"],
+            "sec_qty": flt(g["sec_qty"], 3), "sec_uom": g["sec_uom"],
+            "qty": qty, "uom": g["uom"],
+            "transferred_qty": done,
+            "pending_qty": flt(max(qty - done, 0.0), 3),
+            "available_qty": _batch_stock_in(g["item_code"], g["batch_no"], mip.source_warehouse),
+            "source_rows": g["source_rows"],
+            "duno_mark_no": ", ".join(g["dunos"]),
+        })
+
+
+def _batch_stock_in(item_code, batch_no, warehouse):
+    """What the batch physically holds in a warehouse right now.
+
+    Read through the Serial and Batch Bundle rather than Stock Ledger Entry's own
+    batch_no column, which Frappe v15 leaves empty for bundled movements."""
+    if not (batch_no and warehouse):
+        return 0.0
+    qty = frappe.db.sql(
+        """
+        SELECT SUM(sle.actual_qty)
+        FROM `tabStock Ledger Entry` sle
+        JOIN `tabSerial and Batch Entry` sbe ON sbe.parent = sle.serial_and_batch_bundle
+        WHERE sle.is_cancelled = 0 AND sle.item_code = %s
+          AND sle.warehouse = %s AND sbe.batch_no = %s
+        """,
+        (item_code, warehouse, batch_no),
+    )
+    return flt(qty[0][0] if qty and qty[0] else 0, 3)
 
 
 def _cut_sheet_seed(mp_row):

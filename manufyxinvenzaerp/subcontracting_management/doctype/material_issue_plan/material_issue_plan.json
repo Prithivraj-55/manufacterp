@@ -34,6 +34,9 @@
   "tab_raw_materials",
   "refresh_raw_materials_btn",
   "raw_materials",
+  "tab_consolidate",
+  "consolidate_html",
+  "consolidate_items",
   "tab_excess_return",
   "excess_return_items",
   "section_excess_return_totals",
@@ -131,7 +134,7 @@
    "label": "Warehouses"
   },
   {
-   "description": "Warehouse to transfer raw materials FROM. Auto-fetched from the Production Plan's Raw Material Warehouse — override here if needed.",
+   "description": "Warehouse to transfer raw materials FROM. Auto-fetched from the Production Plan's Raw Material Warehouse \u2014 override here if needed.",
    "fieldname": "source_warehouse",
    "fieldtype": "Link",
    "label": "Source Warehouse (RM)",
@@ -195,7 +198,7 @@
    "read_only": 1
   },
   {
-   "description": "Over-mapped weight (allocated beyond planned) — the difference expected back as excess/off-cut.",
+   "description": "Over-mapped weight (allocated beyond planned) \u2014 the difference expected back as excess/off-cut.",
    "fieldname": "excess_weight_kg",
    "fieldtype": "Float",
    "label": "Excess Weight (Kg)",
@@ -233,12 +236,29 @@
    "options": "Material Issue Plan Raw Material"
   },
   {
+   "fieldname": "tab_consolidate",
+   "fieldtype": "Tab Break",
+   "label": "Consolidate Items"
+  },
+  {
+   "fieldname": "consolidate_html",
+   "fieldtype": "HTML",
+   "options": "<p class='text-muted small'>One row per item and batch \u2014 what will physically move, with rows for the same batch merged. Rebuilt on every save from the Raw Materials table; not editable here.</p>"
+  },
+  {
+   "fieldname": "consolidate_items",
+   "fieldtype": "Table",
+   "label": "Consolidate Items",
+   "options": "Material Issue Plan Consolidate Item",
+   "read_only": 1
+  },
+  {
    "fieldname": "tab_excess_return",
    "fieldtype": "Tab Break",
    "label": "Excess Material Return"
   },
   {
-   "description": "Off-cut / balance material left after cutting the transferred raw material. Enter the items in their new dimensions and Sec Nos — weight (Kg) is auto-calculated.",
+   "description": "Off-cut / balance material left after cutting the transferred raw material. Enter the items in their new dimensions and Sec Nos \u2014 weight (Kg) is auto-calculated.",
    "fieldname": "excess_return_items",
    "fieldtype": "Table",
    "label": "Excess Material Items",
