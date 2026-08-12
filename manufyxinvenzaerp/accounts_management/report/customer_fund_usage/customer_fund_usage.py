@@ -17,6 +17,12 @@ def get_columns():
         {"label": _("Source Reference No"), "fieldname": "source_reference_no", "fieldtype": "Data", "width": 130},
         {"label": _("Source of Funds"), "fieldname": "custom_source_of_funds", "fieldtype": "Link",
          "options": "Payment Entry", "width": 130},
+        # What the customer's payment was booked against -- normally the Sales Order it
+        # came in for. Data rather than Dynamic Link because one Payment Entry may be
+        # allocated across several documents, and those are shown comma-separated; a
+        # Dynamic Link holding a list would render as a broken link.
+        {"label": _("Reference Type"), "fieldname": "source_reference_type", "fieldtype": "Data", "width": 110},
+        {"label": _("Reference Name"), "fieldname": "source_reference_name", "fieldtype": "Data", "width": 150},
         {"label": _("Source Customer"), "fieldname": "source_customer", "fieldtype": "Data", "width": 130},
         {"label": _("Customer Payment Date"), "fieldname": "customer_payment_date", "fieldtype": "Date", "width": 130},
         {"label": _("Total Customer Payment"), "fieldname": "total_customer_payment", "fieldtype": "Currency", "width": 140},
@@ -41,11 +47,43 @@ def get_columns():
 CUSTOMER_PAYMENT_FIELDS = [
     "source_reference_no",
     "custom_source_of_funds",
+    "source_reference_type",
+    "source_reference_name",
     "source_customer",
     "customer_payment_date",
     "total_customer_payment",
     "balance_remaining",
 ]
+
+
+def _references_by_payment_entry(pe_names):
+    """{Payment Entry: (types, names)} from its own Payment Entry Reference rows --
+    what the customer's money was booked against.
+
+    Distinct from the "Against" column, which is the supplier Payment Request's
+    reference, not the incoming customer payment's.
+
+    One query for the whole report rather than one per row: the report already groups
+    many Payment Requests under a single source, so a per-row lookup would repeat the
+    same read for every row in the group. Several allocations are joined with ", " --
+    ERPNext allows one payment to be split across documents even though this site has
+    none today."""
+    if not pe_names:
+        return {}
+    rows = frappe.get_all(
+        "Payment Entry Reference",
+        filters={"parent": ["in", list(pe_names)], "parenttype": "Payment Entry"},
+        fields=["parent", "reference_doctype", "reference_name"],
+        order_by="parent, idx",
+    )
+    grouped = {}
+    for r in rows:
+        types, names = grouped.setdefault(r.parent, ([], []))
+        if r.reference_doctype and r.reference_doctype not in types:
+            types.append(r.reference_doctype)
+        if r.reference_name:
+            names.append(r.reference_name)
+    return {pe: (", ".join(t), ", ".join(n)) for pe, (t, n) in grouped.items()}
 
 
 def get_data(filters):
@@ -103,10 +141,17 @@ def get_data(filters):
         as_dict=True,
     )
 
+    refs_by_pe = _references_by_payment_entry(
+        {r.custom_source_of_funds for r in rows if r.custom_source_of_funds}
+    )
+
     for row in rows:
         total = row.total_customer_payment or 0
         used = already_used_by_source.get(row.custom_source_of_funds, 0)
         row["balance_remaining"] = total - used
+        ref_type, ref_name = refs_by_pe.get(row.custom_source_of_funds, ("", ""))
+        row["source_reference_type"] = ref_type
+        row["source_reference_name"] = ref_name
 
     group_by_customer_payment = filters.get("group_by_customer_payment")
     if group_by_customer_payment is None:

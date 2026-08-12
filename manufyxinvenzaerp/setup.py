@@ -1272,7 +1272,7 @@ def after_install():
     # create_job_card_client_script()
     create_stock_entry_custom_fields()
     create_stock_entry_client_script()
-    create_subcontracting_order_translation()
+    create_doctype_label_translations()
     remove_sco_purchase_order_mandatory()
     hide_sco_job_worker_warehouse()
     make_sco_job_worker_conditional()
@@ -1330,7 +1330,7 @@ def after_migrate():
     # create_job_card_client_script()
     create_stock_entry_custom_fields()
     create_stock_entry_client_script()
-    create_subcontracting_order_translation()
+    create_doctype_label_translations()
     remove_sco_purchase_order_mandatory()
     hide_sco_job_worker_warehouse()
     make_sco_job_worker_conditional()
@@ -3282,28 +3282,41 @@ def create_stock_entry_client_script():
 # Subcontracting Management — Subcontracting Order custom fields + client scripts
 # ─────────────────────────────────────────────────────────────────────────────
 
-def create_subcontracting_order_translation():
-    """Display-only relabel: "Subcontracting Order" renders as "Job work order"
-    everywhere Frappe wraps a string in __() (breadcrumbs, form/list titles,
-    sidebar, print formats, global search, etc.) via the standard Translation
-    doctype -- the doctype itself, its DocType name, links, and all backend
-    code are untouched and stay "Subcontracting Order". This is the lightweight
-    interim fix for client change request Phase 0.2 (the real doctype rename is
-    deferred indefinitely -- see client_change_request_progress.md)."""
-    existing = frappe.db.get_value(
-        "Translation", {"source_text": "Subcontracting Order", "language": "en"}, "name"
-    )
-    if existing:
-        frappe.db.set_value("Translation", existing, "translated_text", "Job work order")
-    else:
-        frappe.get_doc(
-            {
-                "doctype": "Translation",
-                "language": "en",
-                "source_text": "Subcontracting Order",
-                "translated_text": "Job work order",
-            }
-        ).insert(ignore_permissions=True)
+# Display-only doctype relabels, applied through the standard Translation doctype.
+# Each renders everywhere Frappe wraps a string in __() -- breadcrumbs, form and list
+# titles, the sidebar, print formats, global search -- while the doctype itself, its
+# DocType name, every Link pointing at it and all backend code stay untouched.
+#
+# This is deliberately NOT a rename. Renaming Supplier Operation Entry would mean the
+# SQL table, ~125 code references across 26 files, its child tables and the naming
+# series on every existing record; a translation buys the same user-visible result for
+# none of that risk (client change request T9).
+DOCTYPE_LABEL_TRANSLATIONS = {
+    "Subcontracting Order": "Job work order",
+    "Supplier Operation Entry": "Operation Entry",
+}
+
+
+def create_doctype_label_translations():
+    """Create/refresh the display-only relabels in DOCTYPE_LABEL_TRANSLATIONS.
+
+    Idempotent: an existing row for the same source text is updated rather than
+    duplicated, so this is safe to re-run on every migrate."""
+    for source_text, translated_text in DOCTYPE_LABEL_TRANSLATIONS.items():
+        existing = frappe.db.get_value(
+            "Translation", {"source_text": source_text, "language": "en"}, "name"
+        )
+        if existing:
+            frappe.db.set_value("Translation", existing, "translated_text", translated_text)
+        else:
+            frappe.get_doc(
+                {
+                    "doctype": "Translation",
+                    "language": "en",
+                    "source_text": source_text,
+                    "translated_text": translated_text,
+                }
+            ).insert(ignore_permissions=True)
     frappe.db.commit()
 
 

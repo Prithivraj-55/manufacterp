@@ -369,6 +369,14 @@ def get_mip_pending_items(mip_name):
         row["round_up_excess_kg"] = 0.0
         row["round_up_excess_pieces"] = 0.0
 
+    # Keep every row of one item together, batches in a stable order within it.
+    # Rows are collected per Material Planning and then per source table, so an item
+    # drawn from two plans (or from both Material Mapping and Exact Match) came out
+    # scattered down the list. Two batches of the same item are two legitimate lines --
+    # a transfer has to move a specific batch -- but split apart by unrelated rows they
+    # read as a duplicate with the wrong total, which is exactly how this was reported.
+    result.sort(key=lambda r: (r["item_code"], r.get("batch_no") or ""))
+
     return result
 
 
