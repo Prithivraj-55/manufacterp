@@ -773,15 +773,51 @@ def _sync_excess_return_from_raw_materials(mip):
         target.qty = row.excess_calc_qty
 
 
+def _cut_sheet_sheet_qty(row):
+    """Weight of the WHOLE sheet this cut plan is taken from, before any cutting.
+
+    Read from the row's own pre-cut dimensions when it has them, otherwise from the
+    batch as it stands. That order matters: once a transfer has resized the batch down
+    to its Balance, the batch's current dimensions describe the remnant, not the sheet,
+    and using them would make an already-cut row look like a different plan."""
+    if flt(row.precut_length) or flt(row.precut_width):
+        length, width, sec_qty = row.precut_length, row.precut_width, row.precut_sec_qty
+    elif row.batch_no:
+        batch = frappe.db.get_value(
+            "Batch", row.batch_no,
+            ["custom_length", "custom_width", "custom_sec_qty"], as_dict=True,
+        ) or {}
+        length = batch.get("custom_length")
+        width = batch.get("custom_width")
+        sec_qty = batch.get("custom_sec_qty")
+    else:
+        return 0.0
+
+    qty = calculate_qty(
+        row.parent_item_group, length, width, row.thickness, row.unit_weight, sec_qty,
+    )
+    return flt(qty, 3) if qty else 0.0
+
+
 def _sync_cut_sheet_calc(mip):
-    """For every raw_materials row flagged Cut Sheet, recompute To Use Calc Qty
-    (W1 -- the qty actually transferred) and Balance Calc Qty (W2 -- what the
-    same batch's own dimensions get resized to once the transfer submits), both
-    via the same shared Structurals/Plates formula as everywhere else in this
-    app (client change request Phase 5.2). Purely a display/preview recompute
-    here -- the actual transferred qty override and post-submit batch resize
-    happen in material_issue_plan_transfer.py / stock_entry.py, reading these
-    same Cut Sheet fields directly off this row at the time a transfer is made."""
+    """For every raw_materials row flagged Cut Sheet, recompute To Use Calc Qty (W1 --
+    the qty actually transferred) and Balance Calc Qty (W2 -- what stays on the batch).
+
+    W1 comes from the To Use dimensions via the shared Structurals/Plates formula, as
+    everywhere else in this app. **W2 is derived, not measured**: it is whatever the
+    sheet had left after W1 came off it. Both halves used to be calculated from their
+    own dimensions independently, which let them disagree with the sheet they came from
+    -- the stock entry consumes W1, so the batch was left holding (sheet - W1) while the
+    Balance fields claimed something else, and the batch's available qty did not match
+    its own W2 details. Deriving it means the two cannot drift apart.
+
+    The Balance DIMENSIONS stay user-entered: they describe the shape of the off-cut,
+    which the system cannot infer (a plate can be cut along either edge). They are still
+    checked against the derived weight -- see _warn_cut_sheet_mismatch.
+
+    Purely a display/preview recompute here; the transferred qty override and the
+    post-submit batch resize happen in material_issue_plan_transfer.py / stock_entry.py,
+    reading these same fields off the row when a transfer is made."""
     for row in (mip.raw_materials or []):
         if not row.cut_sheet:
             continue
@@ -792,28 +828,26 @@ def _sync_cut_sheet_calc(mip):
         )
         row.use_calc_qty = flt(use_qty, 3) if use_qty is not None else 0
 
-        balance_qty = calculate_qty(
-            row.parent_item_group, row.balance_length, row.balance_width,
-            row.thickness, row.unit_weight, row.balance_sec_qty,
-        )
-        row.balance_calc_qty = flt(balance_qty, 3) if balance_qty is not None else 0
+        sheet_qty = _cut_sheet_sheet_qty(row)
+        # Never negative: cutting more than the sheet holds is caught by the reservation
+        # checks, and a negative Balance would resize the batch into nonsense.
+        row.balance_calc_qty = flt(max(sheet_qty - flt(row.use_calc_qty), 0.0), 3)
 
     _warn_cut_sheet_mismatch(mip)
 
 
 def _warn_cut_sheet_mismatch(mip):
-    """Flag a Cut Sheet whose two halves do not add back up to the sheet they came from.
+    """Flag a Balance whose DIMENSIONS do not describe the weight actually left over.
 
-    Cutting always loses a little to the saw, and the client explicitly expects Length
-    and Width to be adjusted during the process -- so this can never block a save. It
-    exists to catch the typo: entering a Balance of 5 Kg where the geometry says 11.7
-    silently resizes the batch to a piece that does not exist, and nothing else in the
-    chain would notice. The allowance is Cut Sheet Tolerance (%) in Manufyxinvenza
-    Settings, so it can be tightened to 0 or loosened without a code change.
+    Balance Calc Qty is derived now (sheet - To Use), so the two halves always add back
+    up to the sheet and there is nothing to check there any more. What can still be
+    wrong is the shape: the off-cut's dimensions are typed by hand, and entering a
+    Balance measuring 5 Kg where 11.7 Kg is really left resizes the batch to a piece
+    that does not exist. Nothing else in the chain would notice.
 
-    Measured against the sheet's PRE-CUT size where that is known: once a transfer has
-    resized the batch to the Balance, comparing against its current dimensions would
-    accuse every already-cut row of being wrong."""
+    Never blocks a save. Cutting loses a little to the saw and the client expects Length
+    and Width to be adjusted during the process, so the allowance is Cut Sheet Tolerance
+    (%) in Manufyxinvenza Settings -- tighten to 0 or loosen it without a code change."""
     tolerance = flt(frappe.db.get_single_value(
         "Manufyxinvenza Settings", "cut_sheet_tolerance_percent"
     ))
@@ -822,40 +856,36 @@ def _warn_cut_sheet_mismatch(mip):
     for row in (mip.raw_materials or []):
         if not row.cut_sheet or not row.batch_no:
             continue
-        cut_total = flt(row.use_calc_qty) + flt(row.balance_calc_qty)
-        if cut_total <= 0:
+
+        derived = flt(row.balance_calc_qty)
+        if derived <= 0:
             continue
 
-        if flt(row.precut_length) or flt(row.precut_width):
-            length, width, sec_qty = row.precut_length, row.precut_width, row.precut_sec_qty
-        else:
-            batch = frappe.db.get_value(
-                "Batch", row.batch_no,
-                ["custom_length", "custom_width", "custom_sec_qty"], as_dict=True,
-            ) or {}
-            length = batch.get("custom_length")
-            width = batch.get("custom_width")
-            sec_qty = batch.get("custom_sec_qty")
-
-        sheet_qty = calculate_qty(
-            row.parent_item_group, length, width, row.thickness, row.unit_weight, sec_qty,
+        # What the Balance dimensions, as typed, would actually weigh.
+        measured = calculate_qty(
+            row.parent_item_group, row.balance_length, row.balance_width,
+            row.thickness, row.unit_weight, row.balance_sec_qty,
         )
-        if not sheet_qty:
+        if not measured:
             continue
 
-        gap = abs(cut_total - flt(sheet_qty))
-        if gap > flt(sheet_qty) * tolerance / 100.0:
-            problems.append(_("Row {0} ({1}, batch {2}): cut plan totals {3} Kg but the sheet is {4} Kg — a difference of {5} Kg.")
-                            .format(row.idx, row.item_code, row.batch_no,
-                                    flt(cut_total, 3), flt(sheet_qty, 3), flt(gap, 3)))
+        gap = abs(flt(measured) - derived)
+        if gap > derived * tolerance / 100.0:
+            problems.append(
+                _("Row {0} ({1}, batch {2}): {3} Kg is left after the cut, but the "
+                  "Balance dimensions describe {4} Kg — a difference of {5} Kg.")
+                .format(row.idx, row.item_code, row.batch_no,
+                        derived, flt(measured, 3), flt(gap, 3)))
 
     if problems:
         frappe.msgprint(
             "<br>".join(problems) + "<br><br>" + _(
-                "Check the To Use and Balance dimensions. Some loss to the saw is normal — "
-                "raise Cut Sheet Tolerance (%) in Manufyxinvenza Settings if this is expected."
+                "Balance Calc Qty is what the sheet has left once To Use comes off it, so "
+                "it is not editable. Check the Balance Length/Width/Sec Qty describe that "
+                "off-cut. Some loss to the saw is normal — raise Cut Sheet Tolerance (%) in "
+                "Manufyxinvenza Settings if this is expected."
             ),
-            title=_("Cut Sheet Does Not Add Up"),
+            title=_("Balance Dimensions Do Not Match"),
             indicator="orange",
         )
 

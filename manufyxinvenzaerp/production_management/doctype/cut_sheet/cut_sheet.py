@@ -143,10 +143,15 @@ class CutSheet(Document):
             unit_weight, self.w1_sec_qty,
         ) or 0, 3)
 
-        self.w2_calc_qty = flt(calculate_qty(
-            group, self.w2_length, self.w2_width, self.sheet_thickness,
-            unit_weight, self.w2_sec_qty or 0,
-        ) or 0, 3)
+        # W2 is what the sheet has LEFT once W1 comes off it, not an independent
+        # measurement. Calculating both halves from their own dimensions let them
+        # disagree with the sheet they came from: the stock entry consumes W1, so the
+        # batch is left holding (sheet - W1) while W2 claimed something else, and the
+        # batch's available qty stopped matching its own W2 details. Deriving it means
+        # they cannot drift apart. The W2 DIMENSIONS stay entered by hand -- they
+        # describe the off-cut's shape, which cannot be inferred (a plate can be cut
+        # along either edge) -- and are what gets written onto the batch.
+        self.w2_calc_qty = flt(max(self.sheet_qty - self.w1_total_qty, 0.0), 3)
 
         self.allocated_sec_qty = flt(sum(flt(a.sec_qty) for a in (self.allocations or [])), 3)
         self.allocated_qty = flt(sum(flt(a.qty) for a in (self.allocations or [])), 3)
