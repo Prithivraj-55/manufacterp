@@ -95,6 +95,43 @@ def get_data(filters):
 	for d in drawing_rows:
 		drawings_by_soe.setdefault(d.parent, []).append(d)
 
+	# Drawing-level weights, keyed (subcontracting_order, drawing).
+	#
+	# Not read from the SOE Drawing Detail rows already fetched above: their
+	# transferred_weight_kg is only ever filled on sequence 1, so every later operation
+	# would report 0 Kg transferred for a drawing whose material had in fact shipped.
+	#
+	# Preference is the linked Material Issue Plan's own drawing rows -- that is where
+	# transferred weight is actually maintained (refresh_weight_summary); the
+	# Subcontracting Order's copy of the same table carries customer/planned/excess but
+	# leaves transferred at 0. The SCO rows are loaded first as a fallback so a plan with
+	# no Material Issue Plan yet still reports the three weights it does know.
+	weights = {}
+	sco_names = list({s.subcontracting_order for s in soes if s.subcontracting_order})
+	if sco_names:
+		mip_to_sco = {
+			m.name: m.subcontracting_order
+			for m in frappe.get_all(
+				"Material Issue Plan",
+				filters={"subcontracting_order": ["in", sco_names]},
+				fields=["name", "subcontracting_order"],
+			)
+		}
+		sources = [("Subcontracting Order", {s: s for s in sco_names})]
+		if mip_to_sco:
+			sources.append(("Material Issue Plan", mip_to_sco))
+
+		for parenttype, parent_to_sco in sources:
+			for w in frappe.get_all(
+				"SCO Drawing Item",
+				filters={"parent": ["in", list(parent_to_sco)], "parenttype": parenttype},
+				fields=["parent", "drawing", "customer_weight_kg", "total_weight_kg",
+						"transferred_weight_kg", "excess_weight_kg"],
+			):
+				if not w.drawing:
+					continue
+				weights[(parent_to_sco[w.parent], w.drawing)] = w
+
 	so_names = list({d.sales_order for d in drawing_rows if d.sales_order})
 	so_map = {}
 	if so_names:
@@ -115,6 +152,7 @@ def get_data(filters):
 			if filters.get("sales_order") and d.get("sales_order") != filters["sales_order"]:
 				continue
 			so = so_map.get(d.get("sales_order"), frappe._dict())
+			w = weights.get((s.subcontracting_order, d.get("drawing")), frappe._dict())
 			data.append({
 				"production_plan": s.production_plan,
 				"project": pp.get("project") or so.get("project") or "",
@@ -133,6 +171,10 @@ def get_data(filters):
 				"inspection_status": s.custom_inspection_status or "",
 				"inspection_count": call_counts.get(s.name, 0),
 				"operation_gap_days": gap_days.get(s.name, 0),
+				"customer_weight_kg": flt(w.get("customer_weight_kg")),
+				"planned_weight_kg": flt(w.get("total_weight_kg")),
+				"transferred_weight_kg": flt(w.get("transferred_weight_kg")),
+				"excess_weight_kg": flt(w.get("excess_weight_kg")),
 				"consumed_kg": flt(s.total_consumed_kg),
 				"completed_nos": flt(d.get("completed_qty_nos") or s.total_completed_nos),
 				"creation_date": getdate(s.creation) if s.creation else None,
@@ -178,6 +220,12 @@ def get_columns():
 		{"label": _("Inspection Status"), "fieldname": "inspection_status", "fieldtype": "Data", "width": 110},
 		{"label": _("Inspection Count"), "fieldname": "inspection_count", "fieldtype": "Int", "width": 100},
 		{"label": _("Operation Gap (Days, approx.)"), "fieldname": "operation_gap_days", "fieldtype": "Int", "width": 150},
+		# Drawing-level weights -- the same figures on every operation row for a given
+		# drawing, since they describe the drawing rather than the operation.
+		{"label": _("Customer Weight (Kg)"), "fieldname": "customer_weight_kg", "fieldtype": "Float", "width": 130},
+		{"label": _("Planned Weight (Kg)"), "fieldname": "planned_weight_kg", "fieldtype": "Float", "width": 130},
+		{"label": _("Transferred Weight (Kg)"), "fieldname": "transferred_weight_kg", "fieldtype": "Float", "width": 145},
+		{"label": _("Excess Weight (Kg)"), "fieldname": "excess_weight_kg", "fieldtype": "Float", "width": 125},
 		{"label": _("Consumed (Kg)"), "fieldname": "consumed_kg", "fieldtype": "Float", "width": 110},
 		{"label": _("Completed (Nos)"), "fieldname": "completed_nos", "fieldtype": "Float", "width": 110},
 		{"label": _("Created On"), "fieldname": "creation_date", "fieldtype": "Date", "width": 100},

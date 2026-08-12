@@ -542,23 +542,31 @@ function _add_transfer_buttons(frm) {
 	}, __("Transfer"));
 
 	if (frm.doc.cnc_warehouse) {
-		frm.add_custom_button(__("To CNC Warehouse"), function() {
-			_check_transfer_readiness(frm, function() {
-				frappe.call({
-					method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.get_mip_pending_items",
-					args: { mip_name: frm.doc.name },
-					freeze: true,
-					freeze_message: __("Loading pending materials…"),
-					callback(r) { _show_mip_transfer_popup(frm, r.message || [], "cnc"); },
-				});
-			});
-		}, __("Transfer"));
-
+		// One call answers both buttons. "To CNC Warehouse" is shown only while CNC
+		// rows are still waiting to move there -- it used to appear whenever a CNC
+		// warehouse was merely set, so it lingered after everything had gone and could
+		// only open an empty popup.
 		frappe.call({
-			method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.has_cnc_stock",
+			method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.get_mip_cnc_button_state",
 			args: { mip_name: frm.doc.name },
 			callback(r) {
-				if (r.message) {
+				var state = r.message || {};
+
+				if (state.show_to_cnc) {
+					frm.add_custom_button(__("To CNC Warehouse"), function() {
+						_check_transfer_readiness(frm, function() {
+							frappe.call({
+								method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.get_mip_pending_items",
+								args: { mip_name: frm.doc.name },
+								freeze: true,
+								freeze_message: __("Loading pending materials…"),
+								callback(r) { _show_mip_transfer_popup(frm, r.message || [], "cnc"); },
+							});
+						});
+					}, __("Transfer"));
+				}
+
+				if (state.show_cnc_forward) {
 					// Second leg, and a separate Stock Entry by design: only material
 					// that has physically arrived at CNC can be forwarded, and it can
 					// be released in stages as machining finishes, so this opens the

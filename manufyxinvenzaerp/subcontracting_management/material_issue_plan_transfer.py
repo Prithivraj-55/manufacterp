@@ -578,6 +578,48 @@ def has_cnc_stock(mip_name):
     return bool(result)
 
 
+@frappe.whitelist()
+def get_mip_cnc_button_state(mip_name):
+    """Which of the two CNC transfer buttons the form should show.
+
+    {"show_to_cnc": bool, "show_cnc_forward": bool}
+
+    show_to_cnc — is any CNC-flagged row still waiting to go TO the CNC warehouse?
+    "To CNC Warehouse" used to appear whenever a CNC warehouse was merely SET, so it
+    stayed on screen forever, long after every CNC row had moved and its popup could
+    only ever open empty. Deriving it from what is actually pending also makes it
+    self-correcting in the case the client asked about: tick CNC on another Material
+    Planning row, it flows into this plan, that row is pending again, and the button
+    comes back on its own -- no stored state to keep in step.
+
+    show_cnc_forward — is anything sitting AT the CNC warehouse RIGHT NOW to forward
+    onward? This used to come from has_cnc_stock, which answers a historical question
+    ("has anything ever been sent to CNC?"), so the button stayed on screen after the
+    last batch had been forwarded and its popup could only report "Nothing at CNC".
+    Asking what is actually pending fixes the same complaint on both buttons.
+
+    Both are read fresh on every form refresh, so neither can go stale."""
+    mip = frappe.get_cached_doc("Material Issue Plan", mip_name)
+    if not mip.cnc_warehouse:
+        return {"show_to_cnc": False, "show_cnc_forward": False}
+
+    def _any(fn, predicate=bool):
+        # A plan that is not transfer-ready yet (no linked order, no source warehouse)
+        # raises here. Show the button in that case so the user still gets the readiness
+        # message explaining what is missing, rather than a silently absent button.
+        try:
+            return any(predicate(row) for row in fn(mip_name))
+        except Exception:
+            return True
+
+    # Same sources the two popups themselves filter on, so each button appears exactly
+    # when its popup would have something to offer.
+    return {
+        "show_to_cnc": _any(get_mip_pending_items, lambda r: r.get("cnc_process")),
+        "show_cnc_forward": _any(get_mip_cnc_pending_items),
+    }
+
+
 def _get_mip_transfer_stock_entry_names(mip):
     """Names of submitted Stock Entries that physically transferred material for this
     MIP's SCO/WO (Send to Subcontractor / Material Transfer, tagged via
