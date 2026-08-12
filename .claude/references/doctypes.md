@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-08-12 23:32:34_
+_Generated: 2026-08-13 02:12:38_
 
 ## drawing
 
@@ -483,6 +483,17 @@ _Generated: 2026-08-12 23:32:34_
 
 ---
 
+## material_issue_plan_consolidate_item
+
+| Key | Value |
+|-----|-------|
+| Module | subcontracting_management |
+| Path | `subcontracting_management/doctype/material_issue_plan_consolidate_item` |
+| Controller | `subcontracting_management/doctype/material_issue_plan_consolidate_item/material_issue_plan_consolidate_item.py` |
+| Client script | none |
+
+---
+
 ## material_issue_plan
 
 | Key | Value |
@@ -509,6 +520,8 @@ _Generated: 2026-08-12 23:32:34_
 | ` _sync_excess_availability` | no |
 | ` _sync_transferred_qty` | no |
 | ` key` | no |
+| ` _sync_consolidate_items` | no |
+| ` _batch_stock_in` | no |
 | ` _cut_sheet_seed` | no |
 | ` _carry_forward_editable_fields` | no |
 | ` _lookup_drawing_planned_weight` | no |
@@ -517,6 +530,7 @@ _Generated: 2026-08-12 23:32:34_
 | ` _assert_claimed_excess_unchanged` | no |
 | ` unlink_excess_claim` | no |
 | ` _sync_excess_return_from_raw_materials` | no |
+| ` _cut_sheet_sheet_qty` | no |
 | ` _sync_cut_sheet_calc` | no |
 | ` _warn_cut_sheet_mismatch` | no |
 | ` _sync_batch_remarks` | no |
