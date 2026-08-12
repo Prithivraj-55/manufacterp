@@ -17,6 +17,16 @@
 // leave it out).
 
 function manufyx_render_manual(page, opts) {
+	try {
+		_mfx_render_manual_inner(page, opts);
+	} catch (e) {
+		// Same reasoning as the tree renderer -- see _mfx_render_error.
+		_mfx_render_error(page, e);
+		throw e;
+	}
+}
+
+function _mfx_render_manual_inner(page, opts) {
 	_mfx_inject_styles();
 
 	let sections = opts.sections || [];
@@ -69,6 +79,37 @@ function manufyx_render_manual(page, opts) {
 // to be looked something up in, not read start to finish like the walkthroughs.
 
 function manufyx_render_manual_tree(page, opts) {
+	try {
+		_mfx_render_manual_tree_inner(page, opts);
+	} catch (e) {
+		// A manual that fails renders BLANK otherwise -- Frappe swallows the throw
+		// and the user is left with an empty white page and no clue why. Put the
+		// error where they will actually see it, and re-throw so it still reaches
+		// the console for anyone with DevTools open.
+		_mfx_render_error(page, e);
+		throw e;
+	}
+}
+
+function _mfx_render_error(page, e) {
+	let msg = (e && (e.stack || e.message)) || String(e);
+	try {
+		page.main.html(
+			'<div style="margin:24px;padding:20px;border:1px solid #C6462F;border-radius:10px;' +
+				'background:#FBEAE6;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Arial,sans-serif">' +
+				'<div style="font-weight:700;color:#C6462F;margin-bottom:8px">' +
+				__("This manual page failed to render") +
+				"</div>" +
+				'<pre style="white-space:pre-wrap;font-size:12px;color:#4A4550;margin:0">' +
+				frappe.utils.escape_html(msg) +
+				"</pre></div>"
+		);
+	} catch (_) {
+		// page.main itself is unusable -- nothing more we can do here.
+	}
+}
+
+function _mfx_render_manual_tree_inner(page, opts) {
 	_mfx_inject_styles();
 	_mfx_inject_tree_styles();
 
@@ -746,3 +787,13 @@ function _mfx_inject_tree_styles() {
 	document.head.appendChild(style);
 
 }
+
+// Publish the two entry points explicitly.
+//
+// Loaded as a plain <script> these are already globals, so this is redundant --
+// but this file is now pulled in through manufyxinvenzaerp.bundle.js, and esbuild
+// wraps a bundle's contents in its own scope, where a top-level `function` is NOT
+// a global and every manual page would fail its "renderer not loaded" guard.
+// Assigning to window works identically under both loading modes.
+window.manufyx_render_manual = manufyx_render_manual;
+window.manufyx_render_manual_tree = manufyx_render_manual_tree;

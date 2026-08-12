@@ -37,9 +37,53 @@ QTY_EPSILON = 0.001
 class CutSheet(Document):
     def validate(self):
         self._fetch_batch_dimensions()
+        self._sync_allocations_from_rows()
         self._calculate()
         self._validate_allocations_fit()
         self._set_status()
+
+    def _sync_allocations_from_rows(self):
+        """Rebuild the Allocations table from the Material Mapping rows actually
+        holding pieces of this sheet.
+
+        The rows are the truth, not this table. A batch can be put on a Material
+        Mapping row by hand through Update Batch, which never goes near
+        allocate_cut_sheet -- so a table maintained only by that one path missed
+        those claims entirely and the sheet reported 0 allocated while a job was
+        genuinely holding pieces. Deriving it here means the figures are right no
+        matter how the batch got onto the row, and the same query backs the
+        availability check in material_planning._sync_cut_sheet_flag, so the two
+        can no longer disagree.
+
+        Transfer state (stock_entry / is_consumed / allocated_on) is carried over
+        per source row, since that is this table's own bookkeeping and cannot be
+        recovered from the mapping row."""
+        if not self.name or str(self.name).startswith("new-"):
+            return
+
+        previous = {a.source_row: a for a in (self.allocations or []) if a.source_row}
+
+        claims = frappe.get_all(
+            "Material Planning Material Mapping",
+            filters={"cut_sheet_ref": self.name, "is_reserved": 1},
+            fields=["name", "parent", "duno_mark_no", "batch_sec_qty", "batch_calc_qty"],
+            order_by="parent asc, idx asc",
+        )
+
+        self.allocations = []
+        for c in claims:
+            old = previous.get(c.name)
+            self.append("allocations", {
+                "material_planning": c.parent,
+                "source_table": "Material Planning Material Mapping",
+                "source_row": c.name,
+                "duno_mark_no": c.duno_mark_no or "",
+                "sec_qty": flt(c.batch_sec_qty),
+                "qty": flt(c.batch_calc_qty),
+                "allocated_on": (old.allocated_on if old else None) or now(),
+                "stock_entry": old.stock_entry if old else None,
+                "is_consumed": old.is_consumed if old else 0,
+            })
 
     def on_trash(self):
         """A sheet other jobs are drawing from cannot simply vanish -- their rows
@@ -350,33 +394,55 @@ def allocate_cut_sheet(mp_name, cut_sheet_name, sec_qty, row_name=None, unavaila
         update_modified=False,
     )
 
-    cs.append("allocations", {
-        "material_planning": mp_name,
-        "source_table": "Material Planning Material Mapping",
-        "source_row": row.name,
-        "duno_mark_no": row.duno_mark_no or "",
-        "sec_qty": sec_qty,
-        "qty": qty,
-        "allocated_on": now(),
-    })
-    cs.save(ignore_permissions=True)
+    # No manual append: the row is reserved in the database by now, and the sheet
+    # derives its Allocations from the rows holding it (_sync_allocations_from_rows).
+    # Appending here as well would double-count this claim.
+    refresh_cut_sheet_allocations(cs.name)
     frappe.db.commit()
     return {"row_name": row.name, "cut_sheet": cs.name, "sec_qty": sec_qty, "qty": qty}
 
 
+def refresh_cut_sheet_allocations(cut_sheet_name):
+    """Re-derive a sheet's Allocations table and its Allocated/Available figures.
+
+    Called whenever a Material Mapping row starts or stops holding pieces, so the
+    sheet is correct immediately rather than only after someone opens and saves it.
+    A plain save is enough -- validate() does the rebuild -- but it is wrapped here
+    so callers do not need to know that, and so a failure to refresh can never take
+    down the reservation that triggered it."""
+    if not cut_sheet_name or not frappe.db.exists("Cut Sheet", cut_sheet_name):
+        return
+    try:
+        frappe.get_doc("Cut Sheet", cut_sheet_name).save(ignore_permissions=True)
+    except Exception:
+        frappe.log_error(
+            title="Cut Sheet allocation refresh failed",
+            message=frappe.get_traceback(),
+        )
+
+
 def release_cut_sheet_allocation(row):
-    """Hand a row's pieces back to its Cut Sheet. Caller saves the Material Planning."""
+    """Hand a row's pieces back to its Cut Sheet. Caller saves the Material Planning.
+
+    The row's own markers are cleared in the database FIRST, because the sheet now
+    rebuilds its Allocations from whatever rows still point at it -- refreshing
+    before the row was released would simply find it again and put it straight
+    back."""
     if not row.get("cut_sheet_ref"):
         return
     cs_name = row.cut_sheet_ref
-    if frappe.db.exists("Cut Sheet", cs_name):
-        cs = frappe.get_doc("Cut Sheet", cs_name)
-        keep = [a for a in (cs.allocations or []) if a.source_row != row.name]
-        if len(keep) != len(cs.allocations or []):
-            cs.allocations = keep
-            cs.save(ignore_permissions=True)
+
+    if row.name and not str(row.name).startswith("new-"):
+        frappe.db.set_value(
+            "Material Planning Material Mapping", row.name,
+            {"cut_sheet": 0, "cut_sheet_ref": "", "cut_sheet_avail_sec_qty": 0},
+            update_modified=False,
+        )
     row.cut_sheet = 0
     row.cut_sheet_ref = ""
+    row.cut_sheet_avail_sec_qty = 0
+
+    refresh_cut_sheet_allocations(cs_name)
 
 
 # ── W2 write-back ─────────────────────────────────────────────────────────────

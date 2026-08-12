@@ -48,12 +48,11 @@ fixtures = ["Custom Field", "Property Setter"]
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-app_include_js = [
-	"/assets/manufyxinvenzaerp/js/item.js",
-	# Shared layout/scrollspy/CSS for the manual pages (Material Planning, Material
-	# Issue Plan). Each page supplies only its own content.
-	"/assets/manufyxinvenzaerp/js/manual_renderer.js",
-]
+# One content-hashed bundle rather than a list of bare /assets/... paths, so an
+# edit to any of these files reaches browsers that cached the previous copy --
+# see the header comment in public/js/manufyxinvenzaerp.bundle.js for what went
+# wrong before. Add new app-wide scripts by importing them there, not here.
+app_include_js = ["manufyxinvenzaerp.bundle.js"]
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}

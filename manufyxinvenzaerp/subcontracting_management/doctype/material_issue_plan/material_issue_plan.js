@@ -22,10 +22,13 @@ frappe.ui.form.on("Material Issue Plan", {
 			filters: { production_plan: frm.doc.production_plan || "" },
 		}));
 		// Scope every warehouse field to the document's own Company — previously
-		// unfiltered, showing every warehouse across every company.
+		// unfiltered, showing every warehouse across every company. Group
+		// warehouses are excluded too: they are only tree nodes (e.g. "All
+		// Warehouses"), stock can never sit in one, so picking one here would set
+		// a warehouse no transfer could ever move material into or out of.
 		["source_warehouse", "supplier_warehouse", "cnc_warehouse", "excess_return_warehouse"].forEach((fieldname) => {
 			frm.set_query(fieldname, () => ({
-				filters: { company: frm.doc.company || "" },
+				filters: { company: frm.doc.company || "", is_group: 0 },
 			}));
 		});
 		_add_view_all_raw_materials_button(frm);
@@ -33,8 +36,8 @@ frappe.ui.form.on("Material Issue Plan", {
 		// The Manual button is removed at the client's request in favour of one
 		// doctype-wise ERP Manual page (production_management/page/erp_manual),
 		// added to a Workspace separately rather than linked from here. The
-		// underlying material-issue-plan-manual page is not deleted, just
-		// unlinked -- still reachable by direct URL.
+		// per-doctype material-issue-plan-manual page it used to open has since
+		// been deleted outright -- all manual content now lives in ERP Manual.
 		_add_transfer_buttons(frm);
 		_add_pdf_button(frm);
 		_render_excess_action_btn(frm);
@@ -890,6 +893,10 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 						indicator: "orange",
 					}, 6);
 				}
+				// The numbers on screen are no longer the ones this popup opened
+				// with, so the button says what actually happens next: stock is
+				// re-checked server-side before any Stock Entry is created.
+				_mark_sec_nos_edited();
 			},
 		});
 	});
@@ -981,6 +988,53 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 				frappe.msgprint(__("Please select at least one item."));
 				return;
 			}
+
+			// Rounding Sec Nos up to whole pieces is expected -- it is the whole
+			// point of this popup -- but it means issuing MORE than the plan
+			// reserved, and that surplus comes back as excess. Say so plainly and
+			// get a confirmation, rather than letting extra steel leave the rack on
+			// the strength of a number the user may have typed without realising
+			// what it implied.
+			var over = selected.filter(function(s) {
+				return flt(s.qty) > flt(s.planned_qty) + 0.001;
+			});
+			if (!over.length) {
+				_do_transfer(selected);
+				return;
+			}
+
+			var total_extra = 0;
+			var rows = over.map(function(s) {
+				var extra = flt(s.qty) - flt(s.planned_qty);
+				total_extra += extra;
+				return "<tr>"
+					+ "<td style='padding:4px 10px 4px 0'>" + frappe.utils.escape_html(s.item_code) + "</td>"
+					+ "<td style='padding:4px 10px 4px 0;color:#888'>" + frappe.utils.escape_html(s.batch_no || "-") + "</td>"
+					+ "<td style='padding:4px 10px 4px 0;text-align:right'>" + format_number(flt(s.planned_qty), null, 3) + "</td>"
+					+ "<td style='padding:4px 10px 4px 0;text-align:right'>" + format_number(flt(s.qty), null, 3) + "</td>"
+					+ "<td style='padding:4px 0;text-align:right;color:#e8590c;font-weight:600'>+"
+					+ format_number(extra, null, 3) + "</td></tr>";
+			}).join("");
+
+			frappe.confirm(
+				__("These lines are being issued above what Material Planning reserved:")
+				+ "<div style='overflow-x:auto;margin:10px 0'><table style='font-size:12px;border-collapse:collapse'>"
+				+ "<thead><tr style='border-bottom:1px solid #ddd'>"
+				+ "<th style='text-align:left;padding:4px 10px 4px 0'>" + __("Item") + "</th>"
+				+ "<th style='text-align:left;padding:4px 10px 4px 0'>" + __("Batch") + "</th>"
+				+ "<th style='text-align:right;padding:4px 10px 4px 0'>" + __("Planned") + "</th>"
+				+ "<th style='text-align:right;padding:4px 10px 4px 0'>" + __("Transferring") + "</th>"
+				+ "<th style='text-align:right;padding:4px 0'>" + __("Difference") + "</th>"
+				+ "</tr></thead><tbody>" + rows + "</tbody></table></div>"
+				+ __("The <b>{0} Kg</b> difference is recorded as <b>excess to return</b> on the Excess Material Items table, so it can be brought back once the job has cut what it needs. Stock is re-checked before anything moves.",
+					[format_number(total_extra, null, 3)]),
+				function() { _do_transfer(selected); }
+			);
+		},
+	});
+
+	function _do_transfer(selected) {
+		{
 			dlg.hide();
 			// The CNC leg draws from the CNC warehouse, not the source warehouse, so
 			// it has its own endpoint and its own pending/validation basis.
@@ -1000,8 +1054,15 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 					}
 				},
 			});
-		},
-	});
+		}
+	}
+
+	function _mark_sec_nos_edited() {
+		if (dlg._sec_edited) return;
+		dlg._sec_edited = true;
+		dlg.set_primary_action(__("Verify and Transfer"), dlg.primary_action);
+	}
+
 	dlg.fields_dict.content.$wrapper.html($content);
 	dlg.show();
 }

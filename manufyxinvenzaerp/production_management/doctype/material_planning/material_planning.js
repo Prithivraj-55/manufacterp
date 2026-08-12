@@ -203,9 +203,9 @@ frappe.ui.form.on("Material Planning", {
 		// Both per-doctype manual buttons (this one and Material Issue Plan's) are
 		// removed at the client's request in favour of one doctype-wise ERP Manual
 		// page (production_management/page/erp_manual), added to a Workspace
-		// separately rather than linked from here. Neither underlying page --
-		// material-planning-manual nor material-planning-case-studies -- is
-		// deleted, just unlinked; both are still reachable by direct URL.
+		// separately rather than linked from here. The pages they used to open --
+		// material-planning-manual and material-planning-case-studies -- have
+		// since been deleted outright; ERP Manual is the only manual now.
 
 		// Always keep the Stock Analysis tab visible regardless of table data
 		frm.set_df_property("tab_stock_analysis", "hidden", 0); // fieldname stays, label changed to "Stock Details"
@@ -1743,10 +1743,17 @@ function _build_consolidate_material_request_dialog(frm, items) {
 
 	items.forEach(function (row, idx) {
 		let qty = flt(row.purchase_kg) || flt(row.required_kg);
+		// Name the item that will actually be ORDERED. With an Alternate Item set,
+		// make_material_request_from_consolidate raises the line for the alternate
+		// and the Kg describes that alternate too -- labelling it with the original
+		// item read as though the wrong thing was about to be bought.
+		let label = row.alternate_item
+			? `${row.alternate_item} | Qty: ${qty.toFixed(3)} Kg  (alternate for ${row.item_code})`
+			: `${row.item_code} — ${row.item_name || ""} | Qty: ${qty.toFixed(3)} Kg`;
 		fields.push({
 			fieldname: "item_" + idx,
 			fieldtype: "Check",
-			label: `${row.item_code} — ${row.item_name || ""} | Qty: ${qty.toFixed(3)} Kg`,
+			label: label,
 			default: 1,
 		});
 	});

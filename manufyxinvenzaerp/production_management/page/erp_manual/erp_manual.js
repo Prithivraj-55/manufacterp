@@ -23,6 +23,21 @@ frappe.pages["erp-manual"].on_page_load = function (wrapper) {
 		single_column: true,
 	});
 
+	// The renderer lives in public/js/manual_renderer.js, pulled in app-wide via
+	// app_include_js. If that asset has not been rebuilt/served, the page would
+	// otherwise fail with a bare ReferenceError and render blank -- say so plainly
+	// instead, because the fix (bench build + a hard refresh) is not guessable from
+	// an empty screen.
+	if (typeof manufyx_render_manual_tree !== "function") {
+		page.main.html(
+			'<div style="margin:24px;padding:20px;border:1px solid #C6462F;border-radius:10px;background:#FBEAE6">' +
+				"<b>" + __("Manual renderer not loaded") + "</b><br>" +
+				__("manufyx_render_manual_tree is undefined — manufyxinvenzaerp.bundle.js did not load. Run <code>bench build --app manufyxinvenzaerp</code> and hard-refresh (Ctrl+Shift+R).") +
+				"</div>"
+		);
+		return;
+	}
+
 	manufyx_render_manual_tree(page, {
 		heading: __("ERP Manual"),
 		intro: __("Doctype by doctype, table by table — pick a category on the left."),
