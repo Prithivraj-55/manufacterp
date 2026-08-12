@@ -103,6 +103,21 @@ def get_data(filters):
         base_conditions.append("pe.party = %(customer)s")
         base_values["customer"] = filters["customer"]
 
+    # Sales Order narrows the wallets in scope to the customer payments booked against
+    # that order, so every supplier payment funded out of them comes through. Sits in
+    # base_conditions with the customer filter, NOT in display_conditions: both select
+    # which sources are in scope, and Balance Remaining has to be computed from all of a
+    # source's Paid requests to stay correct.
+    if filters.get("sales_order"):
+        base_conditions.append(
+            """EXISTS (SELECT 1 FROM `tabPayment Entry Reference` per
+                       WHERE per.parent = pr.custom_source_of_funds
+                         AND per.parenttype = 'Payment Entry'
+                         AND per.reference_doctype = 'Sales Order'
+                         AND per.reference_name = %(sales_order)s)"""
+        )
+        base_values["sales_order"] = filters["sales_order"]
+
     already_used_by_source = {}
     for row in frappe.db.sql(
         f"""
@@ -135,7 +150,7 @@ def get_data(filters):
         FROM `tabPayment Request` pr
         LEFT JOIN `tabPayment Entry` pe ON pe.name = pr.custom_source_of_funds
         WHERE {" AND ".join(display_conditions)}
-        ORDER BY pr.custom_source_of_funds, pr.transaction_date
+        ORDER BY pr.custom_source_of_funds, pr.transaction_date, pr.name
         """,
         display_values,
         as_dict=True,
