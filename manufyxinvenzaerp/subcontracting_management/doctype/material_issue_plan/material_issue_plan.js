@@ -30,7 +30,11 @@ frappe.ui.form.on("Material Issue Plan", {
 		});
 		_add_view_all_raw_materials_button(frm);
 		_add_update_batch_button(frm);
-		_add_manual_button(frm);
+		// The Manual button is removed at the client's request in favour of one
+		// doctype-wise ERP Manual page (production_management/page/erp_manual),
+		// added to a Workspace separately rather than linked from here. The
+		// underlying material-issue-plan-manual page is not deleted, just
+		// unlinked -- still reachable by direct URL.
 		_add_transfer_buttons(frm);
 		_add_pdf_button(frm);
 		_render_excess_action_btn(frm);
@@ -504,14 +508,6 @@ function _show_mip_batch_plan_popup(frm) {
 }
 
 // ── Transfer / CNC buttons ───────────────────────────────────────────────────
-
-function _add_manual_button(frm) {
-	// Mirrors the Material Planning form's Manual button. Kept in its own page
-	// rather than a dialog so it can be read alongside the form.
-	frm.add_custom_button(frappe.utils.icon("book", "xs") + " " + __("Manual"), () => {
-		frappe.set_route("material-issue-plan-manual");
-	});
-}
 
 function _add_transfer_buttons(frm) {
 	if (frm.is_new() || !frm.doc.source_warehouse) return;

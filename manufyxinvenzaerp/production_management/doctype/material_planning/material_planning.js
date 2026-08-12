@@ -200,17 +200,12 @@ frappe.ui.form.on("Material Planning", {
 	},
 
 	refresh(frm) {
-		// End-user walkthrough of every Stock Details table/button, with worked
-		// examples -- kept in its own page (not a dialog) so it's easy to read
-		// alongside the form. Update material_planning_manual.js whenever this
-		// form's fields/buttons change.
-		frm.add_custom_button(frappe.utils.icon("book", "xs") + " " + __("Manual"), () => {
-			frappe.set_route("material-planning-manual");
-		});
-		// "Over all Manual" (the case-by-case walkthrough page) is hidden from this
-		// nav bar at the client's request. The page itself is untouched and still
-		// reachable at /app/material-planning-case-studies -- only the button is
-		// gone, so nothing is lost if it is wanted back.
+		// Both per-doctype manual buttons (this one and Material Issue Plan's) are
+		// removed at the client's request in favour of one doctype-wise ERP Manual
+		// page (production_management/page/erp_manual), added to a Workspace
+		// separately rather than linked from here. Neither underlying page --
+		// material-planning-manual nor material-planning-case-studies -- is
+		// deleted, just unlinked; both are still reachable by direct URL.
 
 		// Always keep the Stock Analysis tab visible regardless of table data
 		frm.set_df_property("tab_stock_analysis", "hidden", 0); // fieldname stays, label changed to "Stock Details"

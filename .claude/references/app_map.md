@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-11 19:40:38_
+_Generated: 2026-08-12 11:31:32_
 
 ## Modules
 
@@ -26,7 +26,7 @@ _Generated: 2026-08-11 19:40:38_
 
 ## Python files
 
-_Total: 209_
+_Total: 210_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -120,6 +120,7 @@ _Total: 209_
 - production_management/inspection.py
 - production_management/job_card.py
 - production_management/manual_release_check.py
+- production_management/page/erp_manual/__init__.py
 - production_management/page/material_planning_case_studies/__init__.py
 - production_management/page/material_planning_manual/__init__.py
 - production_management/production_utils.py
@@ -240,11 +241,12 @@ _Total: 209_
 
 ## JavaScript files
 
-_Total: 24_
+_Total: 25_
 
 - accounts_management/report/customer_fund_usage/customer_fund_usage.js
 - drawing_management/doctype/drawing/drawing.js
 - production_management/doctype/material_planning/material_planning.js
+- production_management/page/erp_manual/erp_manual.js
 - production_management/page/material_planning_case_studies/material_planning_case_studies.js
 - production_management/page/material_planning_manual/material_planning_manual.js
 - production_management/report/cut_sheet_report/cut_sheet_report.js
@@ -269,7 +271,7 @@ _Total: 24_
 
 ## JSON files
 
-_Total: 51_
+_Total: 52_
 
 - accounts_management/report/customer_fund_usage/customer_fund_usage.json
 - drawing_management/doctype/drawing/drawing.json
@@ -303,6 +305,7 @@ _Total: 51_
 - production_management/doctype/production_plan_available_raw_material/production_plan_available_raw_material.json
 - production_management/doctype/storage_location/storage_location.json
 - production_management/doctype/store_location/store_location.json
+- production_management/page/erp_manual/erp_manual.json
 - production_management/page/material_planning_case_studies/material_planning_case_studies.json
 - production_management/page/material_planning_manual/material_planning_manual.json
 - production_management/report/cut_sheet_report/cut_sheet_report.json

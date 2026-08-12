@@ -45,7 +45,125 @@ function manufyx_render_manual(page, opts) {
 		</div>
 	`);
 
-	_mfx_setup_scrollspy(page);
+	_mfx_setup_scrollspy(page, sections);
+}
+
+// ─── Tree manual (ERP Manual — doctype-wise categories, each with its own
+// tables/topics as sub-tabs) ─────────────────────────────────────────────────
+//
+//   manufyx_render_manual_tree(page, {
+//       heading: "...", intro: "...", welcome: {title, body},
+//       categories: [
+//           { id: "material-planning", label: "Material Planning",
+//             children: [ {id, title, kicker, purpose, fields, ...}, ... ] },
+//           ...
+//       ],
+//   });
+//
+// A category with an empty children array is a soft "coming soon" placeholder --
+// it still shows in the tree (so the intended shape is visible) but expanding it
+// shows a one-line note instead of throwing on an empty list.
+//
+// One content pane, one thing shown at a time -- picking a leaf swaps the pane
+// rather than scrolling a single long page, since a doctype-wise manual is meant
+// to be looked something up in, not read start to finish like the walkthroughs.
+
+function manufyx_render_manual_tree(page, opts) {
+	_mfx_inject_styles();
+	_mfx_inject_tree_styles();
+
+	let categories = opts.categories || [];
+
+	page.main.html(`
+		<div class="mpm-root erpm-root">
+			<header class="mpm-hero">
+				<h1>${frappe.utils.escape_html(opts.heading || "")}</h1>
+				<p>${opts.intro || ""}</p>
+			</header>
+			<div class="mpm-body erpm-body">
+				<nav class="erpm-tree"></nav>
+				<main class="mpm-content erpm-content"></main>
+			</div>
+		</div>
+	`);
+
+	let $tree = page.main.find(".erpm-tree");
+	let $content = page.main.find(".erpm-content");
+
+	function render_welcome() {
+		let w = opts.welcome || {};
+		$content.html(`
+			<section class="mpm-card mpm-overview">
+				<div class="mpm-kicker">${__("ERP Manual")}</div>
+				<h2>${frappe.utils.escape_html(w.title || "")}</h2>
+				<p class="mpm-purpose">${w.body || ""}</p>
+			</section>
+		`);
+	}
+
+	function select_child(cat, child) {
+		$tree.find(".erpm-child-link").removeClass("active");
+		$tree.find(`.erpm-child-link[data-cat="${cat.id}"][data-child="${child.id}"]`).addClass("active");
+		if (!child._stub) {
+			$content.html(_mfx_render_section(child));
+			return;
+		}
+		$content.html(`
+			<section class="mpm-card">
+				<div class="mpm-kicker">${frappe.utils.escape_html(cat.label)}</div>
+				<h2>${frappe.utils.escape_html(child.title)}</h2>
+				<p class="mpm-purpose">${__("Not written up yet — this category is placed here to show where it will sit once it is.")}</p>
+			</section>
+		`);
+	}
+
+	function render_tree() {
+		$tree.html(categories.map((cat) => {
+			let children = cat.children && cat.children.length
+				? cat.children
+				: [{ id: "coming-soon", title: __("Coming Soon"), _stub: true }];
+			return `
+			<div class="erpm-cat" data-cat="${cat.id}">
+				<div class="erpm-cat-label">
+					<span class="erpm-cat-arrow">▸</span>
+					<span>${frappe.utils.escape_html(cat.label)}</span>
+				</div>
+				<div class="erpm-children">
+					${children.map((child) => `
+						<a href="javascript:void(0)" class="erpm-child-link" data-cat="${cat.id}" data-child="${child.id}">
+							${frappe.utils.escape_html(child.title)}
+						</a>
+					`).join("")}
+				</div>
+			</div>`;
+		}).join(""));
+
+		$tree.find(".erpm-cat-label").on("click", function () {
+			let $cat_el = $(this).closest(".erpm-cat");
+			let was_open = $cat_el.hasClass("open");
+			$cat_el.toggleClass("open");
+			// Opening a category with nothing shown yet also shows its first child --
+			// otherwise clicking a category label does nothing visible on its own,
+			// which reads as broken rather than as "now expand a sub-item".
+			if (!was_open) {
+				let cat = categories.find((c) => c.id === $cat_el.data("cat"));
+				let first = (cat.children && cat.children[0]) || { id: "coming-soon", title: __("Coming Soon"), _stub: true };
+				select_child(cat, first);
+			}
+		});
+		$tree.find(".erpm-child-link").on("click", function (e) {
+			e.stopPropagation();
+			let cat_id = $(this).data("cat");
+			let child_id = $(this).data("child");
+			let cat = categories.find((c) => c.id === cat_id);
+			let child = (cat.children || []).find((c) => c.id === child_id) || { id: child_id, title: __("Coming Soon"), _stub: true };
+			$(this).closest(".erpm-cat").addClass("open");
+			select_child(cat, child);
+		});
+	}
+
+	render_tree();
+	render_welcome();
 }
 
 function _mfx_render_section(s) {
@@ -178,7 +296,7 @@ function _mfx_render_flow_diagram() {
 	</div>`;
 }
 
-function _mfx_setup_scrollspy(page) {
+function _mfx_setup_scrollspy(page, sections) {
 	let $links = page.main.find(".mpm-nav-link");
 
 	$links.on("click", function (e) {
@@ -190,8 +308,13 @@ function _mfx_setup_scrollspy(page) {
 		}
 	});
 
-	let sections = MP_MANUAL_SECTIONS.map((s) => page.main.find("#mpm-" + s.id)[0]).filter(Boolean);
-	if (!sections.length || !window.IntersectionObserver) return;
+	// Sections come from the caller rather than a global -- this file is loaded
+	// app-wide (app_include_js), so a hardcoded MP_MANUAL_SECTIONS reference here
+	// broke every OTHER manual page: that constant only exists once Material
+	// Planning's own page script has been fetched by the router, which never
+	// happens while viewing a different manual.
+	let target_els = (sections || []).map((s) => page.main.find("#mpm-" + s.id)[0]).filter(Boolean);
+	if (!target_els.length || !window.IntersectionObserver) return;
 
 	let observer = new IntersectionObserver(
 		(entries) => {
@@ -205,7 +328,7 @@ function _mfx_setup_scrollspy(page) {
 		},
 		{ root: null, rootMargin: "-15% 0px -70% 0px", threshold: 0 }
 	);
-	sections.forEach((el) => observer.observe(el));
+	target_els.forEach((el) => observer.observe(el));
 }
 
 function _mfx_inject_styles() {
@@ -553,4 +676,73 @@ function _mfx_inject_styles() {
 		}
 	`;
 	document.head.appendChild(style);
+}
+
+function _mfx_inject_tree_styles() {
+	if (document.getElementById("erpm-styles")) return;
+	let style = document.createElement("style");
+	style.id = "erpm-styles";
+	style.innerHTML = `
+		.erpm-body { align-items: flex-start; }
+		.erpm-tree {
+			position: sticky;
+			top: 20px;
+			flex: 0 0 260px;
+			background: var(--mpm-card-bg);
+			border: 1px solid var(--mpm-border);
+			border-radius: 12px;
+			padding: 10px;
+			max-height: calc(100vh - 40px);
+			overflow-y: auto;
+		}
+		.erpm-cat { margin-bottom: 2px; }
+		.erpm-cat-label {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			padding: 9px 10px;
+			border-radius: 8px;
+			font-size: 13px;
+			font-weight: 700;
+			color: var(--mpm-heading);
+			cursor: pointer;
+			user-select: none;
+		}
+		.erpm-cat-label:hover { background: var(--mpm-accent-soft); }
+		.erpm-cat-arrow {
+			display: inline-block;
+			width: 10px;
+			color: var(--mpm-accent);
+			transition: transform .15s;
+		}
+		.erpm-cat.open > .erpm-cat-label .erpm-cat-arrow { transform: rotate(90deg); }
+		.erpm-children {
+			display: none;
+			flex-direction: column;
+			padding-left: 22px;
+		}
+		.erpm-cat.open > .erpm-children { display: flex; }
+		.erpm-child-link {
+			display: block;
+			padding: 7px 10px;
+			border-radius: 6px;
+			font-size: 12.5px;
+			color: var(--mpm-text);
+			text-decoration: none;
+			border-left: 2px solid transparent;
+		}
+		.erpm-child-link:hover { background: var(--mpm-accent-soft); color: var(--mpm-heading); text-decoration: none; }
+		.erpm-child-link.active {
+			background: var(--mpm-accent-soft);
+			color: var(--mpm-accent);
+			border-left-color: var(--mpm-accent);
+			font-weight: 700;
+		}
+		.erpm-content { min-height: 300px; }
+		@media (max-width: 900px) {
+			.erpm-tree { position: static; flex: none; width: 100%; max-height: none; }
+		}
+	`;
+	document.head.appendChild(style);
+
 }
