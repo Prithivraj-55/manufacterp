@@ -488,14 +488,21 @@ def _log_round_up_excess(mip, items):
     up the SAME item/batch again ACCUMULATES into the one existing row instead of piling
     up a new row every time.
 
-    Length/Width/Thickness are seeded from the BATCH's own standard dimensions (not left
-    at 0) and Sec Qty from the fractional excess-piece count -- together these recompute
-    back to exactly the tracked excess Kg, so the Return Excess Entry dialog shows a
-    correct, non-zero starting figure instead of losing the tracked amount the moment it's
-    opened (its live preview recalculates Qty FROM these fields). This is still only a
-    placeholder, standing in for "one standard piece, mostly unused" -- the real leftover
-    is almost never that shape, so the user is expected to overwrite these with whatever
-    they actually measure once the job cuts the material, same as any other excess row."""
+    Length/Width/Thickness/Sec Qty come from the popup's own excess row when the user
+    filled it in -- they are looking at the actual off-cut, which is the only place its
+    real shape is known.
+
+    Where they did not, these fall back to the BATCH's standard dimensions and the
+    fractional excess-piece count. Those recompute back to exactly the tracked excess
+    Kg, so the Return Excess Entry dialog opens on a correct, non-zero figure rather
+    than losing the tracked amount (its live preview recalculates Qty FROM these
+    fields). That fallback is only a placeholder standing in for "one standard piece,
+    mostly unused" -- the real leftover is rarely that shape, so it is still worth
+    correcting later if it was not entered at transfer time.
+
+    Return Warehouse defaults to the plan's raw-material warehouse, which is where an
+    off-cut normally goes back to; the popup lets it be pointed at a scrap warehouse
+    instead, per row."""
     SOURCE_TABLE = "Round Up Sec Qty for Transfer"
     by_key = {
         (r.source_table, r.source_row): r
@@ -508,10 +515,17 @@ def _log_round_up_excess(mip, items):
         if excess_kg <= 0:
             continue
         _apply_transfer_excess_to_raw_materials(mip, item, excess_kg)
-        excess_pieces = flt(item.get("round_up_excess_pieces"))
-        length = flt(item.get("custom_length"))
-        width = flt(item.get("custom_width"))
-        thickness = flt(item.get("custom_thickness"))
+
+        # What the user measured in the popup's excess row wins over the placeholder
+        # derived from the batch. They are looking at the actual off-cut; the batch's
+        # standard dimensions are only a stand-in for "one whole piece, mostly unused"
+        # and are almost never the real shape.
+        measured = item.get("excess_entry") or {}
+        excess_pieces = flt(measured.get("sec_qty")) or flt(item.get("round_up_excess_pieces"))
+        length = flt(measured.get("length")) or flt(item.get("custom_length"))
+        width = flt(measured.get("width")) or flt(item.get("custom_width"))
+        thickness = flt(measured.get("thickness")) or flt(item.get("custom_thickness"))
+        return_warehouse = measured.get("return_warehouse") or mip.source_warehouse or ""
         source_row = f"{item['item_code']}|{item.get('batch_no') or ''}"
         key = (SOURCE_TABLE, source_row)
         target = by_key.get(key)
@@ -530,6 +544,8 @@ def _log_round_up_excess(mip, items):
                 target.width = width
             if not target.thickness:
                 target.thickness = thickness
+            if not target.get("return_warehouse"):
+                target.return_warehouse = return_warehouse
         else:
             target = mip.append("excess_return_items", {
                 "source_table": SOURCE_TABLE,
@@ -545,6 +561,7 @@ def _log_round_up_excess(mip, items):
                 "sec_uom": item.get("custom_sec_uom") or "",
                 "uom": item.get("uom") or "Kg",
                 "qty": excess_kg,
+                "return_warehouse": return_warehouse,
                 "return_type": "Return to Own Warehouse",
                 "return_reason": _(
                     "Rounding surplus from \"Round Up Sec Qty for Transfer\" -- placeholder "

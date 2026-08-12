@@ -25,6 +25,7 @@
   "available_qty",
   "return_reason",
   "return_type",
+  "return_warehouse",
   "stock_entry_created",
   "source_table",
   "source_row",
@@ -97,7 +98,7 @@
   },
   {
    "allow_on_submit": 1,
-   "description": "For Nuts and Bolts: auto-calculated as Unit Weight × Weight(Nos qty)",
+   "description": "For Nuts and Bolts: auto-calculated as Unit Weight \u00d7 Weight(Nos qty)",
    "fieldname": "sec_qty",
    "fieldtype": "Float",
    "in_list_view": 1,
@@ -181,6 +182,13 @@
    "in_list_view": 1,
    "label": "Return Type",
    "options": "Return to Own Warehouse\nRetain at Supplier (Virtual)"
+  },
+  {
+   "fieldname": "return_warehouse",
+   "fieldtype": "Link",
+   "label": "Return Warehouse",
+   "options": "Warehouse",
+   "description": "Where this off-cut comes back to. Defaults to the plan's raw-material warehouse; change it to a scrap warehouse when the piece is not reusable."
   },
   {
    "allow_on_submit": 1,
