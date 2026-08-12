@@ -29,7 +29,13 @@ def run():
     frappe.db.set_value("Item", item, "custom_parent_item_group", "Structurals")
     frappe.db.set_value("Item", item, "custom_unit_weight", 10)
 
-    batch = ensure_batch(item, "ZZTEST-CUT-SHEET-BATCH", L=5000, sec_qty=3)
+    # Unique per run. Reusing one fixed batch name made this test poison itself: each
+    # run reserved 150 Kg against it and never released, so the next run found only the
+    # remainder free and failed on a stock check that had nothing to do with cut sheets.
+    batch = ensure_batch(
+        item, "ZZTEST-CUT-SHEET-BATCH-%s" % frappe.generate_hash(length=6).upper(),
+        L=5000, sec_qty=3,
+    )
     # Physically receive 150 Kg of this batch into the source warehouse.
     make_receipt(ctx, item, batch, 150)
     print("Received 150 Kg into batch:", batch)
@@ -123,6 +129,10 @@ def run():
     assert flt(matching[0]["qty"]) == 60, f"Expected pending qty capped at 60 (W1), got {matching[0]['qty']}"
 
     # 5. Transfer exactly that 60 Kg and submit.
+    # Snapshot before the transfer, so "did this create a new batch?" is measured
+    # against this run rather than against leftovers from earlier ones.
+    batches_before = set(frappe.get_all("Batch", filters={"item": item}, pluck="name"))
+
     se_name = create_mip_partial_transfer(mip.name, _json.dumps(matching), "primary")
     se = frappe.get_doc("Stock Entry", se_name)
     for r in se.items:
@@ -139,10 +149,14 @@ def run():
     assert flt(batch_doc.custom_length) == 3000, f"Expected batch resized to 3000mm, got {batch_doc.custom_length}"
     assert flt(batch_doc.custom_sec_qty) == 3, f"Expected batch Sec Qty still 3, got {batch_doc.custom_sec_qty}"
 
-    # Confirm no NEW batch was created for this item -- still exactly one.
-    all_batches = frappe.get_all("Batch", filters={"item": item}, pluck="name")
-    print("Total batches for this item (expect 1 -- no new batch created):", len(all_batches))
-    assert len(all_batches) == 1
+    # Confirm no NEW batch was created -- the whole point of Cut Sheet is that the SAME
+    # batch is resized. Compared against the batches that existed before the transfer
+    # rather than counting every batch of this item: earlier runs leave their own
+    # (uniquely named) batches behind, which say nothing about what this run did.
+    batches_after = set(frappe.get_all("Batch", filters={"item": item}, pluck="name"))
+    created = batches_after - batches_before
+    print("Batches created by the transfer (expect none):", sorted(created) or "none")
+    assert not created, f"Cut Sheet created a new batch instead of resizing: {created}"
 
     # 7. Pending should now be 0 for this row -- fully covered by the capped W1 transfer.
     # (Something in the transfer/submit path re-derives supplier_warehouse from the
