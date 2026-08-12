@@ -94,6 +94,14 @@ def _parse_excel(file_path):
                 "fg_item_code": _sstr(fg_raw) if fg_raw else "",
                 "total_quantity": _sflt(_get(row, "total qty")),
                 "total_weight": _sflt(_get(row, "total weight (kg)", "total weight")),
+                # Both are Drawing-level and are carried through as typed. They are
+                # NOT validated here: the import stages rows with a raw SQL insert
+                # that bypasses Link validation, so an unknown value has to reach the
+                # staging table in order to be reported against its own row by
+                # verify_raw_materials. Rejecting at parse time would abort the whole
+                # file over one bad cell and say nothing about where it was.
+                "nature_of_work": _sstr(_get(row, "nature of work", "nature_of_work")),
+                "rate_schedule": _sstr(_get(row, "rate schedule", "rate_schedule")),
                 "items": [],
             }
 
@@ -238,7 +246,7 @@ def parse_bom_excel(so_name):
         "name", "parent", "parenttype", "parentfield", "idx",
         "creation", "modified", "modified_by", "owner", "docstatus",
         "assembly_group", "item", "item_name", "duno_mark_no", "drawing_number",
-        "total_quantity", "total_weight",
+        "total_quantity", "total_weight", "nature_of_work", "rate_schedule",
         "create_drawing", "submit_drawing", "mark_final_revision", "create_bom",
     ]
     t1_values = []
@@ -251,6 +259,7 @@ def parse_bom_excel(so_name):
             d["assembly_group"], fg, fg_name_map.get(fg, ""),
             d["duno_mark_no"], cdn,
             d["total_quantity"], d["total_weight"],
+            d.get("nature_of_work") or "", d.get("rate_schedule") or "",
             1, 1, 1, 1,
         ))
         t1_idx += 1
@@ -343,6 +352,7 @@ def create_drawings_from_import(so_name, batch_start=0, batch_size=30):
     # Lightweight SQL — never load the full SO doc with all child tables
     all_pending = frappe.db.sql(
         """SELECT name, drawing_number, item, duno_mark_no, total_quantity, total_weight
+           , nature_of_work, rate_schedule
            FROM `tabSales Order DUNO Item`
            WHERE parent = %s AND create_drawing = 1
              AND (drawing IS NULL OR drawing = '')
@@ -415,6 +425,11 @@ def create_drawings_from_import(so_name, batch_start=0, batch_size=30):
                 "duno_mark_no": dr.duno_mark_no or "",
                 "customer_drawing_number": cdn or "",
                 "customer_provided_wt": flt(dr.total_weight),
+                # Carried from the import sheet. verify_raw_materials has already
+                # confirmed both exist in their masters, so these are safe to set as
+                # Links here.
+                "nature_of_work": dr.get("nature_of_work") or "",
+                "rate_schedule": dr.get("rate_schedule") or "",
                 "status": "Working",
             })
 
@@ -611,6 +626,54 @@ def process_drawings(so_name, step, batch_start=0, batch_size=30):
 
 # ---------------------------------------------------------------------------
 
+def _check_drawing_masters(so):
+    """Nature of Work / Rate Schedule on each imported drawing row must already exist
+    in their masters.
+
+    Validated by record NAME and nothing else -- no format rule. Rate Schedule is named
+    by its own RS No, so the name IS the title being typed ("RS- O/S-001 A"), and a
+    pattern invented from one example would start rejecting valid codes the moment the
+    client's numbering changed. Existence cannot go stale that way.
+
+    Checked here rather than at parse time because the import stages rows with a raw
+    SQL insert, which bypasses Link validation: a wrong value has to land in the table
+    to be reported against the drawing it came from. Anything reported blocks
+    verification, so the file has to be corrected before the flow can go on.
+
+    Blank is allowed -- neither is mandatory on a Drawing, and older imports predate
+    both columns."""
+    rows = [r for r in (so.get("custom_duno_items") or [])]
+    if not rows:
+        return []
+
+    wanted = {"Nature of Work": set(), "Rate Schedule": set()}
+    for r in rows:
+        if r.get("nature_of_work"):
+            wanted["Nature of Work"].add(r.nature_of_work)
+        if r.get("rate_schedule"):
+            wanted["Rate Schedule"].add(r.rate_schedule)
+
+    existing = {
+        doctype: set(frappe.get_all(doctype, filters={"name": ["in", list(names)]}, pluck="name"))
+        if names else set()
+        for doctype, names in wanted.items()
+    }
+
+    issues = []
+    for r in rows:
+        label = r.get("drawing_number") or r.get("duno_mark_no") or "?"
+        for doctype, fieldname in (("Nature of Work", "nature_of_work"),
+                                   ("Rate Schedule", "rate_schedule")):
+            value = r.get(fieldname)
+            if value and value not in existing[doctype]:
+                issues.append(
+                    _("Drawing {0}: {1} <b>{2}</b> is not in the {1} master. "
+                      "Correct it in the sheet (or create the record) and import again.")
+                    .format(label, doctype, value)
+                )
+    return issues
+
+
 @frappe.whitelist()
 def verify_raw_materials(so_name):
     """
@@ -620,19 +683,21 @@ def verify_raw_materials(so_name):
     """
     so = frappe.get_doc("Sales Order", so_name)
     unlocked = [r for r in (so.custom_so_raw_materials or []) if not r.is_locked]
+    issues = _check_drawing_masters(so)
 
     if not unlocked:
-        frappe.db.set_value("Sales Order", so_name, "custom_raw_materials_verified", 1, update_modified=False)
+        verified = not issues
+        frappe.db.set_value("Sales Order", so_name, "custom_raw_materials_verified",
+                            1 if verified else 0, update_modified=False)
         frappe.db.commit()
         modified = frappe.db.get_value("Sales Order", so_name, "modified")
-        return {"issues": [], "verified": True, "modified": str(modified)}
+        return {"issues": issues, "verified": verified, "modified": str(modified)}
 
     all_mat = {r.material_code for r in unlocked if r.material_code}
     existing = set(frappe.db.get_all(
         "Item", filters={"name": ["in", list(all_mat)]}, pluck="name"
     )) if all_mat else set()
 
-    issues = []
     for row in unlocked:
         cdn = row.customer_drawing_number or "?"
         mat = row.material_code or ""
@@ -683,22 +748,35 @@ def download_bom_template():
     ws = wb.active
     ws.title = "BOM Import"
 
+    # Nature of Work and Rate Schedule are Drawing-level, so they sit with the other
+    # header columns and repeat on every row of a drawing, same as Assembly Group.
+    # Both must be the master record's NAME exactly as it reads there -- Rate Schedule
+    # is named by its own RS No, so what the client types IS the record.
     headers = [
         "Assembly Group", "Customer Drawing Number", "DUNO/Mark No",
         "FG Item", "Total Qty", "Total Weight (KG)",
+        "Nature of Work", "Rate Schedule",
         "Item No", "Material Code", "Grade", "Thickness", "Width", "Length",
         "Reqd Raw Material Qty",
     ]
     ws.append(headers)
 
+    # Samples use whatever is really in the masters, so the template a client
+    # downloads is filled in with values that will actually verify rather than
+    # placeholders they have to guess the shape of.
+    sample_now = frappe.db.get_value("Nature of Work", {}, "name") or "Auto Welding"
+    sample_rs = frappe.db.get_value("Rate Schedule", {}, "name") or "RS-001"
+
     # Sample row 1 — drawing CDN-001, item 1
     ws.append([
         "Structural Assembly", "CDN-001", "DM-001", "FG-ITEM-001", 5, 250.0,
+        sample_now, sample_rs,
         "1", "MAT-STRUCT-001", "A36", 0, 0, 3000, 2,
     ])
     # Sample row 2 — same drawing CDN-001, item 2 (same header columns repeated)
     ws.append([
         "Structural Assembly", "CDN-001", "DM-001", "FG-ITEM-001", 5, 250.0,
+        sample_now, sample_rs,
         "2", "MAT-PLATE-001", "IS2062", 10, 200, 1500, 1,
     ])
 

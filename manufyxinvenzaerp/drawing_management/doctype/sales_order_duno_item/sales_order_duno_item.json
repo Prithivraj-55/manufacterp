@@ -12,6 +12,8 @@
   "drawing_number",
   "total_quantity",
   "total_weight",
+  "nature_of_work",
+  "rate_schedule",
   "difference_kg",
   "drawing",
   "section_break_actions",
@@ -68,6 +70,20 @@
    "allow_on_submit": 1,
    "read_only_depends_on": "eval:doc.docstatus === 1",
    "description": "Weight per Qty. To update the customer's weight after submission, use \"Update Customer Weight\" on the Drawing."
+  },
+  {
+   "fieldname": "nature_of_work",
+   "fieldtype": "Link",
+   "label": "Nature of Work",
+   "options": "Nature of Work",
+   "in_list_view": 0
+  },
+  {
+   "fieldname": "rate_schedule",
+   "fieldtype": "Link",
+   "label": "Rate Schedule",
+   "options": "Rate Schedule",
+   "in_list_view": 0
   },
   {
    "fieldname": "difference_kg",
