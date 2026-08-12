@@ -1,9 +1,10 @@
+import json
 from collections import defaultdict
 
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt
+from frappe.utils import flt, now
 
 from manufyxinvenzaerp.subcontracting_management.overrides import resolve_supplier_warehouse
 from manufyxinvenzaerp.utils.dimension_formula import calculate_qty
@@ -493,6 +494,96 @@ def _sync_transferred_qty(mip):
         rows[-1].transferred_qty = flt(total_moved - running, 3)
 
 
+@frappe.whitelist()
+def save_transfer_draft(mip_name, rows_json):
+    """Park what has been typed into the transfer popup without transferring anything.
+
+    Deliberately unvalidated. The whole point of "Save and Close" is to step away
+    mid-decision -- a half-entered Sec Nos, an off-cut not yet measured, a warehouse not
+    yet chosen. Checking stock or dimensions here would refuse to save exactly the
+    unfinished state the user is trying to keep. Everything is re-checked, server-side,
+    when Transfer is finally pressed.
+
+    Written straight to the child rows rather than through mip.save(): saving the parent
+    would re-run validate(), which rebuilds this very table, and there is no reason to
+    put the plan through that to record a scratch note."""
+    rows = json.loads(rows_json) if isinstance(rows_json, str) else (rows_json or [])
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+
+    by_key = {
+        (r.item_code, r.batch_no or "", 1 if r.cnc_process else 0): r
+        for r in (mip.consolidate_items or [])
+    }
+
+    saved = 0
+    for r in rows:
+        key = (r.get("item_code"), r.get("batch_no") or "", 1 if r.get("cnc_process") else 0)
+        target = by_key.get(key)
+        if not target:
+            # The plan changed under the popup (a row unreserved, a batch reassigned).
+            # Skip rather than invent a row that no longer corresponds to anything.
+            continue
+        excess = r.get("excess_entry") or {}
+        frappe.db.set_value("Material Issue Plan Consolidate Item", target.name, {
+            "draft_sec_qty": flt(r.get("custom_sec_qty")),
+            "draft_excess_length": flt(excess.get("length")),
+            "draft_excess_width": flt(excess.get("width")),
+            "draft_excess_sec_qty": flt(excess.get("sec_qty")),
+            "draft_return_warehouse": excess.get("return_warehouse") or "",
+            "draft_saved_on": now(),
+        }, update_modified=False)
+        saved += 1
+
+    frappe.db.commit()
+    return {"saved": saved}
+
+
+@frappe.whitelist()
+def get_transfer_draft(mip_name):
+    """The parked popup state, keyed the same way the popup keys its own rows."""
+    rows = frappe.get_all(
+        "Material Issue Plan Consolidate Item",
+        filters={"parent": mip_name, "draft_saved_on": ["is", "set"]},
+        fields=["item_code", "batch_no", "cnc_process"] + list(_CONSOLIDATE_DRAFT_FIELDS),
+    )
+    return {
+        "%s|%s|%s" % (r.item_code, r.batch_no or "", 1 if r.cnc_process else 0): r
+        for r in rows
+    }
+
+
+def _clear_transfer_draft(mip_name, items):
+    """Drop the parked state for rows that have just been transferred -- it described
+    what was about to happen, and it has now happened."""
+    keys = {(i.get("item_code"), i.get("batch_no") or "", 1 if i.get("cnc_process") else 0)
+            for i in (items or [])}
+    if not keys:
+        return
+    for r in frappe.get_all(
+        "Material Issue Plan Consolidate Item",
+        filters={"parent": mip_name, "draft_saved_on": ["is", "set"]},
+        fields=["name", "item_code", "batch_no", "cnc_process"],
+    ):
+        if (r.item_code, r.batch_no or "", 1 if r.cnc_process else 0) in keys:
+            frappe.db.set_value(
+                "Material Issue Plan Consolidate Item", r.name,
+                {f: (None if f in ("draft_return_warehouse", "draft_saved_on") else 0)
+                 for f in _CONSOLIDATE_DRAFT_FIELDS},
+                update_modified=False,
+            )
+
+
+# Held across a rebuild of the Consolidate Items table -- see _sync_consolidate_items.
+_CONSOLIDATE_DRAFT_FIELDS = (
+    "draft_sec_qty",
+    "draft_excess_length",
+    "draft_excess_width",
+    "draft_excess_sec_qty",
+    "draft_return_warehouse",
+    "draft_saved_on",
+)
+
+
 def _sync_consolidate_items(mip):
     """Rebuild the Consolidate Items table: one row per item + batch, merged.
 
@@ -512,7 +603,22 @@ def _sync_consolidate_items(mip):
 
     Sorted by item then batch so a batch's siblings sit together; scattering them is
     what made two legitimate lines read as a duplicate.
+
+    Everything here is derived and the table is rebuilt wholesale on every save -- with
+    ONE exception. The draft_* fields hold what someone typed into the transfer popup
+    and saved without transferring (see save_transfer_draft), so they are carried across
+    the rebuild, matched on the same key the rows are grouped by. Losing them would mean
+    "Save and Close" quietly discarded the work the moment anything re-saved the plan.
     """
+    drafts = {
+        (r.item_code, r.batch_no or "", 1 if r.cnc_process else 0): {
+            f: r.get(f) for f in _CONSOLIDATE_DRAFT_FIELDS
+        }
+        for r in (mip.consolidate_items or [])
+        if any(flt(r.get(f)) if f != "draft_return_warehouse" and f != "draft_saved_on"
+               else r.get(f) for f in _CONSOLIDATE_DRAFT_FIELDS)
+    }
+
     groups = {}
     for row in (mip.raw_materials or []):
         if not row.batch_no:
@@ -545,7 +651,7 @@ def _sync_consolidate_items(mip):
         g = groups[key]
         qty = flt(g["qty"], 3)
         done = flt(g["transferred_qty"], 3)
-        mip.append("consolidate_items", {
+        row = mip.append("consolidate_items", {
             "item_code": g["item_code"], "item_name": g["item_name"],
             "batch_no": g["batch_no"], "cnc_process": g["cnc_process"],
             "parent_item_group": g["parent_item_group"],
@@ -559,6 +665,8 @@ def _sync_consolidate_items(mip):
             "source_rows": g["source_rows"],
             "duno_mark_no": ", ".join(g["dunos"]),
         })
+        for fieldname, value in (drafts.get(key) or {}).items():
+            row.set(fieldname, value)
 
 
 def _batch_stock_in(item_code, batch_no, warehouse):

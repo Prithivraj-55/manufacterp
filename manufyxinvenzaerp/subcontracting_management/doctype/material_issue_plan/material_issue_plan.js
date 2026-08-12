@@ -876,6 +876,49 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 		+ "</tr></thead><tbody></tbody></table>");
 
 	var $tbody = $table.find("tbody");
+
+	// Anything parked by a previous "Save and Close" comes back onto the rows it was
+	// entered against. Fetched after the table is built, so it can simply replay the
+	// same handlers a user would have triggered by typing.
+	frappe.call({
+		method: "manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.get_transfer_draft",
+		args: { mip_name: frm.doc.name },
+		callback: function(r) {
+			var draft = r.message || {};
+			if (!Object.keys(draft).length) return;
+			var restored = 0;
+			$tbody.find("tr:not(.mip-excess-tr)").each(function() {
+				var $tr = $(this);
+				var d = items[parseInt($tr.data("idx"), 10)];
+				if (!d) return;
+				var saved = draft[d.item_code + "|" + (d.batch_no || "") + "|" + (d.cnc_process ? 1 : 0)];
+				if (!saved) return;
+				restored++;
+				if (flt(saved.draft_sec_qty)) {
+					// Fire the normal change handler rather than writing the figures
+					// directly: it is what recalculates Kg and the surplus, and reveals
+					// the excess panel. Duplicating that here would be a second copy to
+					// keep in step.
+					$tr.find(".mip-sec-qty").val(flt(saved.draft_sec_qty, 3)).trigger("change");
+				}
+				var $panel = $tr.next("tr.mip-excess-tr");
+				setTimeout(function() {
+					if (flt(saved.draft_excess_length)) $panel.find(".mip-ex-length").val(flt(saved.draft_excess_length, 3));
+					if (flt(saved.draft_excess_width)) $panel.find(".mip-ex-width").val(flt(saved.draft_excess_width, 3));
+					if (flt(saved.draft_excess_sec_qty)) $panel.find(".mip-ex-sec").val(flt(saved.draft_excess_sec_qty, 3));
+					var wh = $panel.data("wh_control");
+					if (wh && saved.draft_return_warehouse) wh.set_value(saved.draft_return_warehouse);
+					$panel.find(".mip-ex-length").trigger("change");
+				}, 600);
+			});
+			if (restored) {
+				frappe.show_alert({
+					message: __("Restored a saved draft for {0} row(s).", [restored]),
+					indicator: "blue",
+				}, 6);
+			}
+		},
+	});
 	// Sec Nos is THE control, and Kg is derived from it -- steel moves in pieces and
 	// the weight is a consequence of the piece count, so lowering Sec Nos is how a
 	// partial transfer is made. Kg is therefore read-only: editing it directly would
@@ -1142,6 +1185,40 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 		size: "extra-large",
 		fields: [{ fieldtype: "HTML", fieldname: "content" }],
 		primary_action_label: __("Transfer Selected"),
+		secondary_action_label: __("Save and Close"),
+		// Parks whatever has been typed and closes, without validating any of it --
+		// the point is to step away mid-decision. Everything is re-checked server-side
+		// when Transfer is pressed.
+		secondary_action: function() {
+			var draft = [];
+			$tbody.find("tr:not(.mip-excess-tr)").each(function() {
+				var $tr = $(this);
+				var d = items[parseInt($tr.data("idx"), 10)];
+				if (!d) return;
+				draft.push({
+					item_code: d.item_code,
+					batch_no: d.batch_no || "",
+					cnc_process: d.cnc_process ? 1 : 0,
+					custom_sec_qty: flt($tr.find(".mip-sec-qty").val()) || flt(d.custom_sec_qty),
+					excess_entry: _collect_excess_entry($tr),
+				});
+			});
+			frappe.call({
+				method: "manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.save_transfer_draft",
+				args: { mip_name: frm.doc.name, rows_json: JSON.stringify(draft) },
+				freeze: true,
+				freeze_message: __("Saving draft…"),
+				callback: function(r) {
+					dlg.hide();
+					frappe.show_alert({
+						message: __("Draft saved for {0} row(s). Reopen this popup to carry on.",
+							[(r.message || {}).saved || 0]),
+						indicator: "blue",
+					}, 6);
+					frm.reload_doc();
+				},
+			});
+		},
 		primary_action: function() {
 			var selected = [];
 			$tbody.find("tr").each(function() {

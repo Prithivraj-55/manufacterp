@@ -18,6 +18,7 @@ from frappe.utils import flt
 
 from manufyxinvenzaerp.subcontracting_management.subcontracting import _get_mp_reserved_batches
 from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
+    _clear_transfer_draft,
     get_target_context,
     _throw_claimed_excess_locked,
 )
@@ -872,6 +873,8 @@ def create_mip_transfer_entry(mip_name):
     frappe.db.commit()  # release read-locks before SE insert to avoid gap-lock deadlock
     se.insert(ignore_permissions=True)
     _log_round_up_excess(mip, primary_rows)
+    # The parked popup state described what was about to happen; it just did.
+    _clear_transfer_draft(mip.name, primary_rows)
     return {"primary_se": se.name}
 
 
