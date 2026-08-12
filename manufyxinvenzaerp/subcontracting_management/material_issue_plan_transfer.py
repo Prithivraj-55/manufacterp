@@ -120,22 +120,46 @@ def _validate_selected_against_stock(mip, selected):
                 _("{0} ({1}): nothing is pending transfer for this item/batch any more.").format(item_code, batch_no or "-"))
             continue
 
-        if qty > flt(row["qty"]) + 0.001:
-            problems.append(
-                _("{0} ({1}): {2} {3} selected but only {4} still pending.").format(
-                    item_code, batch_no or "-", qty, row.get("uom") or "Kg", flt(row["qty"], 3)))
+        # Taking MORE than the plan is the designed workflow, not an error: a
+        # fractional 2.818 pieces has to become 3 whole ones before anything can
+        # physically leave the rack. The surplus over the plan is booked as excess
+        # to return, so it is measured here -- server-side, rather than trusting
+        # the figure the browser sent -- and stamped onto the line for
+        # _log_round_up_excess to pick up. Only genuine lack of free stock blocks.
+        over_kg = flt(qty - flt(row["qty"]), 3)
+        if over_kg > 0.001:
+            item["round_up_excess_kg"] = over_kg
+            item["round_up_excess_pieces"] = flt(
+                flt(item.get("custom_sec_qty")) - flt(row.get("custom_sec_qty")), 3)
+            item["_planned_qty"] = flt(row["qty"], 3)
+
         # Free stock is per physical batch, so both legs share one running total.
         bkey = (item_code, batch_no)
         wanted_by_batch[bkey] = flt(wanted_by_batch.get(bkey, 0) + qty, 3)
 
     # One batch can appear on several selected lines -- check the batch's free
     # stock against their combined total, not each line on its own.
+    planned_by_batch = {}
+    for item in selected:
+        bkey = (item["item_code"], item.get("batch_no") or "")
+        key = (item["item_code"], item.get("batch_no") or "", 1 if item.get("cnc_process") else 0)
+        row = pending_by_key.get(key)
+        if row:
+            planned_by_batch[bkey] = flt(planned_by_batch.get(bkey, 0) + flt(row["qty"]), 3)
+
     for (item_code, batch_no), wanted in wanted_by_batch.items():
         available = flt(_batch_free_qty(item_code, batch_no, mip.source_warehouse), 3)
         if wanted > available + 0.001:
+            planned = flt(planned_by_batch.get((item_code, batch_no), 0), 3)
+            # Spell out all three figures: what the plan wanted, what the edit
+            # raised it to, and what is actually in the rack -- the shortfall is
+            # only actionable if you can see which of those to change.
             problems.append(
-                _("{0} ({1}): {2} Kg selected but only {3} Kg is in {4}.").format(
-                    item_code, batch_no or "-", wanted, available, mip.source_warehouse))
+                _("<b>{0}</b> ({1}) — planned <b>{2} Kg</b>, updated to <b>{3} Kg</b>, "
+                  "but only <b>{4} Kg</b> is free in {5}. Short by {6} Kg — lower the Sec Nos, "
+                  "or transfer what is available now and the rest later.").format(
+                    item_code, batch_no or "-", planned, wanted, available,
+                    mip.source_warehouse, flt(wanted - available, 3)))
 
     if problems:
         frappe.throw(
@@ -223,8 +247,10 @@ def get_mip_pending_items(mip_name):
     # to send onward. Capping here (rather than after the primary_done/cnc_done
     # netting below) means once W1 has been fully transferred, this row simply
     # stops appearing as pending -- the untransferred remainder is never offered.
+    # Keyed on the BATCH's item (planned_item), matching how _get_mp_reserved_batches
+    # names its rows -- see the note on duno_by_key below.
     cut_sheet_qty_by_key = {
-        (r.item_code, r.batch_no): flt(r.use_calc_qty)
+        ((r.planned_item or r.item_code), r.batch_no): flt(r.use_calc_qty)
         for r in (mip.raw_materials or [])
         if r.cut_sheet and r.batch_no
     }
@@ -238,15 +264,22 @@ def get_mip_pending_items(mip_name):
 
     # duno/drawing/sales_order/customer_drawing_number lookup per (item_code, batch_no),
     # from the MIP's own raw_materials snapshot, for the transfer popup's filters.
-    duno_by_key = {
-        (r.item_code, r.batch_no or ""): r.duno_mark_no or "" for r in (mip.raw_materials or [])
-    }
-    so_by_key = {
-        (r.item_code, r.batch_no or ""): r.sales_order or "" for r in (mip.raw_materials or [])
-    }
-    cdn_by_key = {
-        (r.item_code, r.batch_no or ""): r.customer_drawing_number or "" for r in (mip.raw_materials or [])
-    }
+    #
+    # Keyed on `planned_item or item_code` -- the item the BATCH belongs to -- because
+    # that is the item_code _get_mp_reserved_batches puts on the rows being looked up.
+    # Keying on the requirement's own item_code instead missed every alternate-item
+    # row (a requirement for ISMB450 filled from an ISA150 batch), leaving its DUNO,
+    # Sales Order and Customer Drawing Number blank in the transfer popup and
+    # unreachable by its filters.
+    def _by_key(fieldname):
+        return {
+            ((r.planned_item or r.item_code), r.batch_no or ""): r.get(fieldname) or ""
+            for r in (mip.raw_materials or [])
+        }
+
+    duno_by_key = _by_key("duno_mark_no")
+    so_by_key = _by_key("sales_order")
+    cdn_by_key = _by_key("customer_drawing_number")
     drawing_by_duno = {d.duno_mark_no: d.drawing for d in (mip.drawing_items or []) if d.duno_mark_no}
 
     totals = {}
@@ -408,9 +441,15 @@ def _apply_transfer_excess_to_raw_materials(mip, item, excess_kg):
 
     Accumulates: a second partial transfer that rounds up again adds to what is
     already booked, matching how _log_round_up_excess accumulates its own row."""
+    # Match on the item the BATCH belongs to (planned_item), falling back to the
+    # requirement's own item -- the same `planned_item or item_code` rule the transfer
+    # Stock Entry itself uses to pick its row's item. Comparing item_code alone missed
+    # every alternate-item row: a requirement for ISMB450 satisfied by an ISA150 batch
+    # produces a transfer line whose item_code is ISA150, which matched no row, so the
+    # rounding surplus was silently dropped instead of landing in transfer_excess_kg.
     rows = [
         r for r in (mip.raw_materials or [])
-        if r.item_code == item["item_code"]
+        if (r.planned_item or r.item_code) == item["item_code"]
         and (r.batch_no or "") == (item.get("batch_no") or "")
         and bool(r.cnc_process) == bool(item.get("cnc_process"))
     ]

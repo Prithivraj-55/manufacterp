@@ -1,35 +1,75 @@
-// Material Planning — User Manual page.
+// ERP Manual — doctype-wise reference, tree-navigated.
 //
-// Content is data-driven (the SECTIONS array below) specifically so that
-// when Material Planning's own fields/buttons/behaviour change, updating
-// this manual is a matter of editing plain-text entries here, not
-// rewriting HTML. Keep this in sync whenever Material Planning changes.
+// Replaces the two per-doctype "Manual" buttons (Material Planning, Material Issue
+// Plan). Content there was walkthrough-style, meant to be read start to finish;
+// this page is doctype-wise instead, one category per doctype, each table/topic as
+// a sub-tab under it -- meant to be looked something up in, not read straight
+// through. The old walkthroughs are migrated in as the fully-populated categories
+// below; the client's own nav sketch (Item / Sales Order / Drawing as siblings,
+// Material Planning and Production Plan each expanding to their own tables) is
+// followed for the categories not yet written up, kept visible as "Coming Soon"
+// so the intended shape is there even before the content is.
+//
+// Layout/tree/scrollspy come from the shared renderer
+// (public/js/manual_renderer.js) via manufyx_render_manual_tree(); this file is
+// only the content. A leaf uses the same shape as the old flat manuals: {id,
+// title, kicker, purpose, fields[], steps[], calcs[], examples[], notes[],
+// buttons[]}, everything optional.
 
-frappe.pages["material-planning-manual"].on_page_load = function (wrapper) {
+frappe.pages["erp-manual"].on_page_load = function (wrapper) {
 	let page = frappe.ui.make_app_page({
 		parent: wrapper,
-		title: "Manufyxinvenza Manual",
+		title: "ERP Manual",
 		single_column: true,
 	});
-	// Standard Frappe page header (title + back navigation) stays visible above
-	// our custom-styled content -- keeps a reliable way back to the Material
-	// Planning form instead of trapping the user in a fully custom shell.
 
-	manufyx_render_manual(page, {
-		kicker: __("Material Planning"),
-		heading: __("The Complete Guide"),
-		intro: __("A step-by-step walkthrough of every table, field, and button — with worked examples — written so a first-time user can follow it start to finish, from Material Planning all the way through Production Plan, Job work order, Material Issue Plan, and Inspection."),
-		sections: MP_MANUAL_SECTIONS,
+	// The renderer lives in public/js/manual_renderer.js, pulled in app-wide via
+	// app_include_js. If that asset has not been rebuilt/served, the page would
+	// otherwise fail with a bare ReferenceError and render blank -- say so plainly
+	// instead, because the fix (bench build + a hard refresh) is not guessable from
+	// an empty screen.
+	if (typeof manufyx_render_manual_tree !== "function") {
+		page.main.html(
+			'<div style="margin:24px;padding:20px;border:1px solid #C6462F;border-radius:10px;background:#FBEAE6">' +
+				"<b>" + __("Manual renderer not loaded") + "</b><br>" +
+				__("manufyx_render_manual_tree is undefined — manufyxinvenzaerp.bundle.js did not load. Run <code>bench build --app manufyxinvenzaerp</code> and hard-refresh (Ctrl+Shift+R).") +
+				"</div>"
+		);
+		return;
+	}
+
+	manufyx_render_manual_tree(page, {
+		heading: __("ERP Manual"),
+		intro: __("Doctype by doctype, table by table — pick a category on the left."),
+		welcome: {
+			title: __("Manufacturing, Start to Finish"),
+			body: __(
+				"The flow this ERP drives: <b>Material Planning</b> works out where every raw " +
+				"material is coming from, <b>Production Plan</b> schedules the job and its " +
+				"operations, <b>Job work order</b> is the single execution document for all of " +
+				"them, <b>Material Issue Plan</b> is where reserved stock physically leaves the " +
+				"warehouse, and each operation runs through <b>Supplier Operation Entry</b> — " +
+				"gated by <b>Inspection</b> wherever QC sign-off is required. Those five are fully " +
+				"written up on the left. Item, Sales Order and Drawing are placed in the tree " +
+				"because the flow starts with them, but are not written up yet."
+			),
+		},
+		categories: ERP_MANUAL_CATEGORIES,
 	});
 };
 
-// ─── Content model ────────────────────────────────────────────────────────
-// Each section: { id, title, kicker, purpose, fields:[{name, note}],
-//   buttons:[{name, note}], steps:[string], examples:[{type:"do"|"dont", label, text}],
-//   calcs:[{title, item, group, length, width, thickness, sec_qty, unit_weight,
-//           formula, result}], notes:[string] }
+// ─── Categories not yet written up — kept visible so the intended shape of the
+// manual is there ahead of the content (client's own request: "later we will add
+// more details about it"). Each renders as "Coming Soon" until filled in. ────────
+const ERP_MANUAL_STUB_CATEGORIES = [
+	{ id: "item", label: "Item", children: [] },
+	{ id: "sales-order", label: "Sales Order", children: [] },
+	{ id: "drawing", label: "Drawing", children: [] },
+];
 
-const MP_MANUAL_SECTIONS = [
+// ─── Material Planning — migrated verbatim from the old Material Planning manual,
+// one child per table/topic exactly as that page's sidebar listed them. ─────────
+const ERP_MANUAL_MATERIAL_PLANNING_CHILDREN = [
 	{
 		id: "overview",
 		kind: "overview",
@@ -152,11 +192,11 @@ const MP_MANUAL_SECTIONS = [
 			{ name: "Item Code / Required Qty / Required Sec Qty", note: "What's actually needed — unchanged from the original requirement." },
 			{ name: "Length / Width / Thickness / Unit Weight", note: "The REQUIRED dimensions (not the batch's) — shown for reference so you know what you're covering." },
 			{ name: "Assign Batch", note: "Pick any batch of this item (or of a substitute item) by hand — no dimension-matching restriction here, unlike Exact Match." },
-			{ name: "Status (Mapped / Not Mapped / Virtual (At Supplier) / Claimed (Pending Return))", note: "At a glance, what state this row is in — see the Status legend below." },
+			{ name: "Status (Mapped / Not Mapped / Excess Mapped / Cut Sheet Mapped)", note: "At a glance, what state this row is in — see the Status legend below." },
 			{ name: "Planned Item (from Batch)", note: "The item the assigned batch actually is — will differ from Item Code if you've substituted an alternate item." },
 			{ name: "Batch Length / Width / Thickness / Unit Weight", note: "The ASSIGNED BATCH's own dimensions — this is what the Kg formula actually uses, not the required dimensions." },
 			{ name: "Sec Qty (NOS) / Calc Qty (Kg)", note: "How many pieces you're taking from the batch, and the Kg that works out to." },
-			{ name: "Reserve stock without dimensions", note: "Explained with a worked example below — one batch shared across several rows." },
+			{ name: "Reserve stock without dimensions", note: "Explained with a worked example below — one batch shared across several rows, and how it works on a Cut Sheet row." },
 			{ name: "CNC Process", note: "Same meaning as on Available Raw Materials — see that section for the full example." },
 			{ name: "Reserved / Reserved Qty / Shortfall Qty / Reserved On", note: "Same reservation bookkeeping as Exact Match — and the same rule: only the quantity ON THIS ROW gets reserved, never the whole batch." },
 			{ name: "Batch Total / Reserved / Free Qty", note: "A live snapshot of that batch's stock position across the whole system, not just this row." },
@@ -192,6 +232,16 @@ const MP_MANUAL_SECTIONS = [
 				result: "66.0 Kg  (2.6 Nos across 2 rows)",
 				note: "Both rows keep their exact 33 Kg / 1.3 Nos. At transfer you can hand over 2.6 pieces-worth as calculated, or raise it to 3 whole pieces — that adds 0.4 × 25.38 = 10.15 Kg, and THAT surplus is what becomes excess to return. Planning stays honest; the rounding decision (and its excess) is recorded where the material physically moves.",
 			},
+			{
+				title: "On a Cut Sheet row — the same tick, sized against ONE piece instead of the batch",
+				item: "Plate 5mm (from a Cut Sheet)", group: "Plates",
+				length: 500, sec_qty: 4, unit_weight: 7.85,
+				formula:
+					"W1 is 500 × 250 × 5 = 4.90625 Kg per piece. Requirement is 18 Kg. " +
+					"Ticked: 18 ÷ 4.90625. Unticked, typing 4 pieces: 4 × 4.90625",
+				result: "Ticked — 18.000 Kg (3.669 Nos)   ·   Unticked, 4 pieces — 19.625 Kg (1.625 Kg excess)",
+				note: "Same rule as an ordinary batch, just measured against one Cut Sheet piece instead of the whole plate — see the Cut Sheet section for why that distinction matters.",
+			},
 		],
 		examples: [
 			{
@@ -214,25 +264,17 @@ const MP_MANUAL_SECTIONS = [
 			"Where rounding now happens: NOWHERE automatically. Material Planning always reserves the exact Required Kg and reports Sec Nos as a plain fraction of the assigned batch. The only place a fraction becomes whole pieces is the Material Issue Plan transfer popup, where you type the number yourself — the system re-checks free stock for the new figure and books the extra weight as excess to return.",
 			"Partial transfers are why fractions matter. A Material Planning covering 10 drawings feeds a separate Material Issue Plan per drawing, and each plan only pulls its own drawings' reserved rows. So a batch planned across 5 rows (8 Nos in total) may well present as 4.5 Nos when only 3 of those drawings are being issued — that is expected. Raise it to 5 in the transfer popup if you must hand over whole bars, and the 0.5 piece of surplus is recorded for return.",
 			"Case 1 vs Case 2. Case 1 — leave “Reserve stock without dimensions” OFF, pick a batch and type Sec Qty yourself; the system reserves exactly that and never overwrites your number. Case 2 — tick it when one large bar or sheet serves several rows; the system derives the fractional Sec Nos for you from each row's required Kg.",
-			"Status legend — “Mapped” (green): an ordinary purchased batch is assigned. “Excess Mapped” (blue): a real batch is assigned and it came back from another job as an off-cut. “Excess Mapped (At Supplier)” (blue): fulfilled from another job's excess that's staying at the supplier and will never reach your warehouse — no batch, nothing to transfer. “Excess Mapped (Pending Return)” (blue): fulfilled from another job's excess that HASN'T physically returned to stock yet, but is already promised to this row; the batch attaches itself automatically the day it does return. “Not Mapped” (red): nothing assigned yet. Every blue status counts as mapped — it is material you already have a claim on, so it is included in the Difference in Kg figure and never sent back through purchasing.",
+			"Status legend — “Mapped” (green): an ordinary purchased batch is assigned. “Excess Mapped” (blue): a real batch is assigned and it came back from another job as an off-cut. “Excess Mapped (At Supplier)” (blue): fulfilled from another job's excess that's staying at the supplier and will never reach your warehouse — no batch, nothing to transfer. “Excess Mapped (Pending Return)” (blue): fulfilled from another job's excess that HASN'T physically returned to stock yet, but is already promised to this row; the batch attaches itself automatically the day it does return. “Cut Sheet Mapped” (blue): fulfilled from a Cut Sheet's nesting plan, sized to the piece (W1), not the plate. “Not Mapped” (red): nothing assigned yet. Every blue status counts as mapped — it is material you already have a claim on, so it is included in the Difference in Kg figure and never sent back through purchasing.",
 		],
 		buttons: [
-			{ name: "Reserve / Unreserve", note: "Same soft-claim mechanism as Available Raw Materials — works whether the row has a real batch or is a Virtual/Pending-Return excess claim." },
-			{
-				name: "Excess Material Mapping",
-				note: "Opens the excess-material picker — see the dedicated section below for the full explanation and worked examples of both cases it covers.",
-			},
+			{ name: "Reserve / Unreserve", note: "Same soft-claim mechanism as Available Raw Materials — works whether the row has a real batch, a Cut Sheet allocation, or an Excess Mapped claim." },
 			{
 				name: "Excess Material  (tick on the row)",
-				note: "Only appears on a row with NO batch — excess is a promise against a specific off-cut, not stock in your warehouse. Ticking it reveals <b>Select Item</b>, which opens the same picker described in the section below.",
+				note: "Only appears on a row with NO batch — excess is a promise against a specific off-cut, not stock in your warehouse. Ticking it reveals <b>Select Item</b>, which opens the picker described in the Excess Material Mapping section.",
 			},
 			{
 				name: "Cut Sheet  (tick on the row — read-only)",
 				note: "You never tick this yourself: it appears by itself the moment you pick a batch that has a Cut Sheet against it, and names that sheet plus how many pieces are still free. A batch either has a nesting plan or it does not, and a row claiming otherwise would be describing steel that does not exist in that shape. The row then takes on the PIECE's dimensions (W1), not the whole plate's.",
-			},
-			{
-				name: "Reserve stock without dimensions  (on a Cut Sheet row)",
-				note: "Chooses how the take is sized, and both ways are valid. <b>Ticked</b> — the row reserves exactly its Required Qty, and Sec Nos becomes that weight as a fraction of one W1 piece (read-only; 18 Kg of a 4.90625 Kg piece is 3.669). <b>Unticked</b> — you type whole pieces, and the weight follows (4 pieces = 19.625 Kg); anything above the Required Qty is excess. A suggested count is filled in for you but never overwrites a figure you typed.",
 			},
 			{
 				name: "Validate Stock  (top of the form)",
@@ -327,7 +369,8 @@ const MP_MANUAL_SECTIONS = [
 			"“spare” from a DIFFERENT job — either genuinely sitting back in your own warehouse " +
 			"as an off-cut, or simply promised from another job's Excess Material Items table " +
 			"before it's even physically moved anywhere. Opened from the “Excess Material " +
-			"Mapping” button on any Material Mapping row.",
+			"Mapping” button on any Material Mapping row, or via “Select Item” once you tick " +
+			"Excess Material on a batch-less row.",
 		fields: [
 			{ name: "Item Code / Item Name", note: "The excess item on offer." },
 			{ name: "Source", note: "“Returned Batch” (physically back in your own warehouse) or “Not Yet Returned (Pending)” (still just a row in another job's Excess Material Items table)." },
@@ -372,7 +415,7 @@ const MP_MANUAL_SECTIONS = [
 			{
 				type: "do",
 				label: "A claim turns real by itself when the off-cut comes back",
-				text: "Worked example. Job A ends with a 2000mm ISA100 off-cut (20 Kg) still at the supplier, entered in its Excess Material Items table. Job B claims it — Job B's row shows Status “Claimed (Pending Return)”, Batch blank, but Reserved ticked. Weeks later Job A actually walks the material back: its “Return Excess Entry” button creates the Material Receipt as normal, and the moment that Stock Entry is submitted the new batch (ZZ-L2000-SR014) writes itself into Job B's row, Status flips to “Mapped”, and a green message says so. Nobody re-picks anything, and the material is never free for a third job to grab in between.",
+				text: "Worked example. Job A ends with a 2000mm ISA100 off-cut (20 Kg) still at the supplier, entered in its Excess Material Items table. Job B claims it — Job B's row shows Status “Excess Mapped (Pending Return)”, Batch blank, but Reserved ticked. Weeks later Job A actually walks the material back: its “Return Excess Entry” button creates the Material Receipt as normal, and the moment that Stock Entry is submitted the new batch (ZZ-L2000-SR014) writes itself into Job B's row, Status flips to “Excess Mapped”, and a green message says so. Nobody re-picks anything, and the material is never free for a third job to grab in between.",
 			},
 			{
 				type: "dont",
@@ -485,47 +528,88 @@ const MP_MANUAL_SECTIONS = [
 			"If the purchase was consolidated across several drawings' worth of the same item, the received quantity is split sequentially — the first drawing (by row order) is filled completely, then the next, and so on. Any purchasing surplus left after every drawing is fully covered simply becomes free warehouse stock (see the Consolidate Item section above) — it isn't assigned to any one drawing.",
 		],
 	},
+];
+
+// ─── Production Plan — the old manual's single "production-plan" section split
+// three ways, following the client's own reference nav (Drawing table / Operation
+// table as siblings). "Drawing / Item Table" is new content, written from the
+// po_items fields this session has used directly and repeatedly building test
+// Production Plans (item_code, bom_no, planned_qty, stock_uom, custom_drawing,
+// custom_duno_mark_no, custom_customer_drawing_number, sales_order,
+// custom_material_planning, custom_customer_weight_kg) -- not fabricated, but also
+// not yet reviewed against the live form the way the rest of this page has been. ─
+const ERP_MANUAL_PRODUCTION_PLAN_CHILDREN = [
 	{
-		id: "production-plan",
-		title: "Production Plan",
-		kicker: "After Material Planning — starting the job",
+		id: "type-setup",
+		title: "Type & Setup",
+		kicker: "Before the tables — what kind of job this is",
 		purpose:
-			"Once Material Planning has sorted out where every raw material is coming from, " +
-			"Production Plan is where you actually schedule the job — pick the Type, lay out the " +
-			"operations it goes through and who performs each one, and from here create the Job " +
-			"work order and Material Issue Plan that drive everything downstream. Example used " +
-			"below: Production Plan 1, created against Material Planning 1.",
+			"Production Plan is where a job actually gets scheduled, once Material Planning has " +
+			"sorted out where every raw material is coming from. Type decides the naming series " +
+			"and, downstream, which warehouse defaults are pulled onto the Material Issue Plan.",
 		fields: [
-			{ name: "Type (Internal Job / Supplier Job / Supplier with Material)", note: "Drives the naming series. Doesn't restrict which Work Type each individual operation uses below — those can still be mixed within one plan." },
-			{ name: "Process Planning — Operation Name", note: "The ordered list of operations this job goes through, e.g. Material Issue, Fit-up, Welding, Final, Blasting, Painting. One Supplier Operation Entry gets created per row, in this exact order." },
-			{ name: "Process Planning — Work Type (Internal Jobcard / Subcontractor)", note: "Who performs THIS operation. Can vary row by row in the same plan — e.g. Welding done in-house, Blasting sent to a supplier — but every Subcontractor row must come before every Internal Jobcard row, no interleaving." },
-			{ name: "Process Planning — Inspection Mandatory", note: "Tick on any operation that needs a formal QC sign-off before its completed quantity counts. Covered in full in the Inspection section below." },
+			{ name: "Type (Internal Job / Supplier Job / Supplier with Material)", note: "Drives the naming series. Doesn't restrict which Work Type each individual operation uses on the Operation table below — those can still be mixed within one plan." },
 		],
 		buttons: [
-			{ name: "Set Work Type", note: "Bulk-sets Work Type across selected Process Planning rows instead of editing each one by hand." },
-			{ name: "Job work order & MIP", note: "Appears once the Production Plan is submitted. Creates the Job work order (see below) AND its Material Issue Plan together in one click. Safe to click again later — it just opens what already exists instead of duplicating." },
+			{ name: "Job work order & MIP", note: "Appears once the Production Plan is submitted. Creates the Job work order AND its Material Issue Plan together in one click. Safe to click again later — it just opens what already exists instead of duplicating." },
 			{ name: "Delete Job work order and MIP", note: "Sits next to the Vendor/Contractor field. Deletes both together, with a confirmation prompt — refuses outright if any real stock movement or production has already happened against either one, so nothing gets silently lost." },
 		],
 		notes: [
-			"“Job work order” is a display name only — underneath, it's still the same Subcontracting Order doctype; it just reads as “Job work order” everywhere in the UI.",
-			"If any operation in the Process Planning table has Work Type Subcontractor, Vendor/Contractor must be set before “Job work order & MIP” will create anything.",
+			"If any operation in the Operation table has Work Type Subcontractor, Vendor/Contractor must be set before “Job work order & MIP” will create anything.",
 		],
 	},
 	{
-		id: "job-work-order",
+		id: "drawing-table",
+		title: "Drawing / Item Table",
+		kicker: "Which drawings this plan produces",
+		purpose:
+			"One row per drawing/item this Production Plan is scheduling. Each row carries its " +
+			"own Sales Order, DUNO/Mark No and Customer Drawing Number, and points back at the " +
+			"Material Planning that reserved its raw material — that link is how Material Issue " +
+			"Plan later knows exactly which reserved rows belong to this job.",
+		fields: [
+			{ name: "Item Code / BOM No", note: "What is being produced, and the Bill of Materials it is produced against." },
+			{ name: "Planned Qty / Stock UOM", note: "How many of this item this plan produces." },
+			{ name: "Sales Order / DUNO Mark No / Customer Drawing Number", note: "Traceability back to the customer order and the specific drawing/mark." },
+			{ name: "Material Planning", note: "The Material Planning document that reserved raw material for this row. Material Issue Plan reads this link to pull in only the rows belonging to this plan's own drawings." },
+			{ name: "Customer Weight (Kg)", note: "The customer-provided weight for this item, carried through from the Sales Order/Drawing." },
+		],
+	},
+	{
+		id: "operation-table",
+		title: "Operation Table (Process Planning)",
+		kicker: "The sequence of operations, and who performs each one",
+		purpose:
+			"The ordered list of operations this job goes through — e.g. Material Issue, Fit-up, " +
+			"Welding, Final, Blasting, Painting. One Supplier Operation Entry gets created per " +
+			"row, in this exact order, once the Job work order is created.",
+		fields: [
+			{ name: "Operation Name", note: "The step itself." },
+			{ name: "Work Type (Internal Jobcard / Subcontractor)", note: "Who performs THIS operation. Can vary row by row in the same plan — e.g. Welding done in-house, Blasting sent to a supplier — but every Subcontractor row must come before every Internal Jobcard row, no interleaving." },
+			{ name: "Inspection Mandatory", note: "Tick on any operation that needs a formal QC sign-off before its completed quantity counts. Covered in full in the Inspection category." },
+		],
+		buttons: [
+			{ name: "Set Work Type", note: "Bulk-sets Work Type across selected rows instead of editing each one by hand." },
+		],
+	},
+];
+
+const ERP_MANUAL_JOB_WORK_ORDER_CHILDREN = [
+	{
+		id: "overview",
 		title: "Job work order",
 		kicker: "One document drives every operation",
 		purpose:
-			"Created from Production Plan 1, Job work order 1 is the single execution document " +
-			"for EVERY operation in the plan, whether it's done in-house or by a supplier — there " +
-			"is no separate Work Order/Job Card involved.",
+			"Created from a submitted Production Plan, the Job work order is the single execution " +
+			"document for EVERY operation in the plan, whether it's done in-house or by a supplier — " +
+			"there is no separate Work Order/Job Card involved.",
 		fields: [
-			{ name: "Drawing Items", note: "Every drawing/DUNO this job covers, each with its own Customer Provided Weight, Planned RM Weight, Mapped Weight, Excess Weight, and Transferred Weight — rolled up from Material Planning 1." },
+			{ name: "Drawing Items", note: "Every drawing/DUNO this job covers, each with its own Customer Provided Weight, Planned RM Weight, Mapped Weight, Excess Weight, and Transferred Weight — rolled up from Material Planning." },
 			{ name: "All Operations Complete", note: "Ticks itself once every operation in the chain has been submitted." },
 		],
 		steps: [
-			"Submitting Job work order 1 and clicking “Job work order & MIP” back on Production Plan 1 creates one Supplier Operation Entry per Process Planning row, in sequence order — Supplier Operation Entry 1, Supplier Operation Entry 2, and so on.",
-			"Each operation only becomes submittable once every earlier one already is — Supplier Operation Entry 3 can't be completed before Supplier Operation Entry 2 is.",
+			"Submitting the Job work order and clicking “Job work order & MIP” back on Production Plan creates one Supplier Operation Entry per Operation table row, in sequence order.",
+			"Each operation only becomes submittable once every earlier one already is — operation 3 can't be completed before operation 2 is.",
 			"The Operations tab shows a live summary table — Seq, Operation, Status, Overall Qty, Available to Consume, Total Consumed, Difference, Entry, Drawings. Click any operation's name (shown in blue, underlined) to jump straight into that Supplier Operation Entry.",
 		],
 		buttons: [
@@ -533,85 +617,25 @@ const MP_MANUAL_SECTIONS = [
 			{ name: "Supplier Operation Entries (under Create)", note: "Creates any still-missing Supplier Operation Entry in the chain — normally already done automatically by “Job work order & MIP”." },
 		],
 		notes: [
+			"“Job work order” is a display name only — underneath, it's still the same Subcontracting Order doctype; it just reads as “Job work order” everywhere in the UI.",
 			"The old separate “Work Order / Subcontract PO” create option under Production Plan is disabled — use “Job work order & MIP” there instead.",
 		],
 	},
+];
+
+const ERP_MANUAL_SOE_CHILDREN = [
 	{
-		id: "material-issue-plan",
-		title: "Material Issue Plan",
-		kicker: "Getting reserved stock to the supplier/WIP warehouse",
-		purpose:
-			"Created alongside Job work order 1, Material Issue Plan 1 is where reserved batches " +
-			"actually leave your warehouse — the physical stock movement that Material Planning's " +
-			"“Reserve” only ever soft-claimed.",
-		fields: [
-			{ name: "Raw Materials", note: "Every reserved batch pulled in for this job's drawings, with Reqd Qty (the mapped batch's weight), Issued Qty (cumulative transferred so far across every Stock Entry), Excess Qty (the mapped batch measured against the drawing's own planned weight), Transfer Excess Kg (surplus created by rounding Sec Nos up at transfer time), and per-row Excess Return fields. (Cut plans are no longer entered per row — they live on the Cut Sheet against the batch.)" },
-			{ name: "Finished Goods Warehouse", note: "Receives BOTH the finished good (via Make Final Stock Entry) and any unconsumed/off-cut material (via Return Excess Entry). Must be set before either button will work." },
-		],
-		buttons: [
-			{ name: "Select Materials to Transfer / To CNC Warehouse", note: "Move reserved batches out to the supplier — or, for CNC-flagged rows, to the CNC Warehouse first. Only batches that are BOTH purchased AND reserved are ever offered, filtered by Item Code only, since one consolidated batch can legitimately serve several drawings at once. Sec Nos is EDITABLE in this popup — see the worked example below." },
-			{ name: "Validate Stock", note: "A read-only preview of exactly what this plan will hand over: Kg and Sec Nos per item and batch, with any fractional Sec Nos highlighted in amber. Nothing is created or changed — use it before transferring to see which rows still need a whole-piece decision." },
-			{ name: "CNC to Supplier/WIP", note: "Forwards material on from the CNC Warehouse once machining is done." },
-			{ name: "PDF", note: "A shareable batch plan — DUNO/Mark No, Customer Drawing No, Planned Kg, batch details and Sec Qty — for the production or supplier team, with its own Download button in the popup's corner." },
-			{ name: "Return Excess Entry", note: "Review Qty/dimensions and enter a mandatory Reason for every row, confirm that the material will be received into the Finished Goods Warehouse, then the return Stock Entry is created." },
-			{ name: "Make Final Stock Entry", note: "Appears once Job work order 1's operations are ALL complete. Creates a draft Manufacture Stock Entry that consumes the supplier-warehouse raw material and produces the finished good into the Finished Goods Warehouse — review and submit it from there." },
-		],
-		calcs: [
-			{
-				title: "Fractional Sec Nos at transfer — keep 4.5, or round to 5?",
-				item: "ISMB450", group: "Structurals",
-				length: 900, sec_qty: "4.5 planned", unit_weight: 72.4,
-				formula:
-					"One purchased batch is shared by 5 drawings — 8 Nos in total across the whole Material Planning. " +
-					"But this Material Issue Plan covers only 3 of those drawings, so it pulls 4.5 Nos " +
-					"(Kg-per-piece = (900÷1000) × 72.4 = 65.16, so 4.5 × 65.16 = 293.22 Kg). " +
-					"Leave it at 4.5 to issue the exact planned weight, or type 5 to hand over whole bars: " +
-					"5 × 65.16 = 325.80 Kg",
-				result: "293.22 Kg (4.5 Nos)  →  or 325.80 Kg (5 Nos), excess 32.58 Kg",
-				note:
-					"A fractional 4.5 is expected, not an error — it is simply this plan's share of a bar that " +
-					"several drawings sub-divide. If you type 5, the system re-checks free stock for the higher " +
-					"figure, refuses it outright if the batch can't cover it, and books the extra 32.58 Kg " +
-					"straight into Excess Material Return so it comes back to the batch later.",
-			},
-			{
-				title: "Where that 32.58 Kg of surplus shows up",
-				item: "ISMB450", group: "Structurals",
-				length: 900, sec_qty: "3 rows sharing the batch", unit_weight: 72.4,
-				formula:
-					"The same transfer, seen from the item table. Those 4.5 Nos were not one row — they were " +
-					"3 drawings sharing the batch, at 2 Nos, 1.5 Nos and 1 Nos. The 32.58 Kg surplus belongs " +
-					"to all three, so it is split in proportion to their Sec Nos: " +
-					"2÷4.5 × 32.58, 1.5÷4.5 × 32.58, 1÷4.5 × 32.58",
-				result: "14.48 Kg + 10.86 Kg + 7.24 Kg = 32.58 Kg",
-				note:
-					"Each figure lands in that row's Transfer Excess Kg column, so the surplus is visible against " +
-					"the drawings that caused it instead of only as one lump in Excess Material Items. The parts " +
-					"always add back to the total. Transfer again later and round up again, and the column " +
-					"accumulates rather than resetting. Do not confuse it with Excess Qty next to it: Excess Qty " +
-					"compares the mapped batch against the drawing's planned weight and is set when the row is " +
-					"fetched; Transfer Excess Kg is created purely by your whole-piece decision at transfer time.",
-			},
-		],
-		notes: [
-			"Cut plates arrive here already sized to the PIECE. The cut is planned once on the Cut Sheet against the batch (see that section), so a row reaching this plan already carries W1's dimensions and its share of the pieces — there is nothing to re-enter here, and the transfer moves that piece rather than the whole plate. The plate's own Length/Width/Sec Nos are rewritten to the remnant when the first transfer from that sheet is submitted, and restored if it is cancelled.",
-			"Nothing is ever offered for transfer unless it's BOTH purchased (a Purchase Receipt allocated it) AND reserved (a manual step back on Material Planning 1) — after a Purchase Receipt submits, its popup tells you exactly which Material Planning to open and reserve if anything's still pending.",
-			"Why fractions turn up here and not in Material Planning: a Material Planning covering 10 drawings feeds a SEPARATE Material Issue Plan per drawing, and each plan only ever pulls its own drawings' reserved rows. A batch planned across 5 rows can therefore present as 4.5 Nos when only 3 of those drawings are being issued. That is the whole reason Sec Nos is editable here — this is the first point at which anyone knows how many physical bars are actually going out of the door.",
-			"Nothing rounds automatically, anywhere. Material Planning reserves the exact Kg each drawing needs; this popup is the ONLY place a fraction becomes whole pieces, and only because you typed it. Whatever you add on top is recorded as excess to return, never quietly absorbed.",
-		],
-	},
-	{
-		id: "supplier-operation-entry",
+		id: "overview",
 		title: "Supplier Operation Entry (Operations)",
 		kicker: "One per operation, tracking Nos completed",
 		purpose:
-			"One Supplier Operation Entry exists per Process Planning row. Supplier Operation " +
-			"Entry 1 (the first operation) tracks Kg consumed from what was transferred; every " +
-			"operation after that tracks Nos (pieces) handed forward from the one before it.",
+			"One Supplier Operation Entry exists per Operation table row. The first operation " +
+			"tracks Kg consumed from what was transferred; every operation after that tracks Nos " +
+			"(pieces) handed forward from the one before it.",
 		fields: [
 			{ name: "Consumption Log", note: "Log how many Nos (pieces) of each drawing were completed, with a Date. Weight (Kg) is auto-calculated from the drawing's own per-piece weight." },
-			{ name: "Drawing Details", note: "Per-drawing Qty to Manufacture, Available to Consume (Nos), Completed Qty (Nos), Customer Weight (Kg) and Planned Weight (Kg) — the last two now show on every operation, not just the first." },
-			{ name: "Available to Consume (Nos)", note: "Supplier Operation Entry 1 gets this from what's actually been transferred; every later one gets it from the PREVIOUS operation's own Completed Qty, once that operation is saved (while still draft) or submitted." },
+			{ name: "Drawing Details", note: "Per-drawing Qty to Manufacture, Available to Consume (Nos), Completed Qty (Nos), Customer Weight (Kg) and Planned Weight (Kg)." },
+			{ name: "Available to Consume (Nos)", note: "The first operation gets this from what's actually been transferred; every later one gets it from the PREVIOUS operation's own Completed Qty, once that operation is saved (while still draft) or submitted." },
 		],
 		steps: [
 			"Logging Nos against a drawing in Consumption Log auto-advances Status from Open to In Progress, and — when Inspection Mandatory is off — immediately updates that drawing's Completed Qty.",
@@ -621,11 +645,14 @@ const MP_MANUAL_SECTIONS = [
 			{ name: "Add All Drawing (Testing group)", note: "Fills Consumption Log with one row per drawing at its full available quantity in one click, instead of adding rows one by one. For quick testing/data entry, not a normal production step." },
 		],
 		notes: [
-			"If Inspection Mandatory is ticked for this operation, Consumption Log no longer completes anything directly — see Inspection below for what happens instead.",
+			"If Inspection Mandatory is ticked for this operation, Consumption Log no longer completes anything directly — see Inspection for what happens instead.",
 		],
 	},
+];
+
+const ERP_MANUAL_INSPECTION_CHILDREN = [
 	{
-		id: "inspection",
+		id: "overview",
 		title: "Inspection (Mandatory Operations)",
 		kicker: "QC sign-off before quantity counts as done",
 		purpose:
@@ -675,40 +702,317 @@ const MP_MANUAL_SECTIONS = [
 			"Total Checked / Cleared / Rework Qty still appear (read-only) at the top of the Inspection Entry for reporting — they're auto-totalled from the Inspection Items rows, not entered directly.",
 		],
 	},
+];
+
+// ─── Material Issue Plan — migrated verbatim from the old Material Issue Plan
+// manual, one child per topic exactly as that page's sidebar listed them. ───────
+const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 	{
-		id: "checking-stock",
-		title: "Checking Overall Stock",
-		kicker: "Table 7 of 7 — outside Material Planning",
-		kind: "info",
+		id: "overview",
+		kind: "overview",
+		flow: false,
+		kicker: "Start here",
+		title: "What a Material Issue Plan Is For",
 		purpose:
-			"Everything above shows stock from the point of view of ONE Material Planning " +
-			"document. To see overall, warehouse-wide stock — including what's free right now " +
-			"across every job, batch, and reservation — use the Manufyxinvenza Stock Balance " +
-			"report instead of trying to piece it together from individual plans.",
-		steps: [
-			"Open it from the Awesomebar (search bar at the top) — type “Manufyxinvenza Stock Balance” and select the report.",
-			"It shows item-and-batch-wise on-hand quantity, what's reserved against which Material Planning, and what's genuinely free — the same free-Kg figures the Exact Match and Excess Material Mapping pickers use internally, but for every item and warehouse at once.",
+			"One Material Issue Plan per Production Plan. It pulls in every raw-material row " +
+			"reserved for that job's drawings, and is the only place stock actually moves: out " +
+			"to the supplier (or your WIP warehouse), optionally via CNC, and back again as " +
+			"excess. Nothing here invents quantities — it inherits what Material Planning " +
+			"reserved and asks you to decide the one thing a planner cannot know in advance: " +
+			"how many whole physical pieces are going out today.",
+	},
+	{
+		id: "raw-materials",
+		title: "Raw Materials",
+		kicker: "The list, and where it comes from",
+		purpose:
+			"Every reserved row for this job's drawings, pulled from the linked Material " +
+			"Planning(s). It is rebuilt rather than edited: press <b>Refresh Raw Materials</b> " +
+			"and the rows are re-read from Material Planning, which is how a late purchase or a " +
+			"batch mapped after this plan was created still finds its way in.",
+		fields: [
+			{ name: "Reqd Qty", note: "What this row must transfer — the weight of the batch mapped to it in Material Planning. Not the customer's weight and not the drawing's; the actual mapped material." },
+			{ name: "Issued Qty", note: "Cumulative Kg transferred so far across every Stock Entry from this plan. A row can be issued in stages." },
+			{ name: "Excess Qty", note: "Reqd Qty minus the drawing's own planned raw-material weight — surplus the mapped batch carries beyond what the drawing needs. Set when the row is fetched." },
+			{ name: "Transfer Excess Kg", note: "Surplus created by YOU rounding Sec Nos up at transfer time. Separate from Excess Qty, and accumulates across partial transfers." },
+			{ name: "Sec Qty / Sec UOM", note: "The row's share in pieces. Frequently fractional — see the worked example below, that is expected and not an error." },
+			{ name: "CNC Process", note: "Inherited from Material Planning. Ticked means this material must go to the CNC warehouse first; it is not a preference." },
+			{ name: "Batch / Batch Remarks", note: "The reserved batch and any remarks recorded against it at inspection." },
+		],
+		examples: [
+			{
+				type: "dont",
+				label: "Don't type into these rows expecting it to stick",
+				text: "Everything except the Excess Return and Cut Sheet fields is rebuilt from Material Planning on the next refresh. To change what a row draws from, change it there.",
+			},
+			{
+				type: "do",
+				label: "Refresh after a late purchase",
+				text: "Stock bought after this plan was created is allocated back into Material Planning by the Purchase Receipt, which refreshes this plan automatically. If you have the form open, reload it.",
+			},
+		],
+		notes: [
+			"Only this plan's own drawings appear. One Material Planning can cover ten drawings and feed ten separate Material Issue Plans; each pulls only the rows belonging to the drawings in its own Production Plan.",
+			"Rows fulfilled from a Cut Sheet arrive already sized to the PIECE, not the plate — a 2000 × 1000 sheet cut into 500 × 250 pieces shows 500 × 250 here. That is what physically goes out.",
 		],
 	},
 	{
-		id: "glossary",
-		title: "Quick Reference",
+		id: "warehouses",
+		title: "Warehouses",
+		kicker: "Where material goes",
+		purpose: "Four warehouses decide every movement this plan can make. Three are needed before anything can be transferred.",
+		fields: [
+			{ name: "Source Warehouse", note: "Where the reserved stock is now — normally Stores. Defaults from the Production Plan's Raw Material Warehouse." },
+			{ name: "Supplier / WIP Warehouse", note: "The destination. For a supplier job this is the Job Worker's own warehouse, resolved automatically once a Job Worker is set on the Subcontracting Order. For an internal job there is no supplier, so this is entered by hand and is the ONLY place the WIP warehouse is recorded." },
+			{ name: "CNC Warehouse", note: "Required if any row is flagged CNC Process. Material goes here first and is forwarded on afterwards." },
+			{ name: "Finished Goods Warehouse", note: "Receives both the finished item (Make Final Stock Entry) and returned off-cuts (Return Excess Entry). Neither button works until it is set." },
+		],
+		notes: [
+			"A blank Supplier/WIP Warehouse blocks every transfer and quietly breaks the weight tracking back on the Subcontracting Order — if a transfer button does nothing useful, check here first.",
+		],
+	},
+	{
+		id: "transfer",
+		title: "Select Materials to Transfer",
+		kicker: "The popup that moves stock",
+		purpose:
+			"One popup for every leg — source to supplier, source to CNC, and CNC onward — so " +
+			"there is a single place to learn. It lists what is still pending, lets you take " +
+			"part of it, and is the only point in the whole system where a fractional Sec Nos " +
+			"becomes whole physical pieces.",
+		fields: [
+			{ name: "Planned", note: "What this row was always going to transfer." },
+			{ name: "Transferred", note: "What has already gone, across earlier partial transfers. Re-open the popup after a partial transfer and this is how you see where you stand." },
+			{ name: "In Stock", note: "What the batch physically holds in the source warehouse right now. Zero usually means the Purchase Receipt has not been made yet — the row is planned and reserved, but the steel is not in the building." },
+			{ name: "Sec Nos", note: "Editable. The hint below it reads e.g. “7.92 (Plan) · or 8 whole” so you can see the planned fraction and the nearest whole-piece figure together." },
+			{ name: "Transfer Qty (Kg)", note: "Read-only, derived from Sec Nos. It is not editable on purpose: a hand-typed weight that disagreed with the piece count would ship a Stock Entry whose Sec Qty and weight contradict each other, and consumption downstream is driven by Sec Qty." },
+		],
+		steps: [
+			"Open <b>Transfer → Select Materials to Transfer</b>. A readiness check runs first and tells you about anything that would silently reduce what moves — stock mapped but not reserved, CNC rows with no CNC warehouse, or material already sitting at the supplier.",
+			"Tick the rows to send. Rows short of stock are left unticked for you.",
+			"Adjust <b>Sec Nos</b> where you must hand over whole pieces. The system re-checks free stock for the higher figure and refuses it outright if the batch cannot cover it.",
+			"Submit. The Stock Entry is created, Transferred goes up, and any surplus from rounding is booked as excess to return.",
+			"Come back later for the rest. Partial transfers are expected, and the popup shows exactly how much has gone and how much is left.",
+		],
+		calcs: [
+			{
+				title: "Why Sec Nos reads 4.5 and what to do about it",
+				item: "ISMB450", group: "Structurals",
+				length: 900, sec_qty: "4.5 planned", unit_weight: 72.4,
+				formula:
+					"One purchased bar is 900 mm, so one piece is (900÷1000) × 72.4 = 65.16 Kg. " +
+					"This batch is shared by 5 drawings — 8 Nos in total across the Material Planning — " +
+					"but this plan covers only 3 of them, so it pulls 4.5 Nos. " +
+					"Leave it: 4.5 × 65.16. Or type 5: 5 × 65.16",
+				result: "293.22 Kg (4.5 Nos)   →   or 325.80 Kg (5 Nos), 32.58 Kg excess",
+				note:
+					"The fraction is not an error — it is this plan's share of a bar the other jobs also " +
+					"draw from. Material Planning always reserves the exact weight a drawing needs and " +
+					"never rounds, because at planning time nobody knows which jobs will be issued " +
+					"together. Type 5 only if you genuinely cannot hand over half a bar; the extra " +
+					"32.58 Kg is recorded as excess to come back.",
+			},
+			{
+				title: "Where that 32.58 Kg lands on the item table",
+				item: "ISMB450", group: "Structurals",
+				length: 900, sec_qty: "3 rows sharing the batch", unit_weight: 72.4,
+				formula:
+					"Those 4.5 Nos were 3 drawings at 2 Nos, 1.5 Nos and 1 Nos. The surplus belongs to " +
+					"all three, split by their Sec Nos: 2÷4.5 × 32.58, 1.5÷4.5 × 32.58, 1÷4.5 × 32.58",
+				result: "14.48 + 10.86 + 7.24 = 32.58 Kg",
+				note:
+					"Each figure lands in that row's Transfer Excess Kg, so the surplus is visible against " +
+					"the drawings that caused it rather than as one lump. The parts always add back to the " +
+					"whole. Round up again on a later transfer and the column accumulates.",
+			},
+		],
+		examples: [
+			{
+				type: "do",
+				label: "Transfer in stages",
+				text: "Send what you have, come back for the rest. The popup nets off what has already gone, so you can never double-issue a row by revisiting it.",
+			},
+			{
+				type: "dont",
+				label: "Don't expect a row with no stock to move",
+				text: "If In Stock reads 0 the batch is not in the source warehouse yet. The row stays pending, and a red panel explains why rather than leaving you to work it out.",
+			},
+			{
+				type: "dont",
+				label: "Don't go looking for material already at the supplier",
+				text: "A row fulfilled from an off-cut that never left the supplier is deliberately absent from the list — there is nothing in your warehouse to move. A blue panel names those rows so the gap is explained rather than silent.",
+			},
+		],
+		notes: [
+			"Nothing is offered unless it is BOTH purchased and reserved. Reserving is a separate deliberate step back on Material Planning; if stock is mapped but not reserved, the readiness check names the Material Planning so the fix is one click away.",
+			"Nothing rounds by itself, anywhere in the system. This popup is the only place a fraction becomes whole pieces, and only because you typed it.",
+		],
+	},
+	{
+		id: "cnc",
+		title: "CNC Routing",
+		kicker: "Two legs, two Stock Entries",
+		purpose:
+			"Material flagged <b>CNC Process</b> in Material Planning must reach the CNC " +
+			"warehouse before it reaches the supplier. That is a routing instruction, not a " +
+			"preference, so it is enforced rather than assumed.",
+		steps: [
+			"<b>Transfer → To CNC Warehouse</b> sends the flagged rows to CNC.",
+			"Machining happens. Only material that has physically arrived can be forwarded.",
+			"<b>Transfer → CNC to Supplier/WIP</b> appears once there is something at CNC, and moves it onward as a SEPARATE Stock Entry. Partial forwarding is supported — release it as machining finishes.",
+		],
+		examples: [
+			{
+				type: "dont",
+				label: "Don't leave CNC Warehouse blank on a plan with CNC rows",
+				text: "The transfer is BLOCKED outright, not warned about. With no CNC warehouse the flag would be quietly ignored and the material would go straight to the supplier, skipping the machining step — and by the time anyone noticed, the stock would have moved.",
+			},
+			{
+				type: "do",
+				label: "Two ways to clear that block",
+				text: "Either set the CNC Warehouse here, or untick CNC Process on those rows back in Material Planning if the step is genuinely not required. The block message offers both.",
+			},
+		],
+	},
+	{
+		id: "excess-return",
+		title: "Excess Material Items",
+		kicker: "Getting the leftovers back",
+		purpose:
+			"Everything left over after the job — the surplus from rounding Sec Nos up, and " +
+			"whatever the shop floor measures once the material is actually cut. Each row is " +
+			"either returned to your warehouse as a real batch, or claimed directly by another " +
+			"job while it is still at the supplier.",
+		fields: [
+			{ name: "Length / Width / Sec Nos", note: "The off-cut's real dimensions. Rounding-surplus rows arrive with placeholder dimensions (one standard piece) — overwrite them with what you actually measure." },
+			{ name: "Return Type", note: "“Return to Own Warehouse” is the normal case. “Retain at Supplier (Virtual)” means it will never physically come back — it is consumed there — and such rows are skipped by the return entry." },
+			{ name: "Return Reason", note: "Mandatory before a return entry can be created. It is what makes the returned stock explainable months later." },
+			{ name: "Availability", note: "Allocated and Available, in Sec Nos and Kg — how much of this off-cut other jobs have claimed and how much is still free." },
+			{ name: "Unlink Claim", note: "Releases a Material Planning's claim so the dimensions can be corrected. The off-cut then goes back into the picker for anyone to claim." },
+		],
+		calcs: [
+			{
+				title: "One off-cut, shared between jobs",
+				item: "Plate 5mm", group: "Plates",
+				length: 1000, sec_qty: 6, unit_weight: 7.85,
+				formula:
+					"A 1000 × 500 × 5 off-cut, 6 pieces at (1000÷1000) × (500÷1000) × 5 × 7.85 = 19.625 Kg each. " +
+					"Job B claims 2, Job C claims 3",
+				result: "5 pieces claimed (98.125 Kg) · 1 piece (19.625 Kg) still free",
+				note:
+					"Claiming does not create a Stock Entry — it is a promise against a specific off-cut. " +
+					"The claiming rows show Batch blank with Status “Excess Mapped (Pending Return)”. When " +
+					"the off-cut is physically returned, the new batch attaches itself to every row holding " +
+					"a piece, and no one has to re-pick anything.",
+			},
+		],
+		examples: [
+			{
+				type: "dont",
+				label: "Don't change the size of an off-cut someone has claimed",
+				text: "It is refused, naming the Material Planning that holds it — from this grid, from the raw-material row's Excess fields, and from the Return Excess dialog alike. Another job planned around that exact piece; shrinking it would only surface at their transfer, far too late to fix cheaply.",
+			},
+			{
+				type: "do",
+				label: "The measurement was wrong — Unlink Claim",
+				text: "Release it, correct the dimensions on the raw-material row's Excess Length/Width, then let it be claimed again. Note the risk the confirmation warns about: while unlinked, another job can take it first.",
+			},
+			{
+				type: "do",
+				label: "Edit the raw-material row, not this grid",
+				text: "For an off-cut created from a raw-material row, that row's Excess Length/Width/Sec Qty are the source of truth — this grid is recalculated from them on every save. The exception is a rounding-surplus row, which has no raw-material row behind it and is edited here directly.",
+			},
+		],
+		notes: [
+			"Return Excess Entry creates one Material Receipt for every unreturned row, into the Finished Goods Warehouse, and the batches it creates are traceable back to the off-cut they came from.",
+		],
+	},
+	{
+		id: "finish",
+		title: "Finishing the Job",
+		kicker: "Final stock entry and completion",
+		purpose:
+			"Once every operation on the Job work order is complete, the finished goods are " +
+			"received and the plan closes itself.",
+		steps: [
+			"<b>Make Final Stock Entry</b> appears when all operations are done. It creates a draft Manufacture Stock Entry consuming the supplier-warehouse raw material and producing the finished item into the Finished Goods Warehouse — review it and submit from there.",
+			"The plan moves to <b>Completed</b> by itself once finished goods have been received AND every Excess Material Items row is resolved: returned, claimed by another job, or flagged Retain at Supplier.",
+			"Completed is one-way. The document locks; nothing later moves it back.",
+		],
+		notes: [
+			"If the plan will not complete, it is nearly always an unresolved excess row — check that table before anything else.",
+		],
+	},
+	{
+		id: "buttons",
+		title: "Every Button",
+		kicker: "Quick reference",
+		purpose: "What each action does, in one place.",
+		fields: [
+			{ name: "Refresh Raw Materials", note: "Rebuilds the list from Material Planning. Warns first, because Cut Sheet and Excess Return values you entered on rows are re-applied by matching — but anything else typed on a row is lost." },
+			{ name: "Validate Stock", note: "Read-only preview of exactly what this plan will hand over: Kg and Sec Nos per item and batch, fractional totals in amber, shortfalls in red. Changes nothing — use it before transferring." },
+			{ name: "Select Materials to Transfer", note: "The main transfer popup. Source → Supplier/WIP." },
+			{ name: "To CNC Warehouse", note: "First leg for CNC-flagged rows. Only appears when a CNC Warehouse is set." },
+			{ name: "CNC to Supplier/WIP", note: "Second leg. Only appears once material has physically arrived at CNC." },
+			{ name: "Return Excess Entry", note: "Review quantities and enter a mandatory reason per row, then the return Stock Entry is created into the Finished Goods Warehouse." },
+			{ name: "Make Final Stock Entry", note: "Draft Manufacture entry for the finished goods. Appears once all operations are complete." },
+			{ name: "PDF", note: "A shareable batch plan — DUNO/Mark No, Customer Drawing No, planned Kg, batch details and Sec Qty — for the production or supplier team." },
+		],
+	},
+];
+
+const ERP_MANUAL_REPORTS_CHILDREN = [
+	{
+		id: "overview",
+		title: "Checking Overall Stock & Reports",
+		kicker: "Outside any one Material Planning",
+		kind: "info",
+		purpose:
+			"Everything in Material Planning shows stock from the point of view of ONE document. " +
+			"To see overall, warehouse-wide stock — or to check specifically what needs chasing — " +
+			"use the reports below instead of piecing it together from individual plans.",
+		steps: [
+			"<b>Manufyxinvenza Stock Balance</b> — open from the Awesomebar. Item-and-batch-wise on-hand quantity, what's reserved against which Material Planning, and what's genuinely free — the same free-Kg figures the Exact Match and Excess Material Mapping pickers use internally, but for every item and warehouse at once.",
+			"<b>Excess Material Return Report</b> — the chase-list for off-cuts. Defaults to “Pending Return” (still out there AND actually coming back — drops anything already returned or flagged Retain at Supplier) over the last three months, and names every Material Planning holding a piece of each off-cut.",
+			"<b>Cut Sheet Report</b> — which plates are cut, who is drawing from them, and what is left. “W2 Not Written” filters to sheets that have been cut but never had their balance written back to the batch — the state where the plate in the rack and the system disagree.",
+		],
+	},
+];
+
+const ERP_MANUAL_GLOSSARY_CHILDREN = [
+	{
+		id: "overview",
+		title: "Glossary",
 		kind: "glossary",
-		kicker: "Keep this handy",
+		kicker: "Terms used across this manual",
 		fields: [
 			{ name: "Exact Match", note: "A batch whose own Length/Width/Thickness are EQUAL to what's required — not just “close” or “big enough.”" },
 			{ name: "Reserve", note: "A soft claim on stock — marks it as spoken for so nothing else can also claim it. Always just the row's own quantity, never the whole batch. No physical movement happens yet." },
-			{ name: "Sec Qty", note: "Secondary quantity — the number of individual pieces (Nos)." },
+			{ name: "Sec Qty / Sec Nos", note: "The same idea under two names used interchangeably across the app — a count of physical pieces (bars, plates, cut pieces). Fractional at planning time, whole when material actually moves." },
 			{ name: "Alternate Item", note: "A substitute item used in place of what was originally required." },
 			{ name: "Consolidated", note: "Multiple drawings' requirements for the same item code, combined into one purchasing line." },
-			{ name: "Virtual Excess", note: "Material promised from another job's leftovers that has no physical batch — either it will never return to your warehouse (stays at the supplier) or it just hasn't yet." },
+			{ name: "Virtual / Pending Return", note: "An off-cut claimed by a job while still at the supplier. No batch, no stock entry — a promise, until it physically returns. “Retain at Supplier” means it never will; “Pending Return” means it hasn't yet." },
 			{ name: "CNC Process", note: "Marks that a piece needs CNC cutting at your own facility before it can go to the supplier — routes it through the Material Issue Plan's CNC Warehouse first." },
+			{ name: "W1 / W2", note: "On a Cut Sheet: W1 is the piece being cut, W2 the remnant left on the plate afterwards." },
 			{ name: "DUNO / Mark No", note: "The drawing-level identifier that keeps every row traceable back to exactly which piece, on which drawing, it belongs to." },
 			{ name: "Job work order", note: "Display name only — the same Subcontracting Order doctype underneath, created from a Production Plan, driving every operation whether performed in-house or by a supplier." },
 			{ name: "Consumption Log", note: "Where completed Nos (pieces) are logged, per drawing, on a Supplier Operation Entry — the source of truth for what's been done at that operation." },
-			{ name: "Inspection Mandatory", note: "A per-operation flag (set on Production Plan's Process Planning table) that requires an Inspection Entry to accept quantity before it counts as Completed — see the Inspection section." },
+			{ name: "Inspection Mandatory", note: "A per-operation flag (set on Production Plan's Operation table) that requires an Inspection Entry to accept quantity before it counts as Completed." },
+			{ name: "Reqd Qty vs Issued Qty", note: "On a Material Issue Plan row: what must be transferred, versus what has gone so far. Equal when the row is fully issued." },
+			{ name: "Excess Qty vs Transfer Excess Kg", note: "The first is the mapped batch measured against the drawing's planned weight, set when the row is fetched. The second is surplus created by rounding Sec Nos up at transfer time." },
 			{ name: "Finished Goods Warehouse", note: "The Material Issue Plan field that receives both the finished good (Make Final Stock Entry) and any off-cut/unconsumed material (Return Excess Entry)." },
 		],
 	},
 ];
 
+const ERP_MANUAL_CATEGORIES = [
+	...ERP_MANUAL_STUB_CATEGORIES,
+	{ id: "material-planning", label: "Material Planning", children: ERP_MANUAL_MATERIAL_PLANNING_CHILDREN },
+	{ id: "production-plan", label: "Production Plan", children: ERP_MANUAL_PRODUCTION_PLAN_CHILDREN },
+	{ id: "job-work-order", label: "Job Work Order", children: ERP_MANUAL_JOB_WORK_ORDER_CHILDREN },
+	{ id: "material-issue-plan", label: "Material Issue Plan", children: ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN },
+	{ id: "supplier-operation-entry", label: "Supplier Operation Entry", children: ERP_MANUAL_SOE_CHILDREN },
+	{ id: "inspection", label: "Inspection", children: ERP_MANUAL_INSPECTION_CHILDREN },
+	{ id: "reports", label: "Reports & Stock Checking", children: ERP_MANUAL_REPORTS_CHILDREN },
+	{ id: "glossary", label: "Glossary", children: ERP_MANUAL_GLOSSARY_CHILDREN },
+];

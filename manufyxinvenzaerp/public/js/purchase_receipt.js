@@ -1,4 +1,7 @@
-const FORMULA_GROUPS = ["Structurals", "Plates"];
+// `var`, not `const` -- see the note on the same line in purchase_order.js:
+// both files are eval'd into one shared global script scope, and a repeated
+// top-level `const` is a SyntaxError that discards the entire second file.
+var FORMULA_GROUPS = ["Structurals", "Plates"];
 
 function calc_total_weight(frm) {
 	const total = (frm.doc.items || [])

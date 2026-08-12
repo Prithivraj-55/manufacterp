@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 import frappe
 from frappe import _
 from frappe.model.document import Document
@@ -30,6 +32,7 @@ class MaterialIssuePlan(Document):
         _sync_excess_return_from_raw_materials(self)
         _sync_batch_remarks(self)
         _sync_excess_availability(self)
+        _sync_transferred_qty(self)
         _maybe_mark_completed(self)
 
     def on_trash(self):
@@ -300,7 +303,9 @@ def refresh_mip_raw_materials(mip_name):
                 continue
             qty = row.batch_calc_qty if row.batch else row.qty
             sec_qty = row.batch_sec_qty if row.batch else row.sec_qty
-            planned_weight = _lookup_drawing_planned_weight(row.sales_order, row.customer_drawing_number, row.item_code)
+            planned_weight = _lookup_drawing_planned_weight(
+                row.sales_order, row.customer_drawing_number, row.item_code,
+                row.length, row.width, row.thickness)
             new_row = mip.append("raw_materials", {
                 "material_planning": mp_name,
                 "source_table": "Material Planning Material Mapping",
@@ -338,7 +343,9 @@ def refresh_mip_raw_materials(mip_name):
         for row in (mp.available_raw_materials or []):
             if scoped_keys is not None and (row.sales_order, row.duno_mark_no) not in scoped_keys:
                 continue
-            planned_weight = _lookup_drawing_planned_weight(row.sales_order, row.customer_drawing_number, row.item_code)
+            planned_weight = _lookup_drawing_planned_weight(
+                row.sales_order, row.customer_drawing_number, row.item_code,
+                row.length, row.width, row.thickness)
             new_row = mip.append("raw_materials", {
                 "material_planning": mp_name,
                 "source_table": "Material Planning Available Raw Material",
@@ -426,6 +433,63 @@ def _sync_excess_availability(mip):
         row.available_qty = avail["available_qty"]
 
 
+def _sync_transferred_qty(mip):
+    """Refresh each raw_materials row's Issued Qty from the Stock Entries that actually
+    moved the material.
+
+    This field used to be written only by refresh_mip_raw_materials, which is
+    deliberately blocked once any stock has been transferred (see
+    _mip_refresh_blocked_message) -- so in the one situation where it finally has a
+    non-zero value to show, nothing was left that could write it. Every row read 0 and
+    the grid showed a fully-shipped plan as entirely pending. The transfer popup was
+    never affected: it computes its own figures live (see get_mip_pending_items).
+
+    Counted as "left the source warehouse", so the Stores -> CNC -> supplier route
+    contributes once (on its first leg) rather than twice. Where several requirement
+    rows share one batch they split its total by planned-qty share, the same weighting
+    the transfer popup uses to aggregate them; the last row absorbs the rounding
+    remainder so the parts sum back to the whole exactly."""
+    if not mip.source_warehouse:
+        return
+
+    moved = {}
+    for r in frappe.db.sql(
+        """
+        SELECT sed.item_code, sed.batch_no, SUM(sed.qty) AS qty
+        FROM `tabStock Entry Detail` sed
+        JOIN `tabStock Entry` se ON se.name = sed.parent
+        WHERE se.custom_mip_ref = %s AND se.docstatus = 1 AND sed.s_warehouse = %s
+        GROUP BY sed.item_code, sed.batch_no
+        """,
+        (mip.name, mip.source_warehouse),
+        as_dict=True,
+    ):
+        moved[(r.item_code, r.batch_no or "")] = flt(r.qty)
+
+    # Keyed on the batch's own item -- an alternate-item row's Stock Entry line is
+    # booked against planned_item, not the requirement's item_code.
+    def key(row):
+        return ((row.planned_item or row.item_code), row.batch_no or "")
+
+    rows_by_key = defaultdict(list)
+    for row in (mip.raw_materials or []):
+        rows_by_key[key(row)].append(row)
+
+    for k, rows in rows_by_key.items():
+        total_moved = flt(moved.get(k, 0.0))
+        total_planned = sum(flt(r.qty) for r in rows)
+        if not total_moved or not total_planned:
+            for r in rows:
+                r.transferred_qty = flt(total_moved, 3) if len(rows) == 1 else 0.0
+            continue
+        running = 0.0
+        for r in rows[:-1]:
+            share = flt(total_moved * flt(r.qty) / total_planned, 3)
+            r.transferred_qty = share
+            running += share
+        rows[-1].transferred_qty = flt(total_moved - running, 3)
+
+
 def _cut_sheet_seed(mp_row):
     """The cut plan a Material Planning row carries, shaped for a raw_materials row.
 
@@ -459,27 +523,45 @@ def _carry_forward_editable_fields(new_row, old_rows_by_key, source_table, sourc
         new_row.set(fieldname, old_row.get(fieldname))
 
 
-def _lookup_drawing_planned_weight(sales_order, customer_drawing_number, item_code):
-    """Engineering/planned raw material weight for this (sales_order,
-    customer_drawing_number, item_code) from Sales Order Drawing Raw Material's
-    own Total Weight -- the "Drawing/planned RM weight" Excess Qty is measured
-    against (client change request Phase 5.3's worked example: 14 Kg mapped
-    batch − 13 Kg drawing-planned = 1 Kg excess). Matched on the same key
-    fields Material Issue Plan Raw Material actually carries (no item_number
-    field exists on that row, unlike the stricter match used elsewhere in this
-    app) -- returns None (not 0) when no match exists, so callers can tell
-    "genuinely 0 Kg planned" apart from "no comparison available yet"."""
+def _lookup_drawing_planned_weight(sales_order, customer_drawing_number, item_code,
+                                   length=None, width=None, thickness=None):
+    """Engineering/planned raw material weight for this requirement, from Sales
+    Order Drawing Raw Material's own Total Weight -- the "Drawing/planned RM
+    weight" Excess Qty is measured against (client change request Phase 5.3's
+    worked example: 14 Kg mapped batch − 13 Kg drawing-planned = 1 Kg excess).
+
+    Matched on DIMENSIONS as well as item + drawing. One drawing routinely needs
+    the same item in several sizes -- 1B9 alone needs PLATE10 at 192.31, 200.0 and
+    225.86 mm -- and matching on item + drawing alone returned whichever of those
+    rows came first, then measured every one of them against that single figure.
+    The result was a scatter of meaningless positives and negatives (a 3.404 Kg
+    piece judged against a 5.435 Kg one reported -2.031 Kg of "excess"), even
+    though the mapping covered the requirement exactly.
+
+    Falls back to the item + drawing match when nothing matches dimensionally, so
+    a row whose dimensions have since been edited still gets a figure rather than
+    silently losing its comparison. Returns None (not 0) when no match exists at
+    all, so callers can tell "genuinely 0 Kg planned" apart from "no comparison
+    available yet"."""
     if not sales_order or not item_code:
         return None
-    return frappe.db.get_value(
-        "Sales Order Drawing Raw Material",
-        {
-            "parent": sales_order,
-            "material_code": item_code,
-            "customer_drawing_number": customer_drawing_number or "",
-        },
-        "total_weight",
-    )
+
+    base = {
+        "parent": sales_order,
+        "material_code": item_code,
+        "customer_drawing_number": customer_drawing_number or "",
+    }
+
+    if length is not None:
+        exact = frappe.db.get_value(
+            "Sales Order Drawing Raw Material",
+            dict(base, length=flt(length), width=flt(width), thickness=flt(thickness)),
+            "total_weight",
+        )
+        if exact is not None:
+            return exact
+
+    return frappe.db.get_value("Sales Order Drawing Raw Material", base, "total_weight")
 
 
 #  Claimed-off-cut lock ────────────────────────────────────────────────────────
@@ -967,12 +1049,17 @@ def refresh_weight_summary(mip_name):
     mip.allocated_weight_kg = flt(allocated, 3)
     mip.transferred_weight_kg = flt(transferred, 3)
     mip.excess_weight_kg = flt(excess, 3)
-    # Perf: this function only ever changes the 4 header weight fields above and
-    # per-row weight fields on drawing_items -- it never touches any Link field's
-    # VALUE (Material Issue Plan has no validate() of its own and no doc_events
-    # registered in hooks.py, so nothing else runs here either way). A plain
-    # .save() still re-validates every Link field on every row of every child
-    # table, including raw_materials, which this function never touches -- on a
+
+    # Per-row Issued Qty. This runs on every transfer Stock Entry submit/cancel, which
+    # is exactly when the figure changes and is also the point after which
+    # refresh_mip_raw_materials (the only other writer) is blocked from running.
+    _sync_transferred_qty(mip)
+    # Perf: this function only ever changes the 4 header weight fields above, the
+    # per-row weight fields on drawing_items, and raw_materials.transferred_qty --
+    # it never touches any Link field's VALUE (Material Issue Plan has no validate()
+    # of its own and no doc_events registered in hooks.py, so nothing else runs here
+    # either way). A plain .save() still re-validates every Link field on every row
+    # of every child table, none of whose values this function changes -- on a
     # ~100-row Material Issue Plan that redundant check alone measured at ~0.35s
     # of a ~1.1s Stock Entry submission. ignore_links skips only that
     # re-validation; every other part of the normal save (timestamps, the

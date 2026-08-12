@@ -1062,6 +1062,46 @@ def create_finished_goods_entry(sco_name):
 # Doc event handlers
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _soe_consumed_kg(doc):
+    """Weight this operation actually passed on to the next one.
+
+    Not simply SUM(consumption_log.weight_kg): on an operation with Inspection
+    Mandatory, rework means the SAME piece is legitimately logged again in a later
+    round (see the note on the Op-2+ Nos guard below), so a plain sum double-counts
+    its weight. completed_qty_nos already solves this for Nos -- it only ever grows
+    via Accepted Qty from a submitted Inspection Entry -- so the weight is scaled to
+    match: each drawing contributes its logged Kg in the same proportion that its
+    ACCEPTED Nos bears to its LOGGED Nos.
+
+    For a non-mandatory operation completed_qty_nos IS the raw log total, so the
+    scale factor is 1 and this returns the plain sum, unchanged from before.
+
+    Log rows carrying weight but no drawing (or no Nos) can't be apportioned, so
+    they are passed through at face value rather than silently dropped."""
+    done_by_drawing = {
+        r.drawing: flt(r.completed_qty_nos)
+        for r in (doc.drawing_details or []) if r.drawing
+    }
+    logged_nos = defaultdict(float)
+    logged_kg = defaultdict(float)
+    unattributed_kg = 0.0
+    for r in (doc.consumption_log or []):
+        if r.drawing and flt(r.qty_nos) > 0:
+            logged_nos[r.drawing] += flt(r.qty_nos)
+            logged_kg[r.drawing] += flt(r.weight_kg)
+        else:
+            unattributed_kg += flt(r.weight_kg)
+
+    total = unattributed_kg
+    for drawing, nos in logged_nos.items():
+        kg = logged_kg[drawing]
+        # A drawing with no completed_qty_nos yet (mandatory op awaiting its first
+        # Inspection Entry) contributes nothing -- nothing has been accepted to pass on.
+        done = done_by_drawing.get(drawing, nos)
+        total += kg * (done / nos) if nos else kg
+    return flt(total, 3)
+
+
 def validate_supplier_operation_entry(doc, method):
     """Per-drawing Nos tracking + validation.
 
@@ -1075,6 +1115,9 @@ def validate_supplier_operation_entry(doc, method):
         between what's been logged and what Inspection has actually accepted is instead
         surfaced in inspection_items (see _sync_soe_inspection_items) for QC to review.
       - Auto-advance status from Open → In Progress when any Nos are logged.
+
+      - Recompute total_consumed_kg (see _soe_consumed_kg) on EVERY operation — this is
+        what the next operation's available_to_consume_kg is seeded from.
 
     For Op-1 (sequence_id == 1):
       - Check the Manufacturing Settings trigger: if "Fully Transferred", block logging
@@ -1150,10 +1193,18 @@ def validate_supplier_operation_entry(doc, method):
                         title=_("Material Not Yet Transferred"),
                     )
 
-    # --- 5. Op-1: existing Kg over-consume guard (weight_kg in log) ---
+    # --- 5. Kg consumed, for EVERY operation (this feeds the next one's
+    #        available_to_consume_kg via _propagate_available_to_next). Computing it
+    #        only for seq == 1, as this did originally, left Op-2 reporting 0 Kg
+    #        consumed and every operation from Op-3 on showing 0 Kg available -- the
+    #        weight chain died one hop in. ---
+    doc.total_consumed_kg = _soe_consumed_kg(doc)
+
+    # The over-consume guard stays on the RAW log total, unscaled: it is a data-entry
+    # check ("you typed more Kg than you were given"), so rework re-logs must still
+    # count against it even though they don't add to the weight carried forward.
     if seq == 1:
         total_kg = sum(flt(r.weight_kg) for r in (doc.consumption_log or []))
-        doc.total_consumed_kg = flt(total_kg, 3)
         available_kg = flt(doc.available_to_consume_kg)
         if available_kg > 0 and total_kg > available_kg:
             frappe.throw(
@@ -1689,23 +1740,20 @@ def _refresh_wo_drawing_transferred_weights(wo):
     transferred_weight = flt(wo.get("custom_transferred_weight_kg") or 0)
     ratio = min(transferred_weight / total_wo_mapped, 1.0) if total_wo_mapped else 0.0
 
-    changed = False
     for row in jc_doc.custom_drawing_details:
         wo_row = wo_rows.get(row.drawing)
         new_val = flt(flt(wo_row.mapped_weight_kg) * ratio, 3) if wo_row else 0.0
         if flt(row.transferred_weight_kg) != new_val:
+            # Per-row write, not jc_doc.save() -- see the matching note in
+            # _refresh_sco_drawing_transferred_weights: Op-1 is often already
+            # submitted when a later partial transfer runs this from the Stock Entry
+            # submit hook, and save() would then abort that submission outright.
+            frappe.db.set_value(
+                row.doctype, row.name,
+                "transferred_weight_kg", new_val,
+                update_modified=False,
+            )
             row.transferred_weight_kg = new_val
-            changed = True
-
-    if changed:
-        jc_doc.flags.ignore_validate = True
-        # Perf: only row.transferred_weight_kg (a Float) changes here -- no Link
-        # field's VALUE is touched, so re-validating that every Link on every
-        # child row still points to a real document is pure redundant work on
-        # top of the validate() this already skips. Found while investigating
-        # slow Stock Entry submission (this runs from _update_wo_transferred_weight).
-        jc_doc.flags.ignore_links = True
-        jc_doc.save(ignore_permissions=True)
 
 
 def _get_sco_transfer_warehouses(sco_name):
@@ -1774,22 +1822,23 @@ def _refresh_sco_drawing_transferred_weights(sco):
     transferred_weight = flt(sco.get("custom_transferred_weight_kg") or 0)
     ratio = min(transferred_weight / total_sco_mapped, 1.0) if total_sco_mapped else 0.0
 
-    changed = False
     for row in soe_doc.drawing_details:
         sco_row = sco_rows.get(row.drawing)
         new_val = flt(flt(sco_row.mapped_weight_kg) * ratio, 3) if sco_row else 0.0
         if flt(row.transferred_weight_kg) != new_val:
+            # Written per-row rather than via soe_doc.save(): this runs from the
+            # Stock Entry submit hook, and Op-1 is routinely already SUBMITTED by the
+            # time a later partial transfer lands -- a save() there dies with
+            # "Not allowed to change Transferred (Kg) after submission" and takes the
+            # whole Stock Entry submission down with it. Only this one Float changes
+            # and it is a derived display figure, so a direct write is both safe and
+            # cheaper than the full save this used to do.
+            frappe.db.set_value(
+                row.doctype, row.name,
+                "transferred_weight_kg", new_val,
+                update_modified=False,
+            )
             row.transferred_weight_kg = new_val
-            changed = True
-
-    if changed:
-        soe_doc.flags.ignore_validate = True
-        # Perf: same reasoning as _refresh_wo_drawing_transferred_weights above --
-        # only row.transferred_weight_kg (a Float) changes, no Link field VALUE
-        # is touched, so skip the redundant re-validation of every Link on every
-        # child row on top of the validate() this already skips.
-        soe_doc.flags.ignore_links = True
-        soe_doc.save(ignore_permissions=True)
 
 
 def _get_mp_drawing_weight(mp_name, duno_mark_no):
@@ -1840,9 +1889,18 @@ def _get_mp_mapped_weight_by_duno(mp_name):
 
     Mapped weight = the batch weight allocated to each drawing — cross-mapped rows
     (Material Mapping batch_calc_qty) plus exact-match rows (Available Raw Material
-    reserved_qty or required_qty). Exact-match rows carry no DUNO/Mark No, so their
-    weight is attributed across drawings in proportion to each drawing's planned qty
-    for that item (from the Raw Materials sub-table).
+    reserved_qty or required_qty). BOTH tables carry duno_mark_no, so both are
+    attributed directly to the drawing that actually reserved the batch.
+
+    Exact-match rows used to be spread across every drawing in the Material Planning
+    in proportion to that item's planned qty, on the assumption they carried no DUNO.
+    They do carry one, and the spreading was badly wrong whenever a Material Planning
+    covered more drawings than the job being costed: weight reserved for a drawing in
+    THIS job leaked onto drawings that weren't in it and was then discarded with them.
+    On the plan that surfaced this, drawing 1B1 reported 501.422 Kg mapped against
+    1,876.436 Kg actually reserved, and the Job Work Order's per-drawing rows summed
+    to barely half its own (correct) header weight. The proportional split survives
+    only as a fallback for rows that genuinely have no DUNO.
 
     Includes all batch-assigned rows regardless of is_reserved, so the figure stays
     accurate after SE submission clears the reservation flag.
@@ -1863,10 +1921,10 @@ def _get_mp_mapped_weight_by_duno(mp_name):
     ):
         mapped[r.duno_mark_no or ""] += flt(r.batch_calc_qty)
 
-    # Exact-match — no DUNO; split per item by each drawing's planned share
+    # Exact-match — attributed by its own DUNO; only rows missing one need splitting
     exact_rows = frappe.db.sql(
         """
-        SELECT item_code,
+        SELECT item_code, duno_mark_no,
                COALESCE(NULLIF(reserved_qty, 0), required_qty) AS qty
         FROM `tabMaterial Planning Available Raw Material`
         WHERE parent = %s AND batch_no IS NOT NULL AND batch_no != ''
@@ -1876,6 +1934,12 @@ def _get_mp_mapped_weight_by_duno(mp_name):
         as_dict=True,
     )
     exact_rows = [frappe._dict(r) for r in exact_rows]
+
+    for er in list(exact_rows):
+        if er.duno_mark_no:
+            mapped[er.duno_mark_no] += flt(er.qty)
+            exact_rows.remove(er)
+
     if exact_rows:
         item_duno_qty = defaultdict(lambda: defaultdict(float))  # item -> duno -> planned qty
         item_total = defaultdict(float)                          # item -> total planned qty
@@ -2072,12 +2136,24 @@ def backfill_drawing_item_qty(sco_name):
 
 def _get_supplier_wh_consumption_items(sco, supplier_warehouse=None):
     """Return SE consumption rows (issued FROM the supplier/WIP warehouse, no target) for
-    all raw material transferred to the supplier for this SCO.
+    all raw material still sitting at the supplier for this SCO.
 
-    Pulls items directly from submitted 'Send to Subcontractor' SEs linked to this SCO
-    (via custom_sco_ref or subcontracting_order). Querying the SE Detail rows is reliable
-    in Frappe v15 because SLE rows store batch tracking in Serial and Batch Bundles rather
-    than in the batch_no column, making SLE batch_no lookups unreliable.
+    Counts the NET movement across the supplier warehouse boundary -- every submitted SE
+    linked to this SCO (via custom_sco_ref or subcontracting_order) that puts stock INTO
+    that warehouse adds, and every one that takes stock OUT subtracts. Filtering on
+    stock_entry_type = 'Send to Subcontractor' instead (as this did originally) silently
+    lost every batch routed through CNC: that material reaches the supplier on the second
+    leg of a Stores -> CNC -> supplier hop, which is a 'Material Transfer', so it was
+    never offered for consumption and stayed stranded at the supplier after the finished
+    goods were booked. Netting also means an excess return (supplier -> stores) correctly
+    reduces what is left to consume, and a partial re-run cannot double-count material an
+    earlier Manufacture entry already consumed.
+
+    Querying the SE Detail rows is reliable in Frappe v15 because SLE rows store batch
+    tracking in Serial and Batch Bundles rather than in the batch_no column, making SLE
+    batch_no lookups unreliable. Reading the warehouse's live stock instead would be
+    simpler but wrong -- a supplier warehouse is shared across every order placed with
+    that supplier, so it would pull in other jobs' material.
 
     supplier_warehouse defaults to sco.supplier_warehouse for backward compatibility, but
     callers should pass _get_sco_supplier_warehouse(sco) instead -- an Internal Job SCO's
@@ -2085,16 +2161,21 @@ def _get_supplier_wh_consumption_items(sco, supplier_warehouse=None):
     supplier_warehouse = supplier_warehouse or sco.supplier_warehouse
     rows = frappe.db.sql(
         """
-        SELECT sed.item_code, sed.batch_no, SUM(sed.qty) AS qty
+        SELECT sed.item_code, sed.batch_no,
+               SUM(CASE WHEN sed.t_warehouse = %(wh)s THEN sed.qty
+                        WHEN sed.s_warehouse = %(wh)s THEN -sed.qty
+                        ELSE 0 END) AS qty
         FROM `tabStock Entry Detail` sed
         JOIN `tabStock Entry` se ON se.name = sed.parent
-        WHERE (se.custom_sco_ref = %s OR se.subcontracting_order = %s)
-          AND se.stock_entry_type = 'Send to Subcontractor'
+        WHERE (se.custom_sco_ref = %(sco)s OR se.subcontracting_order = %(sco)s)
           AND se.docstatus = 1
+          AND (sed.t_warehouse = %(wh)s OR sed.s_warehouse = %(wh)s)
         GROUP BY sed.item_code, sed.batch_no
-        HAVING SUM(sed.qty) > 0
+        HAVING SUM(CASE WHEN sed.t_warehouse = %(wh)s THEN sed.qty
+                        WHEN sed.s_warehouse = %(wh)s THEN -sed.qty
+                        ELSE 0 END) > 0
         """,
-        (sco.name, sco.name),
+        {"wh": supplier_warehouse, "sco": sco.name},
         as_dict=True,
     )
     return [

@@ -1,4 +1,8 @@
-const FORMULA_GROUPS = ["Structurals", "Plates"];
+// `var`, not `const`: doctype_js files are eval'd into the SAME global script
+// scope, so navigating Purchase Order -> Purchase Receipt in one session parses
+// both files, and a repeated top-level `const` is a SyntaxError that kills the
+// whole second file (none of its handlers register). `var` may be redeclared.
+var FORMULA_GROUPS = ["Structurals", "Plates"];
 
 function calc_total_weight(frm) {
 	const total = (frm.doc.items || [])

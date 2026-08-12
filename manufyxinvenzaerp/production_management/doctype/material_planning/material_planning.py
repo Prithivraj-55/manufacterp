@@ -152,6 +152,12 @@ class MaterialPlanning(Document):
         Informational only, never blocking: buying short stock is sometimes a
         deliberate call (offcuts, stock already on hand), so this states the
         minimum each line needs and leaves the decision to the buyer.
+
+        Lines with an Alternate Item set are skipped entirely. There the
+        Length/Width/Thickness describe the SUBSTITUTE being bought, not the
+        original item, so measuring them against the original's longest piece
+        compares two different things -- a different profile legitimately carries
+        different dimensions, and the warning was firing on correct data.
         """
         if not self.consolidate_items or not self.unavailable_items:
             return
@@ -168,6 +174,8 @@ class MaterialPlanning(Document):
 
         messages = []
         for c in self.consolidate_items:
+            if c.get("alternate_item"):
+                continue
             agg = needed.get(c.item_code)
             if not agg:
                 continue
@@ -2466,6 +2474,22 @@ def _sec_nos_for_weight(row, weight_kg):
     return flt(flt(weight_kg) / kg_per_nos, 3)
 
 
+def _refresh_touched_cut_sheets(mp):
+    """Re-derive Allocated/Available on every Cut Sheet this plan draws from.
+
+    A sheet computes those figures from the rows holding its pieces, so reserving
+    or unreserving here changes them. Without this the sheet keeps showing the old
+    numbers until someone happens to open and save it -- which is exactly how a
+    batch assigned by hand through Update Batch ended up reserved on the row while
+    the sheet still reported nothing allocated."""
+    from manufyxinvenzaerp.production_management.doctype.cut_sheet.cut_sheet import (
+        refresh_cut_sheet_allocations,
+    )
+
+    for name in {r.cut_sheet_ref for r in (mp.material_mapping or []) if r.get("cut_sheet_ref")}:
+        refresh_cut_sheet_allocations(name)
+
+
 @frappe.whitelist()
 def reserve_batches(material_planning_name):
     """
@@ -2576,6 +2600,7 @@ def reserve_batches(material_planning_name):
 
     _update_bom_item_weights(mp)
     mp.save(ignore_permissions=True)
+    _refresh_touched_cut_sheets(mp)
     frappe.db.commit()
 
     return {
@@ -3220,6 +3245,7 @@ def reserve_exact_match_batches(material_planning_name):
 
     _update_bom_item_weights(mp)
     mp.save(ignore_permissions=True)
+    _refresh_touched_cut_sheets(mp)
     frappe.db.commit()
 
     return {
@@ -3265,6 +3291,7 @@ def unreserve_exact_match_batches(material_planning_name, row_names):
         frappe.throw(_("No matching reserved rows found."))
 
     mp.save(ignore_permissions=True)
+    _refresh_touched_cut_sheets(mp)
     frappe.db.commit()
 
     return [
@@ -3377,6 +3404,7 @@ def unreserve_batches(material_planning_name, row_names):
         frappe.throw(_("No matching reserved rows found."))
 
     mp.save(ignore_permissions=True)
+    _refresh_touched_cut_sheets(mp)
     frappe.db.commit()
 
     return [
