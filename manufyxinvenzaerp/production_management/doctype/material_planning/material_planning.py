@@ -3832,6 +3832,18 @@ def make_production_plan(material_planning_name):
     return pp.name
 
 
+# A Material Request only blocks a plan from ordering again while it is still WAITING to
+# be fulfilled. Received/Issued/Transferred mean the goods arrived and the request is
+# finished with -- it has no claim on anything.
+#
+# This used to be "anything except Cancelled/Stopped", which counted a fully Received
+# request as active. The effect was that a plan which had ever ordered anything could
+# never order again: buying a second item later, or re-ordering after a shortfall, hit
+# "You already have an active Material Request" and the only way through was to delete
+# the completed request -- destroying the purchase history to place a new order.
+MR_STATUSES_BLOCKING_NEW_REQUEST = ["Draft", "Pending", "Partially Ordered", "Ordered"]
+
+
 @frappe.whitelist()
 def make_material_request(material_planning_name, selected_items):
     """Create a draft Material Request for selected unavailable items."""
@@ -3856,7 +3868,7 @@ def make_material_request(material_planning_name, selected_items):
         "Material Request",
         filters={
             "custom_material_planning": material_planning_name,
-            "status": ["not in", ["Cancelled", "Stopped"]],
+            "status": ["in", MR_STATUSES_BLOCKING_NEW_REQUEST],
         },
         fields=["name", "status"],
     )
@@ -4022,7 +4034,7 @@ def make_material_request_from_consolidate(material_planning_name, selected_item
         "Material Request",
         {
             "custom_material_planning": material_planning_name,
-            "status": ["not in", ["Cancelled", "Stopped"]],
+            "status": ["in", MR_STATUSES_BLOCKING_NEW_REQUEST],
         },
         ["name", "status"],
         as_dict=True,

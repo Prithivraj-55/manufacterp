@@ -88,11 +88,20 @@ class CutSheet(Document):
     def on_trash(self):
         """A sheet other jobs are drawing from cannot simply vanish -- their rows
         would be left pointing at nothing, reserving pieces of a plan that no longer
-        exists."""
-        if self.allocations:
+        exists.
+
+        Only plans that still EXIST can object. An allocation naming a deleted Material
+        Planning is a dangling row, not a claim: it protects nothing, and counting it
+        made the sheet permanently undeletable -- the error named a plan the user could
+        not go and release, because it was already gone."""
+        live = sorted({
+            a.material_planning for a in (self.allocations or [])
+            if a.material_planning and frappe.db.exists("Material Planning", a.material_planning)
+        })
+        if live:
             frappe.throw(
                 _("This Cut Sheet is in use by {0}. Release those allocations first.")
-                .format(", ".join(sorted({a.material_planning for a in self.allocations if a.material_planning})))
+                .format(", ".join(live))
             )
 
     # ── derived values ────────────────────────────────────────────────────────
