@@ -1,259 +1,266 @@
 # Client change requests — meeting 2026-08-12
 
-Working list for the next stretch of work. **Nothing here is started.** Each task is
-sized to be done on its own, so we can pick them off one at a time as tokens allow.
+Working list. **Nothing here is started.** Each task stands alone so we can take them
+one at a time.
 
-Blocked items are marked **[Q<n>]** — they need an answer from `~/Downloads/claude doubts.docx`
-before the task can be finished (some can be started, just not completed).
+All 10 open questions were answered on 2026-08-13 (`~/Downloads/claude doubts.docx`);
+the decisions are folded in below. Where a mark and a written comment disagreed, the
+comment wins — that was the client's instruction.
 
-Status legend: `[ ]` not started · `[~]` in progress · `[x]` done
-
----
-
-## T1 — Stock Entry rate is 0 on some items  ·  [Q1]
-
-**Asked for:** cost on Stock Entry lines should come from the purchase / valuation rate.
-
-**Found:** no production code sets `basic_rate` anywhere — only `sample_data.py` and the
-test fixtures do. Every Stock Entry this app builds (transfer, CNC leg, final manufacture,
-excess return) leaves rate to ERPNext, which values a Material Transfer from the source
-warehouse's own valuation. So a 0 rate means the stock went IN at 0 — most likely the
-opening `Material Receipt`, or a Purchase Receipt line with no rate — rather than the
-transfer being at fault.
-
-**Work:** trace one 0-rate line back to the receipt that created the batch, confirm where
-the 0 originates, then fix at that point. Only fall back to stamping `basic_rate` on our
-own Stock Entry rows if the incoming valuation genuinely cannot be relied on.
-
-Files: `production_management/stock_entry.py`, `subcontracting_management/material_issue_plan_transfer.py`,
-`subcontracting_management/subcontracting.py`, `purchase_receipt_management/purchase_receipt.py`
+Status legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[–]` dropped
 
 ---
 
-## T2 — Hide "To CNC Warehouse" once CNC material has moved
+## What the answers changed
 
-**Asked for:** stop showing "To CNC Warehouse" after the planned raw material has been
-transferred. If a CNC checkbox is later enabled in Material Planning, that flows into the
-Material Issue Plan and the button must come back — then hide again once that material moves.
+| | |
+|---|---|
+| **T1 dropped** | Not a code problem. Client will purchase with a proper rate and retest. Core costing left alone. |
+| **T9 collapsed** | No doctype rename. The existing "Job work order" label is a single **Translation** record — do the same for Operation Entry. 125-reference rename avoided entirely. |
+| **T8 shrank** | Two batches of one item *should* be two rows. The real complaint was **ordering** — rows of the same item must sit together. |
+| **T7 grew** | `return_type` is removed outright, and unreturned excess must still be consumed at the final Stock Entry so raw-material cost lands correctly. |
+| **T6 grew** | New **"Save and Close"** draft step: the popup must persist without validating. |
 
-**Found:** `material_issue_plan.js:544` shows the button on `if (frm.doc.cnc_warehouse)`
-alone, so it is permanently visible. "CNC to Supplier/WIP" is already conditional, via the
-whitelisted `has_cnc_stock`.
-
-**Work:** add a companion check ("are any CNC-flagged rows still pending transfer to CNC?")
-and gate the button on it. Reuse `get_mip_cnc_pending_items` rather than adding a new query.
-Naturally self-correcting: a newly CNC-flagged row becomes pending again and the button
-returns, no extra state to store.
-
-Files: `subcontracting_management/doctype/material_issue_plan/material_issue_plan.js`,
-`subcontracting_management/material_issue_plan_transfer.py`
+**T6 and T8 are now one design.** "Save and Close" needs somewhere to persist the
+edited Sec Qty and excess details, and T8's Consolidate Item table on the Material
+Issue Plan is the natural home. Build T8 first, then T6 reads and writes it — doing
+them the other way round means building the popup's persistence twice.
 
 ---
 
-## T3 — Verify Material Planning reservations can be unfrozen
+## T1 — Stock Entry rate is 0  ·  **[–] DROPPED**
 
-**Asked for:** confirm the existing unfreeze/unreserve works.
+> "Don't change the code, next time i will purchase with proper rate and test it, so
+> don't change the core functionality, leave as it is."
 
-**Found:** `unreserve_batches` and `unreserve_exact_match_batches` both exist, plus a per-row
-Unreserve button. Verification only — no change expected.
-
-**Work:** check unreserve behaves correctly *after* a partial transfer and after a Stock
-Entry is cancelled (the reservation flag is cleared on submit, so the interesting case is
-whether a partly-transferred row can still be released and what happens to what already
-shipped). Write it up; only change code if it misbehaves.
-
-Files: `production_management/doctype/material_planning/material_planning.py`
+Confirmed as source data, not code: nothing in the app sets a rate, so ERPNext values
+transfers from the source warehouse and a 0 means the stock went in at 0. No work.
 
 ---
 
-## T4 — Cut Sheet W2 must reach the Batch master  ·  [Q2]
+## T2 — Hide "To CNC Warehouse" once CNC material has moved  ·  `[ ]`
 
-**Asked for:** after the final Stock Entry, the W2 weight / dimensions / Kg should all be
-updated on the batch. Observed: Total available qty does not agree with the W2 figures.
+`material_issue_plan.js:544` shows the button on `if (frm.doc.cnc_warehouse)` alone, so
+it never goes away. "CNC to Supplier/WIP" is already conditional via `has_cnc_stock`.
 
-**Found:** `_apply_cut_sheet_w2` (`stock_entry.py:219`) and `_apply_cut_sheet_batch_size`
-already rewrite the batch's dimensions, and `_reduce_batch_sec_qty` adjusts `custom_sec_qty`
-separately. Two different writers touching the same batch is the likely source of the
-mismatch — quantity and dimensions can end up describing different states.
+Gate it on "are any CNC-flagged rows still pending transfer to CNC?", reusing
+`get_mip_cnc_pending_items`. Self-correcting by design: flag a new row for CNC in
+Material Planning, it becomes pending again, the button returns — no stored state.
 
-**Work:** reproduce with a cut-sheet job through to final Stock Entry, compare batch
-`custom_sec_qty` / dimensions / derived Kg against W2, and make the two writers agree.
-Needs Q2 answered: which figure is authoritative.
-
-Files: `production_management/stock_entry.py`, `production_management/doctype/cut_sheet/cut_sheet.py`
+`material_issue_plan.js`, `material_issue_plan_transfer.py`
 
 ---
 
-## T5 — Nature of Work + Rate Schedule in the BOM template  ·  [Q3]
+## T3 — Verify Material Planning reservations can be unfrozen  ·  `[ ]`
 
-**Asked for:** add both as columns in the BOM upload template; on verify-raw-materials,
-check each value already exists in its master; validate the Rate Schedule title format
-(e.g. `RS- O/S-001 A`).
+`unreserve_batches` and `unreserve_exact_match_batches` both exist, plus a per-row
+button. Verification only.
 
-**Found:** both masters already exist — `Nature of Work` and `Rate Schedule`
-(`drawing_management/doctype/`). Rate Schedule is `autoname: field:rs_no`, so its name IS
-the title being typed. The template header list is `so_drawing_import.py:687`.
-
-**Work:** two columns onto `headers` + the sample rows; carry them through the import rows
-into the Drawing; validate on verify. Q3 covers the exact title grammar and whether an
-unknown value should block the import or be created.
-
-Files: `drawing_management/so_drawing_import.py`, `drawing_management/doctype/drawing/`,
-`drawing_management/doctype/rate_schedule/rate_schedule.py`
+Check the interesting cases: unreserve *after* a partial transfer, and after a Stock
+Entry is cancelled (submit clears the reservation flag, so what happens to the part
+already shipped?). Report; change code only if it misbehaves.
 
 ---
 
-## T6 — Capture excess at transfer time, not on the raw-material row  ·  [Q4] [Q5]
+## T4 — Cut Sheet W2 must land in the stock balance  ·  `[ ]`
 
-**Asked for:** enter the excess dimensions + Sec Qty inside the transfer popup, next to the
-difference quantity, in a collapsible row per line (neat UI; build it in HTML/CSS if the
-standard dialog can't do it). Remove the excess fields from the raw-material table. The
-return needs a warehouse (some to Stores, some to Scrap), written onto the Excess Material
-table at transfer and editable afterwards.
+> "In cut sheet W2 section, Dimensions, Sec qty will be entered, based on that Kg will
+> be calculated, while stock entry you can consume the W1 qty, but ensure W2 qty is
+> added in the stock balance."
 
-**Found:** the raw-material row carries `excess_return_applicable`, `excess_calc_qty`,
-`excess_length/width/sec_qty`, `excess_return_date` — all to be retired. `SCO Excess
-Material Item` has **no warehouse field** (`return_type` is a different thing: Return to Own
-Warehouse / Retain at Supplier). The popup is already hand-built HTML, so the collapsible
-row is a natural fit — no need to abandon the dialog.
+So: W1 is what the Stock Entry consumes; **the batch must be left holding exactly W2**,
+with its dimensions, Sec Qty and Kg all agreeing. Today `_apply_cut_sheet_w2` rewrites
+dimensions while `_reduce_batch_sec_qty` moves quantity separately, which is why the
+balance and the W2 figures disagree.
 
-**Work:** new `return_warehouse` field on the excess table; expandable sub-row per popup
-line; write both through on transfer; drop the raw-material fields and everything feeding
-them (`_sync_excess_return_from_raw_materials`, the auto-suggest from Cut Sheet W2, and the
-`SCO Excess Material Item` client handlers keyed to those fields).
+⚠️ **Confirm before building:** if the batch's opening weight minus W1 does not equal
+W2 (saw cut loss, or the remnant measured differently), something must absorb the
+difference. My proposal: trust W2 as physical truth and book the shortfall as a
+consumption adjustment, so the ledger still balances. Will raise the exact numbers when
+we start.
 
-This is the largest task here. Worth splitting: **T6a** popup capture + warehouse, then
-**T6b** removal of the old per-row fields once T6a is proven.
-
-Files: `subcontracting_management/doctype/material_issue_plan/material_issue_plan.js`,
-`.../material_issue_plan.py`, `subcontracting_management/material_issue_plan_transfer.py`,
-`subcontracting_management/doctype/sco_excess_material_item/`
+`production_management/stock_entry.py`, `doctype/cut_sheet/cut_sheet.py`
 
 ---
 
-## T7 — "Billed to consume" on the excess table  ·  [Q6]
+## T5 — Nature of Work + Rate Schedule in the BOM template  ·  `[ ]`
 
-**Asked for:** not all excess comes back. Mark the remainder "billed to consume"; when set,
-no transfer/return is needed for it.
+> "validate using the Record name, user will add the record name in template. (also add
+> the column in download template also) … if the document is not matching means, show
+> there, (after correction only able to verify and proceed further)."
 
-**Found:** `_maybe_mark_completed` currently holds a Material Issue Plan open until every
-excess row is returned, claimed, or Retain-at-Supplier. A third settled state slots in here
-cleanly.
+- Two columns on the **download template** (`so_drawing_import.py:687`) and its samples
+- Validate by **record name exists in the master** — no format rule, so the client's
+  numbering can change without breaking imports
+- On **Verify Raw Materials**: list every unmatched value and **block** until corrected
 
-**Work:** checkbox on `SCO Excess Material Item`; exclude those rows from the Return Excess
-Entry dialog; treat as settled for completion. Q6 covers whether this is a plain checkbox or
-another `return_type` option, and whether the consumed weight should still be costed.
+Both masters already exist. Rate Schedule is `autoname: field:rs_no`, so its name is the
+title being typed — the existence check is a plain link validation.
 
-Files: `subcontracting_management/doctype/sco_excess_material_item/`,
-`subcontracting_management/material_issue_plan_transfer.py`,
-`subcontracting_management/doctype/material_issue_plan/material_issue_plan.py`
-
----
-
-## T8 — Consolidate Items on the Material Issue Plan  ·  [Q7]
-
-**Asked for:** mirror Material Planning's Consolidate Items — build it from the reserved
-material for the selected drawings, no batch duplication, and drive the transfer popup from
-it. Also: a consolidation bug where an alternate item shows twice, once with the wrong
-group's total.
-
-**Found:** Material Planning's version is `_consolidate_unavailable_items` /
-`_recalculate_consolidate_items` and groups purely by `item_code`. The transfer popup groups
-by `(item_code, batch_no, is_cnc)` where `item_code` is already resolved to
-`planned_item or item_code` — so two batches of the same item legitimately produce two lines,
-both labelled with the alternate's code. That may be the whole of the reported bug, or only
-part of it.
-
-**Work:** reproduce the ISM100/ISM150 case on real data first and pin down whether the
-duplicate is two genuine batches or a real mis-grouping — then build the table. Q7 settles
-whether consolidation is per item or per item+batch, which decides the whole design.
-
-Files: `subcontracting_management/material_issue_plan_transfer.py`,
-`subcontracting_management/doctype/material_issue_plan/`,
-`production_management/doctype/material_planning/material_planning.py`
+`drawing_management/so_drawing_import.py`, `doctype/rate_schedule/`, `doctype/nature_of_work/`
 
 ---
 
-## T9 — Rename Supplier Operation Entry → Operation Entry  ·  [Q8]
+## T6 — Capture excess in the transfer popup  ·  `[ ]`  *(after T8)*
 
-**Asked for:** rename the doctype.
+> "add option as 'Save and Close' … on click save draft and close popup, will click the
+> transfer button to continue the work, you can activate the validation while transfer,
+> no need validation on save draft."
 
-**Found:** app-owned, so mechanical, but wide: **125 occurrences across 26 files**, plus the
-SQL table rename, plus child tables still called `SOE Drawing Detail` / `SOE Consumption Log`,
-plus reports, hooks, fixtures and the `SCO-SOE-` naming series on existing records.
+Three parts:
 
-**Work:** `frappe.rename_doc` in a patch, then sweep the code. Do this on its own, with a
-backup first, and not interleaved with other tasks. Q8 covers the child tables and the
-naming series.
+**T6a — expandable excess row.** One per transfer line, shown where there is a
+difference (Sec Qty is adjusted by hand, so a difference is the normal case). Enter
+excess dimensions + Sec Qty. The popup is already hand-built HTML, so this fits inside
+the existing dialog.
 
----
+**T6b — Save and Close.** Persists the edited Sec Qty and excess entries **without
+validating**, closes the popup, and reopens with the same values. Validation runs only
+on Transfer. Needs the T8 table as its store.
 
-## T10 — Consumption Log: cap at actual qty in all cases
+**T6c — return warehouse.** New field on the excess table, defaulting to the plan's
+**raw-material (source) warehouse**, editable per row (typically to a scrap warehouse).
+Note: source warehouse, *not* the excess return warehouse.
 
-**Asked for:** drop the rework exemption. If actual is 4, never allow more than 4 — even
-across multiple rows, even after an inspection rejection.
+Then remove the excess fields from the raw-material row — `excess_return_applicable`,
+`excess_calc_qty`, `excess_length/width/sec_qty`, `excess_return_date` — plus everything
+feeding them (`_sync_excess_return_from_raw_materials`, the Cut Sheet W2 auto-suggest,
+and the client handlers keyed to those fields).
 
-**Found:** the exemption is deliberate and documented at `subcontracting.py:1165` (Op-2+
-skips the per-drawing Nos ceiling when Inspection Mandatory is on, precisely so a rejected
-piece can be re-logged).
-
-⚠️ **Interacts with a fix made on 2026-08-12.** `_soe_consumed_kg` scales logged Kg by
-accepted/logged Nos *because* rework re-logs the same piece. Once re-logging is forbidden
-the scaling becomes a no-op — harmless, but the rework workflow itself changes, and it is
-not obvious how a reworked piece then gets recorded. **Q9 must be answered before this is
-implemented**; it is the one task here that could break an existing workflow.
-
-Files: `subcontracting_management/subcontracting.py`, `production_management/inspection.py`
+`material_issue_plan.js`, `material_issue_plan.py`, `material_issue_plan_transfer.py`,
+`doctype/sco_excess_material_item/`
 
 ---
 
-## T11 — Production Report  ·  [Q10]
+## T7 — Excess lifecycle rework  ·  `[ ]`  *(largest task; after T6)*
 
-**Asked for:** a new report — Sales Order wise, Production Plan wise, Drawing wise,
-DU/Mark No wise, with customer weight, planned weight, transferred weight, excess weight.
+> "return type is actually not needed, remove it … billed to consume check box need to
+> add in excess material return entry … if not recieved, no transfer will be happen,
+> while making the final stock entry the item need to be consumed … then only the raw
+> material cost will be calculated properly."
 
-**Found:** `production_management/report/production_report/` **already exists** and already
-has Sales Order, Production Plan, Drawing, DUNO/Mark No, Consumed Kg, Completed Nos and the
-inspection columns. Missing: customer weight, planned weight, transferred weight, excess
-weight — all four available on `SOE Drawing Detail` / `SCO Drawing Item`.
+**T7a — remove `return_type`.** 18 references across 7 files including the Excess
+Material Return report and its filter. Everything currently branching on
+"Retain at Supplier (Virtual)" needs rewriting to work without it.
 
-**Work:** most likely extend the existing report rather than build a second one. Q10 confirms
-that, since the existing one is operation-wise (one row per operation) while this ask reads
-as drawing-wise (one row per drawing).
+**T7b — "Billed to Consume" checkbox** on the Return Excess Entry. When set, that excess
+is not transferred back.
 
-Files: `production_management/report/production_report/production_report.py`
+**T7c — free-type excess mapping.** Excess is chosen in Material Planning and reserved
+there; the reservation no longer depends on return type.
+
+**T7d — map the returned batch.** Material normally comes back to the raw-material
+warehouse; on receipt the batch created for it must map onto its Material Planning row.
+(Some of this exists as `materialize_virtual_excess_claim` — check for reuse.)
+
+**T7e — consume the unreturned remainder.** Where nothing physically comes back, the
+final Stock Entry must still consume it so raw-material cost is right: make the return,
+create the batch, consume it in the same entry.
+
+⚠️ **Confirm before building T7e:** whether that batch is received into the raw-material
+warehouse first (a Material Receipt) and then consumed — two documents — or produced
+inside the Manufacture entry itself. Affects the stock ledger, so worth agreeing first.
+
+`doctype/sco_excess_material_item/`, `material_issue_plan_transfer.py`,
+`doctype/material_issue_plan/`, `doctype/material_planning/`,
+`report/excess_material_return_report/`
 
 ---
 
-## T12 — Customer Fund Usage: reference type + name
+## T8 — Consolidate Items on the Material Issue Plan  ·  `[ ]`  *(do before T6)*
 
-**Asked for:** next to Source of Funds, show the Payment Reference type (Sales Order) and
-reference name (Order ID).
+> "1 item(same name) with 2 batches can be shown in 2 rows, no need to show only item
+> wise. ensure item wise sorting is there, there should not be as mixing."
 
-**Found:** the report already selects `reference_name` as a Dynamic Link labelled "Against".
-The ask is for the *source* payment's own references, which is a different join — the source
-Payment Entry's `Payment Entry Reference` rows.
+The reported ISM100/ISM150 problem is **sorting, not arithmetic**. Grouping by item +
+batch is correct — a transfer has to move a specific batch. What went wrong is that rows
+of one item were scattered instead of sitting together, which made two legitimate batch
+lines look like a duplicate with the wrong total.
 
-**Work:** join those and add two columns after `custom_source_of_funds`. Smallest task on the
-list; good one to start with.
+- **T8a** — new Consolidate Item table on the Material Issue Plan, built from the
+  reserved material for the selected drawings, one row per item + batch, no duplication.
+  This table also becomes T6's draft store.
+- **T8b** — sort the transfer popup by item, then batch, so an item's rows are always
+  adjacent. Small, independent, and worth doing first — it fixes the actual complaint.
 
-Files: `accounts_management/report/customer_fund_usage/customer_fund_usage.py`
+I will still reproduce the ISM100/ISM150 case first and confirm the totals were right.
+If any total is genuinely wrong that is a separate bug and I will report it.
+
+`material_issue_plan_transfer.py`, `doctype/material_issue_plan/`,
+`doctype/material_planning/material_planning.py` (pattern to mirror)
 
 ---
 
-## Suggested order
+## T9 — "Operation Entry" label  ·  `[ ]`
 
-1. **T12** — smallest, self-contained, no open questions
-2. **T2** — small, no open questions
-3. **T3** — verification only
-4. **T11** — likely just added columns
-5. **T1** — investigation, then a probably-small fix
-6. **T5** — needs Q3
-7. **T7** — needs Q6, small once answered
-8. **T4** — needs Q2
-9. **T6a / T6b** — largest; needs Q4, Q5
-10. **T8** — needs Q7, and reproduce the bug first
-11. **T10** — needs Q9; touches a live workflow
-12. **T9** — rename last, alone, with a backup
+> "just do the translation, similar to the Subcontracting order is changed to Job work
+> order using the translation. update for SOE also from code."
 
-Rename (T9) goes last deliberately: doing it earlier would churn every other task's diff.
+Verified: the existing relabel is **one Translation record** — `Subcontracting Order` →
+`Job work order`, language `en`. It was created by hand in the database, so a fresh site
+would not have it.
+
+Ship both from code: `Supplier Operation Entry` → `Operation Entry`, and bring the
+existing Subcontracting Order one into the app so it survives a reinstall. Either a
+patch or the fixtures list — check whether `Translation` is already a fixture.
+
+No rename, no table change, no touched records. Was the riskiest task on the list;
+now among the smallest.
+
+---
+
+## T10 — Consumption Log: hard cap at actual qty  ·  `[ ]`
+
+> "log will be one time, inspection can be made many time."
+
+Remove the rework exemption at `subcontracting.py:1165`. The log records what was
+produced, once; inspection rounds handle accept/reject on top of it. Actual 4 means the
+sum can never exceed 4.
+
+Knock-on: `_soe_consumed_kg` (added 2026-08-12) scales logged Kg by accepted/logged Nos
+precisely because re-logging existed. Once re-logging is impossible the scaling is a
+no-op — harmless, and worth leaving in as a guard for historical records that already
+contain a re-log.
+
+`subcontracting.py`, `production_management/inspection.py`
+
+---
+
+## T11 — Production Report: add the four weights  ·  `[ ]`
+
+Extend the existing report. It already has Sales Order, Production Plan, Drawing,
+DU/Mark No and the inspection columns; add customer weight, planned weight, transferred
+weight and excess weight, all available on `SOE Drawing Detail` / `SCO Drawing Item`.
+
+`report/production_report/production_report.py`
+
+---
+
+## T12 — Customer Fund Usage: reference type + name  ·  `[ ]`
+
+Add Payment Reference type (Sales Order) and reference name (Order ID) immediately after
+Source of Funds. The existing `reference_name` column ("Against") is a different thing —
+this needs the *source* payment's own `Payment Entry Reference` rows joined in.
+
+`report/customer_fund_usage/customer_fund_usage.py`
+
+---
+
+## Order to work in
+
+Small and unblocked first, so there is something working early:
+
+1. **T12** — two columns, self-contained
+2. **T9** — translation record, now trivial
+3. **T8b** — popup sorting; fixes the actual reported complaint
+4. **T2** — CNC button visibility
+5. **T3** — verification only
+6. **T11** — four columns on an existing report
+7. **T10** — small, but changes a live workflow: test the inspection rounds after
+8. **T5** — template columns + verify-time blocking
+9. **T4** — needs the W2-vs-balance rounding decision confirmed
+10. **T8a** — Consolidate Item table (T6's foundation)
+11. **T6a / T6b / T6c** — popup excess capture, draft save, return warehouse
+12. **T7a–T7e** — excess lifecycle rework; largest, and depends on T6
+
+Items 1–7 are all independent — any of them can be picked up in any order.
