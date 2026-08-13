@@ -4705,11 +4705,27 @@ def create_material_planning_auto_purchase_fields():
                     "insert_after": "custom_auto_purchase_section",
                 },
                 {
+                    # Sits directly under the Consolidate Item table it acts on, and
+                    # is hidden with the rest of this section unless Auto Purchase is
+                    # switched on in Manufyxinvenza Settings -- same rule as the
+                    # Supplier field below.
+                    "fieldname": "custom_auto_suggest_dimensions_btn",
+                    "fieldtype": "Button",
+                    "label": "Auto Suggest Item Dimensions",
+                    "insert_after": "custom_auto_purchase_warning",
+                    "hidden": 1,
+                    "description": (
+                        "Fills each Consolidate Item with the largest size among the "
+                        "requirements it covers, and the Sec Qty that matches the "
+                        "required weight. Edit and save afterwards."
+                    ),
+                },
+                {
                     "fieldname": "custom_auto_purchase_supplier",
                     "fieldtype": "Link",
                     "label": "Supplier (Auto Purchase)",
                     "options": "Supplier",
-                    "insert_after": "custom_auto_purchase_warning",
+                    "insert_after": "custom_auto_suggest_dimensions_btn",
                     "hidden": 1,
                     "description": "Supplier for the auto-created Purchase Order.",
                 },
