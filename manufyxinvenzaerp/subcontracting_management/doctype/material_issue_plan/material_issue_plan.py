@@ -619,6 +619,15 @@ def _sync_consolidate_items(mip):
                else r.get(f) for f in _CONSOLIDATE_DRAFT_FIELDS)
     }
 
+    # Item names in one query rather than one per group. At 500 drawings a plan can
+    # hold hundreds of distinct item/batch pairs, and a lookup inside the loop turned
+    # a single save into hundreds of round trips.
+    wanted_items = {r.planned_item or r.item_code for r in (mip.raw_materials or []) if r.batch_no}
+    item_names = dict(frappe.get_all(
+        "Item", filters={"name": ["in", list(wanted_items)]},
+        fields=["name", "item_name"], as_list=True,
+    )) if wanted_items else {}
+
     groups = {}
     for row in (mip.raw_materials or []):
         if not row.batch_no:
@@ -629,7 +638,7 @@ def _sync_consolidate_items(mip):
         if not g:
             g = groups[key] = {
                 "item_code": item_code,
-                "item_name": frappe.db.get_value("Item", item_code, "item_name") or item_code,
+                "item_name": item_names.get(item_code) or item_code,
                 "batch_no": row.batch_no,
                 "cnc_process": 1 if row.cnc_process else 0,
                 "parent_item_group": row.parent_item_group or "",
@@ -745,22 +754,50 @@ def _lookup_drawing_planned_weight(sales_order, customer_drawing_number, item_co
     if not sales_order or not item_code:
         return None
 
-    base = {
-        "parent": sales_order,
-        "material_code": item_code,
-        "customer_drawing_number": customer_drawing_number or "",
-    }
-
+    cached = _drawing_planned_weights(sales_order)
+    cdn = customer_drawing_number or ""
     if length is not None:
-        exact = frappe.db.get_value(
-            "Sales Order Drawing Raw Material",
-            dict(base, length=flt(length), width=flt(width), thickness=flt(thickness)),
-            "total_weight",
-        )
-        if exact is not None:
-            return exact
+        hit = cached["exact"].get(
+            (cdn, item_code, flt(length), flt(width), flt(thickness)))
+        if hit is not None:
+            return hit
+    return cached["loose"].get((cdn, item_code))
 
-    return frappe.db.get_value("Sales Order Drawing Raw Material", base, "total_weight")
+
+def _drawing_planned_weights(sales_order):
+    """Every planned raw-material weight for a Sales Order, in one query, keyed both
+    ways this is looked up: exactly (drawing, item, L, W, T) and loosely (drawing, item).
+
+    Cached for the life of the request. This is called once per raw-material row while
+    a Material Issue Plan is rebuilt, and it used to run one or two queries each time --
+    at 500 drawings carrying three materials apiece that is 1,500 rows and up to 3,000
+    round trips for data that never changes during the rebuild.
+
+    frappe.local is the right scope: it is cleared between requests, so an edit to a
+    Sales Order's raw materials is picked up by the next rebuild rather than being
+    served stale from a longer-lived cache."""
+    store = getattr(frappe.local, "_mfx_planned_weights", None)
+    if store is None:
+        store = frappe.local._mfx_planned_weights = {}
+    if sales_order in store:
+        return store[sales_order]
+
+    exact, loose = {}, {}
+    for r in frappe.get_all(
+        "Sales Order Drawing Raw Material",
+        filters={"parent": sales_order},
+        fields=["customer_drawing_number", "material_code", "length", "width",
+                "thickness", "total_weight"],
+    ):
+        cdn = r.customer_drawing_number or ""
+        exact.setdefault(
+            (cdn, r.material_code, flt(r.length), flt(r.width), flt(r.thickness)),
+            r.total_weight)
+        # First row wins, matching the single get_value this replaced.
+        loose.setdefault((cdn, r.material_code), r.total_weight)
+
+    store[sales_order] = {"exact": exact, "loose": loose}
+    return store[sales_order]
 
 
 #  Claimed-off-cut lock ────────────────────────────────────────────────────────

@@ -38,7 +38,7 @@ transfers from the source warehouse and a 0 means the stock went in at 0. No wor
 
 ---
 
-## T2 — Hide "To CNC Warehouse" once CNC material has moved  ·  `[ ]`
+## T2 — Hide "To CNC Warehouse" once CNC material has moved  ·  `[x]`
 
 `material_issue_plan.js:544` shows the button on `if (frm.doc.cnc_warehouse)` alone, so
 it never goes away. "CNC to Supplier/WIP" is already conditional via `has_cnc_stock`.
@@ -51,7 +51,7 @@ Material Planning, it becomes pending again, the button returns — no stored st
 
 ---
 
-## T3 — Verify Material Planning reservations can be unfrozen  ·  `[ ]`
+## T3 — Verify Material Planning reservations can be unfrozen  ·  `[x]`
 
 `unreserve_batches` and `unreserve_exact_match_batches` both exist, plus a per-row
 button. Verification only.
@@ -62,7 +62,7 @@ already shipped?). Report; change code only if it misbehaves.
 
 ---
 
-## T4 — Cut Sheet W2 must land in the stock balance  ·  `[ ]`
+## T4 — Cut Sheet W2 must land in the stock balance  ·  `[x]`
 
 > "In cut sheet W2 section, Dimensions, Sec qty will be entered, based on that Kg will
 > be calculated, while stock entry you can consume the W1 qty, but ensure W2 qty is
@@ -83,7 +83,7 @@ we start.
 
 ---
 
-## T5 — Nature of Work + Rate Schedule in the BOM template  ·  `[ ]`
+## T5 — Nature of Work + Rate Schedule in the BOM template  ·  `[x]`
 
 > "validate using the Record name, user will add the record name in template. (also add
 > the column in download template also) … if the document is not matching means, show
@@ -101,7 +101,7 @@ title being typed — the existence check is a plain link validation.
 
 ---
 
-## T6 — Capture excess in the transfer popup  ·  `[ ]`  *(after T8)*
+## T6 — Capture excess in the transfer popup  ·  `[~]` T6a/T6b/T6c done — T6d (retire old fields) pending
 
 > "add option as 'Save and Close' … on click save draft and close popup, will click the
 > transfer button to continue the work, you can activate the validation while transfer,
@@ -167,7 +167,7 @@ inside the Manufacture entry itself. Affects the stock ledger, so worth agreeing
 
 ---
 
-## T8 — Consolidate Items on the Material Issue Plan  ·  `[ ]`  *(do before T6)*
+## T8 — Consolidate Items on the Material Issue Plan  ·  `[~]` T8a/T8b done, live in the app
 
 > "1 item(same name) with 2 batches can be shown in 2 rows, no need to show only item
 > wise. ensure item wise sorting is there, there should not be as mixing."
@@ -191,7 +191,7 @@ If any total is genuinely wrong that is a separate bug and I will report it.
 
 ---
 
-## T9 — "Operation Entry" label  ·  `[ ]`
+## T9 — "Operation Entry" label  ·  `[x]`
 
 > "just do the translation, similar to the Subcontracting order is changed to Job work
 > order using the translation. update for SOE also from code."
@@ -209,7 +209,7 @@ now among the smallest.
 
 ---
 
-## T10 — Consumption Log: hard cap at actual qty  ·  `[ ]`
+## T10 — Consumption Log: hard cap at actual qty  ·  `[x]`
 
 > "log will be one time, inspection can be made many time."
 
@@ -226,7 +226,7 @@ contain a re-log.
 
 ---
 
-## T11 — Production Report: add the four weights  ·  `[ ]`
+## T11 — Production Report: add the four weights  ·  `[x]`
 
 Extend the existing report. It already has Sales Order, Production Plan, Drawing,
 DU/Mark No and the inspection columns; add customer weight, planned weight, transferred
@@ -236,7 +236,7 @@ weight and excess weight, all available on `SOE Drawing Detail` / `SCO Drawing I
 
 ---
 
-## T12 — Customer Fund Usage: reference type + name  ·  `[ ]`
+## T12 — Customer Fund Usage: reference type + name  ·  `[x]`
 
 Add Payment Reference type (Sales Order) and reference name (Order ID) immediately after
 Source of Funds. The existing `reference_name` column ("Against") is a different thing —
