@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-08-13 02:12:38_
+_Generated: 2026-08-13 23:40:38_
 
 ## drawing
 
@@ -400,6 +400,7 @@ _Generated: 2026-08-13 02:12:38_
 | ` _update_so_difference_kg_for_pair` | no |
 | ` update_so_difference_kg` | no |
 | ` unlink_material_request_on_cancel` | no |
+| ` auto_suggest_consolidate_dimensions` | no |
 | ` auto_purchase_from_mp` | no |
 | ` _collect_batch_mapping_issues` | no |
 | ` complete_batch_mapping` | no |
@@ -520,11 +521,15 @@ _Generated: 2026-08-13 02:12:38_
 | ` _sync_excess_availability` | no |
 | ` _sync_transferred_qty` | no |
 | ` key` | no |
+| ` save_transfer_draft` | no |
+| ` get_transfer_draft` | no |
+| ` _clear_transfer_draft` | no |
 | ` _sync_consolidate_items` | no |
 | ` _batch_stock_in` | no |
 | ` _cut_sheet_seed` | no |
 | ` _carry_forward_editable_fields` | no |
 | ` _lookup_drawing_planned_weight` | no |
+| ` _drawing_planned_weights` | no |
 | ` _throw_claimed_excess_locked` | no |
 | ` _claimed_excess_differs` | no |
 | ` _assert_claimed_excess_unchanged` | no |
