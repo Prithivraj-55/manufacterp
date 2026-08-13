@@ -3832,6 +3832,18 @@ def make_production_plan(material_planning_name):
     return pp.name
 
 
+# A Material Request only blocks a plan from ordering again while it is still WAITING to
+# be fulfilled. Received/Issued/Transferred mean the goods arrived and the request is
+# finished with -- it has no claim on anything.
+#
+# This used to be "anything except Cancelled/Stopped", which counted a fully Received
+# request as active. The effect was that a plan which had ever ordered anything could
+# never order again: buying a second item later, or re-ordering after a shortfall, hit
+# "You already have an active Material Request" and the only way through was to delete
+# the completed request -- destroying the purchase history to place a new order.
+MR_STATUSES_BLOCKING_NEW_REQUEST = ["Draft", "Pending", "Partially Ordered", "Ordered"]
+
+
 @frappe.whitelist()
 def make_material_request(material_planning_name, selected_items):
     """Create a draft Material Request for selected unavailable items."""
@@ -3856,7 +3868,7 @@ def make_material_request(material_planning_name, selected_items):
         "Material Request",
         filters={
             "custom_material_planning": material_planning_name,
-            "status": ["not in", ["Cancelled", "Stopped"]],
+            "status": ["in", MR_STATUSES_BLOCKING_NEW_REQUEST],
         },
         fields=["name", "status"],
     )
@@ -4022,7 +4034,7 @@ def make_material_request_from_consolidate(material_planning_name, selected_item
         "Material Request",
         {
             "custom_material_planning": material_planning_name,
-            "status": ["not in", ["Cancelled", "Stopped"]],
+            "status": ["in", MR_STATUSES_BLOCKING_NEW_REQUEST],
         },
         ["name", "status"],
         as_dict=True,
@@ -4152,6 +4164,94 @@ def unlink_material_request_on_cancel(doc, method=None):
     """Clear the Material Planning link when an MR is cancelled or deleted."""
     if doc.get("custom_material_planning"):
         frappe.db.set_value("Material Request", doc.name, "custom_material_planning", "")
+
+
+@frappe.whitelist()
+def auto_suggest_consolidate_dimensions(material_planning_name):
+    """Fill each Consolidate Item's dimensions and Sec Qty with a sensible opening
+    guess, for the user to adjust.
+
+    LENGTH (and Width/Thickness) come from the LARGEST of the requirements that were
+    consolidated into the row. That is the only safe choice: a purchased bar shorter
+    than the longest member it has to yield can never produce it, no matter how many
+    are bought -- the same failure _warn_undersized_purchase_dimensions exists to
+    catch. Buying to the largest size guarantees every requirement can be cut from it.
+
+    SEC QTY is then whatever makes the purchase weigh what is actually required, so
+    Difference lands on zero. Left as an exact figure rather than rounded up to whole
+    pieces: the client's instruction is to match the requirement and edit by hand
+    afterwards, and rounding here would silently bake in surplus before they have
+    seen the number.
+
+    Only Structurals and Plates are touched. Nuts and Bolts carry no dimensions and
+    reverse the qty/sec_qty roles entirely, so there is nothing to suggest. Rows the
+    user has already filled in are left alone unless overwrite is on -- re-running
+    this must not quietly discard someone's typed sizes.
+
+    Returns a per-row report so the UI can say what changed and what it skipped.
+    """
+    mp = frappe.get_doc("Material Planning", material_planning_name)
+
+    # Largest requirement per item, from the rows folded into each consolidated line.
+    largest = {}
+    for row in (mp.unavailable_items or []):
+        if not row.item_code:
+            continue
+        cur = largest.setdefault(row.item_code, {"length": 0.0, "width": 0.0, "thickness": 0.0})
+        cur["length"] = max(cur["length"], flt(row.length))
+        cur["width"] = max(cur["width"], flt(row.width))
+        cur["thickness"] = max(cur["thickness"], flt(row.thickness))
+
+    from manufyxinvenzaerp.production_management.doctype.material_planning_consolidate_item.material_planning_consolidate_item import (
+        recalculate,
+    )
+
+    updated, skipped = [], []
+    for row in (mp.consolidate_items or []):
+        group = row.alternate_parent_item_group if row.alternate_item else row.parent_item_group
+        unit_weight = flt(row.alternate_unit_weight if row.alternate_item else row.unit_weight)
+
+        if group not in ("Structurals", "Plates"):
+            skipped.append({"item_code": row.item_code, "reason": _("no dimensions for {0}").format(group or _("this item group"))})
+            continue
+
+        dims = largest.get(row.item_code)
+        if not dims or not dims["length"]:
+            skipped.append({"item_code": row.item_code, "reason": _("no requirement rows to measure")})
+            continue
+        if not unit_weight:
+            skipped.append({"item_code": row.item_code, "reason": _("item has no Unit Weight")})
+            continue
+
+        row.length = dims["length"]
+        if group == "Plates":
+            row.width = dims["width"]
+            row.thickness = dims["thickness"]
+
+        # Weight of exactly one piece at those dimensions, then how many are needed.
+        per_piece = _calc_batch_qty(group, row.length, row.width, row.thickness, 1, unit_weight)
+        if not per_piece:
+            skipped.append({"item_code": row.item_code, "reason": _("dimensions do not give a weight")})
+            continue
+
+        # Sec Qty stores 3 decimals, so Difference lands within one thousandth of a
+        # piece of zero rather than exactly on it -- a tenth of a kilo on a tonne of
+        # steel. Not worth carrying more precision into a figure that is bought in
+        # whole lengths and is about to be edited by hand anyway.
+        row.sec_qty = flt(flt(row.required_kg) / per_piece, 3)
+        recalculate(row)
+        updated.append({
+            "item_code": row.item_code,
+            "length": flt(row.length), "width": flt(row.width), "thickness": flt(row.thickness),
+            "sec_qty": flt(row.sec_qty), "purchase_kg": flt(row.purchase_kg),
+            "required_kg": flt(row.required_kg), "difference_kg": flt(row.difference_kg),
+        })
+
+    if updated:
+        mp.save(ignore_permissions=True)
+        frappe.db.commit()
+
+    return {"updated": updated, "skipped": skipped}
 
 
 @frappe.whitelist()

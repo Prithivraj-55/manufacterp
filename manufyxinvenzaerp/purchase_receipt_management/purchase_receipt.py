@@ -599,11 +599,31 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
             batch_reserved_qty = _get_batch_reserved_by_others(batch_no, mp_name) if batch_no else 0.0
             received_qty = flt(pr_item.qty)
 
-            for mp_row, alloc_qty in _split_allocation(matched_original, received_qty, sequential):
+            splits = list(_split_allocation(matched_original, received_qty, sequential))
+
+            # ONE batch, ONE table -- decided here for the whole receipt line rather
+            # than per requirement row.
+            #
+            # A single received batch is routinely split across several requirements,
+            # and its dimensions can match some of them exactly while missing others.
+            # Deciding row by row put the same batch into Material Mapping AND Exact
+            # Match, which _validate_no_cross_table_batch_duplicate then refuses --
+            # the plan could not be saved at all after such a receipt, and the batch
+            # would have been double-counted at transfer time if it had been.
+            #
+            # Any mismatch sends the whole batch to Material Mapping: that table
+            # carries the required size on the row and the purchased size on batch_*,
+            # so it represents a matching row perfectly well, while Exact Match
+            # assumes the two are the same and cannot represent a mismatch at all.
+            all_dimensions_match = all(
+                _pr_dimensions_match(pr_item, mp_row) for mp_row, _ in splits
+            )
+
+            for mp_row, alloc_qty in splits:
                 _consume(mp_row, alloc_qty)
                 ratio = (alloc_qty / received_qty) if received_qty else 0.0
 
-                if not _pr_dimensions_match(pr_item, mp_row):
+                if not all_dimensions_match:
                     mp.append("material_mapping", _build_mapping_row(
                         mp_row,
                         alloc_qty=alloc_qty,

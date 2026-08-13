@@ -1,6 +1,6 @@
 # hooks — manufyxinvenzaerp
 
-_Generated: 2026-08-12 11:31:32_
+_Generated: 2026-08-13 23:40:38_
 
 ## doc_events
 
@@ -129,7 +129,7 @@ override_doctype_dashboards = {
 ## doctype_js (client scripts injected into standard doctypes)
 
 ```python
-app_include_js = [
+app_include_js = ["manufyxinvenzaerp.bundle.js"]
 doctype_js = {
 doctype_js = {
     "Production Plan": "public/js/production_plan.js",

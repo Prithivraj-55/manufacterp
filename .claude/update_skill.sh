@@ -24,7 +24,7 @@ echo ""
 echo "## Modules"
 echo ""
 find "$APP_DIR" -maxdepth 1 -mindepth 1 -type d \
-  | grep -v '__pycache__\|\.git\|\.claude' \
+  | grep -v '__pycache__\|\.git\|\.claude\|/public/dist' \
   | xargs -I{} basename {} \
   | sort \
   | while read -r m; do echo "- $m"; done
@@ -32,7 +32,7 @@ echo ""
 
 echo "## Python files"
 echo ""
-PY_FILES=$(find "$APP_DIR" -name "*.py" | grep -v '__pycache__' | sort)
+PY_FILES=$(find "$APP_DIR" -name "*.py" | grep -v '__pycache__\|/public/dist/' | sort)
 PY_COUNT=$(echo "$PY_FILES" | wc -l | tr -d ' ')
 echo "_Total: ${PY_COUNT}_"
 echo ""
@@ -43,7 +43,7 @@ echo ""
 
 echo "## JavaScript files"
 echo ""
-JS_FILES=$(find "$APP_DIR" -name "*.js" | grep -v '__pycache__' | sort)
+JS_FILES=$(find "$APP_DIR" -name "*.js" | grep -v '__pycache__\|/public/dist/' | sort)
 JS_COUNT=$(echo "$JS_FILES" | wc -l | tr -d ' ')
 echo "_Total: ${JS_COUNT}_"
 echo ""
@@ -54,7 +54,7 @@ echo ""
 
 echo "## JSON files"
 echo ""
-JSON_FILES=$(find "$APP_DIR" -name "*.json" | grep -v '__pycache__' | sort)
+JSON_FILES=$(find "$APP_DIR" -name "*.json" | grep -v '__pycache__\|/public/dist/' | sort)
 JSON_COUNT=$(echo "$JSON_FILES" | wc -l | tr -d ' ')
 echo "_Total: ${JSON_COUNT}_"
 echo ""
@@ -66,7 +66,7 @@ echo ""
 echo "## Doctypes"
 echo ""
 find "$APP_DIR" -path "*/doctype/*" -name "*.json" \
-  | grep -v '__pycache__' \
+  | grep -v '__pycache__\|/public/dist/' \
   | sort \
   | while read -r jf; do
     dt_dir="$(dirname "$jf")"
@@ -88,7 +88,7 @@ find "$APP_DIR" -path "*/doctype/*" -name "*.json" \
 echo "## Module-level controllers"
 echo ""
 find "$APP_DIR" -maxdepth 2 -name "*.py" \
-  | grep -v '__pycache__\|__init__\|/doctype/' \
+  | grep -v '__pycache__\|__init__\|/doctype/\|/public/dist/' \
   | sort \
   | while read -r f; do
     rel="${f#$APP_DIR/}"
@@ -101,7 +101,7 @@ find "$APP_DIR" -maxdepth 2 -name "*.py" \
 echo "## Whitelisted API methods"
 echo ""
 grep -rn "@frappe.whitelist" "$APP_DIR" --include="*.py" \
-  | grep -v '__pycache__' \
+  | grep -v '__pycache__\|/public/dist/' \
   | while IFS=: read -r file line rest; do
     fn_line=$(sed -n "$((line+1))p" "$file" | sed 's/.*def //;s/(.*//')
     echo "- \`${file#$APP_DIR/}:$((line+1))\` — \`$fn_line\`"
@@ -140,7 +140,7 @@ echo ""
 
 DT_COUNT=0
 find "$APP_DIR" -path "*/doctype/*" -name "*.json" \
-  | grep -v '__pycache__' \
+  | grep -v '__pycache__\|/public/dist/' \
   | sort \
   | while read -r jf; do
     dt_dir="$(dirname "$jf")"
@@ -297,7 +297,7 @@ echo ""
 
 current_file=""
 grep -rn "@frappe.whitelist" "$APP_DIR" --include="*.py" \
-  | grep -v '__pycache__' \
+  | grep -v '__pycache__\|/public/dist/' \
   | sort \
   | while IFS=: read -r file line rest; do
     rel="${file#$APP_DIR/}"
@@ -316,7 +316,7 @@ echo ""
 
 echo "## Total"
 echo ""
-TOTAL=$(grep -rn "@frappe.whitelist" "$APP_DIR" --include="*.py" | grep -v '__pycache__' | wc -l | tr -d ' ')
+TOTAL=$(grep -rn "@frappe.whitelist" "$APP_DIR" --include="*.py" | grep -v '__pycache__\|/public/dist/' | wc -l | tr -d ' ')
 echo "_${TOTAL} whitelisted methods_"
 
 } > "$OUT_DIR/api.md"

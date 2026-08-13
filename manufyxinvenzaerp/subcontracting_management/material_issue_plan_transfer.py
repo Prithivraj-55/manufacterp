@@ -18,6 +18,7 @@ from frappe.utils import flt
 
 from manufyxinvenzaerp.subcontracting_management.subcontracting import _get_mp_reserved_batches
 from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
+    _clear_transfer_draft,
     get_target_context,
     _throw_claimed_excess_locked,
 )
@@ -369,6 +370,14 @@ def get_mip_pending_items(mip_name):
         row["round_up_excess_kg"] = 0.0
         row["round_up_excess_pieces"] = 0.0
 
+    # Keep every row of one item together, batches in a stable order within it.
+    # Rows are collected per Material Planning and then per source table, so an item
+    # drawn from two plans (or from both Material Mapping and Exact Match) came out
+    # scattered down the list. Two batches of the same item are two legitimate lines --
+    # a transfer has to move a specific batch -- but split apart by unrelated rows they
+    # read as a duplicate with the wrong total, which is exactly how this was reported.
+    result.sort(key=lambda r: (r["item_code"], r.get("batch_no") or ""))
+
     return result
 
 
@@ -480,14 +489,21 @@ def _log_round_up_excess(mip, items):
     up the SAME item/batch again ACCUMULATES into the one existing row instead of piling
     up a new row every time.
 
-    Length/Width/Thickness are seeded from the BATCH's own standard dimensions (not left
-    at 0) and Sec Qty from the fractional excess-piece count -- together these recompute
-    back to exactly the tracked excess Kg, so the Return Excess Entry dialog shows a
-    correct, non-zero starting figure instead of losing the tracked amount the moment it's
-    opened (its live preview recalculates Qty FROM these fields). This is still only a
-    placeholder, standing in for "one standard piece, mostly unused" -- the real leftover
-    is almost never that shape, so the user is expected to overwrite these with whatever
-    they actually measure once the job cuts the material, same as any other excess row."""
+    Length/Width/Thickness/Sec Qty come from the popup's own excess row when the user
+    filled it in -- they are looking at the actual off-cut, which is the only place its
+    real shape is known.
+
+    Where they did not, these fall back to the BATCH's standard dimensions and the
+    fractional excess-piece count. Those recompute back to exactly the tracked excess
+    Kg, so the Return Excess Entry dialog opens on a correct, non-zero figure rather
+    than losing the tracked amount (its live preview recalculates Qty FROM these
+    fields). That fallback is only a placeholder standing in for "one standard piece,
+    mostly unused" -- the real leftover is rarely that shape, so it is still worth
+    correcting later if it was not entered at transfer time.
+
+    Return Warehouse defaults to the plan's raw-material warehouse, which is where an
+    off-cut normally goes back to; the popup lets it be pointed at a scrap warehouse
+    instead, per row."""
     SOURCE_TABLE = "Round Up Sec Qty for Transfer"
     by_key = {
         (r.source_table, r.source_row): r
@@ -500,10 +516,17 @@ def _log_round_up_excess(mip, items):
         if excess_kg <= 0:
             continue
         _apply_transfer_excess_to_raw_materials(mip, item, excess_kg)
-        excess_pieces = flt(item.get("round_up_excess_pieces"))
-        length = flt(item.get("custom_length"))
-        width = flt(item.get("custom_width"))
-        thickness = flt(item.get("custom_thickness"))
+
+        # What the user measured in the popup's excess row wins over the placeholder
+        # derived from the batch. They are looking at the actual off-cut; the batch's
+        # standard dimensions are only a stand-in for "one whole piece, mostly unused"
+        # and are almost never the real shape.
+        measured = item.get("excess_entry") or {}
+        excess_pieces = flt(measured.get("sec_qty")) or flt(item.get("round_up_excess_pieces"))
+        length = flt(measured.get("length")) or flt(item.get("custom_length"))
+        width = flt(measured.get("width")) or flt(item.get("custom_width"))
+        thickness = flt(measured.get("thickness")) or flt(item.get("custom_thickness"))
+        return_warehouse = measured.get("return_warehouse") or mip.source_warehouse or ""
         source_row = f"{item['item_code']}|{item.get('batch_no') or ''}"
         key = (SOURCE_TABLE, source_row)
         target = by_key.get(key)
@@ -522,6 +545,8 @@ def _log_round_up_excess(mip, items):
                 target.width = width
             if not target.thickness:
                 target.thickness = thickness
+            if not target.get("return_warehouse"):
+                target.return_warehouse = return_warehouse
         else:
             target = mip.append("excess_return_items", {
                 "source_table": SOURCE_TABLE,
@@ -537,6 +562,7 @@ def _log_round_up_excess(mip, items):
                 "sec_uom": item.get("custom_sec_uom") or "",
                 "uom": item.get("uom") or "Kg",
                 "qty": excess_kg,
+                "return_warehouse": return_warehouse,
                 "return_type": "Return to Own Warehouse",
                 "return_reason": _(
                     "Rounding surplus from \"Round Up Sec Qty for Transfer\" -- placeholder "
@@ -568,6 +594,48 @@ def has_cnc_stock(mip_name):
         LIMIT 1
     """, (mip_name, mip.cnc_warehouse))
     return bool(result)
+
+
+@frappe.whitelist()
+def get_mip_cnc_button_state(mip_name):
+    """Which of the two CNC transfer buttons the form should show.
+
+    {"show_to_cnc": bool, "show_cnc_forward": bool}
+
+    show_to_cnc — is any CNC-flagged row still waiting to go TO the CNC warehouse?
+    "To CNC Warehouse" used to appear whenever a CNC warehouse was merely SET, so it
+    stayed on screen forever, long after every CNC row had moved and its popup could
+    only ever open empty. Deriving it from what is actually pending also makes it
+    self-correcting in the case the client asked about: tick CNC on another Material
+    Planning row, it flows into this plan, that row is pending again, and the button
+    comes back on its own -- no stored state to keep in step.
+
+    show_cnc_forward — is anything sitting AT the CNC warehouse RIGHT NOW to forward
+    onward? This used to come from has_cnc_stock, which answers a historical question
+    ("has anything ever been sent to CNC?"), so the button stayed on screen after the
+    last batch had been forwarded and its popup could only report "Nothing at CNC".
+    Asking what is actually pending fixes the same complaint on both buttons.
+
+    Both are read fresh on every form refresh, so neither can go stale."""
+    mip = frappe.get_cached_doc("Material Issue Plan", mip_name)
+    if not mip.cnc_warehouse:
+        return {"show_to_cnc": False, "show_cnc_forward": False}
+
+    def _any(fn, predicate=bool):
+        # A plan that is not transfer-ready yet (no linked order, no source warehouse)
+        # raises here. Show the button in that case so the user still gets the readiness
+        # message explaining what is missing, rather than a silently absent button.
+        try:
+            return any(predicate(row) for row in fn(mip_name))
+        except Exception:
+            return True
+
+    # Same sources the two popups themselves filter on, so each button appears exactly
+    # when its popup would have something to offer.
+    return {
+        "show_to_cnc": _any(get_mip_pending_items, lambda r: r.get("cnc_process")),
+        "show_cnc_forward": _any(get_mip_cnc_pending_items),
+    }
 
 
 def _get_mip_transfer_stock_entry_names(mip):
@@ -805,6 +873,8 @@ def create_mip_transfer_entry(mip_name):
     frappe.db.commit()  # release read-locks before SE insert to avoid gap-lock deadlock
     se.insert(ignore_permissions=True)
     _log_round_up_excess(mip, primary_rows)
+    # The parked popup state described what was about to happen; it just did.
+    _clear_transfer_draft(mip.name, primary_rows)
     return {"primary_se": se.name}
 
 

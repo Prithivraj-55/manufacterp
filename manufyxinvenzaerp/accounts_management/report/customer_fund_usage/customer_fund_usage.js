@@ -10,6 +10,16 @@ frappe.query_reports["Customer Fund Usage"] = {
 			options: "Customer",
 		},
 		{
+			// Narrows to the customer payments booked against this Sales Order, and
+			// therefore to every supplier payment funded out of them -- the same shape
+			// as the Customer filter above, which also selects wallets rather than
+			// individual requests.
+			fieldname: "sales_order",
+			label: __("Sales Order"),
+			fieldtype: "Link",
+			options: "Sales Order",
+		},
+		{
 			fieldname: "source_of_funds",
 			label: __("Source of Funds (Customer Payment Entry)"),
 			fieldtype: "Link",

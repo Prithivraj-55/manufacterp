@@ -1066,15 +1066,18 @@ def _soe_consumed_kg(doc):
     """Weight this operation actually passed on to the next one.
 
     Not simply SUM(consumption_log.weight_kg): on an operation with Inspection
-    Mandatory, rework means the SAME piece is legitimately logged again in a later
-    round (see the note on the Op-2+ Nos guard below), so a plain sum double-counts
-    its weight. completed_qty_nos already solves this for Nos -- it only ever grows
-    via Accepted Qty from a submitted Inspection Entry -- so the weight is scaled to
-    match: each drawing contributes its logged Kg in the same proportion that its
-    ACCEPTED Nos bears to its LOGGED Nos.
+    Mandatory, only ACCEPTED pieces move on, so each drawing contributes its logged Kg
+    in the same proportion that its accepted Nos bears to its logged Nos. Weight that
+    is still awaiting inspection, or was rejected, has not been passed to the next
+    operation and must not be counted as though it had.
 
     For a non-mandatory operation completed_qty_nos IS the raw log total, so the
-    scale factor is 1 and this returns the plain sum, unchanged from before.
+    scale factor is 1 and this returns the plain sum.
+
+    The scaling also absorbs historical records logged while mandatory operations were
+    exempt from the Nos ceiling (step 6 of validate_supplier_operation_entry), where the
+    same piece was deliberately re-logged after rework and a plain sum would count its
+    weight twice. New records can no longer be over-logged, but old ones exist.
 
     Log rows carrying weight but no drawing (or no Nos) can't be apportioned, so
     they are passed through at face value rather than silently dropped."""
@@ -1213,19 +1216,28 @@ def validate_supplier_operation_entry(doc, method):
                 title=_("Exceeds Available to Consume"),
             )
 
-    # --- 6. Op-2+: validate qty_nos per drawing against available_to_consume_nos.
-    #        The raw per-drawing log total is only checked against the ceiling for
-    #        non-mandatory operations. For a mandatory operation, rework means the same
-    #        Nos can legitimately be re-logged across multiple Consumption Log rounds, so
-    #        the cumulative raw total can genuinely exceed "available" -- the real ceiling
-    #        there is enforced downstream by completed_qty_nos (accepted-only) and by
-    #        _validate_soe_items' accept_qty <= qty_nos check instead. ---
-    if seq > 1:
-        detail_map = {r.drawing: r for r in (doc.drawing_details or []) if r.drawing}
-        for drawing, nos in log_nos_by_drawing.items():
-            row = detail_map.get(drawing)
+    # --- 6. Per-drawing Nos ceiling on the Consumption Log, for EVERY operation.
+    #
+    #        The log records what was produced, once. If the drawing is 4 Nos, the log
+    #        can never total more than 4 -- on any operation, mandatory inspection or
+    #        not. The ceiling is the previous operation's completed Nos from Op-2 on,
+    #        and the drawing's own quantity at Op-1.
+    #
+    #        Mandatory operations were previously exempt so that a rejected piece could
+    #        be logged a SECOND time after rework, deliberately pushing the total past
+    #        the real quantity (4 made, 1 rejected, re-logged: total 5). That is no
+    #        longer wanted -- inspection can run many rounds, but the log is written
+    #        once. Nothing is lost by removing it: _sync_soe_inspection_items derives
+    #        pending work as (logged - accepted), so a rejected piece stays pending on
+    #        its own and the next inspection round picks it up without a second log
+    #        entry. See tests/verify_consumption_log_hard_cap.py. ---
+    detail_map = {r.drawing: r for r in (doc.drawing_details or []) if r.drawing}
+    for drawing, nos in log_nos_by_drawing.items():
+        row = detail_map.get(drawing)
+        label = (row.customer_drawing_number if row else None) or drawing
+
+        if seq > 1:
             available = flt(row.available_to_consume_nos) if row else 0.0
-            label = (row.customer_drawing_number if row else None) or drawing
             if available <= 0:
                 frappe.throw(
                     _("Drawing {0}: the previous operation has not completed any quantity "
@@ -1234,13 +1246,22 @@ def validate_supplier_operation_entry(doc, method):
                     .format(label),
                     title=_("Previous Operation Not Completed"),
                 )
-            if nos > available and not doc.custom_inspection_mandatory:
-                frappe.throw(
-                    _("Drawing {0}: entered {1} Nos but only {2} Nos are available "
-                      "from the previous operation.")
-                    .format(label, flt(nos, 3), flt(available, 3)),
-                    title=_("Exceeds Available Qty"),
-                )
+            ceiling, source = available, _("available from the previous operation")
+        else:
+            ceiling = flt(row.qty_to_manufacture) if row else 0.0
+            if ceiling <= 0:
+                continue
+            source = _("to manufacture for this drawing")
+
+        if nos > ceiling:
+            frappe.throw(
+                _("Drawing {0}: entered {1} Nos in total but only {2} Nos are {3}. "
+                  "The Consumption Log records what was produced once -- a piece sent "
+                  "back for rework is not logged again, it stays pending for the next "
+                  "inspection round on its own.")
+                .format(label, flt(nos, 3), flt(ceiling, 3), source),
+                title=_("Exceeds Available Qty"),
+            )
 
 
 def _sync_soe_inspection_items(doc, log_nos_by_drawing):
@@ -1251,12 +1272,15 @@ def _sync_soe_inspection_items(doc, log_nos_by_drawing):
     rounds with no manual bookkeeping: a rejected Nos simply isn't subtracted from the log
     total, so it reappears here on its own the moment it's logged again.
 
-    The raw log total is capped at qty_to_manufacture before subtracting completed_qty_nos
-    -- Consumption Log itself is deliberately left free to be over-logged across rework
-    rounds (see validate_supplier_operation_entry, step 6), but "pending" must never promise
-    more than the drawing's real physical quantity or an Inspection Entry could end up
-    accepting more Nos than actually exist (caught too late, at SOE save, as "Completed Qty
-    Exceeds Limit" -- capping here instead means it can never be entered in the first place).
+    This is what makes rework work without re-logging: 4 logged, 3 accepted in round 1
+    leaves 1 pending, so the rejected piece comes back for round 2 by itself.
+
+    The raw log total is still capped at qty_to_manufacture before subtracting
+    completed_qty_nos. That cap is now belt-and-braces -- step 6 of
+    validate_supplier_operation_entry stops the log exceeding the drawing's quantity in
+    the first place -- but it is kept as a guard for records logged before that ceiling
+    applied to mandatory operations, so "pending" can never promise more Nos than
+    physically exist and an Inspection Entry can never accept more than were made.
 
     Empty (cleared) when Inspection Mandatory is off -- there is nothing pending review."""
     doc.set("inspection_items", [])

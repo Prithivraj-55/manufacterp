@@ -1,9 +1,10 @@
+import json
 from collections import defaultdict
 
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt
+from frappe.utils import flt, now
 
 from manufyxinvenzaerp.subcontracting_management.overrides import resolve_supplier_warehouse
 from manufyxinvenzaerp.utils.dimension_formula import calculate_qty
@@ -33,6 +34,9 @@ class MaterialIssuePlan(Document):
         _sync_batch_remarks(self)
         _sync_excess_availability(self)
         _sync_transferred_qty(self)
+        # After _sync_transferred_qty -- the consolidated rows carry Issued Qty forward
+        # from the raw-material rows, so they have to be refreshed first.
+        _sync_consolidate_items(self)
         _maybe_mark_completed(self)
 
     def on_trash(self):
@@ -490,6 +494,210 @@ def _sync_transferred_qty(mip):
         rows[-1].transferred_qty = flt(total_moved - running, 3)
 
 
+@frappe.whitelist()
+def save_transfer_draft(mip_name, rows_json):
+    """Park what has been typed into the transfer popup without transferring anything.
+
+    Deliberately unvalidated. The whole point of "Save and Close" is to step away
+    mid-decision -- a half-entered Sec Nos, an off-cut not yet measured, a warehouse not
+    yet chosen. Checking stock or dimensions here would refuse to save exactly the
+    unfinished state the user is trying to keep. Everything is re-checked, server-side,
+    when Transfer is finally pressed.
+
+    Written straight to the child rows rather than through mip.save(): saving the parent
+    would re-run validate(), which rebuilds this very table, and there is no reason to
+    put the plan through that to record a scratch note."""
+    rows = json.loads(rows_json) if isinstance(rows_json, str) else (rows_json or [])
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+
+    by_key = {
+        (r.item_code, r.batch_no or "", 1 if r.cnc_process else 0): r
+        for r in (mip.consolidate_items or [])
+    }
+
+    saved = 0
+    for r in rows:
+        key = (r.get("item_code"), r.get("batch_no") or "", 1 if r.get("cnc_process") else 0)
+        target = by_key.get(key)
+        if not target:
+            # The plan changed under the popup (a row unreserved, a batch reassigned).
+            # Skip rather than invent a row that no longer corresponds to anything.
+            continue
+        excess = r.get("excess_entry") or {}
+        frappe.db.set_value("Material Issue Plan Consolidate Item", target.name, {
+            "draft_sec_qty": flt(r.get("custom_sec_qty")),
+            "draft_excess_length": flt(excess.get("length")),
+            "draft_excess_width": flt(excess.get("width")),
+            "draft_excess_sec_qty": flt(excess.get("sec_qty")),
+            "draft_return_warehouse": excess.get("return_warehouse") or "",
+            "draft_saved_on": now(),
+        }, update_modified=False)
+        saved += 1
+
+    frappe.db.commit()
+    return {"saved": saved}
+
+
+@frappe.whitelist()
+def get_transfer_draft(mip_name):
+    """The parked popup state, keyed the same way the popup keys its own rows."""
+    rows = frappe.get_all(
+        "Material Issue Plan Consolidate Item",
+        filters={"parent": mip_name, "draft_saved_on": ["is", "set"]},
+        fields=["item_code", "batch_no", "cnc_process"] + list(_CONSOLIDATE_DRAFT_FIELDS),
+    )
+    return {
+        "%s|%s|%s" % (r.item_code, r.batch_no or "", 1 if r.cnc_process else 0): r
+        for r in rows
+    }
+
+
+def _clear_transfer_draft(mip_name, items):
+    """Drop the parked state for rows that have just been transferred -- it described
+    what was about to happen, and it has now happened."""
+    keys = {(i.get("item_code"), i.get("batch_no") or "", 1 if i.get("cnc_process") else 0)
+            for i in (items or [])}
+    if not keys:
+        return
+    for r in frappe.get_all(
+        "Material Issue Plan Consolidate Item",
+        filters={"parent": mip_name, "draft_saved_on": ["is", "set"]},
+        fields=["name", "item_code", "batch_no", "cnc_process"],
+    ):
+        if (r.item_code, r.batch_no or "", 1 if r.cnc_process else 0) in keys:
+            frappe.db.set_value(
+                "Material Issue Plan Consolidate Item", r.name,
+                {f: (None if f in ("draft_return_warehouse", "draft_saved_on") else 0)
+                 for f in _CONSOLIDATE_DRAFT_FIELDS},
+                update_modified=False,
+            )
+
+
+# Held across a rebuild of the Consolidate Items table -- see _sync_consolidate_items.
+_CONSOLIDATE_DRAFT_FIELDS = (
+    "draft_sec_qty",
+    "draft_excess_length",
+    "draft_excess_width",
+    "draft_excess_sec_qty",
+    "draft_return_warehouse",
+    "draft_saved_on",
+)
+
+
+def _sync_consolidate_items(mip):
+    """Rebuild the Consolidate Items table: one row per item + batch, merged.
+
+    Same shape as the transfer popup, because it describes the same thing -- what will
+    physically move. Grouped by (item, batch, CNC leg), which is as far as consolidation
+    can go: a Stock Entry has to name a specific batch, so two batches of one item stay
+    two rows. Merging them would produce a line that cannot be turned into a transfer.
+
+    Keyed on the BATCH's item (planned_item), not the requirement's, so an alternate-item
+    row lands under the item actually being moved -- the same rule the Stock Entry and
+    the transfer popup use.
+
+    Batch-assigned rows are included whether or not they are still flagged reserved:
+    submitting the transfer clears that flag, and a table that emptied itself the moment
+    material shipped would be useless for seeing what a plan did. Rows with no batch yet
+    (nothing allocated) are left out -- there is nothing to move.
+
+    Sorted by item then batch so a batch's siblings sit together; scattering them is
+    what made two legitimate lines read as a duplicate.
+
+    Everything here is derived and the table is rebuilt wholesale on every save -- with
+    ONE exception. The draft_* fields hold what someone typed into the transfer popup
+    and saved without transferring (see save_transfer_draft), so they are carried across
+    the rebuild, matched on the same key the rows are grouped by. Losing them would mean
+    "Save and Close" quietly discarded the work the moment anything re-saved the plan.
+    """
+    drafts = {
+        (r.item_code, r.batch_no or "", 1 if r.cnc_process else 0): {
+            f: r.get(f) for f in _CONSOLIDATE_DRAFT_FIELDS
+        }
+        for r in (mip.consolidate_items or [])
+        if any(flt(r.get(f)) if f != "draft_return_warehouse" and f != "draft_saved_on"
+               else r.get(f) for f in _CONSOLIDATE_DRAFT_FIELDS)
+    }
+
+    # Item names in one query rather than one per group. At 500 drawings a plan can
+    # hold hundreds of distinct item/batch pairs, and a lookup inside the loop turned
+    # a single save into hundreds of round trips.
+    wanted_items = {r.planned_item or r.item_code for r in (mip.raw_materials or []) if r.batch_no}
+    item_names = dict(frappe.get_all(
+        "Item", filters={"name": ["in", list(wanted_items)]},
+        fields=["name", "item_name"], as_list=True,
+    )) if wanted_items else {}
+
+    groups = {}
+    for row in (mip.raw_materials or []):
+        if not row.batch_no:
+            continue
+        item_code = row.planned_item or row.item_code
+        key = (item_code, row.batch_no, 1 if row.cnc_process else 0)
+        g = groups.get(key)
+        if not g:
+            g = groups[key] = {
+                "item_code": item_code,
+                "item_name": item_names.get(item_code) or item_code,
+                "batch_no": row.batch_no,
+                "cnc_process": 1 if row.cnc_process else 0,
+                "parent_item_group": row.parent_item_group or "",
+                "length": flt(row.length), "width": flt(row.width),
+                "thickness": flt(row.thickness), "unit_weight": flt(row.unit_weight),
+                "sec_uom": row.sec_uom or "", "uom": row.uom or "Kg",
+                "sec_qty": 0.0, "qty": 0.0, "transferred_qty": 0.0,
+                "source_rows": 0, "dunos": [],
+            }
+        g["sec_qty"] += flt(row.sec_qty)
+        g["qty"] += flt(row.qty)
+        g["transferred_qty"] += flt(row.transferred_qty)
+        g["source_rows"] += 1
+        if row.duno_mark_no and row.duno_mark_no not in g["dunos"]:
+            g["dunos"].append(row.duno_mark_no)
+
+    mip.set("consolidate_items", [])
+    for key in sorted(groups, key=lambda k: (k[0], k[1], k[2])):
+        g = groups[key]
+        qty = flt(g["qty"], 3)
+        done = flt(g["transferred_qty"], 3)
+        row = mip.append("consolidate_items", {
+            "item_code": g["item_code"], "item_name": g["item_name"],
+            "batch_no": g["batch_no"], "cnc_process": g["cnc_process"],
+            "parent_item_group": g["parent_item_group"],
+            "length": g["length"], "width": g["width"],
+            "thickness": g["thickness"], "unit_weight": g["unit_weight"],
+            "sec_qty": flt(g["sec_qty"], 3), "sec_uom": g["sec_uom"],
+            "qty": qty, "uom": g["uom"],
+            "transferred_qty": done,
+            "pending_qty": flt(max(qty - done, 0.0), 3),
+            "available_qty": _batch_stock_in(g["item_code"], g["batch_no"], mip.source_warehouse),
+            "source_rows": g["source_rows"],
+            "duno_mark_no": ", ".join(g["dunos"]),
+        })
+        for fieldname, value in (drafts.get(key) or {}).items():
+            row.set(fieldname, value)
+
+
+def _batch_stock_in(item_code, batch_no, warehouse):
+    """What the batch physically holds in a warehouse right now.
+
+    Read through the Serial and Batch Bundle rather than Stock Ledger Entry's own
+    batch_no column, which Frappe v15 leaves empty for bundled movements."""
+    if not (batch_no and warehouse):
+        return 0.0
+    qty = frappe.db.sql(
+        """
+        SELECT SUM(sle.actual_qty)
+        FROM `tabStock Ledger Entry` sle
+        JOIN `tabSerial and Batch Entry` sbe ON sbe.parent = sle.serial_and_batch_bundle
+        WHERE sle.is_cancelled = 0 AND sle.item_code = %s
+          AND sle.warehouse = %s AND sbe.batch_no = %s
+        """,
+        (item_code, warehouse, batch_no),
+    )
+    return flt(qty[0][0] if qty and qty[0] else 0, 3)
+
+
 def _cut_sheet_seed(mp_row):
     """The cut plan a Material Planning row carries, shaped for a raw_materials row.
 
@@ -546,22 +754,50 @@ def _lookup_drawing_planned_weight(sales_order, customer_drawing_number, item_co
     if not sales_order or not item_code:
         return None
 
-    base = {
-        "parent": sales_order,
-        "material_code": item_code,
-        "customer_drawing_number": customer_drawing_number or "",
-    }
-
+    cached = _drawing_planned_weights(sales_order)
+    cdn = customer_drawing_number or ""
     if length is not None:
-        exact = frappe.db.get_value(
-            "Sales Order Drawing Raw Material",
-            dict(base, length=flt(length), width=flt(width), thickness=flt(thickness)),
-            "total_weight",
-        )
-        if exact is not None:
-            return exact
+        hit = cached["exact"].get(
+            (cdn, item_code, flt(length), flt(width), flt(thickness)))
+        if hit is not None:
+            return hit
+    return cached["loose"].get((cdn, item_code))
 
-    return frappe.db.get_value("Sales Order Drawing Raw Material", base, "total_weight")
+
+def _drawing_planned_weights(sales_order):
+    """Every planned raw-material weight for a Sales Order, in one query, keyed both
+    ways this is looked up: exactly (drawing, item, L, W, T) and loosely (drawing, item).
+
+    Cached for the life of the request. This is called once per raw-material row while
+    a Material Issue Plan is rebuilt, and it used to run one or two queries each time --
+    at 500 drawings carrying three materials apiece that is 1,500 rows and up to 3,000
+    round trips for data that never changes during the rebuild.
+
+    frappe.local is the right scope: it is cleared between requests, so an edit to a
+    Sales Order's raw materials is picked up by the next rebuild rather than being
+    served stale from a longer-lived cache."""
+    store = getattr(frappe.local, "_mfx_planned_weights", None)
+    if store is None:
+        store = frappe.local._mfx_planned_weights = {}
+    if sales_order in store:
+        return store[sales_order]
+
+    exact, loose = {}, {}
+    for r in frappe.get_all(
+        "Sales Order Drawing Raw Material",
+        filters={"parent": sales_order},
+        fields=["customer_drawing_number", "material_code", "length", "width",
+                "thickness", "total_weight"],
+    ):
+        cdn = r.customer_drawing_number or ""
+        exact.setdefault(
+            (cdn, r.material_code, flt(r.length), flt(r.width), flt(r.thickness)),
+            r.total_weight)
+        # First row wins, matching the single get_value this replaced.
+        loose.setdefault((cdn, r.material_code), r.total_weight)
+
+    store[sales_order] = {"exact": exact, "loose": loose}
+    return store[sales_order]
 
 
 #  Claimed-off-cut lock ────────────────────────────────────────────────────────
@@ -773,15 +1009,51 @@ def _sync_excess_return_from_raw_materials(mip):
         target.qty = row.excess_calc_qty
 
 
+def _cut_sheet_sheet_qty(row):
+    """Weight of the WHOLE sheet this cut plan is taken from, before any cutting.
+
+    Read from the row's own pre-cut dimensions when it has them, otherwise from the
+    batch as it stands. That order matters: once a transfer has resized the batch down
+    to its Balance, the batch's current dimensions describe the remnant, not the sheet,
+    and using them would make an already-cut row look like a different plan."""
+    if flt(row.precut_length) or flt(row.precut_width):
+        length, width, sec_qty = row.precut_length, row.precut_width, row.precut_sec_qty
+    elif row.batch_no:
+        batch = frappe.db.get_value(
+            "Batch", row.batch_no,
+            ["custom_length", "custom_width", "custom_sec_qty"], as_dict=True,
+        ) or {}
+        length = batch.get("custom_length")
+        width = batch.get("custom_width")
+        sec_qty = batch.get("custom_sec_qty")
+    else:
+        return 0.0
+
+    qty = calculate_qty(
+        row.parent_item_group, length, width, row.thickness, row.unit_weight, sec_qty,
+    )
+    return flt(qty, 3) if qty else 0.0
+
+
 def _sync_cut_sheet_calc(mip):
-    """For every raw_materials row flagged Cut Sheet, recompute To Use Calc Qty
-    (W1 -- the qty actually transferred) and Balance Calc Qty (W2 -- what the
-    same batch's own dimensions get resized to once the transfer submits), both
-    via the same shared Structurals/Plates formula as everywhere else in this
-    app (client change request Phase 5.2). Purely a display/preview recompute
-    here -- the actual transferred qty override and post-submit batch resize
-    happen in material_issue_plan_transfer.py / stock_entry.py, reading these
-    same Cut Sheet fields directly off this row at the time a transfer is made."""
+    """For every raw_materials row flagged Cut Sheet, recompute To Use Calc Qty (W1 --
+    the qty actually transferred) and Balance Calc Qty (W2 -- what stays on the batch).
+
+    W1 comes from the To Use dimensions via the shared Structurals/Plates formula, as
+    everywhere else in this app. **W2 is derived, not measured**: it is whatever the
+    sheet had left after W1 came off it. Both halves used to be calculated from their
+    own dimensions independently, which let them disagree with the sheet they came from
+    -- the stock entry consumes W1, so the batch was left holding (sheet - W1) while the
+    Balance fields claimed something else, and the batch's available qty did not match
+    its own W2 details. Deriving it means the two cannot drift apart.
+
+    The Balance DIMENSIONS stay user-entered: they describe the shape of the off-cut,
+    which the system cannot infer (a plate can be cut along either edge). They are still
+    checked against the derived weight -- see _warn_cut_sheet_mismatch.
+
+    Purely a display/preview recompute here; the transferred qty override and the
+    post-submit batch resize happen in material_issue_plan_transfer.py / stock_entry.py,
+    reading these same fields off the row when a transfer is made."""
     for row in (mip.raw_materials or []):
         if not row.cut_sheet:
             continue
@@ -792,28 +1064,26 @@ def _sync_cut_sheet_calc(mip):
         )
         row.use_calc_qty = flt(use_qty, 3) if use_qty is not None else 0
 
-        balance_qty = calculate_qty(
-            row.parent_item_group, row.balance_length, row.balance_width,
-            row.thickness, row.unit_weight, row.balance_sec_qty,
-        )
-        row.balance_calc_qty = flt(balance_qty, 3) if balance_qty is not None else 0
+        sheet_qty = _cut_sheet_sheet_qty(row)
+        # Never negative: cutting more than the sheet holds is caught by the reservation
+        # checks, and a negative Balance would resize the batch into nonsense.
+        row.balance_calc_qty = flt(max(sheet_qty - flt(row.use_calc_qty), 0.0), 3)
 
     _warn_cut_sheet_mismatch(mip)
 
 
 def _warn_cut_sheet_mismatch(mip):
-    """Flag a Cut Sheet whose two halves do not add back up to the sheet they came from.
+    """Flag a Balance whose DIMENSIONS do not describe the weight actually left over.
 
-    Cutting always loses a little to the saw, and the client explicitly expects Length
-    and Width to be adjusted during the process -- so this can never block a save. It
-    exists to catch the typo: entering a Balance of 5 Kg where the geometry says 11.7
-    silently resizes the batch to a piece that does not exist, and nothing else in the
-    chain would notice. The allowance is Cut Sheet Tolerance (%) in Manufyxinvenza
-    Settings, so it can be tightened to 0 or loosened without a code change.
+    Balance Calc Qty is derived now (sheet - To Use), so the two halves always add back
+    up to the sheet and there is nothing to check there any more. What can still be
+    wrong is the shape: the off-cut's dimensions are typed by hand, and entering a
+    Balance measuring 5 Kg where 11.7 Kg is really left resizes the batch to a piece
+    that does not exist. Nothing else in the chain would notice.
 
-    Measured against the sheet's PRE-CUT size where that is known: once a transfer has
-    resized the batch to the Balance, comparing against its current dimensions would
-    accuse every already-cut row of being wrong."""
+    Never blocks a save. Cutting loses a little to the saw and the client expects Length
+    and Width to be adjusted during the process, so the allowance is Cut Sheet Tolerance
+    (%) in Manufyxinvenza Settings -- tighten to 0 or loosen it without a code change."""
     tolerance = flt(frappe.db.get_single_value(
         "Manufyxinvenza Settings", "cut_sheet_tolerance_percent"
     ))
@@ -822,40 +1092,36 @@ def _warn_cut_sheet_mismatch(mip):
     for row in (mip.raw_materials or []):
         if not row.cut_sheet or not row.batch_no:
             continue
-        cut_total = flt(row.use_calc_qty) + flt(row.balance_calc_qty)
-        if cut_total <= 0:
+
+        derived = flt(row.balance_calc_qty)
+        if derived <= 0:
             continue
 
-        if flt(row.precut_length) or flt(row.precut_width):
-            length, width, sec_qty = row.precut_length, row.precut_width, row.precut_sec_qty
-        else:
-            batch = frappe.db.get_value(
-                "Batch", row.batch_no,
-                ["custom_length", "custom_width", "custom_sec_qty"], as_dict=True,
-            ) or {}
-            length = batch.get("custom_length")
-            width = batch.get("custom_width")
-            sec_qty = batch.get("custom_sec_qty")
-
-        sheet_qty = calculate_qty(
-            row.parent_item_group, length, width, row.thickness, row.unit_weight, sec_qty,
+        # What the Balance dimensions, as typed, would actually weigh.
+        measured = calculate_qty(
+            row.parent_item_group, row.balance_length, row.balance_width,
+            row.thickness, row.unit_weight, row.balance_sec_qty,
         )
-        if not sheet_qty:
+        if not measured:
             continue
 
-        gap = abs(cut_total - flt(sheet_qty))
-        if gap > flt(sheet_qty) * tolerance / 100.0:
-            problems.append(_("Row {0} ({1}, batch {2}): cut plan totals {3} Kg but the sheet is {4} Kg — a difference of {5} Kg.")
-                            .format(row.idx, row.item_code, row.batch_no,
-                                    flt(cut_total, 3), flt(sheet_qty, 3), flt(gap, 3)))
+        gap = abs(flt(measured) - derived)
+        if gap > derived * tolerance / 100.0:
+            problems.append(
+                _("Row {0} ({1}, batch {2}): {3} Kg is left after the cut, but the "
+                  "Balance dimensions describe {4} Kg — a difference of {5} Kg.")
+                .format(row.idx, row.item_code, row.batch_no,
+                        derived, flt(measured, 3), flt(gap, 3)))
 
     if problems:
         frappe.msgprint(
             "<br>".join(problems) + "<br><br>" + _(
-                "Check the To Use and Balance dimensions. Some loss to the saw is normal — "
-                "raise Cut Sheet Tolerance (%) in Manufyxinvenza Settings if this is expected."
+                "Balance Calc Qty is what the sheet has left once To Use comes off it, so "
+                "it is not editable. Check the Balance Length/Width/Sec Qty describe that "
+                "off-cut. Some loss to the saw is normal — raise Cut Sheet Tolerance (%) in "
+                "Manufyxinvenza Settings if this is expected."
             ),
-            title=_("Cut Sheet Does Not Add Up"),
+            title=_("Balance Dimensions Do Not Match"),
             indicator="orange",
         )
 

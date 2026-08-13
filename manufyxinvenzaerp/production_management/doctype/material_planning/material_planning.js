@@ -383,9 +383,11 @@ frappe.ui.form.on("Material Planning", {
 			frappe.db.get_single_value("Manufyxinvenza Settings", "auto_purchase_from_material_planning")
 				.then(function(enabled) {
 					if (!enabled) return;
-					frm.set_df_property("custom_auto_purchase_section",  "hidden", 0);
-					frm.set_df_property("custom_auto_purchase_supplier", "hidden", 0);
-					frm.refresh_fields(["custom_auto_purchase_section", "custom_auto_purchase_supplier", "custom_auto_purchase_btn"]);
+					frm.set_df_property("custom_auto_purchase_section",           "hidden", 0);
+					frm.set_df_property("custom_auto_suggest_dimensions_btn",     "hidden", 0);
+					frm.set_df_property("custom_auto_purchase_supplier",          "hidden", 0);
+					frm.refresh_fields(["custom_auto_purchase_section", "custom_auto_suggest_dimensions_btn",
+						"custom_auto_purchase_supplier", "custom_auto_purchase_btn"]);
 				});
 		}
 
@@ -3146,10 +3148,90 @@ function _add_exact_match_reservation_buttons(frm) {
 
 // ── Auto Purchase (Manufyxinvenza Settings) ──────────────────────────────
 frappe.ui.form.on("Material Planning", {
+	custom_auto_suggest_dimensions_btn(frm) {
+		_run_auto_suggest_dimensions(frm);
+	},
 	custom_auto_purchase_btn(frm) {
 		_run_auto_purchase(frm);
 	},
 });
+
+// Opening guess for the Consolidate Item table: the largest size among the
+// requirements each row covers, and the Sec Qty that matches the weight needed.
+// Confirms first when rows already carry dimensions -- re-running it must not
+// quietly overwrite sizes someone has typed.
+function _run_auto_suggest_dimensions(frm) {
+	if (!(frm.doc.consolidate_items || []).length) {
+		frappe.msgprint(__("There are no Consolidate Items to suggest dimensions for."));
+		return;
+	}
+	if (frm.is_dirty()) {
+		frappe.msgprint(__("Save the document first — suggestions are written straight to the rows."));
+		return;
+	}
+
+	var filled = (frm.doc.consolidate_items || []).filter(function(r) {
+		return flt(r.length) || flt(r.width) || flt(r.thickness) || flt(r.sec_qty);
+	});
+
+	function go() {
+		frappe.call({
+			method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.auto_suggest_consolidate_dimensions",
+			args: { material_planning_name: frm.doc.name },
+			freeze: true,
+			freeze_message: __("Suggesting dimensions…"),
+			callback: function(r) {
+				var m = r.message || {};
+				var up = m.updated || [], sk = m.skipped || [];
+				frm.reload_doc();
+				if (!up.length && !sk.length) {
+					frappe.msgprint(__("Nothing to suggest."));
+					return;
+				}
+				var html = "";
+				if (up.length) {
+					html += "<b>" + __("Suggested for {0} item(s)", [up.length]) + "</b>"
+						+ "<table class='table table-bordered table-condensed' style='margin-top:8px;font-size:12px'>"
+						+ "<thead><tr><th>" + __("Item") + "</th><th class='text-right'>" + __("Length") + "</th>"
+						+ "<th class='text-right'>" + __("Sec Qty") + "</th>"
+						+ "<th class='text-right'>" + __("Required") + "</th>"
+						+ "<th class='text-right'>" + __("Purchase") + "</th></tr></thead><tbody>";
+					up.forEach(function(u) {
+						html += "<tr><td>" + frappe.utils.escape_html(u.item_code) + "</td>"
+							+ "<td class='text-right'>" + format_number(u.length, null, 0) + "</td>"
+							+ "<td class='text-right'>" + format_number(u.sec_qty, null, 3) + "</td>"
+							+ "<td class='text-right'>" + format_number(u.required_kg, null, 3) + "</td>"
+							+ "<td class='text-right'>" + format_number(u.purchase_kg, null, 3) + "</td></tr>";
+					});
+					html += "</tbody></table>"
+						+ "<div class='text-muted' style='font-size:11px'>"
+						+ __("Length is the largest size these requirements need, so every piece can be cut from it. Adjust and save.")
+						+ "</div>";
+				}
+				if (sk.length) {
+					html += "<div style='margin-top:10px'><b>" + __("Skipped") + "</b><ul style='margin:4px 0 0 -18px'>";
+					sk.forEach(function(x) {
+						html += "<li>" + frappe.utils.escape_html(x.item_code || "?") + " — "
+							+ frappe.utils.escape_html(x.reason || "") + "</li>";
+					});
+					html += "</ul></div>";
+				}
+				frappe.msgprint({ title: __("Auto Suggest Item Dimensions"), message: html, indicator: "blue" });
+			},
+		});
+	}
+
+	if (filled.length) {
+		frappe.confirm(
+			__("{0} of {1} row(s) already have dimensions or Sec Qty. Overwrite them with the suggestion?",
+				[filled.length, (frm.doc.consolidate_items || []).length]),
+			go
+		);
+	} else {
+		go();
+	}
+}
+
 
 function _run_auto_purchase(frm) {
 	if (!frm.doc.custom_auto_purchase_supplier) {

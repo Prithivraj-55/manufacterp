@@ -423,6 +423,21 @@ def _collect_consumed_batches(doc):
 	return batches
 
 
+# Stock Entry types that move reserved material out of the warehouse it was reserved
+# in, and therefore release (on submit) or restore (on cancel) the Material Planning
+# reservations behind it. One constant so the two stay in step -- a type released on
+# submit but not restored on cancel would strand the reservation.
+#
+# 'Send to Subcontractor' was missing from this list, which mattered more than the rest
+# put together: it is THE primary transfer in this app's flow, moving reserved material
+# from Stores to the supplier. The main path released nothing, so batches stayed
+# reserved after their stock had physically gone and their free qty was under-reported
+# to every later plan.
+RESERVATION_RELEASING_SE_TYPES = {
+	"Manufacture", "Material Transfer", "Material Issue", "Repack", "Send to Subcontractor",
+}
+
+
 def _linked_material_plannings(doc):
 	"""Material Planning docs whose reservations belong to this consumption.
 
@@ -441,6 +456,18 @@ def _linked_material_plannings(doc):
 		pp_names.add(doc.get("custom_production_plan"))
 	if doc.get("custom_mip_ref"):
 		pp = frappe.db.get_value("Material Issue Plan", doc.get("custom_mip_ref"), "production_plan")
+		if pp:
+			pp_names.add(pp)
+	# Also via the Subcontracting Order, on either field. The finished-goods entry
+	# (create_finished_goods_entry) sets only the core `subcontracting_order` -- no
+	# custom_mip_ref, no custom_sco_ref -- so without this it resolves to nothing and
+	# the caller drops to the legacy fallback, which releases Material Mapping rows and
+	# silently leaves every exact-match reservation held forever.
+	for fieldname in ("custom_sco_ref", "subcontracting_order"):
+		sco = doc.get(fieldname)
+		if not sco:
+			continue
+		pp = frappe.db.get_value("Subcontracting Order", sco, "custom_production_plan")
 		if pp:
 			pp_names.add(pp)
 
@@ -464,8 +491,7 @@ def _release_material_planning_reservations(doc):
 	so a batch shared with other MPs keeps those other reservations intact. When no link can be
 	resolved, falls back to the legacy batch-wide behaviour on the Material Mapping table.
 	"""
-	consumed_types = {"Manufacture", "Material Transfer", "Material Issue", "Repack"}
-	if doc.stock_entry_type not in consumed_types:
+	if doc.stock_entry_type not in RESERVATION_RELEASING_SE_TYPES:
 		return
 
 	consumed_batches = _collect_consumed_batches(doc)
@@ -508,14 +534,20 @@ def _release_material_planning_reservations(doc):
 				frappe.db.set_value(child_dt, r.name, cleared, update_modified=False)
 		return
 
-	# Fallback (no Production Plan link): legacy batch-wide release on Material Mapping.
-	reserved_rows = frappe.get_all(
-		"Material Planning Material Mapping",
-		filters={"batch": ["in", list(consumed_batches)], "is_reserved": 1},
-		pluck="name",
-	)
-	for name in reserved_rows:
-		frappe.db.set_value("Material Planning Material Mapping", name, cleared, update_modified=False)
+	# Fallback (no Production Plan link): batch-wide release across BOTH tables.
+	# It used to cover Material Mapping only, so an exact-match reservation whose entry
+	# could not be traced to a plan stayed held forever, and the batch's free qty was
+	# under-reported to every later plan even though its stock had gone.
+	for child_dt, batch_field in (
+		("Material Planning Material Mapping", "batch"),
+		("Material Planning Available Raw Material", "batch_no"),
+	):
+		for name in frappe.get_all(
+			child_dt,
+			filters={batch_field: ["in", list(consumed_batches)], "is_reserved": 1},
+			pluck="name",
+		):
+			frappe.db.set_value(child_dt, name, cleared, update_modified=False)
 
 
 def _refresh_linked_mip_weight(sco_ref=None, wo_ref=None):
@@ -603,8 +635,7 @@ def _restore_material_planning_reservations(doc):
 	the linked Material Plannings on both tables, or legacy batch-wide on Material Mapping when
 	no Production Plan link exists. Only currently-unreserved rows with the batch are restored.
 	"""
-	consumed_types = {"Manufacture", "Material Transfer", "Material Issue", "Repack"}
-	if doc.stock_entry_type not in consumed_types:
+	if doc.stock_entry_type not in RESERVATION_RELEASING_SE_TYPES:
 		return
 
 	consumed_batches = _collect_consumed_batches(doc)
@@ -639,14 +670,19 @@ def _restore_material_planning_reservations(doc):
 				_reserve(child_dt, r.name, r.get(qty_field))
 		return
 
-	# Fallback (no Production Plan link): legacy batch-wide restore on Material Mapping.
-	mapping_rows = frappe.get_all(
-		"Material Planning Material Mapping",
-		filters={"batch": ["in", list(consumed_batches)], "is_reserved": 0},
-		fields=["name", "qty"],
-	)
-	for r in mapping_rows:
-		_reserve("Material Planning Material Mapping", r.name, r.qty)
+	# Fallback (no Production Plan link): batch-wide restore across BOTH tables, mirroring
+	# the release fallback exactly -- releasing on submit without restoring on cancel
+	# would strand the reservation.
+	for child_dt, batch_field, qty_field in (
+		("Material Planning Material Mapping", "batch", "qty"),
+		("Material Planning Available Raw Material", "batch_no", "required_qty"),
+	):
+		for r in frappe.get_all(
+			child_dt,
+			filters={batch_field: ["in", list(consumed_batches)], "is_reserved": 0},
+			fields=["name", qty_field],
+		):
+			_reserve(child_dt, r.name, r.get(qty_field))
 
 
 def _update_sco_transferred_weight(sco_name):

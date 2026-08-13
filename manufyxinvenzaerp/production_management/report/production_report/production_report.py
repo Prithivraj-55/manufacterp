@@ -91,9 +91,89 @@ def get_data(filters):
 		fields=["parent", "drawing", "customer_drawing_number", "duno_mark_no", "sales_order",
 				"qty_to_manufacture", "planned_weight_kg", "transferred_weight_kg", "completed_qty_nos"],
 	)
+	# Fall back to the Drawing master for Sales Order. The copy held on the drawing rows
+	# is blank in practice -- it is only populated when the Production Plan item carried
+	# one -- which left the Sales Order column empty, the Customer column empty (it is
+	# looked up FROM the sales order) and the Sales Order filter matching nothing at all,
+	# on a report whose whole point is to be readable sales-order-wise.
+	missing_so = {d.drawing for d in drawing_rows if d.drawing and not d.sales_order}
+	if missing_so:
+		so_by_drawing = {
+			dr.name: dr.sales_order
+			for dr in frappe.get_all(
+				"Drawing",
+				filters={"name": ["in", list(missing_so)]},
+				fields=["name", "sales_order"],
+			)
+			if dr.sales_order
+		}
+		for d in drawing_rows:
+			if not d.sales_order:
+				d.sales_order = so_by_drawing.get(d.drawing) or ""
+
 	drawings_by_soe = {}
 	for d in drawing_rows:
 		drawings_by_soe.setdefault(d.parent, []).append(d)
+
+	# Drawing-level weights, keyed (subcontracting_order, drawing).
+	#
+	# Not read from the SOE Drawing Detail rows already fetched above: their
+	# transferred_weight_kg is only ever filled on sequence 1, so every later operation
+	# would report 0 Kg transferred for a drawing whose material had in fact shipped.
+	#
+	# Preference is the linked Material Issue Plan's own drawing rows -- that is where
+	# transferred weight is actually maintained (refresh_weight_summary); the
+	# Subcontracting Order's copy of the same table carries customer/planned/excess but
+	# leaves transferred at 0. The SCO rows are loaded first as a fallback so a plan with
+	# no Material Issue Plan yet still reports the three weights it does know.
+	weights = {}
+	sec_nos = {}
+	sco_names = list({s.subcontracting_order for s in soes if s.subcontracting_order})
+	if sco_names:
+		mip_to_sco = {
+			m.name: m.subcontracting_order
+			for m in frappe.get_all(
+				"Material Issue Plan",
+				filters={"subcontracting_order": ["in", sco_names]},
+				fields=["name", "subcontracting_order"],
+			)
+		}
+		sources = [("Subcontracting Order", {s: s for s in sco_names})]
+		if mip_to_sco:
+			sources.append(("Material Issue Plan", mip_to_sco))
+
+		for parenttype, parent_to_sco in sources:
+			for w in frappe.get_all(
+				"SCO Drawing Item",
+				filters={"parent": ["in", list(parent_to_sco)], "parenttype": parenttype},
+				fields=["parent", "drawing", "customer_weight_kg", "total_weight_kg",
+						"transferred_weight_kg", "excess_weight_kg"],
+			):
+				if not w.drawing:
+					continue
+				weights[(parent_to_sco[w.parent], w.drawing)] = w
+
+		# Sec Nos (piece counts) alongside the weights. No drawing-level table holds
+		# these -- Sec Qty lives only on the individual raw-material rows -- so they are
+		# aggregated per DUNO/Mark No from the Material Issue Plan's own rows.
+		#
+		# Issued Sec Nos is derived rather than stored, scaling each row's Sec Qty by the
+		# share of its Kg that actually shipped. That is what makes fractional rows add
+		# up: where two drawings each hold part of one physical piece (0.098 and 0.102 of
+		# it), the pieces they were issued come to 0.49 and 0.51 -- one whole piece
+		# between them, which is exactly what left the rack. Issued can legitimately
+		# exceed planned, since Sec Nos rounded up at transfer is the normal case and the
+		# surplus is booked as excess to return.
+		for r in frappe.get_all(
+			"Material Issue Plan Raw Material",
+			filters={"parent": ["in", list(mip_to_sco)]} if mip_to_sco else {"parent": ["in", []]},
+			fields=["parent", "duno_mark_no", "sec_qty", "qty", "transferred_qty"],
+		):
+			key = (mip_to_sco[r.parent], r.duno_mark_no or "")
+			agg = sec_nos.setdefault(key, {"planned": 0.0, "issued": 0.0})
+			agg["planned"] += flt(r.sec_qty)
+			if flt(r.qty):
+				agg["issued"] += flt(r.sec_qty) * flt(r.transferred_qty) / flt(r.qty)
 
 	so_names = list({d.sales_order for d in drawing_rows if d.sales_order})
 	so_map = {}
@@ -115,6 +195,8 @@ def get_data(filters):
 			if filters.get("sales_order") and d.get("sales_order") != filters["sales_order"]:
 				continue
 			so = so_map.get(d.get("sales_order"), frappe._dict())
+			w = weights.get((s.subcontracting_order, d.get("drawing")), frappe._dict())
+			sn = sec_nos.get((s.subcontracting_order, d.get("duno_mark_no") or ""), {})
 			data.append({
 				"production_plan": s.production_plan,
 				"project": pp.get("project") or so.get("project") or "",
@@ -133,6 +215,12 @@ def get_data(filters):
 				"inspection_status": s.custom_inspection_status or "",
 				"inspection_count": call_counts.get(s.name, 0),
 				"operation_gap_days": gap_days.get(s.name, 0),
+				"customer_weight_kg": flt(w.get("customer_weight_kg")),
+				"planned_weight_kg": flt(w.get("total_weight_kg")),
+				"planned_sec_nos": flt(sn.get("planned"), 3),
+				"transferred_weight_kg": flt(w.get("transferred_weight_kg")),
+				"transferred_sec_nos": flt(sn.get("issued"), 3),
+				"excess_weight_kg": flt(w.get("excess_weight_kg")),
 				"consumed_kg": flt(s.total_consumed_kg),
 				"completed_nos": flt(d.get("completed_qty_nos") or s.total_completed_nos),
 				"creation_date": getdate(s.creation) if s.creation else None,
@@ -178,6 +266,19 @@ def get_columns():
 		{"label": _("Inspection Status"), "fieldname": "inspection_status", "fieldtype": "Data", "width": 110},
 		{"label": _("Inspection Count"), "fieldname": "inspection_count", "fieldtype": "Int", "width": 100},
 		{"label": _("Operation Gap (Days, approx.)"), "fieldname": "operation_gap_days", "fieldtype": "Int", "width": 150},
+		# Drawing-level weights -- the same figures on every operation row for a given
+		# drawing, since they describe the drawing rather than the operation.
+		{"label": _("Customer Weight (Kg)"), "fieldname": "customer_weight_kg", "fieldtype": "Float", "width": 130},
+		{"label": _("Planned Weight (Kg)"), "fieldname": "planned_weight_kg", "fieldtype": "Float", "width": 130},
+		# Sec Nos sit beside the weight they belong to -- the two are read together, and
+		# a weight without its piece count has repeatedly been the thing that hides a
+		# problem (a rounded-up transfer looks identical in Kg terms until you see Nos).
+		{"label": _("Planned Sec Nos"), "fieldname": "planned_sec_nos", "fieldtype": "Float",
+		 "precision": 3, "width": 120},
+		{"label": _("Transferred Weight (Kg)"), "fieldname": "transferred_weight_kg", "fieldtype": "Float", "width": 145},
+		{"label": _("Transferred Sec Nos"), "fieldname": "transferred_sec_nos", "fieldtype": "Float",
+		 "precision": 3, "width": 140},
+		{"label": _("Excess Weight (Kg)"), "fieldname": "excess_weight_kg", "fieldtype": "Float", "width": 125},
 		{"label": _("Consumed (Kg)"), "fieldname": "consumed_kg", "fieldtype": "Float", "width": 110},
 		{"label": _("Completed (Nos)"), "fieldname": "completed_nos", "fieldtype": "Float", "width": 110},
 		{"label": _("Created On"), "fieldname": "creation_date", "fieldtype": "Date", "width": 100},
