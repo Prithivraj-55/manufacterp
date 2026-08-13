@@ -930,6 +930,12 @@ function _so_run_batched(frm, opts) {
 	var BATCH_SIZE = 30;
 	var all_results = [];
 	var batch_start = 0;
+	// Counts only move when a batch returns (~4s on BOM creation), but elapsed time
+	// and the estimate can tick every second -- so the dialog looks alive between
+	// round trips instead of appearing frozen for four seconds at a time.
+	var started_at = Date.now();
+	var last = { processed: 0, total: opts.count || 1, done: false };
+	var ticker = null;
 
 	// Create dialog with a pre-wired Close button (hidden until done)
 	var d = new frappe.ui.Dialog({
@@ -941,8 +947,17 @@ function _so_run_batched(frm, opts) {
 	// Hide Close button and X while running
 	d.get_primary_btn().hide();
 	d.$wrapper.find(".modal-header .close").hide();
-	d.$body.html(_so_progress_html(0, opts.count || 1, [], false));
+	d.$body.html(_so_progress_html(0, opts.count || 1, [], false, _so_timing(started_at, 0, opts.count || 1, false)));
 	d.show();
+
+	// Refresh only the clock/estimate line, not the whole body: re-rendering would
+	// reset the scroll position of the error list and restart the bar animation.
+	ticker = setInterval(function() {
+		if (last.done) { clearInterval(ticker); return; }
+		var t = _so_timing(started_at, last.processed, last.total, false);
+		var $el = d.$body.find(".so-eta");
+		if ($el.length) $el.html(t.html);
+	}, 1000);
 
 	function _next() {
 		var args = Object.assign({}, opts.args, {
@@ -960,7 +975,11 @@ function _so_run_batched(frm, opts) {
 				var total = res.total || processed;
 				var done = (res.next_start === null || res.next_start === undefined || processed >= total);
 
-				d.$body.html(_so_progress_html(processed, total, all_results, done));
+				last = { processed: processed, total: total, done: done };
+				d.$body.html(_so_progress_html(processed, total, all_results, done,
+					_so_timing(started_at, processed, total, done)));
+
+				if (done && ticker) clearInterval(ticker);
 
 				if (!done) {
 					batch_start = res.next_start;
@@ -972,6 +991,7 @@ function _so_run_batched(frm, opts) {
 				}
 			},
 			error: function() {
+				if (ticker) clearInterval(ticker);
 				d.hide();
 				frappe.msgprint(__("A server error occurred — check the error log for details."));
 				frm.reload_doc();
@@ -981,7 +1001,44 @@ function _so_run_batched(frm, opts) {
 	_next();
 }
 
-function _so_progress_html(processed, total, results, done) {
+// Elapsed / remaining / estimate, measured from this run's own throughput rather
+// than a fixed guess -- BOM creation runs at roughly 8 per second on a warm site and
+// far slower on a cold one, so a hardcoded rate would be wrong on both.
+//
+// No estimate is offered until a batch has actually completed: extrapolating from a
+// part-finished first batch produces a wild number that then collapses, which reads
+// as a bug even though the job is fine.
+function _so_timing(started_at, processed, total, done) {
+	var elapsed = Math.max(0, (Date.now() - started_at) / 1000);
+	var pending = Math.max(0, total - processed);
+	var rate = processed > 0 ? processed / elapsed : 0;
+
+	function fmt(sec) {
+		sec = Math.round(sec);
+		if (sec < 60) return sec + "s";
+		var m = Math.floor(sec / 60), r = sec % 60;
+		return m + "m " + (r < 10 ? "0" : "") + r + "s";
+	}
+
+	var eta_txt;
+	if (done) eta_txt = __("finished in {0}", [fmt(elapsed)]);
+	else if (processed <= 0 || rate <= 0) eta_txt = __("estimating…");
+	else eta_txt = __("about {0} left", [fmt(pending / rate)]);
+
+	var html =
+		'<span>' + __("Elapsed") + ' <b>' + fmt(elapsed) + '</b></span>' +
+		'<span style="margin:0 10px;color:#cbd5e0">|</span>' +
+		'<span>' + eta_txt + '</span>' +
+		(rate > 0 && !done
+			? '<span style="margin:0 10px;color:#cbd5e0">|</span><span>' +
+			  rate.toFixed(1) + ' ' + __("per second") + '</span>'
+			: '');
+
+	return { elapsed: elapsed, pending: pending, rate: rate, html: html };
+}
+
+
+function _so_progress_html(processed, total, results, done, timing) {
 	var pct  = total ? Math.min(100, Math.round((processed / total) * 100)) : 0;
 	var ok   = results.filter(function(x) { return x.status === "success"; }).length;
 	var err  = results.filter(function(x) { return x.status === "error"; }).length;
@@ -1037,7 +1094,10 @@ function _so_progress_html(processed, total, results, done) {
 	html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">';
 	html += '<div style="display:flex;align-items:center;gap:12px;">' + icon_html;
 	html += '<div><div style="font-size:14px;font-weight:700;color:#1a202c;line-height:1.2;">' + lbl + '</div>';
-	html += '<div style="font-size:11px;color:#a0aec0;margin-top:2px;">' + processed + ' / ' + total + ' ' + __("processed") + '</div></div>';
+	html += '<div style="font-size:11px;color:#a0aec0;margin-top:2px;">'
+		+ '<b style="color:#4a5568">' + processed + '</b> ' + __("done")
+		+ ' &nbsp;·&nbsp; <b style="color:#4a5568">' + Math.max(0, total - processed) + '</b> ' + __("pending")
+		+ ' &nbsp;·&nbsp; ' + total + ' ' + __("total") + '</div></div>';
 	html += '</div>';
 	html += '<span style="font-size:36px;font-weight:800;color:' + clr_main + ';line-height:1;letter-spacing:-1px;">'
 		+ pct + '<span style="font-size:16px;font-weight:500;color:#a0aec0;">%</span></span>';
@@ -1048,6 +1108,10 @@ function _so_progress_html(processed, total, results, done) {
 		+ 'margin-bottom:16px;box-shadow:inset 0 1px 3px rgba(0,0,0,0.08);">';
 	html += '<div style="' + bar_style + 'width:' + pct + '%;height:100%;border-radius:999px;transition:width 0.35s ease;"></div>';
 	html += '</div>';
+
+	// Ticks every second between batches -- see the ticker in _so_run_batched.
+	html += '<div class="so-eta" style="font-size:11px;color:#718096;margin:-8px 0 14px;display:flex;align-items:center;">'
+		+ ((timing && timing.html) || "") + '</div>';
 
 	// Stats pills
 	if (results.length) {
