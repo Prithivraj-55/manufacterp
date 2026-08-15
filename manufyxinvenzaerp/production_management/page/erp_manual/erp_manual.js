@@ -61,9 +61,98 @@ frappe.pages["erp-manual"].on_page_load = function (wrapper) {
 // ─── Categories not yet written up — kept visible so the intended shape of the
 // manual is there ahead of the content (client's own request: "later we will add
 // more details about it"). Each renders as "Coming Soon" until filled in. ────────
+// Sales Order — where a job starts. The BOM sheet is uploaded here and turned into
+// Drawings and BOMs before Material Planning ever sees it.
+const ERP_MANUAL_SALES_ORDER_CHILDREN = [
+	{
+		id: "so-overview",
+		title: "From Sales Order to BOM",
+		kicker: "The whole upload flow",
+		purpose:
+			"Everything downstream — Material Planning, purchasing, transfers, production — is built " +
+			"from Drawings and BOMs. Both are created here, from one Excel sheet attached to the " +
+			"Sales Order. Get this stage right and the rest follows; get it wrong and every later " +
+			"stage inherits the mistake.",
+		steps: [
+			"Create the Sales Order and enter <b>every finished goods item</b> in the Items table. Not just one line — each FG item the customer has ordered needs its own row.",
+			"Prepare the BOM sheet. <b>The same FG item codes must appear in the sheet's FG Item column.</b> A code in the sheet that is not on the order (or spelled differently) has nothing to attach to.",
+			"Attach the sheet to <b>BOM Excel File</b> on the Sales Order and save.",
+			"<b>Load Items</b> — reads the sheet and stages every drawing and its raw materials onto the order.",
+			"<b>Verify Raw Materials</b> — checks what was staged. Fix anything it reports, then run it again.",
+			"<b>Create Drawing</b> — creates a Drawing document per drawing in the sheet.",
+			"<b>Submit</b> the Sales Order, then <b>Submit Drawing</b>.",
+			"<b>Mark as Final Revision</b> — freezes the drawings as the version to build from.",
+			"<b>Create and Submit BOM</b> — one BOM per drawing, ready for Material Planning.",
+		],
+		notes: [
+			"<b>Two ways to get the sheet.</b> <b>Download Template</b> (on the Sales Order, before a file is attached) gives you an empty sheet with the correct column headers. " +
+			"To see one filled in properly, download the worked sample: " +
+			"<a href='/assets/manufyxinvenzaerp/files/Sample_BOM_Sheet.xlsx' download " +
+			"style='font-weight:600'>Sample BOM Sheet (filled)</a> — a real 22-drawing sheet with " +
+			"100 raw-material rows, showing how the header columns repeat down every row of a drawing.",
+			"<b>Column headers must match.</b> The importer finds columns by name, not position, so you may reorder them — but a renamed or missing header is simply not read. Assembly Group, Customer Drawing Number, DUNO/Mark No, FG Item, Total Qty, Total Weight (KG), Nature of Work, Rate Schedule, Item No, Material Code, Grade, Thickness, Width, Length, Reqd Raw Material Qty.",
+			"<b>One row per raw material, not per drawing.</b> A drawing needing three materials takes three rows, and its header columns (drawing number, DUNO, FG item, quantities, Nature of Work, Rate Schedule) repeat identically on all three. The importer groups them by Customer Drawing Number.",
+		],
+		buttons: [
+			{ name: "Download Template", note: "An empty sheet with the right headers. Only shown before a file is attached." },
+			{ name: "Load Items", note: "Parses the attached sheet onto the order. Disabled once drawings exist, so a reload cannot contradict what was already created." },
+			{ name: "Clear Items", note: "Removes staged rows so you can correct the sheet and load again. Rows that already have a Drawing are kept." },
+		],
+	},
+	{
+		id: "so-verify",
+		title: "Verify Raw Materials",
+		kicker: "The gate before drawings",
+		purpose:
+			"Checks everything staged from the sheet and refuses to pass until it is right. This is " +
+			"deliberately strict: a bad row here becomes a bad Drawing, a bad BOM, and a wrong " +
+			"requirement in Material Planning, and by then it is far harder to see where it came from.",
+		fields: [
+			{ name: "Material Code", note: "Must exist in the Item master. A typo here is the most common failure." },
+			{ name: "Nature of Work", note: "Must already exist in the Nature of Work master. Checked by name exactly as typed." },
+			{ name: "Rate Schedule", note: "Must already exist in the Rate Schedule master — e.g. RS- O/S-001 A. Checked by name; there is no format rule, so your numbering can change freely." },
+			{ name: "Dimensions", note: "Plates need Thickness, Width and Length. Structurals need Length. Both need a Unit Weight on the Item master, or no Kg can be calculated." },
+		],
+		notes: [
+			"<b>It blocks, it does not warn.</b> Anything reported has to be corrected in the sheet (or the master record created) before the flow can continue. Correct the sheet, Clear Items, Load Items again, and re-verify.",
+			"<b>Why unknown values still reach this screen.</b> The importer stages rows with a direct insert that skips link checking, on purpose — so a wrong Rate Schedule lands in the table and can be reported <i>against the drawing it came from</i>. Rejecting during the upload would abort the whole file over one cell and tell you nothing about where it was.",
+			"<b>Blank is allowed</b> for Nature of Work and Rate Schedule. Neither is mandatory on a Drawing, and older imports predate both columns.",
+		],
+		buttons: [
+			{ name: "Verify Raw Materials", note: "Runs the check. Passing sets the order's verified flag; failing lists every problem row with its drawing." },
+		],
+	},
+	{
+		id: "so-drawings",
+		title: "Create Drawing, Final Revision, BOM",
+		kicker: "Turning the sheet into documents",
+		purpose:
+			"The three build steps. Each processes in batches with a live progress dialog, so a large " +
+			"order does not time out and you can watch it work.",
+		steps: [
+			"<b>Create Drawing</b> — one Drawing document per Customer Drawing Number, carrying its DUNO/Mark No, FG item, customer weight, Nature of Work, Rate Schedule and its full raw-material list. Created as drafts, so they can still be corrected.",
+			"<b>Submit Drawing</b> — locks each drawing. The Sales Order itself must be submitted before the next step.",
+			"<b>Mark as Final Revision</b> — marks the drawings as the version production will be built from. A BOM can only be created from a submitted, Final Revision drawing.",
+			"<b>Create and Submit BOM</b> — one BOM per drawing, from that drawing's raw materials. These are what Material Planning pulls requirements from.",
+		],
+		notes: [
+			"<b>The progress dialog is live.</b> It shows how many are done, how many are pending, elapsed time, an estimate of what is left and the current rate — refreshed every second. The estimate is measured from the run itself, so it is rough at first and tightens as it goes.",
+			"<b>BOM creation is the slow step</b>, at roughly a tenth of a second per drawing — a few seconds for a small order, around a minute for 500 drawings. That is ERPNext's own BOM validation and costing, not something the upload is doing badly. Leave the dialog open; it is working.",
+			"<b>Drawings are created in batches</b> and can be run again safely: a drawing that already exists is skipped, not duplicated. If a batch fails, fix the cause and re-run — the ones already created stay.",
+		],
+		buttons: [
+			{ name: "Create Drawing", note: "Creates the Drawing documents. Skips any drawing number that already has one." },
+			{ name: "Submit Drawing", note: "Submits the created drawings." },
+			{ name: "Mark as Final Revision", note: "Requires the Sales Order to be submitted first." },
+			{ name: "Create and Submit BOM", note: "Creates and submits one BOM per drawing. The longest step on a large order." },
+			{ name: "Submit BOM", note: "Submits BOMs that were created but left in draft." },
+		],
+	},
+];
+
 const ERP_MANUAL_STUB_CATEGORIES = [
 	{ id: "item", label: "Item", children: [] },
-	{ id: "sales-order", label: "Sales Order", children: [] },
+	{ id: "sales-order", label: "Sales Order", children: ERP_MANUAL_SALES_ORDER_CHILDREN },
 	{ id: "drawing", label: "Drawing", children: [] },
 ];
 
