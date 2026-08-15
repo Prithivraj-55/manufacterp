@@ -390,6 +390,13 @@ def create_drawings_from_import(so_name, batch_start=0, batch_size=30):
     for r in rm_rows_raw:
         rm_by_cdn.setdefault(r.customer_drawing_number, []).append(r)
 
+    # Rate Schedule types for this batch, in one query.
+    rs_names = list({r.rate_schedule for r in batch if r.get("rate_schedule")})
+    rate_schedule_types = dict(frappe.get_all(
+        "Rate Schedule", filters={"name": ["in", rs_names]},
+        fields=["name", "type"], as_list=True,
+    )) if rs_names else {}
+
     # Pre-fetch FG item data for this batch in one query
     fg_items = list({r.item for r in batch if r.item})
     item_cache = {}
@@ -430,6 +437,13 @@ def create_drawings_from_import(so_name, batch_start=0, batch_size=30):
                 # Links here.
                 "nature_of_work": dr.get("nature_of_work") or "",
                 "rate_schedule": dr.get("rate_schedule") or "",
+                # Type belongs to the Rate Schedule, so it is read from there rather
+                # than carried in the sheet -- one less column to keep in step, and it
+                # cannot contradict the schedule it describes. On the form Type is the
+                # filter used to pick a schedule by hand; an import sets the schedule
+                # directly, so without this it stayed blank and the picker then
+                # filtered on an empty Type.
+                "type": rate_schedule_types.get(dr.get("rate_schedule")) or "",
                 "status": "Working",
             })
 

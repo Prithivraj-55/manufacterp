@@ -106,8 +106,11 @@ frappe.ui.form.on("Drawing", {
 			});
 		}
 
+		// Filter the picker by Type only when one is chosen. Filtering on an empty
+		// Type matched only schedules whose own Type is blank, so an imported drawing
+		// -- which arrives with a schedule but no Type -- offered an empty list.
 		frm.set_query("rate_schedule", function () {
-			return { filters: { type: frm.doc.type || "" } };
+			return frm.doc.type ? { filters: { type: frm.doc.type } } : {};
 		});
 
 		frm.set_query("batch", "items", function (doc, cdt, cdn) {
@@ -145,14 +148,33 @@ frappe.ui.form.on("Drawing", {
 		frm.set_value("customer_no", frm.doc.customer || "");
 	},
 
+	// Type and Rate Schedule describe the same thing from two directions: Type
+	// narrows the picker when choosing by hand, and is read back off the schedule
+	// when one arrives ready-made from a BOM import. Each only touches the other
+	// when they actually disagree, so setting one cannot loop into clearing the other.
 	type(frm) {
-		if (frm.doc.rate_schedule) frm.set_value("rate_schedule", "");
+		if (!frm.doc.rate_schedule) return;
+		frappe.db.get_value("Rate Schedule", frm.doc.rate_schedule, "type").then(function (r) {
+			var rs_type = (r && r.message && r.message.type) || "";
+			// Only drop the schedule if the new Type genuinely excludes it.
+			if (frm.doc.type && rs_type && rs_type !== frm.doc.type) {
+				frm.set_value("rate_schedule", "");
+			}
+		});
 	},
 
 	rate_schedule(frm) {
-		if (frm.doc.rate_schedule) return;
-		["rs_job_nature", "rs_details", "rs_work_content", "rs_job_reference", "rs_rate_per_kg"].forEach(function (f) {
-			frm.set_value(f, "");
+		if (!frm.doc.rate_schedule) {
+			["rs_job_nature", "rs_details", "rs_work_content", "rs_job_reference", "rs_rate_per_kg"].forEach(function (f) {
+				frm.set_value(f, "");
+			});
+			return;
+		}
+		// Type belongs to the schedule, so mirror it here rather than expecting the
+		// user to have set it first -- an imported drawing never did.
+		frappe.db.get_value("Rate Schedule", frm.doc.rate_schedule, "type").then(function (r) {
+			var rs_type = (r && r.message && r.message.type) || "";
+			if (rs_type && rs_type !== frm.doc.type) frm.set_value("type", rs_type);
 		});
 	},
 

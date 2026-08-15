@@ -61,10 +61,277 @@ frappe.pages["erp-manual"].on_page_load = function (wrapper) {
 // ─── Categories not yet written up — kept visible so the intended shape of the
 // manual is there ahead of the content (client's own request: "later we will add
 // more details about it"). Each renders as "Coming Soon" until filled in. ────────
+// Sales Order — where a job starts. The BOM sheet is uploaded here and turned into
+// Drawings and BOMs before Material Planning ever sees it.
+const ERP_MANUAL_SALES_ORDER_CHILDREN = [
+	{
+		id: "so-overview",
+		title: "From Sales Order to BOM",
+		kicker: "The whole upload flow",
+		purpose:
+			"Everything downstream — Material Planning, purchasing, transfers, production — is built " +
+			"from Drawings and BOMs. Both are created here, from one Excel sheet attached to the " +
+			"Sales Order. Get this stage right and the rest follows; get it wrong and every later " +
+			"stage inherits the mistake.",
+		steps: [
+			"Create the Sales Order and enter <b>every finished goods item</b> in the Items table. Not just one line — each FG item the customer has ordered needs its own row.",
+			"Prepare the BOM sheet. <b>The same FG item codes must appear in the sheet's FG Item column.</b> A code in the sheet that is not on the order (or spelled differently) has nothing to attach to.",
+			"Attach the sheet to <b>BOM Excel File</b> on the Sales Order and save.",
+			"<b>Load Items</b> — reads the sheet and stages every drawing and its raw materials onto the order.",
+			"<b>Verify Raw Materials</b> — checks what was staged. Fix anything it reports, then run it again.",
+			"<b>Create Drawing</b> — creates a Drawing document per drawing in the sheet.",
+			"<b>Submit</b> the Sales Order, then <b>Submit Drawing</b>.",
+			"<b>Mark as Final Revision</b> — freezes the drawings as the version to build from.",
+			"<b>Create and Submit BOM</b> — one BOM per drawing, ready for Material Planning.",
+		],
+		notes: [
+			"<b>Two ways to get the sheet.</b> <b>Download Template</b> (on the Sales Order, before a file is attached) gives you an empty sheet with the correct column headers. " +
+			"To see one filled in properly, download the worked sample: " +
+			"<a href='/assets/manufyxinvenzaerp/files/Sample_BOM_Sheet.xlsx' download " +
+			"style='font-weight:600'>Sample BOM Sheet (filled)</a> — a real 22-drawing sheet with " +
+			"100 raw-material rows, showing how the header columns repeat down every row of a drawing.",
+			"<b>Column headers must match.</b> The importer finds columns by name, not position, so you may reorder them — but a renamed or missing header is simply not read. Assembly Group, Customer Drawing Number, DUNO/Mark No, FG Item, Total Qty, Total Weight (KG), Nature of Work, Rate Schedule, Item No, Material Code, Grade, Thickness, Width, Length, Reqd Raw Material Qty.",
+			"<b>One row per raw material, not per drawing.</b> A drawing needing three materials takes three rows, and its header columns (drawing number, DUNO, FG item, quantities, Nature of Work, Rate Schedule) repeat identically on all three. The importer groups them by Customer Drawing Number.",
+		],
+		buttons: [
+			{ name: "Download Template", note: "An empty sheet with the right headers. Only shown before a file is attached." },
+			{ name: "Load Items", note: "Parses the attached sheet onto the order. Disabled once drawings exist, so a reload cannot contradict what was already created." },
+			{ name: "Clear Items", note: "Removes staged rows so you can correct the sheet and load again. Rows that already have a Drawing are kept." },
+		],
+	},
+	{
+		id: "so-verify",
+		title: "Verify Raw Materials",
+		kicker: "The gate before drawings",
+		purpose:
+			"Checks everything staged from the sheet and refuses to pass until it is right. This is " +
+			"deliberately strict: a bad row here becomes a bad Drawing, a bad BOM, and a wrong " +
+			"requirement in Material Planning, and by then it is far harder to see where it came from.",
+		fields: [
+			{ name: "Material Code", note: "Must exist in the Item master. A typo here is the most common failure." },
+			{ name: "Nature of Work", note: "Must already exist in the Nature of Work master. Checked by name exactly as typed." },
+			{ name: "Rate Schedule", note: "Must already exist in the Rate Schedule master — e.g. RS- O/S-001 A. Checked by name; there is no format rule, so your numbering can change freely." },
+			{ name: "Dimensions", note: "Plates need Thickness, Width and Length. Structurals need Length. Both need a Unit Weight on the Item master, or no Kg can be calculated." },
+		],
+		notes: [
+			"<b>It blocks, it does not warn.</b> Anything reported has to be corrected in the sheet (or the master record created) before the flow can continue. Correct the sheet, Clear Items, Load Items again, and re-verify.",
+			"<b>Why unknown values still reach this screen.</b> The importer stages rows with a direct insert that skips link checking, on purpose — so a wrong Rate Schedule lands in the table and can be reported <i>against the drawing it came from</i>. Rejecting during the upload would abort the whole file over one cell and tell you nothing about where it was.",
+			"<b>Blank is allowed</b> for Nature of Work and Rate Schedule. Neither is mandatory on a Drawing, and older imports predate both columns.",
+		],
+		buttons: [
+			{ name: "Verify Raw Materials", note: "Runs the check. Passing sets the order's verified flag; failing lists every problem row with its drawing." },
+		],
+	},
+	{
+		id: "so-drawings",
+		title: "Create Drawing, Final Revision, BOM",
+		kicker: "Turning the sheet into documents",
+		purpose:
+			"The three build steps. Each processes in batches with a live progress dialog, so a large " +
+			"order does not time out and you can watch it work.",
+		steps: [
+			"<b>Create Drawing</b> — one Drawing document per Customer Drawing Number, carrying its DUNO/Mark No, FG item, customer weight, Nature of Work, Rate Schedule and its full raw-material list. Created as drafts, so they can still be corrected.",
+			"<b>Submit Drawing</b> — locks each drawing. The Sales Order itself must be submitted before the next step.",
+			"<b>Mark as Final Revision</b> — marks the drawings as the version production will be built from. A BOM can only be created from a submitted, Final Revision drawing.",
+			"<b>Create and Submit BOM</b> — one BOM per drawing, from that drawing's raw materials. These are what Material Planning pulls requirements from.",
+		],
+		notes: [
+			"<b>The progress dialog is live.</b> It shows how many are done, how many are pending, elapsed time, an estimate of what is left and the current rate — refreshed every second. The estimate is measured from the run itself, so it is rough at first and tightens as it goes.",
+			"<b>BOM creation is the slow step</b>, at roughly a tenth of a second per drawing — a few seconds for a small order, around a minute for 500 drawings. That is ERPNext's own BOM validation and costing, not something the upload is doing badly. Leave the dialog open; it is working.",
+			"<b>Drawings are created in batches</b> and can be run again safely: a drawing that already exists is skipped, not duplicated. If a batch fails, fix the cause and re-run — the ones already created stay.",
+		],
+		buttons: [
+			{ name: "Create Drawing", note: "Creates the Drawing documents. Skips any drawing number that already has one." },
+			{ name: "Submit Drawing", note: "Submits the created drawings." },
+			{ name: "Mark as Final Revision", note: "Requires the Sales Order to be submitted first." },
+			{ name: "Create and Submit BOM", note: "Creates and submits one BOM per drawing. The longest step on a large order." },
+			{ name: "Submit BOM", note: "Submits BOMs that were created but left in draft." },
+		],
+	},
+];
+
+// Drawing — one per drawing in the uploaded sheet. Everything downstream measures
+// itself against the numbers held here.
+const ERP_MANUAL_DRAWING_CHILDREN = [
+	{
+		id: "drw-what",
+		title: "What a Drawing Holds",
+		kicker: "One per drawing in the sheet",
+		purpose:
+			"Every drawing in the BOM sheet becomes one Drawing document. It carries who the job " +
+			"is for, what is being made, and the full raw-material list for it — and it is the " +
+			"master those figures are corrected on later. Production Plans, Job Work Orders and " +
+			"Material Issue Plans all take their copy of the customer weight from here.",
+		fields: [
+			{ name: "Sales Order, Customer, Customer No, Project, Cust PO No", note: "Pulled from the Sales Order the sheet was uploaded to — not typed again." },
+			{ name: "Customer Drawing Number / DUNO / Mark No", note: "From the sheet. The Customer Drawing Number is what groups its raw-material rows together during import." },
+			{ name: "FG Item Code / Name / Description", note: "The finished-goods item, from the sheet's FG Item column — which is why the same code must be on the Sales Order's Items table." },
+			{ name: "No of Qty to Manufacture", note: "From the sheet's Total Qty. Every row's totals are multiplied by this." },
+			{ name: "Nature of Work", note: "From the sheet. Must already exist in the Nature of Work master." },
+			{ name: "Rate Schedule / Type", note: "The schedule comes from the sheet; Type is read from the schedule itself, along with Job Nature, Details, Work Content, Job Reference and Rate per Kg." },
+			{ name: "Rev No", note: "Revision number. 0 on the original — see Revisions below." },
+		],
+		notes: [
+			"<b>The raw-material rows live on the Raw Materials tab.</b> Each carries Item No, Material Code, Grade, the dimensions, and Reqd Raw Material Qty (the Sec Qty) — exactly as uploaded.",
+		],
+	},
+	{
+		id: "drw-calcs",
+		title: "What Is Calculated, and How",
+		kicker: "Per row, and per drawing",
+		purpose:
+			"Nothing weight-related is typed on a Drawing. Every figure below is recalculated on " +
+			"every save from the dimensions and the item's Unit Weight, so a corrected dimension " +
+			"always flows through to the totals.",
+		calcs: [
+			{
+				title: "Row weight for a Structural — Qty",
+				item: "ISMB400", group: "Structurals",
+				length: 6936, sec_qty: 2, unit_weight: 61.6,
+				formula: "(Length ÷ 1000) × Unit Weight × Sec Qty  =  (6936 ÷ 1000) × 61.6 × 2",
+				result: "854.51",
+			},
+			{
+				title: "Row weight for a Plate — Qty (uses Width and Thickness too)",
+				item: "PLATE10", group: "Plates",
+				length: 424.68, width: 180, thickness: 10, sec_qty: 2,
+				formula: "(L ÷ 1000) × (W ÷ 1000) × Thickness × Unit Weight × Sec Qty  =  (424.68÷1000) × (180÷1000) × 10 × 7.85 × 2",
+				result: "12.00",
+			},
+		],
+		steps: [
+			"<b>Total Sec Qty</b> = Sec Qty × No of Qty to Manufacture. One drawing built twice needs twice the pieces.",
+			"<b>Total Qty</b> = the same weight formula run against Total Sec Qty — not the row weight multiplied, so rounding cannot drift.",
+			"<b>Total Weight</b> (drawing level) = the sum of every row's weight, taking Qty where the row's UOM is Kg and Sec Qty where the secondary UOM is Kg.",
+			"<b>Nuts and Bolts reverse.</b> There Qty is the count and Sec Qty is the weight, so Total Qty = Qty × No of Qty to Manufacture and Total Sec Qty = Total Qty × Unit Weight.",
+		],
+		notes: [
+			"<b>The comparison you want is in Totals.</b> <b>Total Weight</b> is what the drawing's own raw materials add up to — our engineering figure. <b>Customer Provided Weight</b> is what the customer stated, brought in from the sheet's Total Weight (KG). The gap between them is the difference every downstream document measures excess against.",
+			"<b>A missing Unit Weight breaks the chain silently.</b> With no Unit Weight on the Item master, the formula yields nothing and the row weighs zero. Verify Raw Materials on the Sales Order catches this before drawings are ever created.",
+		],
+	},
+	{
+		id: "drw-weight",
+		title: "Changing the Customer Weight",
+		kicker: "Correct it here, once",
+		purpose:
+			"When the customer revises a weight, change it on the Drawing and nowhere else. The " +
+			"field itself is read-only on purpose: editing copies one by one is how documents end " +
+			"up disagreeing. Use Update Customer Weight and every copy is rewritten together.",
+		steps: [
+			"Open the Drawing and press <b>Update Customer Weight</b>.",
+			"Enter the new figure. The old value, the new one, who changed it and when are written to the drawing's own <b>Weight Change Log</b> — so the history is on the document, not in someone's memory.",
+			"Everything below is then updated in the same operation.",
+		],
+		fields: [
+			{ name: "Drawing", note: "Customer Provided Weight itself, plus a Weight Change Log row recording the change." },
+			{ name: "Sales Order", note: "The DUNO Item's Total Weight — the value every downstream document originally read from. The order is re-saved, so its raw-material quantities recalculate." },
+			{ name: "Sales Order — Difference Kg", note: "Recomputed for that drawing/DUNO pair, which is what makes the new excess visible." },
+			{ name: "Production Plan", note: "Customer Weight Kg on the Production Plan Item for this drawing." },
+			{ name: "Job Work Order", note: "Customer Weight Kg on its drawing row, and the order's own total re-summed from those rows." },
+			{ name: "Material Issue Plan", note: "Customer Weight Kg on its drawing row, then the whole weight summary refreshed." },
+		],
+		notes: [
+			"<b>Prefer the sheet.</b> If anything else changed alongside the weight — a dimension, a quantity, a material — correct the BOM sheet on the Sales Order and load it again instead. Use this button only when the weight alone has moved and nothing else about the drawing has.",
+			"<b>Excess follows automatically.</b> Excess is the gap between what was planned or mapped and what the drawing says is needed — so once the customer weight moves, the difference is recomputed and the excess figures downstream reflect it without anything else being touched.",
+			"<b>Batches are deliberately left alone.</b> Reserved and mapped batches are NOT re-allocated, because a weight change should not silently move steel that is already committed or shipped. If the new weight means a different allocation, unreserve and reserve again by hand in Material Planning.",
+			"<b>Work Order is not updated</b> — it is standard ERPNext in this app and carries no copy of this figure.",
+			"<b>The same weight is rejected.</b> Entering the value it already has does nothing but add noise to the log, so it is refused.",
+		],
+		buttons: [
+			{ name: "Update Customer Weight", note: "The only supported way to change it. Writes the Drawing, the Sales Order and every downstream copy in one go, with an audit row." },
+		],
+	},
+	{
+		id: "drw-revisions",
+		title: "Revisions",
+		kicker: "Rev No",
+		purpose:
+			"Corrections are made in the BOM sheet on the Sales Order, not on the Drawing. The " +
+			"sheet is the master input: raw materials, dimensions, quantities and weights all come " +
+			"from it, so a revision means updating the sheet and loading it again — that way every " +
+			"changed detail travels together instead of being patched one field at a time.",
+		notes: [
+			"<b>Do not rework a Drawing by hand.</b> When a revision arrives, or the customer changes a weight, update the BOM sheet attached to the Sales Order and load it again. The Drawing carries the raw-material list as well as the weight, and editing figures on it one at a time leaves the sheet and the drawing telling different stories.",
+			"<b>Rev No is derived, never typed.</b> It is read from the document being amended, so the sequence cannot be broken by hand.",
+			"<b>Amending does not move the BOM.</b> A BOM already created from the earlier revision stays as it is — create a BOM from the new revision when it is ready, and it is that BOM which Material Planning should be pointed at.",
+		],
+		steps: [
+			"<b>Cancel</b> the submitted Drawing.",
+			"<b>Amend</b> it. Frappe creates a new document linked back to the cancelled one.",
+			"<b>Rev No</b> is set automatically: the previous drawing's Rev No plus one. An original imported drawing is Rev 0, its first amendment Rev 1, and so on.",
+			"Correct what changed, then submit and Mark as Final Revision as before.",
+		],
+	},
+];
+
+// BOM — created from a Drawing, one per drawing. Read-only in practice: everything on
+// it is derived, and nothing here is where costs are decided.
+const ERP_MANUAL_BOM_CHILDREN = [
+	{
+		id: "bom-what",
+		title: "What the BOM Holds",
+		kicker: "One per drawing",
+		purpose:
+			"Created by Create and Submit BOM on the Sales Order — one BOM per Drawing, built " +
+			"entirely from that drawing's own data. Nothing on it is typed. It exists so Material " +
+			"Planning has something to pull requirements from, and so every requirement stays " +
+			"traceable back to the drawing and sheet it came from.",
+		fields: [
+			{ name: "Item / Item Name", note: "The finished-goods item, from the drawing's FG Item — originally the sheet's FG Item column." },
+			{ name: "Quantity", note: "The drawing's No of Qty to Manufacture, which came from the sheet's Total Qty." },
+			{ name: "Drawing / DUNO Mark No / Customer Drawing Number", note: "Carried across so any requirement can be traced back to its drawing and its row in the sheet." },
+			{ name: "Project / Company / Currency", note: "Project from the drawing; company and its default currency from your setup." },
+			{ name: "Items table", note: "One row per raw material on the drawing — Material Code, the dimensions, Unit Weight, Sec Qty and Sec UOM, Item Group and Item Number, all as uploaded. Qty is the drawing's Total Qty for that row, so it already accounts for how many are being made." },
+		],
+		notes: [
+			"<b>Everything here came from the sheet.</b> The BOM is the third copy of the same data — sheet, then Drawing, then BOM. That is why corrections belong in the sheet: change it there and reload, and all three agree. Editing a BOM by hand leaves it disagreeing with the drawing it was built from.",
+		],
+	},
+	{
+		id: "bom-operations",
+		title: "Operations and Workstations",
+		kicker: "Added automatically",
+		purpose:
+			"Every BOM gets the standard routing attached automatically — you do not choose it and " +
+			"you do not need to maintain it. It is there for information and for tracing work back " +
+			"afterwards, not because anything asks you to plan it here.",
+		steps: [
+			"<b>With Operations</b> is ticked and <b>Routing</b> is set to <b>Standard Manufacturing Routing</b> on every BOM, without being asked for.",
+			"That routing carries six operations, in order: <b>Material Issue, Fit-up, Welding, Final, Blasting, Painting</b>.",
+			"Each operation has a workstation of the same name, created alongside it.",
+			"The real sequence for a job is decided later, on the Production Plan's Process Planning table — which operations actually run, who performs each one, and which are skipped.",
+		],
+		notes: [
+			"<b>Informational only.</b> The operations on a BOM do not drive anything. Production is driven by the Production Plan's Process Planning rows, which create one Operation Entry each. The BOM's copy is there so the standard route is visible on the document and can be looked back at.",
+			"<b>Operating cost is not used.</b> The times on the routing are placeholders and the BOM's Operating Cost stays at zero — labour is not costed here.",
+		],
+	},
+	{
+		id: "bom-costing",
+		title: "Rates and Costing",
+		kicker: "An estimate, not the cost",
+		purpose:
+			"The value on a BOM is an estimate for reference only. The real raw-material cost of a " +
+			"job comes from the stock that is actually issued to it, at the rate that stock was " +
+			"actually valued at — which is known at Stock Entry time, not here.",
+		fields: [
+			{ name: "Rate Of Materials Based On", note: "Set to Valuation Rate. Each row is priced at the item's valuation at the moment the BOM is built." },
+			{ name: "Raw Material Cost / Total Cost", note: "The estimate that follows from those rates." },
+			{ name: "Operating Cost", note: "Zero — see Operations above." },
+		],
+		notes: [
+			"<b>Treat the BOM value as indicative.</b> It is a snapshot of valuation on the day the BOM was created. Valuation moves with every purchase, so the same BOM built a month later would show a different figure for identical material.",
+			"<b>The actual cost is recorded on the Stock Entry.</b> When material is issued against a job, the rate on that entry is what the stock was really worth, and that is what the raw-material cost of the job is calculated from. If you need to know what a job cost, look at its Stock Entries, not its BOM.",
+			"<b>A zero rate on a BOM means zero valuation, not free material.</b> If stock was received without a rate, its valuation is zero and every BOM using it will show zero for those rows. Fix it at the receipt — the BOM is only reporting what it was told.",
+		],
+	},
+];
+
 const ERP_MANUAL_STUB_CATEGORIES = [
 	{ id: "item", label: "Item", children: [] },
-	{ id: "sales-order", label: "Sales Order", children: [] },
-	{ id: "drawing", label: "Drawing", children: [] },
+	{ id: "sales-order", label: "Sales Order", children: ERP_MANUAL_SALES_ORDER_CHILDREN },
+	{ id: "drawing", label: "Drawing", children: ERP_MANUAL_DRAWING_CHILDREN },
 ];
 
 // ─── Material Planning — migrated verbatim from the old Material Planning manual,
@@ -82,6 +349,29 @@ const ERP_MANUAL_MATERIAL_PLANNING_CHILDREN = [
 			"piece, have the item but need to cut/substitute, or don't have it at all and need " +
 			"to buy it. Everything downstream (reservations, purchasing, allocation once stock " +
 			"arrives) flows from that first sort.",
+	},
+	{
+		id: "select-boms",
+		title: "Selected BOMs",
+		kicker: "Choosing what to plan",
+		purpose:
+			"Where a plan gets its scope. Pick the Sales Order, then choose which of its BOMs " +
+			"this plan covers — all of them, or a few. Everything the plan later does is limited " +
+			"to what you select here.",
+		steps: [
+			"Set <b>Sales Order</b> in the Import BOMs section.",
+			"The picker lists every submitted BOM on that order, with its drawing and DUNO/Mark No. Tick <b>all of them</b>, or only the ones this plan is for.",
+			"The chosen BOMs land in the <b>BOM Items</b> table, each carrying its drawing, DUNO, customer, Customer Provided Weight and Planned Weight.",
+			"Press <b>Get Raw Materials</b> to pull in every raw material those BOMs need.",
+		],
+		notes: [
+			"<b>One plan per order, or several — both are supported.</b> A single plan can cover a whole sales order, which is the simplest way to buy in bulk: requirements for the same item consolidate across every drawing on the order. Or split the order across several plans — by area, by phase, by delivery date — and each plans and reserves independently. Nothing forces one plan per order.",
+			"<b>Only submitted BOMs appear.</b> A BOM still in draft is not offered, because its quantities can still change. Submit it on the Sales Order first.",
+			"<b>Adding BOMs later is fine.</b> Select more and press Get Raw Materials again; the new requirements are added. Reservations already made are not disturbed.",
+		],
+		buttons: [
+			{ name: "Get Raw Materials", note: "Pulls every raw material from the selected BOMs into the Raw Materials table. This is the starting point for everything else." },
+		],
 	},
 	{
 		id: "raw-materials",
@@ -512,6 +802,61 @@ const ERP_MANUAL_MATERIAL_PLANNING_CHILDREN = [
 					"For every row here: if an active Material Request already covers it, the row is left untouched — a purchase is already in motion. Otherwise the row is removed and stock is re-checked against the underlying drawing requirements: an exact match now found goes to Available Raw Materials, a batch item with still no exact match goes to Material Mapping (blank batch, assign by hand), and it only stays unavailable if truly nothing exists.",
 			},
 			{ name: "Create Material Request", note: "Raises a purchase for the selected rows — orders the Alternate Item instead of the original wherever one is set." },
+		],
+	},
+	{
+		id: "weight-summary",
+		title: "Weight Summary",
+		kicker: "Where the plan stands, in Kg",
+		purpose:
+			"Four running totals and one difference, all recalculated on every save. Read together " +
+			"they answer: how much does this plan need, how much of it is settled, and are we " +
+			"about to commit more steel than the job actually calls for?",
+		fields: [
+			{ name: "Total Weight — Plates & Structurals (Kg)", note: "Everything the plan needs. The sum of required Kg across the whole Raw Materials table — the figure the other three are measured against." },
+			{ name: "Weight — Exact Raw Material (Kg)", note: "The part covered by batches that are already the right size. Sum of required Kg in Available Raw Materials (Exact Match)." },
+			{ name: "Expected Item Weight — Material Mapping (Kg)", note: "What the Material Mapping rows were SUPPOSED to need — the sum of their required Kg, before any batch was assigned." },
+			{ name: "Weight of Cross Item Mapped (Kg)", note: "What the batches actually assigned to those rows WEIGH — the sum of their Calc Qty. Larger than the line above whenever a bigger piece was used to cover a smaller requirement." },
+			{ name: "Difference in Kg — Batch Mapped Items", note: "Cross Item Mapped minus Expected. Appears as soon as one row is mapped, and says how many of the rows are mapped so far." },
+		],
+		notes: [
+			"<b>The Difference is the excess you will have to get back.</b> A positive figure means the batches committed weigh more than the requirement they cover — normal when a 6 m bar covers a 4 m need, but it is steel that goes out to the supplier and has to come back. The panel says so explicitly when it is positive.",
+			"<b>Green is not automatically good.</b> A large positive difference on a plan about to be transferred means a lot of material will be sitting at the supplier waiting to be returned. It is worth looking at before transferring, not after.",
+			"<b>The difference only appears once something is mapped.</b> Before that there is nothing to compare, so the panel stays blank rather than showing a misleading zero.",
+			"<b>Exact Match contributes no difference.</b> Those batches are the right size by definition, which is why only the Material Mapping side is compared.",
+		],
+		buttons: [
+			{ name: "Update SO Difference", note: "Writes this plan's difference back onto the Sales Order for the drawings it covers, so the excess is visible from the order rather than only from here. Save the document first." },
+		],
+	},
+	{
+		id: "actions",
+		title: "Create, Status and Validate Stock",
+		kicker: "The three top-bar actions",
+		purpose:
+			"What the buttons along the top of a Material Planning do, and when each one is the " +
+			"right thing to press.",
+		steps: [
+			"<b>Create → Production Plan</b> — hands this plan on to production. Needs at least one BOM in Selected BOMs and a saved document. The new Production Plan carries the plan's BOMs and drawings, and is the document that later creates the Job Work Order and Material Issue Plan.",
+			"<b>Status → Batch Mapping Completed</b> — declares the mapping finished. It is checked, not just set: anything still unmapped or inconsistent is listed and the status stays where it is until those are dealt with.",
+			"<b>Status → Reopen Mapping</b> — appears once completed, and puts the plan back to <b>Working</b> so changes can be made again.",
+			"<b>Validate Stock</b> — a read-only check. For every item and batch the plan has committed, it shows the Kg and Sec Nos claimed against what the batch actually holds. Changes nothing.",
+		],
+		fields: [
+			{ name: "Status — Open", note: "Nothing planned yet." },
+			{ name: "Status — Working", note: "Set automatically as soon as any mapping or exact-match row exists. The normal working state." },
+			{ name: "Status — Batch Mapping Completed", note: "Set only through the Status button, and only when the checks pass. Signals the plan is ready to be acted on." },
+		],
+		notes: [
+			"<b>Validate Stock before transferring, every time.</b> It is the one place that shows a fractional Sec Nos total — which means several drawings are sharing one bar or sheet, and someone has to decide at transfer time whether to hand over the lower or the higher whole piece count. Better known now than in front of the storeman.",
+			"<b>Status never moves backwards on its own.</b> Working is set automatically, but the plan is only marked complete when you say so, and only Reopen Mapping brings it back.",
+			"<b>Creating a Production Plan does not lock this plan.</b> You can still map and reserve afterwards — but anything you change after the Production Plan exists will not be reflected in it unless it is refreshed.",
+		],
+		buttons: [
+			{ name: "Create → Production Plan", note: "Creates the Production Plan from this plan's selected BOMs." },
+			{ name: "Status → Batch Mapping Completed", note: "Validates, then marks the plan complete. Lists what is wrong if it cannot." },
+			{ name: "Status → Reopen Mapping", note: "Returns a completed plan to Working so it can be edited." },
+			{ name: "Validate Stock", note: "Shows planned Kg and Sec Nos per item and batch against what is really in the warehouse. Read-only." },
 		],
 	},
 	{
@@ -1007,6 +1352,7 @@ const ERP_MANUAL_GLOSSARY_CHILDREN = [
 
 const ERP_MANUAL_CATEGORIES = [
 	...ERP_MANUAL_STUB_CATEGORIES,
+	{ id: "bom", label: "BOM", children: ERP_MANUAL_BOM_CHILDREN },
 	{ id: "material-planning", label: "Material Planning", children: ERP_MANUAL_MATERIAL_PLANNING_CHILDREN },
 	{ id: "production-plan", label: "Production Plan", children: ERP_MANUAL_PRODUCTION_PLAN_CHILDREN },
 	{ id: "job-work-order", label: "Job Work Order", children: ERP_MANUAL_JOB_WORK_ORDER_CHILDREN },
