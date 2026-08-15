@@ -696,6 +696,74 @@ function _excess_weight(d, L, W, S) {
 	return null;
 }
 
+// ── Transfer popup theme ──────────────────────────────────────────────────────
+//
+// The client supplied the palette; these are their values, not invented ones.
+// Everything is scoped to .mip-transfer-theme so no other dialog in the desk is
+// touched, and the few !important flags exist because the markup underneath
+// carries its own inline colours from when the popup was light.
+var MIP_THEME_CSS = `
+.mip-transfer-theme .modal-content { background:#0F2D1E; color:#F0FDF4; border:1px solid #2F6F4F; }
+.mip-transfer-theme .modal-header,
+.mip-transfer-theme .modal-footer { background:#0F2D1E; border-color:#2F6F4F; }
+.mip-transfer-theme .modal-title { color:#F0FDF4; font-weight:600; }
+.mip-transfer-theme .modal-body { background:#0F2D1E; color:#F0FDF4; }
+.mip-transfer-theme .modal-header .btn-modal-close .icon,
+.mip-transfer-theme .modal-header .icon { stroke:#BBF7D0; fill:none; }
+
+.mip-transfer-theme .mip-tab {
+	display:inline-block; padding:9px 22px; margin-right:14px; cursor:pointer;
+	font-size:12px; font-weight:600; border-radius:8px 8px 0 0; position:relative; top:1px;
+	background:#1B4332; color:#BBF7D0; border:1px solid #2F6F4F; border-bottom:none;
+	text-decoration:none;
+}
+.mip-transfer-theme .mip-tab:hover { color:#F0FDF4; text-decoration:none; }
+.mip-transfer-theme .mip-tab.active { background:#22C55E; color:#0F2D1E; border-color:#22C55E; }
+
+.mip-transfer-theme .mip-pane {
+	background:#14532D; border:1px solid #2F6F4F; border-radius:0 10px 10px 10px; padding:14px;
+}
+.mip-transfer-theme .mip-summary {
+	background:#064E3B !important; border:1px solid #2F6F4F !important;
+	color:#F0FDF4 !important; border-radius:8px !important;
+}
+.mip-transfer-theme .mip-summary b { color:#F0FDF4; }
+.mip-transfer-theme .mip-summary a { color:#BBF7D0; }
+
+.mip-transfer-theme table { color:#F0FDF4; }
+.mip-transfer-theme table thead th {
+	background:#064E3B !important; color:#F0FDF4 !important; border-color:#2F6F4F !important;
+}
+.mip-transfer-theme table thead th .text-muted { color:#BBF7D0 !important; }
+.mip-transfer-theme table tbody td {
+	background:#14532D !important; border-color:#2F6F4F !important; color:#F0FDF4;
+}
+.mip-transfer-theme table tbody tr:hover td { background:#1B4332 !important; }
+.mip-transfer-theme .text-muted { color:#BBF7D0 !important; }
+
+.mip-transfer-theme .form-control,
+.mip-transfer-theme input[type="number"], .mip-transfer-theme input[type="text"] {
+	background:#FFFFFF; color:#0F2D1E; border:1px solid #2F6F4F; border-radius:6px;
+}
+.mip-transfer-theme .form-control::placeholder { color:#6b7280; }
+.mip-transfer-theme .btn-default {
+	background:#1B4332; color:#F0FDF4; border:1px solid #2F6F4F;
+}
+.mip-transfer-theme .btn-default:hover { background:#2F6F4F; color:#F0FDF4; }
+.mip-transfer-theme .btn-primary {
+	background:#22C55E; color:#0F2D1E; border-color:#22C55E; font-weight:600;
+}
+.mip-transfer-theme .btn-primary:hover { background:#16a34a; color:#0F2D1E; }
+.mip-transfer-theme .awesomplete > ul { background:#14532D; color:#F0FDF4; border-color:#2F6F4F; }
+.mip-transfer-theme .awesomplete > ul > li:hover,
+.mip-transfer-theme .awesomplete > ul > li[aria-selected="true"] { background:#1B4332; color:#F0FDF4; }
+`;
+
+function _mip_inject_theme() {
+	if (document.getElementById("mip-transfer-theme-css")) return;
+	$("<style id='mip-transfer-theme-css'>").text(MIP_THEME_CSS).appendTo(document.head);
+}
+
 function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 	var is_cnc_fwd = transfer_type === "cnc_forward";
 	var items = is_cnc_fwd
@@ -1058,36 +1126,23 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 	// an off-cut is actually handled -- one item comes back as one shape, however
 	// many batches it was drawn from. Asking per batch made the same item's excess
 	// be entered two and three times over.
-	// Folder tabs sitting on the panel, in the client's own green: the inactive
-	// ones sit back, the active one is lighter and joins the body below it with no
-	// line between, so the pane reads as the sheet the tab belongs to.
-	var TAB_IDLE = "#4d7c0f", TAB_ACTIVE = "#d9f99d", PANE_BG = "#d9f99d";
-	function _tab_css(active) {
-		return "display:inline-block;padding:7px 18px;margin-right:3px;cursor:pointer;" +
-			"font-size:12px;font-weight:600;border-radius:6px 6px 0 0;position:relative;" +
-			"top:1px;border:1px solid " + (active ? TAB_ACTIVE : TAB_IDLE) + ";border-bottom:none;" +
-			(active
-				? "background:" + TAB_ACTIVE + ";color:#1a2e05;"
-				: "background:" + TAB_IDLE + ";color:#ecfccb;");
-	}
-	var $tab_nav = $("<div style='margin-bottom:0;padding-left:2px'>").append(
-		$("<a href='#' data-pane='transfer'>").attr("style", _tab_css(true)).text(__("Raw material to transfer")),
-		$("<a href='#' data-pane='excess'>").attr("style", _tab_css(false)).text(__("Consolidate item for excess return plan"))
+	// Folder tabs sitting on the panel: the inactive one sits back, the active one
+	// shares its colour with the pane below and joins it with no line between, so
+	// the body reads as the sheet the tab belongs to.
+	_mip_inject_theme();
+	var $tab_nav = $("<div style='padding-left:2px'>").append(
+		$("<a href='#' class='mip-tab active' data-pane='transfer'>").text(__("Raw material to transfer")),
+		$("<a href='#' class='mip-tab' data-pane='excess'>").text(__("Consolidate item for excess return plan"))
 	);
-	var pane_style = "background:" + PANE_BG + ";border:1px solid " + TAB_ACTIVE +
-		";border-radius:0 8px 8px 8px;padding:14px;";
-	var $pane_transfer = $("<div class='mip-pane' data-pane='transfer'>").attr("style", pane_style)
-		.append($(summary), $filter_row, $actions, $table);
-	var $pane_excess = $("<div class='mip-pane' data-pane='excess'>")
-		.attr("style", pane_style + "display:none;");
+	var $pane_transfer = $("<div class='mip-pane' data-pane='transfer'>")
+		.append($(summary).addClass("mip-summary"), $filter_row, $actions, $table);
+	var $pane_excess = $("<div class='mip-pane' data-pane='excess' style='display:none'>");
 	var $content = $("<div>").append($tab_nav, $pane_transfer, $pane_excess);
 
 	$tab_nav.on("click", "a", function(e) {
 		e.preventDefault();
 		var pane = $(this).data("pane");
-		$tab_nav.find("a").each(function() {
-			$(this).attr("style", _tab_css($(this).data("pane") === pane));
-		});
+		$tab_nav.find("a").removeClass("active").filter("[data-pane='" + pane + "']").addClass("active");
 		$content.find(".mip-pane").hide().filter("[data-pane='" + pane + "']").show();
 		// Rebuilt on entry rather than kept in step continuously: it reads the
 		// transfer tab's live figures, and those change with every tick and every
@@ -1134,14 +1189,14 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 		var by_item = _collect_excess_plan_state();
 		var codes = Object.keys(by_item).sort();
 		if (!codes.length) {
-			$pane_excess.html("<div class='text-muted' style='padding:20px 4px'>" +
+			$pane_excess.html("<div style='padding:20px 4px;color:#BBF7D0'>" +
 				__("Tick the materials to transfer on the first tab. Whatever is selected there is consolidated here, one line per item.") +
 				"</div>");
 			return;
 		}
 
-		var th = "white-space:nowrap;padding:6px 8px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;";
-		var html = "<div style='font-size:12px;color:#475569;margin-bottom:10px'>" +
+		var th = "white-space:nowrap;padding:6px 8px;font-weight:600;font-size:11px;";
+		var html = "<div style='font-size:12px;color:#BBF7D0;margin-bottom:10px'>" +
 			__("One line per item, with no batch reference: an off-cut comes back as one shape however many batches it was drawn from.") +
 			"<br><b>" + __("Excess Kg (system)") + "</b> = " + __("Planned transfer weight − Planned drawing weight") +
 			" &nbsp;·&nbsp; <b>" + __("Difference") + "</b> = " + __("Excess Kg (entered) − Excess Kg (system)") +
@@ -1221,7 +1276,9 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 		$row.find(".mip-xs-diff")
 			.text((diff > 0 ? "+" : "") + format_number(diff, null, 3))
 			.attr("title", diff > 0 ? __("extra beyond the transfer") : diff < 0 ? __("missing") : "")
-			.css("color", Math.abs(diff) < 0.001 ? "#15803d" : diff > 0 ? "#1d4ed8" : "#b91c1c");
+			// Readable on the dark panel: green when it reconciles, blue for extra,
+			// red for missing.
+			.css("color", Math.abs(diff) < 0.001 ? "#4ADE80" : diff > 0 ? "#93C5FD" : "#FCA5A5");
 	}
 
 	var dlg = new frappe.ui.Dialog({
@@ -1367,6 +1424,7 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 		dlg.set_primary_action(__("Verify and Transfer"), dlg.primary_action);
 	}
 
+	dlg.$wrapper.addClass("mip-transfer-theme");
 	dlg.fields_dict.content.$wrapper.html($content);
 	dlg.show();
 }

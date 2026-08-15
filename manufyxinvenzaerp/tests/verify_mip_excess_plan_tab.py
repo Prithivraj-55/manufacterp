@@ -68,6 +68,24 @@ def run():
           "positive = extra, negative = missing" in js, True)
 
     print()
+    print("=== the popup carries the client's supplied palette ===")
+    palette = {
+        "#0F2D1E": "page / modal background",
+        "#1B4332": "tab unselected",
+        "#22C55E": "tab selected",
+        "#064E3B": "info / summary",
+        "#14532D": "table background",
+        "#2F6F4F": "borders / dividers",
+        "#F0FDF4": "primary text",
+        "#BBF7D0": "secondary text",
+    }
+    for colour, role in palette.items():
+        check("%s (%s)" % (colour, role), colour in js, True)
+    check("scoped so no other dialog is touched", ".mip-transfer-theme" in js, True)
+    check("injected once, not per open", "mip-transfer-theme-css" in js, True)
+    check("the tabs are spaced apart", "margin-right:14px" in js, True)
+
+    print()
     print("=== the plan reaches the server ===")
     check("popup sends it", "excess_plan_json" in js, True)
     sig = inspect.signature(create_mip_partial_transfer)
