@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-08-16 00:22:40_
+_Generated: 2026-08-16 02:22:39_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -63,10 +63,10 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `suggest_w1_sec_qty` | 197 |
-| `get_available_cut_sheets` | 238 |
-| `get_cut_sheet_for_batch` | 262 |
-| `allocate_cut_sheet` | 296 |
+| `suggest_w1_sec_qty` | 259 |
+| `get_available_cut_sheets` | 300 |
+| `get_cut_sheet_for_batch` | 324 |
+| `allocate_cut_sheet` | 358 |
 ## production_management/doctype/material_planning/material_planning.py
 
 | Method | Line |
@@ -148,33 +148,33 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `refresh_weight_summary` | 1220 |
-| `get_mip_batch_plan_html` | 1414 |
-| `download_mip_batch_plan_pdf` | 1420 |
+| `refresh_weight_summary` | 1225 |
+| `get_mip_batch_plan_html` | 1419 |
+| `download_mip_batch_plan_pdf` | 1425 |
 | `check_mip_raw_materials_refreshable` | 207 |
 | `refresh_mip_raw_materials_manual` | 221 |
 | `refresh_mip_raw_materials` | 241 |
 | `save_transfer_draft` | 498 |
 | `create_from_subcontracting_order` | 52 |
-| `get_transfer_draft` | 542 |
+| `get_transfer_draft` | 547 |
 | `create_from_work_order` | 71 |
-| `unlink_excess_claim` | 873 |
+| `unlink_excess_claim` | 878 |
 | `populate_from_production_plan` | 90 |
 ## subcontracting_management/material_issue_plan_transfer.py
 
 | Method | Line |
 |--------|------|
-| `create_mip_cnc_partial_forward` | 1010 |
-| `create_mip_cnc_forward_entry` | 1132 |
-| `create_mip_excess_return_entry` | 1205 |
+| `get_mip_cnc_pending_items` | 1073 |
+| `create_mip_cnc_partial_forward` | 1130 |
+| `create_mip_cnc_forward_entry` | 1252 |
+| `create_mip_excess_return_entry` | 1325 |
 | `get_mip_pending_items` | 221 |
-| `update_transfer_sec_qty` | 385 |
-| `has_cnc_stock` | 580 |
-| `get_mip_cnc_button_state` | 600 |
-| `get_mip_readiness_check` | 674 |
-| `create_mip_transfer_entry` | 832 |
-| `create_mip_partial_transfer` | 882 |
-| `get_mip_cnc_pending_items` | 953 |
+| `update_transfer_sec_qty` | 390 |
+| `has_cnc_stock` | 693 |
+| `get_mip_cnc_button_state` | 713 |
+| `get_mip_readiness_check` | 787 |
+| `create_mip_transfer_entry` | 945 |
+| `create_mip_partial_transfer` | 995 |
 ## subcontracting_management/subcontracting.py
 
 | Method | Line |

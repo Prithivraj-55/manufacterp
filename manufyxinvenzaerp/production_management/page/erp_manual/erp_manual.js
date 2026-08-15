@@ -1240,7 +1240,9 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 			"One popup for every leg — source to supplier, source to CNC, and CNC onward — so " +
 			"there is a single place to learn. It lists what is still pending, lets you take " +
 			"part of it, and is the only point in the whole system where a fractional Sec Nos " +
-			"becomes whole physical pieces.",
+			"becomes whole physical pieces. It carries two tabs: <b>Raw material to transfer</b>, " +
+			"which is the transfer itself, and <b>Consolidate item for excess return plan</b>, " +
+			"where the off-cut coming back is measured.",
 		fields: [
 			{ name: "Planned", note: "What this row was always going to transfer." },
 			{ name: "Transferred", note: "What has already gone, across earlier partial transfers. Re-open the popup after a partial transfer and this is how you see where you stand." },
@@ -1252,8 +1254,10 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 			"Open <b>Transfer → Select Materials to Transfer</b>. A readiness check runs first and tells you about anything that would silently reduce what moves — stock mapped but not reserved, CNC rows with no CNC warehouse, or material already sitting at the supplier.",
 			"Tick the rows to send. Rows short of stock are left unticked for you.",
 			"Adjust <b>Sec Nos</b> where you must hand over whole pieces. The system re-checks free stock for the higher figure and refuses it outright if the batch cannot cover it.",
-			"Submit. The Stock Entry is created, Transferred goes up, and any surplus from rounding is booked as excess to return.",
+			"Switch to <b>Consolidate item for excess return plan</b> and measure the off-cut, one line per item. Optional — leave it blank and only a rounding surplus is booked, as before.",
+			"Submit. The Stock Entry is created, Transferred goes up, and the excess is written to the Excess Material table.",
 			"Come back later for the rest. Partial transfers are expected, and the popup shows exactly how much has gone and how much is left.",
+			"<b>Save and Close</b> at any point parks everything — the ticks, the Sec Nos, and the measured off-cuts — without transferring or validating anything. Reopen the popup and it is all still there.",
 		],
 		calcs: [
 			{
@@ -1310,6 +1314,60 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 		],
 	},
 	{
+		id: "excess-plan",
+		title: "Consolidate Item for Excess Return Plan",
+		kicker: "The transfer popup's second tab",
+		purpose:
+			"Where the material coming back is measured, at the moment it is being sent out. " +
+			"It consolidates whatever is ticked on the first tab <b>by item</b> and carries no " +
+			"batch reference at all — an off-cut comes back as one shape however many batches " +
+			"it was drawn from, so it is asked for once per item rather than once per batch.",
+		fields: [
+			{ name: "Item", note: "One line per item, with the number of batch rows behind it shown underneath. Ten rows on the transfer tab commonly become five or six lines here." },
+			{ name: "Planned Drawing Wt", note: "What the drawings actually call for, added up across every selected row of that item. Read-only." },
+			{ name: "Planned Transfer Wt", note: "What is being sent, added up the same way. Follows the ticks and the Sec Nos on the first tab, so it changes as you edit them." },
+			{ name: "Excess Kg (system)", note: "<b>Planned Transfer Wt − Planned Drawing Wt.</b> What the transfer is sending beyond what the job needs. Read-only." },
+			{ name: "Length / Width / Sec Qty", note: "The off-cut you expect back. Entered rather than inferred: the system knows the weight of the surplus, never its shape." },
+			{ name: "Excess Kg (entered)", note: "Calculated live from those dimensions with the same formula as everywhere else — Length ÷ 1000 × Unit Weight × Sec Qty for Structurals, with Width and Thickness for Plates." },
+			{ name: "Difference", note: "<b>Excess Kg (entered) − Excess Kg (system).</b> Green when the two agree, blue when more is coming back than the transfer created, red when part of it is unaccounted for." },
+		],
+		calcs: [
+			{
+				title: "The difference, both ways round",
+				item: "Any item", group: "Structurals",
+				length: "—", sec_qty: "—", unit_weight: "—",
+				formula:
+					"Drawings call for 100 Kg and 110 Kg is being transferred, so the system figure is " +
+					"110 − 100 = 10 Kg. Measure an off-cut of 11 Kg: 11 − 10. Measure 9 Kg instead: 9 − 10",
+				result: "+1 Kg (extra)   or   −1 Kg (missing)",
+				note:
+					"Positive means more is coming back than the transfer created. Negative means part " +
+					"of the excess is unaccounted for — usually the off-cut was mis-measured, or the " +
+					"transfer sent more than anyone realised. Neither figure blocks the transfer: it is " +
+					"there to be judged, not enforced.",
+			},
+		],
+		examples: [
+			{
+				type: "do",
+				label: "One item drawn from three batches",
+				text: "ISA100 taken from three batches appears as a single line — planned drawing weight, planned transfer weight and excess all added up, with “3 batch rows” underneath. Measure the off-cut once and it applies to the item.",
+			},
+			{
+				type: "dont",
+				label: "Don't expect it to fill itself in",
+				text: "The system can calculate the excess weight, but not its shape. Leave the dimensions blank and no consolidated row is booked — only the ordinary rounding surplus is recorded, exactly as before this tab existed.",
+			},
+		],
+		notes: [
+			"<b>It updates when you open it.</b> The tab is rebuilt from the transfer tab's live figures each time you switch to it, so it always reflects the current ticks and Sec Nos. What you have typed is remembered when you switch back and forth.",
+			"<b>What Transfer writes.</b> Each measured item gets one row in the <b>Excess Material</b> table on the plan, with your dimensions, the measured Kg as the quantity, and the system figure and difference recorded in its reason line — so a row that does not reconcile says so on its face rather than only in the popup that created it.",
+			"<b>Transferring the same item twice accumulates</b> into that one row rather than piling up new ones. A row already returned to stock, or claimed by another plan through Excess Material Mapping, is left alone and a fresh row started instead.",
+			"<b>It replaces the old per-batch excess panel.</b> That one asked for the same item's off-cut once per batch, and only ever appeared on a line already over plan — so in practice it was never seen. Where you measure here, the per-batch rounding surplus is not booked as well; the same off-cut is never recorded twice.",
+			"<b>Nothing here blocks the transfer.</b> Leave the tab untouched and everything behaves exactly as it did before it existed.",
+		],
+	},
+	{
 		id: "cnc",
 		title: "CNC Routing",
 		kicker: "Two legs, two Stock Entries",
@@ -1340,12 +1398,13 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 		title: "Excess Material Items",
 		kicker: "Getting the leftovers back",
 		purpose:
-			"Everything left over after the job — the surplus from rounding Sec Nos up, and " +
-			"whatever the shop floor measures once the material is actually cut. Each row is " +
-			"either returned to your warehouse as a real batch, or claimed directly by another " +
-			"job while it is still at the supplier.",
+			"Everything left over after the job — the surplus from rounding Sec Nos up, whatever " +
+			"was measured on the transfer popup's <b>Consolidate item for excess return plan</b> " +
+			"tab, and whatever the shop floor measures once the material is actually cut. Each " +
+			"row is either returned to your warehouse as a real batch, or claimed directly by " +
+			"another job while it is still at the supplier.",
 		fields: [
-			{ name: "Length / Width / Sec Nos", note: "The off-cut's real dimensions. Rounding-surplus rows arrive with placeholder dimensions (one standard piece) — overwrite them with what you actually measure." },
+			{ name: "Length / Width / Sec Nos", note: "The off-cut's real dimensions. Rows planned on the transfer popup's second tab arrive with what you measured there. Rounding-surplus rows arrive with placeholder dimensions (one standard piece) — overwrite them with what you actually measure." },
 			{ name: "Return Type", note: "“Return to Own Warehouse” is the normal case. “Retain at Supplier (Virtual)” means it will never physically come back — it is consumed there — and such rows are skipped by the return entry." },
 			{ name: "Return Reason", note: "Mandatory before a return entry can be created. It is what makes the returned stock explainable months later." },
 			{ name: "Availability", note: "Allocated and Available, in Sec Nos and Kg — how much of this off-cut other jobs have claimed and how much is still free." },
