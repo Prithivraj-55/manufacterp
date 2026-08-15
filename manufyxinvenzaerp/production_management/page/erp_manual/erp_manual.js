@@ -150,10 +150,122 @@ const ERP_MANUAL_SALES_ORDER_CHILDREN = [
 	},
 ];
 
+// Drawing — one per drawing in the uploaded sheet. Everything downstream measures
+// itself against the numbers held here.
+const ERP_MANUAL_DRAWING_CHILDREN = [
+	{
+		id: "drw-what",
+		title: "What a Drawing Holds",
+		kicker: "One per drawing in the sheet",
+		purpose:
+			"Every drawing in the BOM sheet becomes one Drawing document. It carries who the job " +
+			"is for, what is being made, and the full raw-material list for it — and it is the " +
+			"master those figures are corrected on later. Production Plans, Job Work Orders and " +
+			"Material Issue Plans all take their copy of the customer weight from here.",
+		fields: [
+			{ name: "Sales Order, Customer, Customer No, Project, Cust PO No", note: "Pulled from the Sales Order the sheet was uploaded to — not typed again." },
+			{ name: "Customer Drawing Number / DUNO / Mark No", note: "From the sheet. The Customer Drawing Number is what groups its raw-material rows together during import." },
+			{ name: "FG Item Code / Name / Description", note: "The finished-goods item, from the sheet's FG Item column — which is why the same code must be on the Sales Order's Items table." },
+			{ name: "No of Qty to Manufacture", note: "From the sheet's Total Qty. Every row's totals are multiplied by this." },
+			{ name: "Nature of Work", note: "From the sheet. Must already exist in the Nature of Work master." },
+			{ name: "Rate Schedule / Type", note: "The schedule comes from the sheet; Type is read from the schedule itself, along with Job Nature, Details, Work Content, Job Reference and Rate per Kg." },
+			{ name: "Rev No", note: "Revision number. 0 on the original — see Revisions below." },
+		],
+		notes: [
+			"<b>The raw-material rows live on the Raw Materials tab.</b> Each carries Item No, Material Code, Grade, the dimensions, and Reqd Raw Material Qty (the Sec Qty) — exactly as uploaded.",
+		],
+	},
+	{
+		id: "drw-calcs",
+		title: "What Is Calculated, and How",
+		kicker: "Per row, and per drawing",
+		purpose:
+			"Nothing weight-related is typed on a Drawing. Every figure below is recalculated on " +
+			"every save from the dimensions and the item's Unit Weight, so a corrected dimension " +
+			"always flows through to the totals.",
+		calcs: [
+			{
+				title: "Row weight for a Structural — Qty",
+				item: "ISMB400", group: "Structurals",
+				length: 6936, sec_qty: 2, unit_weight: 61.6,
+				formula: "(Length ÷ 1000) × Unit Weight × Sec Qty  =  (6936 ÷ 1000) × 61.6 × 2",
+				result: "854.51",
+			},
+			{
+				title: "Row weight for a Plate — Qty (uses Width and Thickness too)",
+				item: "PLATE10", group: "Plates",
+				length: 424.68, width: 180, thickness: 10, sec_qty: 2,
+				formula: "(L ÷ 1000) × (W ÷ 1000) × Thickness × Unit Weight × Sec Qty  =  (424.68÷1000) × (180÷1000) × 10 × 7.85 × 2",
+				result: "12.00",
+			},
+		],
+		steps: [
+			"<b>Total Sec Qty</b> = Sec Qty × No of Qty to Manufacture. One drawing built twice needs twice the pieces.",
+			"<b>Total Qty</b> = the same weight formula run against Total Sec Qty — not the row weight multiplied, so rounding cannot drift.",
+			"<b>Total Weight</b> (drawing level) = the sum of every row's weight, taking Qty where the row's UOM is Kg and Sec Qty where the secondary UOM is Kg.",
+			"<b>Nuts and Bolts reverse.</b> There Qty is the count and Sec Qty is the weight, so Total Qty = Qty × No of Qty to Manufacture and Total Sec Qty = Total Qty × Unit Weight.",
+		],
+		notes: [
+			"<b>The comparison you want is in Totals.</b> <b>Total Weight</b> is what the drawing's own raw materials add up to — our engineering figure. <b>Customer Provided Weight</b> is what the customer stated, brought in from the sheet's Total Weight (KG). The gap between them is the difference every downstream document measures excess against.",
+			"<b>A missing Unit Weight breaks the chain silently.</b> With no Unit Weight on the Item master, the formula yields nothing and the row weighs zero. Verify Raw Materials on the Sales Order catches this before drawings are ever created.",
+		],
+	},
+	{
+		id: "drw-weight",
+		title: "Changing the Customer Weight",
+		kicker: "Correct it here, once",
+		purpose:
+			"When the customer revises a weight, change it on the Drawing and nowhere else. The " +
+			"field itself is read-only on purpose: editing copies one by one is how documents end " +
+			"up disagreeing. Use Update Customer Weight and every copy is rewritten together.",
+		steps: [
+			"Open the Drawing and press <b>Update Customer Weight</b>.",
+			"Enter the new figure. The old value, the new one, who changed it and when are written to the drawing's own <b>Weight Change Log</b> — so the history is on the document, not in someone's memory.",
+			"Everything below is then updated in the same operation.",
+		],
+		fields: [
+			{ name: "Drawing", note: "Customer Provided Weight itself, plus a Weight Change Log row recording the change." },
+			{ name: "Sales Order", note: "The DUNO Item's Total Weight — the value every downstream document originally read from. The order is re-saved, so its raw-material quantities recalculate." },
+			{ name: "Sales Order — Difference Kg", note: "Recomputed for that drawing/DUNO pair, which is what makes the new excess visible." },
+			{ name: "Production Plan", note: "Customer Weight Kg on the Production Plan Item for this drawing." },
+			{ name: "Job Work Order", note: "Customer Weight Kg on its drawing row, and the order's own total re-summed from those rows." },
+			{ name: "Material Issue Plan", note: "Customer Weight Kg on its drawing row, then the whole weight summary refreshed." },
+		],
+		notes: [
+			"<b>Excess follows automatically.</b> Excess is the gap between what was planned or mapped and what the drawing says is needed — so once the customer weight moves, the difference is recomputed and the excess figures downstream reflect it without anything else being touched.",
+			"<b>Batches are deliberately left alone.</b> Reserved and mapped batches are NOT re-allocated, because a weight change should not silently move steel that is already committed or shipped. If the new weight means a different allocation, unreserve and reserve again by hand in Material Planning.",
+			"<b>Work Order is not updated</b> — it is standard ERPNext in this app and carries no copy of this figure.",
+			"<b>The same weight is rejected.</b> Entering the value it already has does nothing but add noise to the log, so it is refused.",
+		],
+		buttons: [
+			{ name: "Update Customer Weight", note: "The only supported way to change it. Writes the Drawing, the Sales Order and every downstream copy in one go, with an audit row." },
+		],
+	},
+	{
+		id: "drw-revisions",
+		title: "Revisions",
+		kicker: "Rev No",
+		purpose:
+			"A submitted Drawing cannot be edited — that is the point of submitting it. When the " +
+			"customer issues a revised drawing, you cancel and amend, and the new document numbers " +
+			"itself as the next revision.",
+		steps: [
+			"<b>Cancel</b> the submitted Drawing.",
+			"<b>Amend</b> it. Frappe creates a new document linked back to the cancelled one.",
+			"<b>Rev No</b> is set automatically: the previous drawing's Rev No plus one. An original imported drawing is Rev 0, its first amendment Rev 1, and so on.",
+			"Correct what changed, then submit and Mark as Final Revision as before.",
+		],
+		notes: [
+			"<b>Rev No is derived, never typed.</b> It is read from the document being amended, so the sequence cannot be broken by hand.",
+			"<b>Amending does not move the BOM.</b> A BOM already created from the earlier revision stays as it is — create a BOM from the new revision when it is ready, and it is that BOM which Material Planning should be pointed at.",
+		],
+	},
+];
+
 const ERP_MANUAL_STUB_CATEGORIES = [
 	{ id: "item", label: "Item", children: [] },
 	{ id: "sales-order", label: "Sales Order", children: ERP_MANUAL_SALES_ORDER_CHILDREN },
-	{ id: "drawing", label: "Drawing", children: [] },
+	{ id: "drawing", label: "Drawing", children: ERP_MANUAL_DRAWING_CHILDREN },
 ];
 
 // ─── Material Planning — migrated verbatim from the old Material Planning manual,
