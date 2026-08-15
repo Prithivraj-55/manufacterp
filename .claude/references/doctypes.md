@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-08-15 22:33:50_
+_Generated: 2026-08-16 02:22:39_
 
 ## drawing
 
@@ -174,6 +174,8 @@ _Generated: 2026-08-15 22:33:50_
 | ` validate` | no |
 | ` _sync_allocations_from_rows` | no |
 | ` on_trash` | no |
+| ` _block_if_claimed` | no |
+| ` _block_if_transferred` | no |
 | ` _fetch_batch_dimensions` | no |
 | ` _calculate` | no |
 | ` _validate_allocations_fit` | no |

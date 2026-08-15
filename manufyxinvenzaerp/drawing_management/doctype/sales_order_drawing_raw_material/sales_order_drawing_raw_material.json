@@ -127,14 +127,14 @@
    "read_only": 1
   },
   {
+   "allow_on_submit": 1,
    "columns": 1,
-   "description": "Reqd Sec Qty × Total Quantity",
+   "description": "Auto calculated: Reqd Sec Qty x Total Quantity of the drawing.",
    "fieldname": "total_sec_qty",
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Total Sec Qty",
-   "read_only": 1,
-   "allow_on_submit": 1
+   "read_only": 1
   },
   {
    "fetch_from": "material_code.custom_unit_weight",
@@ -145,13 +145,14 @@
    "read_only": 1
   },
   {
+   "allow_on_submit": 1,
    "columns": 1,
+   "description": "Auto calculated, never typed. Structurals: Length / 1000 x Unit Weight x Reqd Sec Qty. Plates: Length / 1000 x Width / 1000 x Thickness x Unit Weight x Reqd Sec Qty. Unit Weight comes from the Item master.",
    "fieldname": "qty",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Weight (Primary UOM)",
-   "read_only": 1,
-   "allow_on_submit": 1
+   "label": "Calculated Weight (Kg)",
+   "read_only": 1
   },
   {
    "fetch_from": "material_code.stock_uom",
@@ -162,14 +163,14 @@
    "read_only": 1
   },
   {
+   "allow_on_submit": 1,
    "columns": 1,
-   "description": "Weight (Primary UOM) × Total Quantity",
+   "description": "Auto calculated: Calculated Weight (Kg) x Total Quantity of the drawing.",
    "fieldname": "total_weight",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Total Weight",
-   "read_only": 1,
-   "allow_on_submit": 1
+   "label": "Calculated Total Weight (Kg)",
+   "read_only": 1
   },
   {
    "default": "0",

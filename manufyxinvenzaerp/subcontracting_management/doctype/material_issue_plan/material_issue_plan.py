@@ -495,7 +495,7 @@ def _sync_transferred_qty(mip):
 
 
 @frappe.whitelist()
-def save_transfer_draft(mip_name, rows_json):
+def save_transfer_draft(mip_name, rows_json, excess_plan_json=None):
     """Park what has been typed into the transfer popup without transferring anything.
 
     Deliberately unvalidated. The whole point of "Save and Close" is to step away
@@ -508,6 +508,11 @@ def save_transfer_draft(mip_name, rows_json):
     would re-run validate(), which rebuilds this very table, and there is no reason to
     put the plan through that to record a scratch note."""
     rows = json.loads(rows_json) if isinstance(rows_json, str) else (rows_json or [])
+    # The measured off-cut is stated once per ITEM on the popup's consolidated tab,
+    # while this table is keyed per item+batch. The same figures are parked against
+    # every batch row of that item and read back from whichever one is found first
+    # -- they describe one off-cut, so any of them answers the question.
+    excess_plan = json.loads(excess_plan_json) if isinstance(excess_plan_json, str) else (excess_plan_json or {})
     mip = frappe.get_doc("Material Issue Plan", mip_name)
 
     by_key = {
@@ -523,7 +528,7 @@ def save_transfer_draft(mip_name, rows_json):
             # The plan changed under the popup (a row unreserved, a batch reassigned).
             # Skip rather than invent a row that no longer corresponds to anything.
             continue
-        excess = r.get("excess_entry") or {}
+        excess = excess_plan.get(r.get("item_code")) or {}
         frappe.db.set_value("Material Issue Plan Consolidate Item", target.name, {
             "draft_sec_qty": flt(r.get("custom_sec_qty")),
             "draft_excess_length": flt(excess.get("length")),

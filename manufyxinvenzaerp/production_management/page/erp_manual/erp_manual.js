@@ -106,20 +106,136 @@ const ERP_MANUAL_SALES_ORDER_CHILDREN = [
 		purpose:
 			"Checks everything staged from the sheet and refuses to pass until it is right. This is " +
 			"deliberately strict: a bad row here becomes a bad Drawing, a bad BOM, and a wrong " +
-			"requirement in Material Planning, and by then it is far harder to see where it came from.",
+			"requirement in Material Planning, and by then it is far harder to see where it came from. " +
+			"The full list of what it checks is below — everything the weight formula reads, whether " +
+			"the value is absent when it is needed or present when it is not.",
 		fields: [
-			{ name: "Material Code", note: "Must exist in the Item master. A typo here is the most common failure." },
+			{ name: "Material Code", note: "Present on the row, and exists in the Item master. A typo here is the most common failure." },
+			{ name: "Parent Item Group", note: "The Item master must say <b>Structurals</b>, <b>Plates</b> or <b>Nuts and Bolts</b>. Any other value — or none — means no weight can be calculated, so the row is rejected rather than staged weighing zero. It must also still match what the row was staged with: if the Item was re-grouped after the upload, you are told to load the sheet again." },
+			{ name: "Unit Weight", note: "Must be set on the Item master. It is not in the sheet — it comes from the Item — and without it the formula produces nothing." },
+			{ name: "Dimensions the formula needs", note: "<b>Structurals:</b> Length. <b>Plates:</b> Length, Width and Thickness. <b>Nuts and Bolts:</b> none. Missing any of them is reported against the drawing and Item No it came from." },
+			{ name: "Dimensions the formula does not use", note: "A value here is reported too. A Structural's weight is Length × Unit Weight × Sec Qty — Thickness and Width take no part — and a bolt uses no dimension at all. Anything typed into an unused column is not harmless: it is carried into the Drawing, the BOM and Material Planning as a real requirement that the delivered material can never match." },
+			{ name: "Reqd Raw Material Qty", note: "Must be more than zero, for every group. This is the Sec Qty (pieces) the formula multiplies by — a blank column produces a row weighing nothing." },
+			{ name: "Calculated weight", note: "The last check: the row's Kg is recalculated from its current dimensions and the Item master's Unit Weight. Zero is refused, and a figure that no longer agrees with what was staged means the Item master changed after the upload — load the sheet again." },
 			{ name: "Nature of Work", note: "Must already exist in the Nature of Work master. Checked by name exactly as typed." },
 			{ name: "Rate Schedule", note: "Must already exist in the Rate Schedule master — e.g. RS- O/S-001 A. Checked by name; there is no format rule, so your numbering can change freely." },
-			{ name: "Dimensions", note: "Plates need Thickness, Width and Length. Structurals need Length. Both need a Unit Weight on the Item master, or no Kg can be calculated." },
+			{ name: "FG Item", note: "Every drawing needs one, and it must exist in the Item master." },
+			{ name: "DUNO/Mark No", note: "Must be filled in on each drawing." },
+			{ name: "Total Qty", note: "Must be more than zero. A blank is otherwise read as one piece, and every total on the drawing would be calculated for a single unit." },
+			{ name: "Rows per drawing", note: "A drawing staged with no raw-material rows at all is reported by name." },
+		],
+		examples: [
+			{
+				type: "dont",
+				label: "ISMB250 with a Thickness of 10",
+				text: "A beam is a Structural — its weight is Length × Unit Weight × Sec Qty, so it has no Thickness to give. " +
+					"One line of a 100-row sheet had 10 typed into the Thickness column. The weight was still correct, " +
+					"so nothing looked wrong: the 10 travelled into the Drawing, the BOM and Material Planning as part of " +
+					"the requirement, and when the beam was received with no thickness it could not be matched to it. " +
+					"<b>Now reported at this step</b>, naming the drawing, the Item No and the column to clear.",
+			},
+			{
+				type: "do",
+				label: "The same row, correct",
+				text: "Material Code ISMB250, Length 879.1, Thickness and Width left empty, Reqd Raw Material Qty 1, " +
+					"and a Unit Weight of 37.3 on the Item master. 879.1 / 1000 × 37.3 × 1 = <b>32.79 Kg</b>.",
+			},
 		],
 		notes: [
 			"<b>It blocks, it does not warn.</b> Anything reported has to be corrected in the sheet (or the master record created) before the flow can continue. Correct the sheet, Clear Items, Load Items again, and re-verify.",
+			"<b>Load Items warns about unused columns too</b>, as soon as the sheet is read, so you can see it against the file still in front of you. Only this step blocks.",
 			"<b>Why unknown values still reach this screen.</b> The importer stages rows with a direct insert that skips link checking, on purpose — so a wrong Rate Schedule lands in the table and can be reported <i>against the drawing it came from</i>. Rejecting during the upload would abort the whole file over one cell and tell you nothing about where it was.",
+			"<b>Rows whose Drawing already exists are not re-checked.</b> They are locked at that point and the check skips them, so correcting the sheet for a later drawing can never fail an order that is already part-built.",
 			"<b>Blank is allowed</b> for Nature of Work and Rate Schedule. Neither is mandatory on a Drawing, and older imports predate both columns.",
 		],
 		buttons: [
-			{ name: "Verify Raw Materials", note: "Runs the check. Passing sets the order's verified flag; failing lists every problem row with its drawing." },
+			{ name: "Verify Raw Materials", note: "Runs every check above. Passing sets the order's verified flag; failing lists each problem with the drawing, Material Code and Item No it belongs to." },
+		],
+	},
+	{
+		id: "so-weights",
+		title: "Customer Weight vs Calculated Weight",
+		kicker: "Two numbers, two meanings",
+		purpose:
+			"Every drawing carries two weights and they are not two attempts at the same figure. " +
+			"One is typed in from the sheet and describes the finished part. The other is worked out " +
+			"by the system from the raw materials listed under that drawing. They are supposed to " +
+			"differ — what matters is which way round.",
+		fields: [
+			{ name: "Customer Provided Weight (Kg)", note: "On the drawing row. Comes from the sheet's <b>Total Weight (KG)</b> column — what the finished, fabricated piece weighs. Typed in, never calculated, and editable." },
+			{ name: "Calculated Weight (Kg) — drawing row", note: "<b>Auto calculated.</b> What the raw materials listed under that drawing add up to. Read-only, filled the moment Load Items runs and recalculated on every save." },
+			{ name: "Calculated Weight (Kg) — raw material row", note: "<b>Auto calculated.</b> That one material's weight: <i>Length ÷ 1000 × Unit Weight × Reqd Sec Qty</i> for Structurals, <i>Length ÷ 1000 × Width ÷ 1000 × Thickness × Unit Weight × Reqd Sec Qty</i> for Plates. Unit Weight comes from the Item master, not the sheet." },
+			{ name: "Calculated Total Weight (Kg)", note: "<b>Auto calculated.</b> The row's weight × the drawing's Total Quantity — what the whole drawing quantity consumes of that one material." },
+		],
+		calcs: [
+			{
+				title: "Drawing 1B16 — material 1 of 3",
+				item: "ISMB250", group: "Structurals",
+				length: 879.1, sec_qty: 1, unit_weight: 37.3,
+				formula: "(Length ÷ 1000) × Unit Weight × Sec Qty  =  (879.1 ÷ 1000) × 37.3 × 1",
+				result: "32.790",
+			},
+			{
+				title: "Drawing 1B16 — material 2 of 3",
+				item: "ISA100", group: "Structurals",
+				length: 190, sec_qty: 4, unit_weight: 14.9,
+				formula: "(Length ÷ 1000) × Unit Weight × Sec Qty  =  (190 ÷ 1000) × 14.9 × 4",
+				result: "11.324",
+			},
+			{
+				title: "Drawing 1B16 — material 3 of 3",
+				item: "PLATE10", group: "Plates",
+				length: 210.81, width: 201, thickness: 10, sec_qty: 1, unit_weight: 7.85,
+				formula: "(L ÷ 1000) × (W ÷ 1000) × Thickness × Unit Weight × Sec Qty  =  (210.81÷1000) × (201÷1000) × 10 × 7.85 × 1",
+				result: "3.326",
+				note: "<b>Drawing total:</b> 32.790 + 11.324 + 3.326 = <b>47.44 Kg</b> calculated, against a " +
+					"Customer Provided Weight of <b>42.90 Kg</b> — a difference of <b>+4.54 Kg (+10.6%)</b>.",
+			},
+		],
+		examples: [
+			{
+				type: "do",
+				label: "Calculated above customer weight — normal",
+				text: "To make a 42.9 Kg part you consume 47.44 Kg of steel. The stock is cut down to " +
+					"the finished piece, so the raw material is the heavier of the two. Small drawings " +
+					"show a larger percentage than big ones — a broadly fixed allowance is a small " +
+					"fraction of a 900 Kg beam and a large fraction of a 43 Kg one.",
+			},
+			{
+				type: "dont",
+				label: "Calculated below customer weight — look at it",
+				text: "The materials listed cannot physically produce the part: you are asking for a " +
+					"finished piece heavier than the steel it is cut from. Something is wrong in the " +
+					"sheet — a missing row, a length short by a decimal place, or a wrong Sec Qty. " +
+					"The summary panel names any drawing in this state.",
+			},
+		],
+		notes: [
+			"<b>The gap is not an error and nothing needs correcting for it.</b> The system is built on it: the excess tracking in Material Issue Plan follows exactly this chain — customer weight, then planned raw material, then the weight of the batch actually mapped.",
+			"<b>Where each is shown.</b> Per material on the Raw Materials row, per drawing on the Drawing List row, and totalled for the whole order in the summary panel beside the BOM file.",
+			"<b>Nothing here is typed except the customer's figure.</b> Every Calculated field is read-only and recomputed from the dimensions and the Item master's Unit Weight, so it can never drift from the rows it summarises.",
+		],
+	},
+	{
+		id: "so-summary",
+		title: "Loaded Sheet Summary",
+		kicker: "The panel beside the file",
+		purpose:
+			"A running summary of what the sheet actually produced, shown next to the file it came " +
+			"from. It reads the staged rows directly in the browser, so it follows an edit in the " +
+			"grid immediately — no save, no reload.",
+		fields: [
+			{ name: "Drawings", note: "How many drawings the sheet produced, and how many already have a Drawing document created." },
+			{ name: "Raw material rows", note: "Total staged rows, then the same total split by group — e.g. 50 Plates · 50 Structurals. A group you did not expect to see is worth a second look." },
+			{ name: "Customer weight", note: "The sheet's Total Weight (KG) added up across every drawing." },
+			{ name: "Calculated weight", note: "What all the listed raw materials add up to across every drawing." },
+			{ name: "Difference", note: "Calculated minus customer, in Kg and as a percentage. Positive is the normal direction." },
+			{ name: "Below customer weight", note: "Any drawing whose raw material weighs <i>less</i> than the finished piece, named by Mark No. <b>None</b> in green is what you want to see." },
+			{ name: "Raw materials", note: "Verified or Not verified — the same state as the button above the Raw Materials table." },
+		],
+		notes: [
+			"<b>It is a summary, not a check.</b> Verify Raw Materials is what blocks; this panel is for seeing at a glance whether the sheet loaded into the shape you expected before you commit to creating drawings.",
+			"<b>Read the difference as a direction, not a target.</b> Whether +2% is right for your fabrication is an engineering judgement. The panel only reports it — and calls out the one case that is always wrong, a drawing whose material weighs less than the part.",
 		],
 	},
 	{
@@ -1124,7 +1240,9 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 			"One popup for every leg — source to supplier, source to CNC, and CNC onward — so " +
 			"there is a single place to learn. It lists what is still pending, lets you take " +
 			"part of it, and is the only point in the whole system where a fractional Sec Nos " +
-			"becomes whole physical pieces.",
+			"becomes whole physical pieces. It carries two tabs: <b>Raw material to transfer</b>, " +
+			"which is the transfer itself, and <b>Consolidate item for excess return plan</b>, " +
+			"where the off-cut coming back is measured.",
 		fields: [
 			{ name: "Planned", note: "What this row was always going to transfer." },
 			{ name: "Transferred", note: "What has already gone, across earlier partial transfers. Re-open the popup after a partial transfer and this is how you see where you stand." },
@@ -1136,8 +1254,10 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 			"Open <b>Transfer → Select Materials to Transfer</b>. A readiness check runs first and tells you about anything that would silently reduce what moves — stock mapped but not reserved, CNC rows with no CNC warehouse, or material already sitting at the supplier.",
 			"Tick the rows to send. Rows short of stock are left unticked for you.",
 			"Adjust <b>Sec Nos</b> where you must hand over whole pieces. The system re-checks free stock for the higher figure and refuses it outright if the batch cannot cover it.",
-			"Submit. The Stock Entry is created, Transferred goes up, and any surplus from rounding is booked as excess to return.",
+			"Switch to <b>Consolidate item for excess return plan</b> and measure the off-cut, one line per item. Optional — leave it blank and only a rounding surplus is booked, as before.",
+			"Submit. The Stock Entry is created, Transferred goes up, and the excess is written to the Excess Material table.",
 			"Come back later for the rest. Partial transfers are expected, and the popup shows exactly how much has gone and how much is left.",
+			"<b>Save and Close</b> at any point parks everything — the ticks, the Sec Nos, and the measured off-cuts — without transferring or validating anything. Reopen the popup and it is all still there.",
 		],
 		calcs: [
 			{
@@ -1194,6 +1314,60 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 		],
 	},
 	{
+		id: "excess-plan",
+		title: "Consolidate Item for Excess Return Plan",
+		kicker: "The transfer popup's second tab",
+		purpose:
+			"Where the material coming back is measured, at the moment it is being sent out. " +
+			"It consolidates whatever is ticked on the first tab <b>by item</b> and carries no " +
+			"batch reference at all — an off-cut comes back as one shape however many batches " +
+			"it was drawn from, so it is asked for once per item rather than once per batch.",
+		fields: [
+			{ name: "Item", note: "One line per item, with the number of batch rows behind it shown underneath. Ten rows on the transfer tab commonly become five or six lines here." },
+			{ name: "Planned Drawing Wt", note: "What the drawings actually call for, added up across every selected row of that item. Read-only." },
+			{ name: "Planned Transfer Wt", note: "What is being sent, added up the same way. Follows the ticks and the Sec Nos on the first tab, so it changes as you edit them." },
+			{ name: "Excess Kg (system)", note: "<b>Planned Transfer Wt − Planned Drawing Wt.</b> What the transfer is sending beyond what the job needs. Read-only." },
+			{ name: "Length / Width / Sec Qty", note: "The off-cut you expect back. Entered rather than inferred: the system knows the weight of the surplus, never its shape." },
+			{ name: "Excess Kg (entered)", note: "Calculated live from those dimensions with the same formula as everywhere else — Length ÷ 1000 × Unit Weight × Sec Qty for Structurals, with Width and Thickness for Plates." },
+			{ name: "Difference", note: "<b>Excess Kg (entered) − Excess Kg (system).</b> Green when the two agree, blue when more is coming back than the transfer created, red when part of it is unaccounted for." },
+		],
+		calcs: [
+			{
+				title: "The difference, both ways round",
+				item: "Any item", group: "Structurals",
+				length: "—", sec_qty: "—", unit_weight: "—",
+				formula:
+					"Drawings call for 100 Kg and 110 Kg is being transferred, so the system figure is " +
+					"110 − 100 = 10 Kg. Measure an off-cut of 11 Kg: 11 − 10. Measure 9 Kg instead: 9 − 10",
+				result: "+1 Kg (extra)   or   −1 Kg (missing)",
+				note:
+					"Positive means more is coming back than the transfer created. Negative means part " +
+					"of the excess is unaccounted for — usually the off-cut was mis-measured, or the " +
+					"transfer sent more than anyone realised. Neither figure blocks the transfer: it is " +
+					"there to be judged, not enforced.",
+			},
+		],
+		examples: [
+			{
+				type: "do",
+				label: "One item drawn from three batches",
+				text: "ISA100 taken from three batches appears as a single line — planned drawing weight, planned transfer weight and excess all added up, with “3 batch rows” underneath. Measure the off-cut once and it applies to the item.",
+			},
+			{
+				type: "dont",
+				label: "Don't expect it to fill itself in",
+				text: "The system can calculate the excess weight, but not its shape. Leave the dimensions blank and no consolidated row is booked — only the ordinary rounding surplus is recorded, exactly as before this tab existed.",
+			},
+		],
+		notes: [
+			"<b>It updates when you open it.</b> The tab is rebuilt from the transfer tab's live figures each time you switch to it, so it always reflects the current ticks and Sec Nos. What you have typed is remembered when you switch back and forth.",
+			"<b>What Transfer writes.</b> Each measured item gets one row in the <b>Excess Material</b> table on the plan, with your dimensions, the measured Kg as the quantity, and the system figure and difference recorded in its reason line — so a row that does not reconcile says so on its face rather than only in the popup that created it.",
+			"<b>Transferring the same item twice accumulates</b> into that one row rather than piling up new ones. A row already returned to stock, or claimed by another plan through Excess Material Mapping, is left alone and a fresh row started instead.",
+			"<b>It replaces the old per-batch excess panel.</b> That one asked for the same item's off-cut once per batch, and only ever appeared on a line already over plan — so in practice it was never seen. Where you measure here, the per-batch rounding surplus is not booked as well; the same off-cut is never recorded twice.",
+			"<b>Nothing here blocks the transfer.</b> Leave the tab untouched and everything behaves exactly as it did before it existed.",
+		],
+	},
+	{
 		id: "cnc",
 		title: "CNC Routing",
 		kicker: "Two legs, two Stock Entries",
@@ -1224,12 +1398,13 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 		title: "Excess Material Items",
 		kicker: "Getting the leftovers back",
 		purpose:
-			"Everything left over after the job — the surplus from rounding Sec Nos up, and " +
-			"whatever the shop floor measures once the material is actually cut. Each row is " +
-			"either returned to your warehouse as a real batch, or claimed directly by another " +
-			"job while it is still at the supplier.",
+			"Everything left over after the job — the surplus from rounding Sec Nos up, whatever " +
+			"was measured on the transfer popup's <b>Consolidate item for excess return plan</b> " +
+			"tab, and whatever the shop floor measures once the material is actually cut. Each " +
+			"row is either returned to your warehouse as a real batch, or claimed directly by " +
+			"another job while it is still at the supplier.",
 		fields: [
-			{ name: "Length / Width / Sec Nos", note: "The off-cut's real dimensions. Rounding-surplus rows arrive with placeholder dimensions (one standard piece) — overwrite them with what you actually measure." },
+			{ name: "Length / Width / Sec Nos", note: "The off-cut's real dimensions. Rows planned on the transfer popup's second tab arrive with what you measured there. Rounding-surplus rows arrive with placeholder dimensions (one standard piece) — overwrite them with what you actually measure." },
 			{ name: "Return Type", note: "“Return to Own Warehouse” is the normal case. “Retain at Supplier (Virtual)” means it will never physically come back — it is consumed there — and such rows are skipped by the return entry." },
 			{ name: "Return Reason", note: "Mandatory before a return entry can be created. It is what makes the returned stock explainable months later." },
 			{ name: "Availability", note: "Allocated and Available, in Sec Nos and Kg — how much of this off-cut other jobs have claimed and how much is still free." },

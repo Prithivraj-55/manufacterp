@@ -86,22 +86,84 @@ class CutSheet(Document):
             })
 
     def on_trash(self):
-        """A sheet other jobs are drawing from cannot simply vanish -- their rows
-        would be left pointing at nothing, reserving pieces of a plan that no longer
-        exists.
+        """A sheet cannot vanish while anything is still standing on it, and if it
+        does go it has to put the batch back the way it found it.
 
-        Only plans that still EXIST can object. An allocation naming a deleted Material
-        Planning is a dangling row, not a claim: it protects nothing, and counting it
-        made the sheet permanently undeletable -- the error named a plan the user could
-        not go and release, because it was already gone."""
-        live = sorted({
-            a.material_planning for a in (self.allocations or [])
-            if a.material_planning and frappe.db.exists("Material Planning", a.material_planning)
-        })
+        Three things can be standing on it: a Material Planning row still pointing
+        at it (reserved or not -- either way the row would be left referring to a
+        plan that no longer exists), a transfer already taken from it, and the
+        balance written onto the batch.
+
+        That last one is why this method exists in its present form. W2 replaces
+        the batch's Length and Sec Qty with the remnant's, and the batch keeps its
+        original name -- so once the sheet is gone there is nothing left on the
+        site that explains why a batch called ...L12000... says 6000, and nothing
+        that knows what to restore. The ledger still holds every kilo, so the
+        Manufyx Stock Balance report and Material Planning -- which works from the
+        dimensions -- disagree, with no visible cause. Reverting here is what keeps
+        deletion from being a one-way door.
+
+        Only plans that still EXIST can object. An allocation naming a deleted
+        Material Planning is a dangling row, not a claim: it protects nothing, and
+        counting it made the sheet permanently undeletable -- the error named a
+        plan the user could not go and release, because it was already gone."""
+        self._block_if_claimed()
+        self._block_if_transferred()
+
+        # Nothing is holding it: hand the batch back its own dimensions before the
+        # record that knows them disappears.
+        if self.w2_applied:
+            revert_w2_from_batch(self.name)
+
+    def _block_if_claimed(self):
+        """Material Planning rows still pointing at this sheet.
+
+        Read from the database, not from self.allocations: that table is rebuilt
+        during validate, so on a document loaded and deleted without saving it
+        holds whatever was true when it was last written. A claim made since then
+        would not appear in it, and the sheet would delete out from under a
+        reserved row."""
+        claims = frappe.get_all(
+            "Material Planning Material Mapping",
+            filters={"cut_sheet_ref": self.name},
+            fields=["parent", "is_reserved"],
+        )
+        live = {}
+        for c in claims:
+            if frappe.db.exists("Material Planning", c.parent):
+                live[c.parent] = live.get(c.parent) or c.is_reserved
+        if not live:
+            return
+        described = ", ".join(
+            "{0}{1}".format(mp, _(" (reserved)") if reserved else "")
+            for mp, reserved in sorted(live.items())
+        )
+        frappe.throw(
+            _("This Cut Sheet is in use by {0}. Release those allocations first.")
+            .format(described)
+        )
+
+    def _block_if_transferred(self):
+        """Transfers taken from this sheet.
+
+        A submitted transfer is the physical cut: the steel has moved and the
+        batch has been rewritten to match. Reverting the batch under a live
+        transfer would claim the sheet is whole again while its pieces are out on
+        the floor, so the transfer has to be cancelled first -- which reverts the
+        batch through the ordinary path."""
+        names = {a.stock_entry for a in (self.allocations or []) if a.stock_entry}
+        if self.w2_applied_stock_entry:
+            names.add(self.w2_applied_stock_entry)
+        live = sorted(
+            n for n in names
+            if frappe.db.get_value("Stock Entry", n, "docstatus") == 1
+        )
         if live:
             frappe.throw(
-                _("This Cut Sheet is in use by {0}. Release those allocations first.")
-                .format(", ".join(live))
+                _("Material has already been transferred from this Cut Sheet by {0}. "
+                  "Cancel {1} first — that puts the batch's dimensions back — and then "
+                  "delete this sheet.")
+                .format(", ".join(live), _("it") if len(live) == 1 else _("them"))
             )
 
     # ── derived values ────────────────────────────────────────────────────────

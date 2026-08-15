@@ -12,6 +12,7 @@
   "drawing_number",
   "total_quantity",
   "total_weight",
+  "calculated_weight",
   "nature_of_work",
   "rate_schedule",
   "difference_kg",
@@ -63,27 +64,36 @@
    "label": "Total Quantity"
   },
   {
+   "allow_on_submit": 1,
+   "description": "Weight per Qty. To update the customer's weight after submission, use \"Update Customer Weight\" on the Drawing.",
    "fieldname": "total_weight",
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Customer Provided Weight (Kg)",
-   "allow_on_submit": 1,
-   "read_only_depends_on": "eval:doc.docstatus === 1",
-   "description": "Weight per Qty. To update the customer's weight after submission, use \"Update Customer Weight\" on the Drawing."
+   "read_only_depends_on": "eval:doc.docstatus === 1"
+  },
+  {
+   "description": "Auto calculated, never typed: the raw materials listed for this drawing add up to this. Compare it with Customer Provided Weight (Kg) -- the raw material is normally the heavier of the two, since the stock is cut down to the finished piece.",
+   "fieldname": "calculated_weight",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Calculated Weight (Kg)",
+   "precision": "3",
+   "read_only": 1
   },
   {
    "fieldname": "nature_of_work",
    "fieldtype": "Link",
+   "in_list_view": 0,
    "label": "Nature of Work",
-   "options": "Nature of Work",
-   "in_list_view": 0
+   "options": "Nature of Work"
   },
   {
    "fieldname": "rate_schedule",
    "fieldtype": "Link",
+   "in_list_view": 0,
    "label": "Rate Schedule",
-   "options": "Rate Schedule",
-   "in_list_view": 0
+   "options": "Rate Schedule"
   },
   {
    "fieldname": "difference_kg",

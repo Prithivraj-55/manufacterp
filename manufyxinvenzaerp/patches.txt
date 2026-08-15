@@ -10,4 +10,4 @@ manufyxinvenzaerp.patches.v1.remove_wo_transfer_fields
 manufyxinvenzaerp.patches.v1.backfill_payment_entry_created_flag
 manufyxinvenzaerp.patches.v1.rename_excess_batch_mapped_statuses
 manufyxinvenzaerp.patches.v1.backfill_drawing_rate_schedule_type
-
+manufyxinvenzaerp.patches.v1.backfill_duno_calculated_weight
