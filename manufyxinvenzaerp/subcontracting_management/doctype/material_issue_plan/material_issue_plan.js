@@ -683,64 +683,6 @@ function _show_mip_stock_validation(rows) {
 	dlg.show();
 }
 
-// What was measured in a line's excess panel, or null if it was never opened. Sent
-// with the transfer so the excess row is booked with the real off-cut rather than the
-// batch's standard dimensions -- see _log_round_up_excess.
-function _collect_excess_entry($row) {
-	var $panel = $row.next("tr.mip-excess-tr");
-	if (!$panel.length || !$panel.data("seeded")) return null;
-	var wh = $panel.data("wh_control");
-	var entry = {
-		length: flt($panel.find(".mip-ex-length").val()),
-		width: flt($panel.find(".mip-ex-width").val()),
-		sec_qty: flt($panel.find(".mip-ex-sec").val()),
-		return_warehouse: wh ? (wh.get_value() || "") : "",
-	};
-	// Nothing actually filled in -- let the server fall back to its placeholder.
-	if (!entry.length && !entry.width && !entry.sec_qty && !entry.return_warehouse) return null;
-	return entry;
-}
-
-
-// Show the excess panel for a line that has just gone over plan, seeded with the
-// surplus the server calculated: its piece count, the batch's own dimensions as a
-// starting shape, and the plan's raw-material warehouse as the destination. Seeded
-// once -- re-editing Sec Nos must not wipe out what the user has already measured.
-function _reveal_excess_row(frm, $row, d) {
-	var $panel = $row.next("tr.mip-excess-tr");
-	$row.find(".mip-excess-toggle").show();
-
-	if (!$panel.data("seeded")) {
-		$panel.data("seeded", true);
-		$panel.find(".mip-ex-length").val(flt(d.custom_length, 3) || "");
-		$panel.find(".mip-ex-width").val(flt(d.custom_width, 3) || "");
-		$panel.find(".mip-ex-sec").val(flt(d.round_up_excess_pieces, 3) || "");
-
-		// A real Link control, so the warehouse is picked rather than typed, and is
-		// restricted to leaf warehouses of this company like every other warehouse
-		// field on this form.
-		var wh = frappe.ui.form.make_control({
-			parent: $panel.find(".mip-ex-wh"),
-			df: {
-				fieldtype: "Link", options: "Warehouse", fieldname: "mip_ex_wh",
-				placeholder: __("Return Warehouse"),
-				get_query: function() {
-					return { filters: { company: frm.doc.company || "", is_group: 0 } };
-				},
-			},
-			render_input: true,
-		});
-		wh.$wrapper.find(".control-label, .help-box").hide();
-		wh.set_value(frm.doc.source_warehouse || "");
-		$panel.data("wh_control", wh);
-	}
-
-	$panel.find(".mip-ex-kg").text(format_number(flt(d.round_up_excess_kg), null, 3) + " Kg");
-	$panel.show();
-	$row.find(".mip-excess-toggle").text("▾ " + __("Excess details"));
-}
-
-
 // Weight of an off-cut from what was measured -- client-side twin of
 // utils/dimension_formula.calculate_qty, same as the Cut Sheet preview uses.
 function _excess_weight(d, L, W, S) {
@@ -753,32 +695,6 @@ function _excess_weight(d, L, W, S) {
 	}
 	return null;
 }
-
-// The collapsed panel under a transfer line. Rendered for every row but only revealed
-// once that line is sending more than planned -- see the toggle handler. Dimensions
-// describe the off-cut being sent back, which is why they are entered rather than
-// inferred: the system knows the weight of the surplus, not its shape.
-function _excess_row_html(idx) {
-	return "<tr class='mip-excess-tr' data-idx='" + idx + "' style='display:none;background:#fffbeb'>" +
-		"<td></td><td colspan='7' style='padding:10px 12px'>" +
-			"<div style='font-size:11px;color:#92400e;margin-bottom:6px'>" +
-				__("Measure the off-cut going back. Leave blank to record one standard piece of this batch.") +
-			"</div>" +
-			"<div style='display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end'>" +
-				"<div><label style='font-size:11px;margin-bottom:2px'>" + __("Length (mm)") + "</label>" +
-					"<input type='number' step='0.001' min='0' class='form-control input-xs mip-ex-length' style='width:110px'></div>" +
-				"<div><label style='font-size:11px;margin-bottom:2px'>" + __("Width (mm)") + "</label>" +
-					"<input type='number' step='0.001' min='0' class='form-control input-xs mip-ex-width' style='width:110px'></div>" +
-				"<div><label style='font-size:11px;margin-bottom:2px'>" + __("Sec Nos") + "</label>" +
-					"<input type='number' step='0.001' min='0' class='form-control input-xs mip-ex-sec' style='width:90px'></div>" +
-				"<div><label style='font-size:11px;margin-bottom:2px'>" + __("Return Warehouse") + "</label>" +
-					"<div class='mip-ex-wh' style='width:220px'></div></div>" +
-				"<div style='padding-bottom:4px'><span class='text-muted' style='font-size:11px'>" +
-					__("Excess") + ": </span><span class='mip-ex-kg' style='font-weight:600'>—</span></div>" +
-			"</div>" +
-		"</td></tr>";
-}
-
 
 function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 	var is_cnc_fwd = transfer_type === "cnc_forward";
@@ -887,7 +803,7 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 			var draft = r.message || {};
 			if (!Object.keys(draft).length) return;
 			var restored = 0;
-			$tbody.find("tr:not(.mip-excess-tr)").each(function() {
+			$tbody.find("tr").each(function() {
 				var $tr = $(this);
 				var d = items[parseInt($tr.data("idx"), 10)];
 				if (!d) return;
@@ -895,21 +811,11 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 				if (!saved) return;
 				restored++;
 				if (flt(saved.draft_sec_qty)) {
-					// Fire the normal change handler rather than writing the figures
-					// directly: it is what recalculates Kg and the surplus, and reveals
-					// the excess panel. Duplicating that here would be a second copy to
-					// keep in step.
+					// Fire the normal change handler rather than writing the figure
+					// directly: it is what recalculates Kg and the surplus. Duplicating
+					// that here would be a second copy to keep in step.
 					$tr.find(".mip-sec-qty").val(flt(saved.draft_sec_qty, 3)).trigger("change");
 				}
-				var $panel = $tr.next("tr.mip-excess-tr");
-				setTimeout(function() {
-					if (flt(saved.draft_excess_length)) $panel.find(".mip-ex-length").val(flt(saved.draft_excess_length, 3));
-					if (flt(saved.draft_excess_width)) $panel.find(".mip-ex-width").val(flt(saved.draft_excess_width, 3));
-					if (flt(saved.draft_excess_sec_qty)) $panel.find(".mip-ex-sec").val(flt(saved.draft_excess_sec_qty, 3));
-					var wh = $panel.data("wh_control");
-					if (wh && saved.draft_return_warehouse) wh.set_value(saved.draft_return_warehouse);
-					$panel.find(".mip-ex-length").trigger("change");
-				}, 600);
 			});
 			if (restored) {
 				frappe.show_alert({
@@ -962,9 +868,7 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 					  "<div class='text-muted' style='font-size:11px'>" +
 						flt(d._planned_sec_qty, 3) + " " + __("(Plan)") +
 						(is_frac ? " · " + __("or {0} whole", [Math.ceil(d._planned_sec_qty - 0.001)]) : "") +
-					  "</div>" +
-					  "<a class='mip-excess-toggle' href='#' style='font-size:11px;display:none'>▸ " +
-						__("Excess details") + "</a>"
+					  "</div>"
 					: "<span class='text-muted'>—</span>") +
 			"</td>" +
 			"<td class='text-right'>" +
@@ -976,34 +880,8 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 				"<div class='text-muted mip-qty-note' style='font-size:11px'>" +
 					__("pending {0}", [format_number(flt(d.qty), null, 3)]) + "</div>" +
 			"</td>" +
-			"</tr>" +
-			_excess_row_html(idx)
+			"</tr>"
 		);
-	});
-
-	// Expandable excess row, one per line, revealed only once that line is actually
-	// sending more than was planned -- rounding Sec Nos up to whole pieces is the normal
-	// way a transfer is made, so a difference is expected rather than exceptional. Kept
-	// collapsed until then so the table stays readable: most rows never need it, and the
-	// ones that do are exactly the ones showing a difference.
-	$tbody.on("click", ".mip-excess-toggle", function() {
-		var $btn = $(this);
-		var $panel = $btn.closest("tr").next("tr.mip-excess-tr");
-		var open = $panel.is(":visible");
-		$panel.toggle(!open);
-		$btn.text(open ? "▸ " + __("Excess details") : "▾ " + __("Excess details"));
-	});
-
-	// Live Kg preview from whatever has been measured, so the figure being booked is
-	// visible before the transfer rather than after.
-	$tbody.on("change", ".mip-ex-length, .mip-ex-width, .mip-ex-sec", function() {
-		var $row = $(this).closest("tr.mip-excess-tr");
-		var d = items[parseInt($row.data("idx"), 10)];
-		var L = flt($row.find(".mip-ex-length").val());
-		var W = flt($row.find(".mip-ex-width").val());
-		var S = flt($row.find(".mip-ex-sec").val());
-		var kg = _excess_weight(d, L, W, S);
-		$row.find(".mip-ex-kg").text(kg === null ? __("—") : format_number(kg, null, 3) + " Kg");
 	});
 
 	// Only reachable on rows where Sec Nos cannot drive the weight (see above), so
@@ -1088,11 +966,6 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 						message: __("{0} Kg extra will be issued and recorded as excess to return.", [flt(m.round_up_excess_kg, 3)]),
 						indicator: "orange",
 					}, 6);
-					_reveal_excess_row(frm, $row, d);
-				} else {
-					// Edited back to the plan -- no surplus, so nothing to measure.
-					$row.find(".mip-excess-toggle").hide();
-					$row.next("tr.mip-excess-tr").hide();
 				}
 				// The numbers on screen are no longer the ones this popup opened
 				// with, so the button says what actually happens next: stock is
@@ -1104,20 +977,9 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 
 	function _apply_filters() {
 		var item_q = item_search.getValue().toLowerCase();
-		// Only the item rows carry data-item; their excess panel follows whatever the
-		// line it belongs to does, and stays collapsed if it was collapsed. Iterating
-		// every tr indiscriminately would read data-item off the panels too, which is
-		// undefined -- a filter keystroke would throw before this row existed.
-		$tbody.find("tr:not(.mip-excess-tr)").each(function() {
+		$tbody.find("tr").each(function() {
 			var $row = $(this);
-			var matches = !item_q || String($row.data("item") || "").toLowerCase().includes(item_q);
-			$row.toggle(matches);
-			var $panel = $row.next("tr.mip-excess-tr");
-			if (!matches) {
-				$panel.hide();
-			} else if ($row.find(".mip-excess-toggle").text().charAt(0) === "▾") {
-				$panel.show();
-			}
+			$row.toggle(!item_q || String($row.data("item") || "").toLowerCase().includes(item_q));
 		});
 	}
 	item_search.$el.on("mip:filter", _apply_filters);
@@ -1191,7 +1053,7 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 		// when Transfer is pressed.
 		secondary_action: function() {
 			var draft = [];
-			$tbody.find("tr:not(.mip-excess-tr)").each(function() {
+			$tbody.find("tr").each(function() {
 				var $tr = $(this);
 				var d = items[parseInt($tr.data("idx"), 10)];
 				if (!d) return;
@@ -1200,7 +1062,6 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 					batch_no: d.batch_no || "",
 					cnc_process: d.cnc_process ? 1 : 0,
 					custom_sec_qty: flt($tr.find(".mip-sec-qty").val()) || flt(d.custom_sec_qty),
-					excess_entry: _collect_excess_entry($tr),
 				});
 			});
 			frappe.call({
@@ -1223,9 +1084,6 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 			var selected = [];
 			$tbody.find("tr").each(function() {
 				var $tr = $(this);
-				// The excess panels are rows in the same tbody -- skip them, they are
-				// read via _collect_excess_entry from their own line below.
-				if ($tr.hasClass("mip-excess-tr")) return;
 				if (!$tr.find(".mip-item-chk").prop("checked")) return;
 				var d = items[parseInt($tr.data("idx"), 10)];
 				// Send whatever is in the Qty box, not the full pending figure --
@@ -1233,7 +1091,6 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 				var qty = flt($tr.find(".mip-qty").val());
 				selected.push($.extend({}, d, {
 					qty: qty > 0 ? qty : flt(d.qty),
-					excess_entry: _collect_excess_entry($tr),
 				}));
 			});
 			if (!selected.length) {

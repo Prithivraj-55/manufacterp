@@ -610,22 +610,63 @@ def on_cancel_stock_entry(doc, method):
 		_refresh_linked_mip_weight(wo_ref=doc.custom_wo_ref)
 
 
+def _cancelled_row_batch_no(row, voucher_no):
+	"""The batch a Stock Entry row moved, found even after cancellation.
+
+	on_cancel runs AFTER ERPNext has cleared batch_no and unlinked the Serial and
+	Batch Bundle from every row, so reading row.batch_no there matches nothing --
+	which is why the reduction done on submit was never reversed. Batches were
+	left holding every kilo they were received with and no Sec Nos at all, and a
+	Sec Nos of zero cannot drive a transfer: the Material Issue Plan popup shows
+	a dash and falls back to an editable Kg box. Three batches on this site were
+	in that state, each reduced to exactly the figure its receipt line carried.
+
+	The Bundle document survives cancellation and still names the row it belonged
+	to, so it is what this reads. row.batch_no is still tried first: on the submit
+	path it is set, and this same helper serves both so the two can never look at
+	different batches.
+	"""
+	if row.get("batch_no"):
+		return row.batch_no
+	if row.get("serial_and_batch_bundle"):
+		found = frappe.db.get_value(
+			"Serial and Batch Entry", {"parent": row.serial_and_batch_bundle}, "batch_no"
+		)
+		if found:
+			return found
+	found = frappe.db.sql(
+		"""
+		SELECT sbe.batch_no
+		FROM `tabSerial and Batch Bundle` sbb
+		JOIN `tabSerial and Batch Entry` sbe ON sbe.parent = sbb.name
+		WHERE sbb.voucher_type = 'Stock Entry'
+		  AND sbb.voucher_no = %s
+		  AND sbb.voucher_detail_no = %s
+		LIMIT 1
+		""",
+		(voucher_no, row.name),
+	)
+	return found[0][0] if found else None
+
+
 def _restore_batch_sec_qty(doc):
-	"""Reverse the custom_sec_qty reduction done on submit, mirroring on_submit_stock_entry."""
+	"""Reverse the custom_sec_qty reduction done on submit, mirroring on_submit_stock_entry.
+
+	The batch is resolved through _cancelled_row_batch_no rather than read off the
+	row: by the time this runs the row no longer says which batch it moved."""
 	if doc.stock_entry_type == "Material Issue":
 		for row in doc.items:
-			if row.batch_no and flt(row.get("custom_sec_qty")):
-				_reduce_batch_sec_qty(row.batch_no, -flt(row.custom_sec_qty))
+			batch_no = _cancelled_row_batch_no(row, doc.name)
+			if batch_no and flt(row.get("custom_sec_qty")):
+				_reduce_batch_sec_qty(batch_no, -flt(row.custom_sec_qty))
 
 	elif doc.stock_entry_type in ("Repack", "Manufacture"):
 		for row in doc.items:
-			if (
-				row.s_warehouse
-				and not row.is_finished_item
-				and row.batch_no
-				and flt(row.get("custom_sec_qty"))
-			):
-				_reduce_batch_sec_qty(row.batch_no, -flt(row.custom_sec_qty))
+			if not (row.s_warehouse and not row.is_finished_item):
+				continue
+			batch_no = _cancelled_row_batch_no(row, doc.name)
+			if batch_no and flt(row.get("custom_sec_qty")):
+				_reduce_batch_sec_qty(batch_no, -flt(row.custom_sec_qty))
 
 
 def _restore_material_planning_reservations(doc):
