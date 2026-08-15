@@ -106,20 +106,50 @@ const ERP_MANUAL_SALES_ORDER_CHILDREN = [
 		purpose:
 			"Checks everything staged from the sheet and refuses to pass until it is right. This is " +
 			"deliberately strict: a bad row here becomes a bad Drawing, a bad BOM, and a wrong " +
-			"requirement in Material Planning, and by then it is far harder to see where it came from.",
+			"requirement in Material Planning, and by then it is far harder to see where it came from. " +
+			"The full list of what it checks is below — everything the weight formula reads, whether " +
+			"the value is absent when it is needed or present when it is not.",
 		fields: [
-			{ name: "Material Code", note: "Must exist in the Item master. A typo here is the most common failure." },
+			{ name: "Material Code", note: "Present on the row, and exists in the Item master. A typo here is the most common failure." },
+			{ name: "Parent Item Group", note: "The Item master must say <b>Structurals</b>, <b>Plates</b> or <b>Nuts and Bolts</b>. Any other value — or none — means no weight can be calculated, so the row is rejected rather than staged weighing zero. It must also still match what the row was staged with: if the Item was re-grouped after the upload, you are told to load the sheet again." },
+			{ name: "Unit Weight", note: "Must be set on the Item master. It is not in the sheet — it comes from the Item — and without it the formula produces nothing." },
+			{ name: "Dimensions the formula needs", note: "<b>Structurals:</b> Length. <b>Plates:</b> Length, Width and Thickness. <b>Nuts and Bolts:</b> none. Missing any of them is reported against the drawing and Item No it came from." },
+			{ name: "Dimensions the formula does not use", note: "A value here is reported too. A Structural's weight is Length × Unit Weight × Sec Qty — Thickness and Width take no part — and a bolt uses no dimension at all. Anything typed into an unused column is not harmless: it is carried into the Drawing, the BOM and Material Planning as a real requirement that the delivered material can never match." },
+			{ name: "Reqd Raw Material Qty", note: "Must be more than zero, for every group. This is the Sec Qty (pieces) the formula multiplies by — a blank column produces a row weighing nothing." },
+			{ name: "Calculated weight", note: "The last check: the row's Kg is recalculated from its current dimensions and the Item master's Unit Weight. Zero is refused, and a figure that no longer agrees with what was staged means the Item master changed after the upload — load the sheet again." },
 			{ name: "Nature of Work", note: "Must already exist in the Nature of Work master. Checked by name exactly as typed." },
 			{ name: "Rate Schedule", note: "Must already exist in the Rate Schedule master — e.g. RS- O/S-001 A. Checked by name; there is no format rule, so your numbering can change freely." },
-			{ name: "Dimensions", note: "Plates need Thickness, Width and Length. Structurals need Length. Both need a Unit Weight on the Item master, or no Kg can be calculated." },
+			{ name: "FG Item", note: "Every drawing needs one, and it must exist in the Item master." },
+			{ name: "DUNO/Mark No", note: "Must be filled in on each drawing." },
+			{ name: "Total Qty", note: "Must be more than zero. A blank is otherwise read as one piece, and every total on the drawing would be calculated for a single unit." },
+			{ name: "Rows per drawing", note: "A drawing staged with no raw-material rows at all is reported by name." },
+		],
+		examples: [
+			{
+				type: "dont",
+				label: "ISMB250 with a Thickness of 10",
+				text: "A beam is a Structural — its weight is Length × Unit Weight × Sec Qty, so it has no Thickness to give. " +
+					"One line of a 100-row sheet had 10 typed into the Thickness column. The weight was still correct, " +
+					"so nothing looked wrong: the 10 travelled into the Drawing, the BOM and Material Planning as part of " +
+					"the requirement, and when the beam was received with no thickness it could not be matched to it. " +
+					"<b>Now reported at this step</b>, naming the drawing, the Item No and the column to clear.",
+			},
+			{
+				type: "do",
+				label: "The same row, correct",
+				text: "Material Code ISMB250, Length 879.1, Thickness and Width left empty, Reqd Raw Material Qty 1, " +
+					"and a Unit Weight of 37.3 on the Item master. 879.1 / 1000 × 37.3 × 1 = <b>32.79 Kg</b>.",
+			},
 		],
 		notes: [
 			"<b>It blocks, it does not warn.</b> Anything reported has to be corrected in the sheet (or the master record created) before the flow can continue. Correct the sheet, Clear Items, Load Items again, and re-verify.",
+			"<b>Load Items warns about unused columns too</b>, as soon as the sheet is read, so you can see it against the file still in front of you. Only this step blocks.",
 			"<b>Why unknown values still reach this screen.</b> The importer stages rows with a direct insert that skips link checking, on purpose — so a wrong Rate Schedule lands in the table and can be reported <i>against the drawing it came from</i>. Rejecting during the upload would abort the whole file over one cell and tell you nothing about where it was.",
+			"<b>Rows whose Drawing already exists are not re-checked.</b> They are locked at that point and the check skips them, so correcting the sheet for a later drawing can never fail an order that is already part-built.",
 			"<b>Blank is allowed</b> for Nature of Work and Rate Schedule. Neither is mandatory on a Drawing, and older imports predate both columns.",
 		],
 		buttons: [
-			{ name: "Verify Raw Materials", note: "Runs the check. Passing sets the order's verified flag; failing lists every problem row with its drawing." },
+			{ name: "Verify Raw Materials", note: "Runs every check above. Passing sets the order's verified flag; failing lists each problem with the drawing, Material Code and Item No it belongs to." },
 		],
 	},
 	{
