@@ -68,19 +68,11 @@ def run():
           "positive = extra, negative = missing" in js, True)
 
     print()
-    print("=== the popup carries the client's supplied palette ===")
-    palette = {
-        "#0F2D1E": "page / modal background",
-        "#1B4332": "tab unselected",
-        "#22C55E": "tab selected",
-        "#064E3B": "info / summary",
-        "#14532D": "table background",
-        "#2F6F4F": "borders / dividers",
-        "#F0FDF4": "primary text",
-        "#BBF7D0": "secondary text",
-    }
-    for colour, role in palette.items():
-        check("%s (%s)" % (colour, role), colour in js, True)
+    print("=== the popup stays light; only the tabs carry colour ===")
+    for dark in ("#0F2D1E", "#14532D", "#064E3B", "#BBF7D0", "#F0FDF4"):
+        check("%s not used" % dark, dark in js, False)
+    check("tab colour kept", "#65a30d" in js, True)
+    check("active tab and pane share a colour", js.count("#ecfccb") >= 2, True)
     check("scoped so no other dialog is touched", ".mip-transfer-theme" in js, True)
     check("injected once, not per open", "mip-transfer-theme-css" in js, True)
     check("the tabs are spaced apart", "margin-right:14px" in js, True)

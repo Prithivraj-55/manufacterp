@@ -698,65 +698,28 @@ function _excess_weight(d, L, W, S) {
 
 // ── Transfer popup theme ──────────────────────────────────────────────────────
 //
-// The client supplied the palette; these are their values, not invented ones.
-// Everything is scoped to .mip-transfer-theme so no other dialog in the desk is
-// touched, and the few !important flags exist because the markup underneath
-// carries its own inline colours from when the popup was light.
+// Light, like the rest of the desk: the popup is read for a long time while
+// figures are checked row by row, and a dark panel was tiring for that. Only the
+// tabs carry colour, in the client's green, so the two panes stay told apart at a
+// glance without the whole dialog going dark.
+//
+// Scoped to .mip-transfer-theme so no other dialog in the desk is touched.
 var MIP_THEME_CSS = `
-.mip-transfer-theme .modal-content { background:#0F2D1E; color:#F0FDF4; border:1px solid #2F6F4F; }
-.mip-transfer-theme .modal-header,
-.mip-transfer-theme .modal-footer { background:#0F2D1E; border-color:#2F6F4F; }
-.mip-transfer-theme .modal-title { color:#F0FDF4; font-weight:600; }
-.mip-transfer-theme .modal-body { background:#0F2D1E; color:#F0FDF4; }
-.mip-transfer-theme .modal-header .btn-modal-close .icon,
-.mip-transfer-theme .modal-header .icon { stroke:#BBF7D0; fill:none; }
-
 .mip-transfer-theme .mip-tab {
 	display:inline-block; padding:9px 22px; margin-right:14px; cursor:pointer;
 	font-size:12px; font-weight:600; border-radius:8px 8px 0 0; position:relative; top:1px;
-	background:#1B4332; color:#BBF7D0; border:1px solid #2F6F4F; border-bottom:none;
+	background:#65a30d; color:#f7fee7; border:1px solid #65a30d; border-bottom:none;
 	text-decoration:none;
 }
-.mip-transfer-theme .mip-tab:hover { color:#F0FDF4; text-decoration:none; }
-.mip-transfer-theme .mip-tab.active { background:#22C55E; color:#0F2D1E; border-color:#22C55E; }
-
+.mip-transfer-theme .mip-tab:hover { background:#4d7c0f; color:#ffffff; text-decoration:none; }
+.mip-transfer-theme .mip-tab.active {
+	background:#ecfccb; color:#365314; border-color:#d9f99d; border-bottom:1px solid #ecfccb;
+}
 .mip-transfer-theme .mip-pane {
-	background:#14532D; border:1px solid #2F6F4F; border-radius:0 10px 10px 10px; padding:14px;
+	background:#ecfccb; border:1px solid #d9f99d; border-radius:0 10px 10px 10px; padding:14px;
 }
-.mip-transfer-theme .mip-summary {
-	background:#064E3B !important; border:1px solid #2F6F4F !important;
-	color:#F0FDF4 !important; border-radius:8px !important;
-}
-.mip-transfer-theme .mip-summary b { color:#F0FDF4; }
-.mip-transfer-theme .mip-summary a { color:#BBF7D0; }
-
-.mip-transfer-theme table { color:#F0FDF4; }
-.mip-transfer-theme table thead th {
-	background:#064E3B !important; color:#F0FDF4 !important; border-color:#2F6F4F !important;
-}
-.mip-transfer-theme table thead th .text-muted { color:#BBF7D0 !important; }
-.mip-transfer-theme table tbody td {
-	background:#14532D !important; border-color:#2F6F4F !important; color:#F0FDF4;
-}
-.mip-transfer-theme table tbody tr:hover td { background:#1B4332 !important; }
-.mip-transfer-theme .text-muted { color:#BBF7D0 !important; }
-
-.mip-transfer-theme .form-control,
-.mip-transfer-theme input[type="number"], .mip-transfer-theme input[type="text"] {
-	background:#FFFFFF; color:#0F2D1E; border:1px solid #2F6F4F; border-radius:6px;
-}
-.mip-transfer-theme .form-control::placeholder { color:#6b7280; }
-.mip-transfer-theme .btn-default {
-	background:#1B4332; color:#F0FDF4; border:1px solid #2F6F4F;
-}
-.mip-transfer-theme .btn-default:hover { background:#2F6F4F; color:#F0FDF4; }
-.mip-transfer-theme .btn-primary {
-	background:#22C55E; color:#0F2D1E; border-color:#22C55E; font-weight:600;
-}
-.mip-transfer-theme .btn-primary:hover { background:#16a34a; color:#0F2D1E; }
-.mip-transfer-theme .awesomplete > ul { background:#14532D; color:#F0FDF4; border-color:#2F6F4F; }
-.mip-transfer-theme .awesomplete > ul > li:hover,
-.mip-transfer-theme .awesomplete > ul > li[aria-selected="true"] { background:#1B4332; color:#F0FDF4; }
+.mip-transfer-theme .mip-pane table tbody td { background:#ffffff; }
+.mip-transfer-theme .mip-pane table thead th { background:#f4f5f7; }
 `;
 
 function _mip_inject_theme() {
@@ -1189,14 +1152,14 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 		var by_item = _collect_excess_plan_state();
 		var codes = Object.keys(by_item).sort();
 		if (!codes.length) {
-			$pane_excess.html("<div style='padding:20px 4px;color:#BBF7D0'>" +
+			$pane_excess.html("<div class='text-muted' style='padding:20px 4px'>" +
 				__("Tick the materials to transfer on the first tab. Whatever is selected there is consolidated here, one line per item.") +
 				"</div>");
 			return;
 		}
 
-		var th = "white-space:nowrap;padding:6px 8px;font-weight:600;font-size:11px;";
-		var html = "<div style='font-size:12px;color:#BBF7D0;margin-bottom:10px'>" +
+		var th = "white-space:nowrap;padding:6px 8px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;";
+		var html = "<div style='font-size:12px;color:#475569;margin-bottom:10px'>" +
 			__("One line per item, with no batch reference: an off-cut comes back as one shape however many batches it was drawn from.") +
 			"<br><b>" + __("Excess Kg (system)") + "</b> = " + __("Planned transfer weight − Planned drawing weight") +
 			" &nbsp;·&nbsp; <b>" + __("Difference") + "</b> = " + __("Excess Kg (entered) − Excess Kg (system)") +
@@ -1276,9 +1239,7 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 		$row.find(".mip-xs-diff")
 			.text((diff > 0 ? "+" : "") + format_number(diff, null, 3))
 			.attr("title", diff > 0 ? __("extra beyond the transfer") : diff < 0 ? __("missing") : "")
-			// Readable on the dark panel: green when it reconciles, blue for extra,
-			// red for missing.
-			.css("color", Math.abs(diff) < 0.001 ? "#4ADE80" : diff > 0 ? "#93C5FD" : "#FCA5A5");
+			.css("color", Math.abs(diff) < 0.001 ? "#15803d" : diff > 0 ? "#1d4ed8" : "#b91c1c");
 	}
 
 	var dlg = new frappe.ui.Dialog({
