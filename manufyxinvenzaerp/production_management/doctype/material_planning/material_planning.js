@@ -2852,6 +2852,8 @@ const _TABLE_VIEW_CONFIG = {
 			{ fieldname: "sales_order",       label: "Sales Order" },
 			{ fieldname: "item_code",         label: "Item Code" },
 			{ fieldname: "item_name",         label: "Item Name" },
+			{ fieldname: "duno_mark_no",            label: "DUNO/Mark No" },
+			{ fieldname: "customer_drawing_number", label: "Cust Drawing Number" },
 			{ fieldname: "batch_no",          label: "Batch No" },
 			{ fieldname: "parent_item_group", label: "Item Group" },
 			{ fieldname: "length",            label: "Length (mm)" },
@@ -2875,6 +2877,8 @@ const _TABLE_VIEW_CONFIG = {
 			{ fieldname: "sales_order",       label: "Sales Order" },
 			{ fieldname: "item_code",         label: "Item Code" },
 			{ fieldname: "item_name",         label: "Item Name" },
+			{ fieldname: "duno_mark_no",            label: "DUNO/Mark No" },
+			{ fieldname: "customer_drawing_number", label: "Cust Drawing Number" },
 			{ fieldname: "qty",               label: "Req Qty" },
 			{ fieldname: "uom",               label: "UOM" },
 			{ fieldname: "parent_item_group", label: "Item Group" },
@@ -2899,6 +2903,8 @@ const _TABLE_VIEW_CONFIG = {
 			{ fieldname: "sales_order",        label: "Sales Order" },
 			{ fieldname: "item_code",          label: "Item Code" },
 			{ fieldname: "item_name",          label: "Item Name" },
+			{ fieldname: "duno_mark_no",             label: "DUNO/Mark No" },
+			{ fieldname: "customer_drawing_number",  label: "Cust Drawing Number" },
 			{ fieldname: "qty",                label: "Required Qty" },
 			{ fieldname: "uom",                label: "UOM" },
 			{ fieldname: "parent_item_group",  label: "Item Group" },
@@ -2913,6 +2919,16 @@ const _TABLE_VIEW_CONFIG = {
 		],
 	},
 };
+
+// Filters offered above every View All popup. Shared by all four tables: which
+// ones actually appear is decided per table from the rows themselves, so a table
+// that does not carry a field never shows a box for it.
+const _VIEW_FILTERS = [
+	{ fieldname: "item_code",               placeholder: "Filter Item Code…",           width: 150 },
+	{ fieldname: "item_name",               placeholder: "Filter Item Name…",           width: 160 },
+	{ fieldname: "duno_mark_no",            placeholder: "Filter DUNO/Mark No…",        width: 180 },
+	{ fieldname: "customer_drawing_number", placeholder: "Filter Cust Drawing Number…", width: 200 },
+];
 
 // Generic View All popup — read-only, all configured columns, scrollable
 function _show_table_popup(frm, fieldname) {
@@ -2941,12 +2957,20 @@ function _show_table_popup(frm, fieldname) {
 		}).join("");
 	}
 
-	let filter_bar = `<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">
-		<input id="_vw_duno" type="text" placeholder="${__("Filter DUNO/Mark No…")}"
-			style="border:1px solid #d1d8dd;border-radius:4px;padding:4px 8px;font-size:12px;width:180px;">
-		<input id="_vw_cdn" type="text" placeholder="${__("Filter Cust Drawing Number…")}"
-			style="border:1px solid #d1d8dd;border-radius:4px;padding:4px 8px;font-size:12px;width:200px;">
+	// Only offer a filter the table can actually answer. Every popup shares this
+	// list, but the tables do not all carry every field -- Available Raw
+	// Materials has no drawing number, for one -- and a box that can only ever
+	// return nothing is worse than no box at all.
+	let active_filters = _VIEW_FILTERS.filter(f =>
+		rows.some(r => r[f.fieldname] !== undefined && r[f.fieldname] !== null && r[f.fieldname] !== "")
+	);
+
+	let input_style = "border:1px solid #d1d8dd;border-radius:4px;padding:4px 8px;font-size:12px;";
+	let filter_bar = `<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;flex-wrap:wrap;">
+		${active_filters.map(f => `<input type="text" class="_vw_filter" data-fieldname="${f.fieldname}"
+			placeholder="${__(f.placeholder)}" style="${input_style}width:${f.width}px;">`).join("")}
 		<span id="_vw_count" style="font-size:12px;color:#6c757d;"></span>
+		<button class="btn btn-xs btn-default" id="_vw_clear" style="font-size:11px;">${__("Clear")}</button>
 	</div>`;
 
 	let table_html = `<div style="overflow:auto;max-height:65vh;">
@@ -2963,17 +2987,27 @@ function _show_table_popup(frm, fieldname) {
 	d.$body.html(filter_bar + table_html);
 
 	function _apply_filter() {
-		let duno_q = (d.$body.find("#_vw_duno").val() || "").toLowerCase();
-		let cdn_q  = (d.$body.find("#_vw_cdn").val() || "").toLowerCase();
-		let filtered = rows.filter(function(r) {
-			let duno_ok = !duno_q || String(r.duno_mark_no || "").toLowerCase().includes(duno_q);
-			let cdn_ok  = !cdn_q  || String(r.customer_drawing_number || "").toLowerCase().includes(cdn_q);
-			return duno_ok && cdn_ok;
+		// Every box that has something typed in it must match — narrowing by item
+		// code AND mark number is the whole point of having more than one.
+		let queries = [];
+		d.$body.find("._vw_filter").each(function() {
+			let q = (this.value || "").trim().toLowerCase();
+			if (q) queries.push([this.dataset.fieldname, q]);
 		});
+		let filtered = queries.length ? rows.filter(function(r) {
+			return queries.every(([fieldname, q]) =>
+				String(r[fieldname] === null || r[fieldname] === undefined ? "" : r[fieldname])
+					.toLowerCase().includes(q)
+			);
+		}) : rows;
 		d.$body.find("#_vw_tbody").html(_render_tbody(filtered));
 		d.$body.find("#_vw_count").text(filtered.length + " / " + rows.length + " " + __("rows"));
 	}
-	d.$body.find("#_vw_duno, #_vw_cdn").on("input", _apply_filter);
+	d.$body.find("._vw_filter").on("input", _apply_filter);
+	d.$body.find("#_vw_clear").on("click", function() {
+		d.$body.find("._vw_filter").val("");
+		_apply_filter();
+	});
 	_apply_filter();
 	d.show();
 }
