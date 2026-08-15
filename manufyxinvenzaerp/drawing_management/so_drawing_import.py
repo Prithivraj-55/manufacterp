@@ -251,12 +251,30 @@ def parse_bom_excel(so_name):
     now = frappe_now()
     user = frappe.session.user
 
+    # --- Weight of the raw materials listed under each drawing ---
+    # Filled at import so the Drawing List shows it beside the customer's own
+    # figure straight after Load Items, without waiting for a save. Kept in step
+    # afterwards by sales_order.recalculate_raw_material_qty, which recomputes it
+    # from the rows on every save.
+    calc_weight_by_cdn = {}
+    for cdn, d in new_drawings.items():
+        total = 0.0
+        for item in d["items"]:
+            idata = item_data_map.get(item["material_code"]) or frappe._dict()
+            total += flt(_calc_qty(
+                (idata.get("custom_parent_item_group") or "").strip(),
+                item["length"], item["width"], item["thickness"],
+                flt(idata.get("custom_unit_weight") or 0), flt(item["sec_qty"]),
+            ))
+        calc_weight_by_cdn[cdn] = flt(total, 3)
+
     # --- Build Table 1 (Drawing List) insert values ---
     t1_fields = [
         "name", "parent", "parenttype", "parentfield", "idx",
         "creation", "modified", "modified_by", "owner", "docstatus",
         "assembly_group", "item", "item_name", "duno_mark_no", "drawing_number",
-        "total_quantity", "total_weight", "nature_of_work", "rate_schedule",
+        "total_quantity", "total_weight", "calculated_weight",
+        "nature_of_work", "rate_schedule",
         "create_drawing", "submit_drawing", "mark_final_revision", "create_bom",
     ]
     t1_values = []
@@ -268,7 +286,7 @@ def parse_bom_excel(so_name):
             now, now, user, user, 0,
             d["assembly_group"], fg, fg_name_map.get(fg, ""),
             d["duno_mark_no"], cdn,
-            d["total_quantity"], d["total_weight"],
+            d["total_quantity"], d["total_weight"], calc_weight_by_cdn.get(cdn, 0.0),
             d.get("nature_of_work") or "", d.get("rate_schedule") or "",
             1, 1, 1, 1,
         ))

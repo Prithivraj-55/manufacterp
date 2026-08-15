@@ -554,6 +554,7 @@ frappe.ui.form.on("Sales Order", {
 		_so_render_rm_verify_btn(frm);
 		_so_render_drawing_buttons(frm);
 		_so_render_duno_view_all_btn(frm);
+		_so_render_bom_summary(frm);
 	},
 	custom_bom_excel_file(frm) {
 		_so_render_file_buttons(frm);
@@ -610,6 +611,93 @@ function _so_calc_rm_qty(frm, cdt, cdn) {
 	frappe.model.set_value(cdt, cdn, "qty", flt(qty, 3));
 	frappe.model.set_value(cdt, cdn, "total_sec_qty", flt(sq * tq, 3));
 	frappe.model.set_value(cdt, cdn, "total_weight", flt(qty * tq, 3));
+	_so_roll_up_drawing_weight(frm, cdn_val);
+	_so_render_bom_summary(frm);
+}
+
+// Keep the drawing's Calculated Weight in step with its rows as they are edited.
+// The server recomputes the same total on save (sales_order.recalculate_raw_material_qty);
+// this is only so the grid does not sit showing a figure the rows no longer add up to.
+function _so_roll_up_drawing_weight(frm, drawing_number) {
+	if (!drawing_number) return;
+	var dr = (frm.doc.custom_duno_items || []).find(function(r) {
+		return r.drawing_number === drawing_number;
+	});
+	if (!dr) return;
+	var total = (frm.doc.custom_so_raw_materials || []).reduce(function(sum, r) {
+		return r.customer_drawing_number === drawing_number ? sum + flt(r.qty) : sum;
+	}, 0);
+	frappe.model.set_value(dr.doctype, dr.name, "calculated_weight", flt(total, 3));
+}
+
+// ── Summary of the loaded sheet, beside the file ──────────────────────────
+//
+// Customer weight is typed in from the sheet and describes the FINISHED piece.
+// Calculated weight is never typed -- it is what the raw materials listed under
+// the drawing add up to. Raw material above finished weight is the normal case
+// (stock is cut down to the part); a drawing that comes out UNDER is the one
+// worth looking at, so it is called out by name rather than buried in a total.
+
+function _so_render_bom_summary(frm) {
+	var fd = frm.fields_dict["custom_bom_summary_html"];
+	if (!fd) return;
+	var $w = fd.$wrapper;
+	$w.empty();
+	if (frm.doc.__islocal || frm.doc.docstatus === 2) return;
+
+	var duno = frm.doc.custom_duno_items || [];
+	var rows = frm.doc.custom_so_raw_materials || [];
+	if (!duno.length && !rows.length) return;
+
+	var created = duno.filter(function(r) { return !!r.drawing; }).length;
+
+	var by_group = {};
+	rows.forEach(function(r) {
+		var g = (r.parent_item_group || __("Ungrouped")).trim();
+		by_group[g] = (by_group[g] || 0) + 1;
+	});
+	var group_text = Object.keys(by_group).sort().map(function(g) {
+		return by_group[g] + " " + g;
+	}).join(" · ") || "—";
+
+	var customer = 0, calculated = 0, under = [];
+	duno.forEach(function(d) {
+		var c = flt(d.total_weight), k = flt(d.calculated_weight);
+		customer += c;
+		calculated += k;
+		if (c > 0 && k > 0 && k < c) under.push(d.duno_mark_no || d.drawing_number);
+	});
+	var diff = calculated - customer;
+	var pct = customer ? (diff / customer) * 100 : 0;
+
+	function row(label, value, color) {
+		return '<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0">' +
+			'<span style="color:var(--text-muted)">' + label + '</span>' +
+			'<span style="font-weight:600' + (color ? ";color:" + color : "") + '">' + value + '</span></div>';
+	}
+
+	var verified = !!frm.doc.custom_raw_materials_verified;
+	var html = '<div style="border:1px solid var(--border-color);border-radius:6px;padding:10px 12px;font-size:12px">' +
+		'<div style="font-weight:700;margin-bottom:6px">' + __("Loaded Sheet") + '</div>' +
+		row(__("Drawings"), duno.length + (created ? " (" + created + " " + __("created") + ")" : "")) +
+		row(__("Raw material rows"), rows.length) +
+		row(__("By group"), group_text) +
+		'<hr style="margin:8px 0;border-top:1px solid var(--border-color)">' +
+		row(__("Customer weight"), format_number(customer, null, 2) + " Kg") +
+		row(__("Calculated weight"), format_number(calculated, null, 2) + " Kg") +
+		row(__("Difference"), (diff >= 0 ? "+" : "") + format_number(diff, null, 2) + " Kg (" +
+			(pct >= 0 ? "+" : "") + format_number(pct, null, 1) + "%)") +
+		row(__("Below customer weight"),
+			under.length ? under.join(", ") : __("None"),
+			under.length ? "var(--red-500)" : "var(--green-600)") +
+		'<hr style="margin:8px 0;border-top:1px solid var(--border-color)">' +
+		row(__("Raw materials"), verified ? __("Verified") : __("Not verified"),
+			verified ? "var(--green-600)" : "var(--orange-500)") +
+		'<div style="color:var(--text-muted);margin-top:8px;line-height:1.5">' +
+			__("Customer weight is the finished weight typed in the sheet. Calculated weight is what the raw materials listed under each drawing add up to — normally the heavier of the two, since stock is cut down to the part.") +
+		'</div></div>';
+
+	$w.html(html);
 }
 
 // ── Verify Raw Materials button above the RM table ────────────────────────
@@ -651,6 +739,7 @@ function _so_reset_verification(frm) {
 	if (frm.doc.custom_raw_materials_verified) {
 		frm.doc.custom_raw_materials_verified = 0;
 		_so_render_rm_verify_btn(frm);
+		_so_render_bom_summary(frm);
 	}
 }
 
@@ -668,6 +757,7 @@ function _so_verify_rm(frm) {
 				if (res.modified) { frm.doc.modified = res.modified; }
 				frm.doc.custom_raw_materials_verified = res.verified ? 1 : 0;
 				_so_render_rm_verify_btn(frm);
+				_so_render_bom_summary(frm);
 				if (res.verified) {
 					frappe.show_alert({ message: __("All raw materials verified!"), indicator: "green" }, 5);
 				} else {
@@ -2422,6 +2512,20 @@ def create_so_custom_fields():
                     "fieldtype": "HTML",
                     "label": "BOM Actions",
                     "insert_after": "custom_bom_excel_file",
+                },
+                # Summary of what was loaded, beside the file it came from. Read
+                # straight off the staged rows in the browser -- no server call,
+                # so it follows an edit in the grid immediately.
+                {
+                    "fieldname": "custom_bom_summary_col",
+                    "fieldtype": "Column Break",
+                    "insert_after": "custom_bom_action_btns",
+                },
+                {
+                    "fieldname": "custom_bom_summary_html",
+                    "fieldtype": "HTML",
+                    "label": "Loaded Sheet Summary",
+                    "insert_after": "custom_bom_summary_col",
                 },
                 {
                     "fieldname": "custom_drawing_list_section",

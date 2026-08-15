@@ -153,6 +153,92 @@ const ERP_MANUAL_SALES_ORDER_CHILDREN = [
 		],
 	},
 	{
+		id: "so-weights",
+		title: "Customer Weight vs Calculated Weight",
+		kicker: "Two numbers, two meanings",
+		purpose:
+			"Every drawing carries two weights and they are not two attempts at the same figure. " +
+			"One is typed in from the sheet and describes the finished part. The other is worked out " +
+			"by the system from the raw materials listed under that drawing. They are supposed to " +
+			"differ — what matters is which way round.",
+		fields: [
+			{ name: "Customer Provided Weight (Kg)", note: "On the drawing row. Comes from the sheet's <b>Total Weight (KG)</b> column — what the finished, fabricated piece weighs. Typed in, never calculated, and editable." },
+			{ name: "Calculated Weight (Kg) — drawing row", note: "<b>Auto calculated.</b> What the raw materials listed under that drawing add up to. Read-only, filled the moment Load Items runs and recalculated on every save." },
+			{ name: "Calculated Weight (Kg) — raw material row", note: "<b>Auto calculated.</b> That one material's weight: <i>Length ÷ 1000 × Unit Weight × Reqd Sec Qty</i> for Structurals, <i>Length ÷ 1000 × Width ÷ 1000 × Thickness × Unit Weight × Reqd Sec Qty</i> for Plates. Unit Weight comes from the Item master, not the sheet." },
+			{ name: "Calculated Total Weight (Kg)", note: "<b>Auto calculated.</b> The row's weight × the drawing's Total Quantity — what the whole drawing quantity consumes of that one material." },
+		],
+		calcs: [
+			{
+				title: "Drawing 1B16 — material 1 of 3",
+				item: "ISMB250", group: "Structurals",
+				length: 879.1, sec_qty: 1, unit_weight: 37.3,
+				formula: "(Length ÷ 1000) × Unit Weight × Sec Qty  =  (879.1 ÷ 1000) × 37.3 × 1",
+				result: "32.790",
+			},
+			{
+				title: "Drawing 1B16 — material 2 of 3",
+				item: "ISA100", group: "Structurals",
+				length: 190, sec_qty: 4, unit_weight: 14.9,
+				formula: "(Length ÷ 1000) × Unit Weight × Sec Qty  =  (190 ÷ 1000) × 14.9 × 4",
+				result: "11.324",
+			},
+			{
+				title: "Drawing 1B16 — material 3 of 3",
+				item: "PLATE10", group: "Plates",
+				length: 210.81, width: 201, thickness: 10, sec_qty: 1, unit_weight: 7.85,
+				formula: "(L ÷ 1000) × (W ÷ 1000) × Thickness × Unit Weight × Sec Qty  =  (210.81÷1000) × (201÷1000) × 10 × 7.85 × 1",
+				result: "3.326",
+				note: "<b>Drawing total:</b> 32.790 + 11.324 + 3.326 = <b>47.44 Kg</b> calculated, against a " +
+					"Customer Provided Weight of <b>42.90 Kg</b> — a difference of <b>+4.54 Kg (+10.6%)</b>.",
+			},
+		],
+		examples: [
+			{
+				type: "do",
+				label: "Calculated above customer weight — normal",
+				text: "To make a 42.9 Kg part you consume 47.44 Kg of steel. The stock is cut down to " +
+					"the finished piece, so the raw material is the heavier of the two. Small drawings " +
+					"show a larger percentage than big ones — a broadly fixed allowance is a small " +
+					"fraction of a 900 Kg beam and a large fraction of a 43 Kg one.",
+			},
+			{
+				type: "dont",
+				label: "Calculated below customer weight — look at it",
+				text: "The materials listed cannot physically produce the part: you are asking for a " +
+					"finished piece heavier than the steel it is cut from. Something is wrong in the " +
+					"sheet — a missing row, a length short by a decimal place, or a wrong Sec Qty. " +
+					"The summary panel names any drawing in this state.",
+			},
+		],
+		notes: [
+			"<b>The gap is not an error and nothing needs correcting for it.</b> The system is built on it: the excess tracking in Material Issue Plan follows exactly this chain — customer weight, then planned raw material, then the weight of the batch actually mapped.",
+			"<b>Where each is shown.</b> Per material on the Raw Materials row, per drawing on the Drawing List row, and totalled for the whole order in the summary panel beside the BOM file.",
+			"<b>Nothing here is typed except the customer's figure.</b> Every Calculated field is read-only and recomputed from the dimensions and the Item master's Unit Weight, so it can never drift from the rows it summarises.",
+		],
+	},
+	{
+		id: "so-summary",
+		title: "Loaded Sheet Summary",
+		kicker: "The panel beside the file",
+		purpose:
+			"A running summary of what the sheet actually produced, shown next to the file it came " +
+			"from. It reads the staged rows directly in the browser, so it follows an edit in the " +
+			"grid immediately — no save, no reload.",
+		fields: [
+			{ name: "Drawings", note: "How many drawings the sheet produced, and how many already have a Drawing document created." },
+			{ name: "Raw material rows", note: "Total staged rows, then the same total split by group — e.g. 50 Plates · 50 Structurals. A group you did not expect to see is worth a second look." },
+			{ name: "Customer weight", note: "The sheet's Total Weight (KG) added up across every drawing." },
+			{ name: "Calculated weight", note: "What all the listed raw materials add up to across every drawing." },
+			{ name: "Difference", note: "Calculated minus customer, in Kg and as a percentage. Positive is the normal direction." },
+			{ name: "Below customer weight", note: "Any drawing whose raw material weighs <i>less</i> than the finished piece, named by Mark No. <b>None</b> in green is what you want to see." },
+			{ name: "Raw materials", note: "Verified or Not verified — the same state as the button above the Raw Materials table." },
+		],
+		notes: [
+			"<b>It is a summary, not a check.</b> Verify Raw Materials is what blocks; this panel is for seeing at a glance whether the sheet loaded into the shape you expected before you commit to creating drawings.",
+			"<b>Read the difference as a direction, not a target.</b> Whether +2% is right for your fabrication is an engineering judgement. The panel only reports it — and calls out the one case that is always wrong, a drawing whose material weighs less than the part.",
+		],
+	},
+	{
 		id: "so-drawings",
 		title: "Create Drawing, Final Revision, BOM",
 		kicker: "Turning the sheet into documents",
