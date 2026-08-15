@@ -1039,7 +1039,164 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 			+ "</div>";
 	}
 
-	var $content = $("<div>").append($(summary), $filter_row, $actions, $table);
+	// Two tabs. The first is the transfer itself, per batch; the second plans the
+	// excess return for the same material CONSOLIDATED by item, because that is how
+	// an off-cut is actually handled -- one item comes back as one shape, however
+	// many batches it was drawn from. Asking per batch made the same item's excess
+	// be entered two and three times over.
+	var $tab_nav = $(
+		"<ul class='nav nav-tabs' style='margin-bottom:12px'>" +
+			"<li class='active'><a href='#' data-pane='transfer' style='cursor:pointer'>" +
+				__("Raw material to transfer") + "</a></li>" +
+			"<li><a href='#' data-pane='excess' style='cursor:pointer'>" +
+				__("Consolidate item for excess return plan") + "</a></li>" +
+		"</ul>"
+	);
+	var $pane_transfer = $("<div class='mip-pane' data-pane='transfer'>")
+		.append($(summary), $filter_row, $actions, $table);
+	var $pane_excess = $("<div class='mip-pane' data-pane='excess' style='display:none'>");
+	var $content = $("<div>").append($tab_nav, $pane_transfer, $pane_excess);
+
+	$tab_nav.on("click", "a", function(e) {
+		e.preventDefault();
+		var pane = $(this).data("pane");
+		$tab_nav.find("li").removeClass("active");
+		$(this).closest("li").addClass("active");
+		$content.find(".mip-pane").hide().filter("[data-pane='" + pane + "']").show();
+		// Rebuilt on entry rather than kept in step continuously: it reads the
+		// transfer tab's live figures, and those change with every tick and every
+		// Sec Nos edit.
+		if (pane === "excess") _render_excess_plan();
+	});
+
+	// ── Consolidated excess plan ──────────────────────────────────────────────
+	//
+	//   Excess Kg (system)  = Planned transfer weight - Planned drawing weight
+	//   Difference          = Excess Kg (entered) - Excess Kg (system)
+	//
+	// Positive means more is coming back than the transfer created; negative means
+	// part of the excess is unaccounted for. Neither blocks the transfer -- the
+	// figure is there to be judged, not enforced.
+	function _collect_excess_plan_state() {
+		var by_item = {};
+		$tbody.find("tr").each(function() {
+			var $tr = $(this);
+			if (!$tr.find(".mip-item-chk").prop("checked")) return;
+			var d = items[parseInt($tr.data("idx"), 10)];
+			if (!d) return;
+			var e = by_item[d.item_code];
+			if (!e) {
+				e = by_item[d.item_code] = {
+					item_code: d.item_code,
+					item_name: d.item_name || d.item_code,
+					group: d.custom_parent_item_group || "",
+					thickness: flt(d.custom_thickness),
+					unit_weight: flt(d.custom_unit_weight),
+					drawing_kg: 0,
+					transfer_kg: 0,
+					batches: 0,
+				};
+			}
+			e.drawing_kg += flt(d.drawing_planned_weight);
+			e.transfer_kg += flt($tr.find(".mip-qty").val()) || flt(d.qty);
+			e.batches += 1;
+		});
+		return by_item;
+	}
+
+	function _render_excess_plan() {
+		var by_item = _collect_excess_plan_state();
+		var codes = Object.keys(by_item).sort();
+		if (!codes.length) {
+			$pane_excess.html("<div class='text-muted' style='padding:20px 4px'>" +
+				__("Tick the materials to transfer on the first tab. Whatever is selected there is consolidated here, one line per item.") +
+				"</div>");
+			return;
+		}
+
+		var th = "white-space:nowrap;padding:6px 8px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;";
+		var html = "<div style='font-size:12px;color:#475569;margin-bottom:10px'>" +
+			__("One line per item, with no batch reference: an off-cut comes back as one shape however many batches it was drawn from.") +
+			"<br><b>" + __("Excess Kg (system)") + "</b> = " + __("Planned transfer weight − Planned drawing weight") +
+			" &nbsp;·&nbsp; <b>" + __("Difference") + "</b> = " + __("Excess Kg (entered) − Excess Kg (system)") +
+			" &nbsp;(" + __("positive = extra, negative = missing") + ")</div>" +
+			"<div style='overflow-x:auto'><table class='table table-bordered table-condensed' style='margin-bottom:0;font-size:12px'>" +
+			"<thead><tr>" +
+				"<th style='" + th + "'>" + __("Item") + "</th>" +
+				"<th style='" + th + "text-align:right'>" + __("Planned Drawing Wt") + "</th>" +
+				"<th style='" + th + "text-align:right'>" + __("Planned Transfer Wt") + "</th>" +
+				"<th style='" + th + "text-align:right'>" + __("Excess Kg") +
+					"<div class='text-muted' style='font-weight:normal;font-size:10px'>" + __("system") + "</div></th>" +
+				"<th style='" + th + "'>" + __("Length (mm)") + "</th>" +
+				"<th style='" + th + "'>" + __("Width (mm)") + "</th>" +
+				"<th style='" + th + "'>" + __("Sec Qty") + "</th>" +
+				"<th style='" + th + "text-align:right'>" + __("Excess Kg") +
+					"<div class='text-muted' style='font-weight:normal;font-size:10px'>" + __("entered") + "</div></th>" +
+				"<th style='" + th + "text-align:right'>" + __("Difference") + "</th>" +
+			"</tr></thead><tbody>";
+
+		codes.forEach(function(code) {
+			var e = by_item[code];
+			var sys = flt(e.transfer_kg - e.drawing_kg, 3);
+			var saved = (dlg._excess_plan || {})[code] || {};
+			var num = "<input type='number' step='0.001' min='0' class='form-control input-xs text-right ";
+			html += "<tr data-item='" + frappe.utils.escape_html(code) + "'>" +
+				"<td>" + frappe.utils.escape_html(code) +
+					"<div class='text-muted' style='font-size:11px'>" +
+						__("{0} batch row(s)", [e.batches]) + "</div></td>" +
+				"<td class='text-right' style='white-space:nowrap'>" + format_number(e.drawing_kg, null, 3) + "</td>" +
+				"<td class='text-right' style='white-space:nowrap'>" + format_number(e.transfer_kg, null, 3) + "</td>" +
+				"<td class='text-right mip-xs-sys' style='white-space:nowrap;font-weight:600'>" +
+					format_number(sys, null, 3) + "</td>" +
+				"<td>" + num + "mip-xs-length' style='width:100px' value='" + (flt(saved.length) || "") + "'></td>" +
+				"<td>" + num + "mip-xs-width' style='width:100px' value='" + (flt(saved.width) || "") + "'></td>" +
+				"<td>" + num + "mip-xs-sec' style='width:90px' value='" + (flt(saved.sec_qty) || "") + "'></td>" +
+				"<td class='text-right mip-xs-kg' style='white-space:nowrap;font-weight:600'>—</td>" +
+				"<td class='text-right mip-xs-diff' style='white-space:nowrap;font-weight:600'>—</td>" +
+			"</tr>";
+		});
+		html += "</tbody></table></div>";
+		$pane_excess.html(html);
+		$pane_excess.find("tr[data-item]").each(function() { _recalc_excess_row($(this), by_item); });
+		$pane_excess.off("input.xs").on("input.xs", ".mip-xs-length, .mip-xs-width, .mip-xs-sec", function() {
+			_recalc_excess_row($(this).closest("tr"), by_item);
+		});
+	}
+
+	function _recalc_excess_row($row, by_item) {
+		var e = by_item[$row.data("item")];
+		if (!e) return;
+		var L = flt($row.find(".mip-xs-length").val());
+		var W = flt($row.find(".mip-xs-width").val());
+		var S = flt($row.find(".mip-xs-sec").val());
+		var entered = _excess_weight({
+			custom_parent_item_group: e.group,
+			custom_thickness: e.thickness,
+			custom_unit_weight: e.unit_weight,
+		}, L, W, S);
+		var sys = flt(e.transfer_kg - e.drawing_kg, 3);
+
+		// Remembered on the dialog, not only in the DOM: switching back to the
+		// transfer tab re-renders this one from scratch.
+		dlg._excess_plan = dlg._excess_plan || {};
+		if (L || W || S) {
+			dlg._excess_plan[e.item_code] = { length: L, width: W, sec_qty: S };
+		} else {
+			delete dlg._excess_plan[e.item_code];
+		}
+
+		if (entered === null) {
+			$row.find(".mip-xs-kg").text("—");
+			$row.find(".mip-xs-diff").text("—").css("color", "");
+			return;
+		}
+		var diff = flt(entered - sys, 3);
+		$row.find(".mip-xs-kg").text(format_number(entered, null, 3));
+		$row.find(".mip-xs-diff")
+			.text((diff > 0 ? "+" : "") + format_number(diff, null, 3))
+			.attr("title", diff > 0 ? __("extra beyond the transfer") : diff < 0 ? __("missing") : "")
+			.css("color", Math.abs(diff) < 0.001 ? "#15803d" : diff > 0 ? "#1d4ed8" : "#b91c1c");
+	}
 
 	var dlg = new frappe.ui.Dialog({
 		title: is_cnc_fwd ? __("Select Materials — CNC to Supplier/WIP")
@@ -1153,7 +1310,15 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 					: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.create_mip_partial_transfer",
 				args: is_cnc_fwd
 					? { mip_name: frm.doc.name, selected_items_json: JSON.stringify(selected) }
-					: { mip_name: frm.doc.name, selected_items_json: JSON.stringify(selected), transfer_type: transfer_type },
+					: {
+						mip_name: frm.doc.name,
+						selected_items_json: JSON.stringify(selected),
+						transfer_type: transfer_type,
+						// One measured off-cut per item, from the second tab. Empty
+						// when nothing was entered, and the server falls back to its
+						// own placeholder shape exactly as before.
+						excess_plan_json: JSON.stringify(dlg._excess_plan || {}),
+					},
 				freeze: true,
 				freeze_message: __("Creating transfer entry…"),
 				callback: function(r) {

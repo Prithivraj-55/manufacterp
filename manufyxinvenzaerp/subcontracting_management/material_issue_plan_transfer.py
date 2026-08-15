@@ -279,6 +279,10 @@ def get_mip_pending_items(mip_name):
         }
 
     duno_by_key = _by_key("duno_mark_no")
+    # What the drawing actually calls for, as opposed to what the reserved batches
+    # weigh. The consolidated excess tab in the transfer popup is the difference
+    # between the two, so it has to travel with the row.
+    drawing_wt_by_key = _by_key("drawing_planned_weight")
     so_by_key = _by_key("sales_order")
     cdn_by_key = _by_key("customer_drawing_number")
     drawing_by_duno = {d.duno_mark_no: d.drawing for d in (mip.drawing_items or []) if d.duno_mark_no}
@@ -362,6 +366,7 @@ def get_mip_pending_items(mip_name):
             "drawing": drawing_by_duno.get(duno, ""),
             "sales_order": so_by_key.get((item_code, batch_no), ""),
             "customer_drawing_number": cdn_by_key.get((item_code, batch_no), ""),
+            "drawing_planned_weight": flt(drawing_wt_by_key.get((item_code, batch_no), 0), 3),
         })
 
     for row in result:
@@ -480,7 +485,7 @@ def _apply_transfer_excess_to_raw_materials(mip, item, excess_kg):
         r.transfer_excess_kg = flt(flt(r.transfer_excess_kg) + share, 3)
 
 
-def _log_round_up_excess(mip, items):
+def _log_round_up_excess(mip, items, excess_plan=None):
     """After a transfer whose Sec Qty the user rounded up (see update_transfer_sec_qty), log the
     rounding surplus into excess_return_items so it flows through the existing Return
     Excess Entry workflow once physically confirmed. Keyed by (item_code, batch_no) via
@@ -521,7 +526,21 @@ def _log_round_up_excess(mip, items):
         # derived from the batch. They are looking at the actual off-cut; the batch's
         # standard dimensions are only a stand-in for "one whole piece, mostly unused"
         # and are almost never the real shape.
+        # The consolidated plan is stated once for the item; where it exists it
+        # describes the off-cut for every batch row of that item. Sec Qty is the
+        # exception -- it is a piece COUNT for the item as a whole, so applying it
+        # to each batch row would book it two and three times over. The row's own
+        # share of the surplus is used for the count, and the measured shape for
+        # everything else.
+        planned = (excess_plan or {}).get(item["item_code"]) or {}
         measured = item.get("excess_entry") or {}
+        if planned:
+            measured = {
+                "length": planned.get("length"),
+                "width": planned.get("width"),
+                "thickness": planned.get("thickness"),
+                "return_warehouse": planned.get("return_warehouse"),
+            }
         excess_pieces = flt(measured.get("sec_qty")) or flt(item.get("round_up_excess_pieces"))
         length = flt(measured.get("length")) or flt(item.get("custom_length"))
         width = flt(measured.get("width")) or flt(item.get("custom_width"))
@@ -879,7 +898,7 @@ def create_mip_transfer_entry(mip_name):
 
 
 @frappe.whitelist()
-def create_mip_partial_transfer(mip_name, selected_items_json, transfer_type):
+def create_mip_partial_transfer(mip_name, selected_items_json, transfer_type, excess_plan_json=None):
     """Create a draft Stock Entry for the caller-selected raw-material items.
 
     transfer_type: "primary" -> Send to Subcontractor/Material Transfer to the
@@ -895,6 +914,12 @@ def create_mip_partial_transfer(mip_name, selected_items_json, transfer_type):
     selected = _json.loads(selected_items_json) if isinstance(selected_items_json, str) else selected_items_json
     if not selected:
         frappe.throw(_("No items selected for transfer."))
+
+    # One measured off-cut per ITEM, from the transfer popup's second tab. Keyed by
+    # item_code and carrying no batch: an off-cut comes back as one shape however
+    # many batches the item was drawn from. Absent when nothing was measured, and
+    # _log_round_up_excess then falls back to its own placeholder as before.
+    excess_plan = _json.loads(excess_plan_json) if isinstance(excess_plan_json, str) else (excess_plan_json or {})
 
     mip = frappe.get_doc("Material Issue Plan", mip_name)
     _ensure_mip_editable(mip)
@@ -945,7 +970,7 @@ def create_mip_partial_transfer(mip_name, selected_items_json, transfer_type):
     }, mip_name, ctx))
     frappe.db.commit()
     se.insert(ignore_permissions=True)
-    _log_round_up_excess(mip, selected)
+    _log_round_up_excess(mip, selected, excess_plan=excess_plan)
     return se.name
 
 
