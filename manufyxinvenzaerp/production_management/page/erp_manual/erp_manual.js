@@ -351,6 +351,29 @@ const ERP_MANUAL_MATERIAL_PLANNING_CHILDREN = [
 			"arrives) flows from that first sort.",
 	},
 	{
+		id: "select-boms",
+		title: "Selected BOMs",
+		kicker: "Choosing what to plan",
+		purpose:
+			"Where a plan gets its scope. Pick the Sales Order, then choose which of its BOMs " +
+			"this plan covers — all of them, or a few. Everything the plan later does is limited " +
+			"to what you select here.",
+		steps: [
+			"Set <b>Sales Order</b> in the Import BOMs section.",
+			"The picker lists every submitted BOM on that order, with its drawing and DUNO/Mark No. Tick <b>all of them</b>, or only the ones this plan is for.",
+			"The chosen BOMs land in the <b>BOM Items</b> table, each carrying its drawing, DUNO, customer, Customer Provided Weight and Planned Weight.",
+			"Press <b>Get Raw Materials</b> to pull in every raw material those BOMs need.",
+		],
+		notes: [
+			"<b>One plan per order, or several — both are supported.</b> A single plan can cover a whole sales order, which is the simplest way to buy in bulk: requirements for the same item consolidate across every drawing on the order. Or split the order across several plans — by area, by phase, by delivery date — and each plans and reserves independently. Nothing forces one plan per order.",
+			"<b>Only submitted BOMs appear.</b> A BOM still in draft is not offered, because its quantities can still change. Submit it on the Sales Order first.",
+			"<b>Adding BOMs later is fine.</b> Select more and press Get Raw Materials again; the new requirements are added. Reservations already made are not disturbed.",
+		],
+		buttons: [
+			{ name: "Get Raw Materials", note: "Pulls every raw material from the selected BOMs into the Raw Materials table. This is the starting point for everything else." },
+		],
+	},
+	{
 		id: "raw-materials",
 		title: "Raw Materials",
 		kicker: "Table 1 of 7",
@@ -779,6 +802,61 @@ const ERP_MANUAL_MATERIAL_PLANNING_CHILDREN = [
 					"For every row here: if an active Material Request already covers it, the row is left untouched — a purchase is already in motion. Otherwise the row is removed and stock is re-checked against the underlying drawing requirements: an exact match now found goes to Available Raw Materials, a batch item with still no exact match goes to Material Mapping (blank batch, assign by hand), and it only stays unavailable if truly nothing exists.",
 			},
 			{ name: "Create Material Request", note: "Raises a purchase for the selected rows — orders the Alternate Item instead of the original wherever one is set." },
+		],
+	},
+	{
+		id: "weight-summary",
+		title: "Weight Summary",
+		kicker: "Where the plan stands, in Kg",
+		purpose:
+			"Four running totals and one difference, all recalculated on every save. Read together " +
+			"they answer: how much does this plan need, how much of it is settled, and are we " +
+			"about to commit more steel than the job actually calls for?",
+		fields: [
+			{ name: "Total Weight — Plates & Structurals (Kg)", note: "Everything the plan needs. The sum of required Kg across the whole Raw Materials table — the figure the other three are measured against." },
+			{ name: "Weight — Exact Raw Material (Kg)", note: "The part covered by batches that are already the right size. Sum of required Kg in Available Raw Materials (Exact Match)." },
+			{ name: "Expected Item Weight — Material Mapping (Kg)", note: "What the Material Mapping rows were SUPPOSED to need — the sum of their required Kg, before any batch was assigned." },
+			{ name: "Weight of Cross Item Mapped (Kg)", note: "What the batches actually assigned to those rows WEIGH — the sum of their Calc Qty. Larger than the line above whenever a bigger piece was used to cover a smaller requirement." },
+			{ name: "Difference in Kg — Batch Mapped Items", note: "Cross Item Mapped minus Expected. Appears as soon as one row is mapped, and says how many of the rows are mapped so far." },
+		],
+		notes: [
+			"<b>The Difference is the excess you will have to get back.</b> A positive figure means the batches committed weigh more than the requirement they cover — normal when a 6 m bar covers a 4 m need, but it is steel that goes out to the supplier and has to come back. The panel says so explicitly when it is positive.",
+			"<b>Green is not automatically good.</b> A large positive difference on a plan about to be transferred means a lot of material will be sitting at the supplier waiting to be returned. It is worth looking at before transferring, not after.",
+			"<b>The difference only appears once something is mapped.</b> Before that there is nothing to compare, so the panel stays blank rather than showing a misleading zero.",
+			"<b>Exact Match contributes no difference.</b> Those batches are the right size by definition, which is why only the Material Mapping side is compared.",
+		],
+		buttons: [
+			{ name: "Update SO Difference", note: "Writes this plan's difference back onto the Sales Order for the drawings it covers, so the excess is visible from the order rather than only from here. Save the document first." },
+		],
+	},
+	{
+		id: "actions",
+		title: "Create, Status and Validate Stock",
+		kicker: "The three top-bar actions",
+		purpose:
+			"What the buttons along the top of a Material Planning do, and when each one is the " +
+			"right thing to press.",
+		steps: [
+			"<b>Create → Production Plan</b> — hands this plan on to production. Needs at least one BOM in Selected BOMs and a saved document. The new Production Plan carries the plan's BOMs and drawings, and is the document that later creates the Job Work Order and Material Issue Plan.",
+			"<b>Status → Batch Mapping Completed</b> — declares the mapping finished. It is checked, not just set: anything still unmapped or inconsistent is listed and the status stays where it is until those are dealt with.",
+			"<b>Status → Reopen Mapping</b> — appears once completed, and puts the plan back to <b>Working</b> so changes can be made again.",
+			"<b>Validate Stock</b> — a read-only check. For every item and batch the plan has committed, it shows the Kg and Sec Nos claimed against what the batch actually holds. Changes nothing.",
+		],
+		fields: [
+			{ name: "Status — Open", note: "Nothing planned yet." },
+			{ name: "Status — Working", note: "Set automatically as soon as any mapping or exact-match row exists. The normal working state." },
+			{ name: "Status — Batch Mapping Completed", note: "Set only through the Status button, and only when the checks pass. Signals the plan is ready to be acted on." },
+		],
+		notes: [
+			"<b>Validate Stock before transferring, every time.</b> It is the one place that shows a fractional Sec Nos total — which means several drawings are sharing one bar or sheet, and someone has to decide at transfer time whether to hand over the lower or the higher whole piece count. Better known now than in front of the storeman.",
+			"<b>Status never moves backwards on its own.</b> Working is set automatically, but the plan is only marked complete when you say so, and only Reopen Mapping brings it back.",
+			"<b>Creating a Production Plan does not lock this plan.</b> You can still map and reserve afterwards — but anything you change after the Production Plan exists will not be reflected in it unless it is refreshed.",
+		],
+		buttons: [
+			{ name: "Create → Production Plan", note: "Creates the Production Plan from this plan's selected BOMs." },
+			{ name: "Status → Batch Mapping Completed", note: "Validates, then marks the plan complete. Lists what is wrong if it cannot." },
+			{ name: "Status → Reopen Mapping", note: "Returns a completed plan to Working so it can be edited." },
+			{ name: "Validate Stock", note: "Shows planned Kg and Sec Nos per item and batch against what is really in the warehouse. Read-only." },
 		],
 	},
 	{
