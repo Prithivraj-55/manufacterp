@@ -526,21 +526,12 @@ def _log_round_up_excess(mip, items, excess_plan=None):
         # derived from the batch. They are looking at the actual off-cut; the batch's
         # standard dimensions are only a stand-in for "one whole piece, mostly unused"
         # and are almost never the real shape.
-        # The consolidated plan is stated once for the item; where it exists it
-        # describes the off-cut for every batch row of that item. Sec Qty is the
-        # exception -- it is a piece COUNT for the item as a whole, so applying it
-        # to each batch row would book it two and three times over. The row's own
-        # share of the surplus is used for the count, and the measured shape for
-        # everything else.
-        planned = (excess_plan or {}).get(item["item_code"]) or {}
+        # An item the user planned on the consolidated tab is booked once, by item,
+        # in _log_consolidated_excess. Booking it here as well -- once per batch row
+        # -- would count the same off-cut two and three times over.
+        if (excess_plan or {}).get(item["item_code"]):
+            continue
         measured = item.get("excess_entry") or {}
-        if planned:
-            measured = {
-                "length": planned.get("length"),
-                "width": planned.get("width"),
-                "thickness": planned.get("thickness"),
-                "return_warehouse": planned.get("return_warehouse"),
-            }
         excess_pieces = flt(measured.get("sec_qty")) or flt(item.get("round_up_excess_pieces"))
         length = flt(measured.get("length")) or flt(item.get("custom_length"))
         width = flt(measured.get("width")) or flt(item.get("custom_width"))
@@ -591,6 +582,109 @@ def _log_round_up_excess(mip, items, excess_plan=None):
             })
             by_key[key] = target
         changed = True
+    if changed:
+        mip.save(ignore_permissions=True)
+
+
+CONSOLIDATED_EXCESS_SOURCE = "Consolidated Excess Return Plan"
+
+
+def _log_consolidated_excess(mip, items, excess_plan):
+    """Book the excess the user planned on the transfer popup's second tab.
+
+    One row per ITEM, with no batch reference: the tab consolidates the transfer by
+    item precisely because an off-cut comes back as one shape however many batches
+    it was drawn from.
+
+    Two figures are in play and both are kept. The Kg booked is what the user
+    measured, because that is the off-cut that will physically come back. The
+    system's own figure -- what the transfer sent beyond what the drawings called
+    for -- is written into the reason line beside it, so a row that does not
+    reconcile says so on its face rather than only in the popup that created it.
+
+    A second transfer for the same item accumulates into the existing row, matching
+    how _log_round_up_excess treats its own, and skips a row already returned to
+    stock or claimed elsewhere rather than drifting a settled entry.
+    """
+    if not excess_plan:
+        return
+
+    planned_kg, meta = {}, {}
+    for item in items:
+        code = item["item_code"]
+        if code not in excess_plan:
+            continue
+        planned_kg[code] = flt(planned_kg.get(code, 0) + flt(item.get("qty")), 3)
+        drawing = flt(planned_kg.get("_drawing_" + code, 0) + flt(item.get("drawing_planned_weight")), 3)
+        planned_kg["_drawing_" + code] = drawing
+        meta.setdefault(code, item)
+
+    by_key = {
+        r.source_row: r
+        for r in (mip.excess_return_items or [])
+        if r.source_table == CONSOLIDATED_EXCESS_SOURCE
+    }
+
+    changed = False
+    for code, entry in excess_plan.items():
+        item = meta.get(code)
+        if not item:
+            continue
+        length = flt(entry.get("length"))
+        width = flt(entry.get("width"))
+        sec_qty = flt(entry.get("sec_qty"))
+        thickness = flt(item.get("custom_thickness"))
+        entered_kg = flt(calculate_qty(
+            item.get("custom_parent_item_group") or "",
+            length, width, thickness,
+            flt(item.get("custom_unit_weight")), sec_qty,
+        ) or 0, 3)
+        if entered_kg <= 0:
+            # Nothing measurable was typed for this item -- no row to book.
+            continue
+
+        system_kg = flt(planned_kg.get(code, 0) - planned_kg.get("_drawing_" + code, 0), 3)
+        difference = flt(entered_kg - system_kg, 3)
+        reason = _(
+            "Planned on the transfer popup's consolidated excess tab. "
+            "Transfer sent {0} Kg against {1} Kg planned on the drawings, so the "
+            "system figure is {2} Kg; {3} Kg was measured, a difference of {4} Kg."
+        ).format(
+            flt(planned_kg.get(code, 0), 3), flt(planned_kg.get("_drawing_" + code, 0), 3),
+            system_kg, entered_kg, ("+%s" % difference) if difference > 0 else difference,
+        )
+
+        target = by_key.get(code)
+        if target and (target.stock_entry_created or target.mapped_material_planning):
+            target = None
+        if target:
+            target.qty = flt(flt(target.qty) + entered_kg, 3)
+            target.sec_qty = flt(flt(target.sec_qty) + sec_qty, 3)
+            target.length = length or target.length
+            target.width = width or target.width
+            target.return_reason = reason
+        else:
+            target = mip.append("excess_return_items", {
+                "source_table": CONSOLIDATED_EXCESS_SOURCE,
+                "source_row": code,
+                "item_code": code,
+                "item_name": item.get("item_name") or code,
+                "parent_item_group": item.get("custom_parent_item_group") or "",
+                "unit_weight": flt(item.get("custom_unit_weight")),
+                "length": length,
+                "width": width,
+                "thickness": thickness,
+                "sec_qty": sec_qty,
+                "sec_uom": item.get("custom_sec_uom") or "",
+                "uom": item.get("uom") or "Kg",
+                "qty": entered_kg,
+                "return_warehouse": entry.get("return_warehouse") or mip.source_warehouse or "",
+                "return_type": "Return to Own Warehouse",
+                "return_reason": reason,
+            })
+            by_key[code] = target
+        changed = True
+
     if changed:
         mip.save(ignore_permissions=True)
 
@@ -971,6 +1065,7 @@ def create_mip_partial_transfer(mip_name, selected_items_json, transfer_type, ex
     frappe.db.commit()
     se.insert(ignore_permissions=True)
     _log_round_up_excess(mip, selected, excess_plan=excess_plan)
+    _log_consolidated_excess(mip, selected, excess_plan)
     return se.name
 
 

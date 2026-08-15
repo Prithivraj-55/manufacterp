@@ -50,10 +50,14 @@ def run():
         "item_code": row.item_code, "batch_no": row.batch_no,
         "cnc_process": 1 if row.cnc_process else 0,
         "custom_sec_qty": 9999,
-        "excess_entry": {"length": 640, "width": 12, "sec_qty": 1.25,
-                         "return_warehouse": mip.source_warehouse or ""},
     }]
-    res = save_transfer_draft(mip_name, json.dumps(draft))
+    # The off-cut is stated once per ITEM now, on the popup's consolidated tab,
+    # rather than once per batch row -- the same off-cut comes back whichever
+    # batches it was drawn from. It is parked against every batch row of that item
+    # so reopening finds it whichever row it reads first.
+    excess_plan = {row.item_code: {"length": 640, "width": 12, "sec_qty": 1.25,
+                                   "return_warehouse": mip.source_warehouse or ""}}
+    res = save_transfer_draft(mip_name, json.dumps(draft), json.dumps(excess_plan))
     check("one row saved", res.get("saved"), 1)
 
     got = get_transfer_draft(mip_name).get(key) or {}
@@ -78,7 +82,7 @@ def run():
     print()
     print("=== a row that no longer exists is skipped, not invented ===")
     ghost = [{"item_code": "ZZ-NOT-A-REAL-ITEM", "batch_no": "ZZ-NOT-A-REAL-BATCH",
-              "cnc_process": 0, "custom_sec_qty": 5, "excess_entry": None}]
+              "cnc_process": 0, "custom_sec_qty": 5}]
     check("nothing saved for it", save_transfer_draft(mip_name, json.dumps(ghost)).get("saved"), 0)
 
     print()

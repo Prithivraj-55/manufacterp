@@ -816,6 +816,20 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 					// that here would be a second copy to keep in step.
 					$tr.find(".mip-sec-qty").val(flt(saved.draft_sec_qty, 3)).trigger("change");
 				}
+				// The off-cut was parked per item, against every batch row of it --
+				// first one found answers for the item.
+				if (flt(saved.draft_excess_length) || flt(saved.draft_excess_width) ||
+					flt(saved.draft_excess_sec_qty)) {
+					dlg._excess_plan = dlg._excess_plan || {};
+					if (!dlg._excess_plan[d.item_code]) {
+						dlg._excess_plan[d.item_code] = {
+							length: flt(saved.draft_excess_length),
+							width: flt(saved.draft_excess_width),
+							sec_qty: flt(saved.draft_excess_sec_qty),
+							return_warehouse: saved.draft_return_warehouse || "",
+						};
+					}
+				}
 			});
 			if (restored) {
 				frappe.show_alert({
@@ -1044,24 +1058,36 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 	// an off-cut is actually handled -- one item comes back as one shape, however
 	// many batches it was drawn from. Asking per batch made the same item's excess
 	// be entered two and three times over.
-	var $tab_nav = $(
-		"<ul class='nav nav-tabs' style='margin-bottom:12px'>" +
-			"<li class='active'><a href='#' data-pane='transfer' style='cursor:pointer'>" +
-				__("Raw material to transfer") + "</a></li>" +
-			"<li><a href='#' data-pane='excess' style='cursor:pointer'>" +
-				__("Consolidate item for excess return plan") + "</a></li>" +
-		"</ul>"
+	// Folder tabs sitting on the panel, in the client's own green: the inactive
+	// ones sit back, the active one is lighter and joins the body below it with no
+	// line between, so the pane reads as the sheet the tab belongs to.
+	var TAB_IDLE = "#4d7c0f", TAB_ACTIVE = "#d9f99d", PANE_BG = "#d9f99d";
+	function _tab_css(active) {
+		return "display:inline-block;padding:7px 18px;margin-right:3px;cursor:pointer;" +
+			"font-size:12px;font-weight:600;border-radius:6px 6px 0 0;position:relative;" +
+			"top:1px;border:1px solid " + (active ? TAB_ACTIVE : TAB_IDLE) + ";border-bottom:none;" +
+			(active
+				? "background:" + TAB_ACTIVE + ";color:#1a2e05;"
+				: "background:" + TAB_IDLE + ";color:#ecfccb;");
+	}
+	var $tab_nav = $("<div style='margin-bottom:0;padding-left:2px'>").append(
+		$("<a href='#' data-pane='transfer'>").attr("style", _tab_css(true)).text(__("Raw material to transfer")),
+		$("<a href='#' data-pane='excess'>").attr("style", _tab_css(false)).text(__("Consolidate item for excess return plan"))
 	);
-	var $pane_transfer = $("<div class='mip-pane' data-pane='transfer'>")
+	var pane_style = "background:" + PANE_BG + ";border:1px solid " + TAB_ACTIVE +
+		";border-radius:0 8px 8px 8px;padding:14px;";
+	var $pane_transfer = $("<div class='mip-pane' data-pane='transfer'>").attr("style", pane_style)
 		.append($(summary), $filter_row, $actions, $table);
-	var $pane_excess = $("<div class='mip-pane' data-pane='excess' style='display:none'>");
+	var $pane_excess = $("<div class='mip-pane' data-pane='excess'>")
+		.attr("style", pane_style + "display:none;");
 	var $content = $("<div>").append($tab_nav, $pane_transfer, $pane_excess);
 
 	$tab_nav.on("click", "a", function(e) {
 		e.preventDefault();
 		var pane = $(this).data("pane");
-		$tab_nav.find("li").removeClass("active");
-		$(this).closest("li").addClass("active");
+		$tab_nav.find("a").each(function() {
+			$(this).attr("style", _tab_css($(this).data("pane") === pane));
+		});
 		$content.find(".mip-pane").hide().filter("[data-pane='" + pane + "']").show();
 		// Rebuilt on entry rather than kept in step continuously: it reads the
 		// transfer tab's live figures, and those change with every tick and every
@@ -1223,7 +1249,11 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 			});
 			frappe.call({
 				method: "manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.save_transfer_draft",
-				args: { mip_name: frm.doc.name, rows_json: JSON.stringify(draft) },
+				args: {
+					mip_name: frm.doc.name,
+					rows_json: JSON.stringify(draft),
+					excess_plan_json: JSON.stringify(dlg._excess_plan || {}),
+				},
 				freeze: true,
 				freeze_message: __("Saving draft…"),
 				callback: function(r) {

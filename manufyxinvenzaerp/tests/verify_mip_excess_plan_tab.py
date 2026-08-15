@@ -143,6 +143,33 @@ def run():
     check("empty json parses to nothing", json.loads("{}"), {})
 
     print()
+    print("=== the plan is booked into the Excess Material table ===")
+    from manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer import (
+        _log_consolidated_excess, CONSOLIDATED_EXCESS_SOURCE,
+    )
+    check("booking function exists", callable(_log_consolidated_excess), True)
+    check("...under its own source table", CONSOLIDATED_EXCESS_SOURCE,
+          "Consolidated Excess Return Plan")
+    src = inspect.getsource(_log_consolidated_excess)
+    check("keyed by item, not item+batch", "source_row\": code" in src, True)
+    check("books the measured Kg", "\"qty\": entered_kg" in src, True)
+    check("a second transfer accumulates", "target.qty = flt(flt(target.qty) + entered_kg" in src, True)
+    check("a settled row is never drifted", "stock_entry_created" in src, True)
+    round_src = inspect.getsource(_log_round_up_excess)
+    check("the per-batch logger stands aside for a planned item",
+          'if (excess_plan or {}).get(item["item_code"]):' in round_src, True)
+
+    print()
+    print("=== Save and Close keeps the plan ===")
+    from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
+        save_transfer_draft,
+    )
+    check("the draft accepts it",
+          "excess_plan_json" in inspect.signature(save_transfer_draft).parameters, True)
+    check("the popup sends it with the draft too", js.count("excess_plan_json") >= 2, True)
+    check("and restores it on reopen", "dlg._excess_plan[d.item_code]" in js, True)
+
+    print()
     print("=== SUMMARY ===")
     if all(checks):
         print("ALL %d CHECKS PASSED" % len(checks))
