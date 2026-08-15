@@ -31,8 +31,13 @@ def run():
     ctx = get_ctx()
     item = ensure_item(ctx, "ZZTEST-W2DERIVE", "W2 Derived", uom="Kg")
     frappe.db.set_value("Item", item, {"custom_unit_weight": 10, "custom_parent_item_group": "Structurals"})
-    # 10 m bar at 10 Kg/m = 100 Kg.
-    batch = ensure_batch(item, "ZZTEST-W2DERIVE-BATCH", L=10000)
+    # 10 m bar at 10 Kg/m = 100 Kg. The batch is named per run: the last section
+    # weighs what the LEDGER holds against it, so a batch reused from a previous
+    # run carried that run's leftovers and the balance came out doubled. A Cut
+    # Sheet is also unique per batch, so a fixed name made the second run fail to
+    # insert at all.
+    batch = ensure_batch(item, "ZZTEST-W2DERIVE-BATCH-%s" % frappe.generate_hash(length=6).upper(),
+                         L=10000)
     frappe.db.set_value("Batch", batch, {"custom_length": 10000, "custom_sec_qty": 1})
     frappe.db.commit()
 
