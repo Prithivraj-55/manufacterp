@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-13 23:40:38_
+_Generated: 2026-08-15 22:33:50_
 
 ## Modules
 
@@ -26,7 +26,7 @@ _Generated: 2026-08-13 23:40:38_
 
 ## Python files
 
-_Total: 218_
+_Total: 219_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -72,6 +72,7 @@ _Total: 218_
 - material_request_management/__init__.py
 - material_request_management/material_request.py
 - patches/__init__.py
+- patches/v1/backfill_drawing_rate_schedule_type.py
 - patches/v1/backfill_payment_entry_created_flag.py
 - patches/v1/fix_bom_item_number_field_type.py
 - patches/v1/__init__.py
@@ -278,7 +279,7 @@ _Total: 24_
 
 ## JSON files
 
-_Total: 50_
+_Total: 51_
 
 - accounts_management/report/customer_fund_usage/customer_fund_usage.json
 - drawing_management/doctype/drawing/drawing.json
@@ -294,6 +295,7 @@ _Total: 50_
 - fixtures/custom_field.json
 - fixtures/property_setter.json
 - manufyxinvenzaerp/doctype/manufyxinvenza_settings/manufyxinvenza_settings.json
+- manufyxinvenzaerp/workspace/manufyx/manufyx.json
 - production_management/doctype/cut_sheet_allocation/cut_sheet_allocation.json
 - production_management/doctype/cut_sheet/cut_sheet.json
 - production_management/doctype/inspection_call_log/inspection_call_log.json
@@ -758,11 +760,11 @@ Functions:
   - 127:parse_bom_excel:
   - 323:_bulk_insert:
   - 343:create_drawings_from_import:
-  - 500:process_drawings:
-  - 629:_check_drawing_masters:
-  - 678:verify_raw_materials:
-  - 738:download_bom_template:
-  - 793:clear_drawing_import:
+  - 514:process_drawings:
+  - 643:_check_drawing_masters:
+  - 692:verify_raw_materials:
+  - 752:download_bom_template:
+  - 807:clear_drawing_import:
 
 ### hooks.py
 
@@ -1453,10 +1455,10 @@ Functions:
 - `drawing_management/bom_class_override.py:1574` — `make_variant_bom`
 - `drawing_management/so_drawing_import.py:127` — `parse_bom_excel`
 - `drawing_management/so_drawing_import.py:343` — `create_drawings_from_import`
-- `drawing_management/so_drawing_import.py:500` — `process_drawings`
-- `drawing_management/so_drawing_import.py:678` — `verify_raw_materials`
-- `drawing_management/so_drawing_import.py:738` — `download_bom_template`
-- `drawing_management/so_drawing_import.py:793` — `clear_drawing_import`
+- `drawing_management/so_drawing_import.py:514` — `process_drawings`
+- `drawing_management/so_drawing_import.py:692` — `verify_raw_materials`
+- `drawing_management/so_drawing_import.py:752` — `download_bom_template`
+- `drawing_management/so_drawing_import.py:807` — `clear_drawing_import`
 - `drawing_management/doctype/drawing/drawing.py:109` — `check_existing_bom`
 - `production_plan_management/production_plan.py:284` — `get_items_for_material_requests`
 - `production_plan_management/production_plan.py:661` — `get_mp_planned_weights`
