@@ -232,6 +232,7 @@ const ERP_MANUAL_DRAWING_CHILDREN = [
 			{ name: "Material Issue Plan", note: "Customer Weight Kg on its drawing row, then the whole weight summary refreshed." },
 		],
 		notes: [
+			"<b>Prefer the sheet.</b> If anything else changed alongside the weight — a dimension, a quantity, a material — correct the BOM sheet on the Sales Order and load it again instead. Use this button only when the weight alone has moved and nothing else about the drawing has.",
 			"<b>Excess follows automatically.</b> Excess is the gap between what was planned or mapped and what the drawing says is needed — so once the customer weight moves, the difference is recomputed and the excess figures downstream reflect it without anything else being touched.",
 			"<b>Batches are deliberately left alone.</b> Reserved and mapped batches are NOT re-allocated, because a weight change should not silently move steel that is already committed or shipped. If the new weight means a different allocation, unreserve and reserve again by hand in Material Planning.",
 			"<b>Work Order is not updated</b> — it is standard ERPNext in this app and carries no copy of this figure.",
@@ -246,18 +247,83 @@ const ERP_MANUAL_DRAWING_CHILDREN = [
 		title: "Revisions",
 		kicker: "Rev No",
 		purpose:
-			"A submitted Drawing cannot be edited — that is the point of submitting it. When the " +
-			"customer issues a revised drawing, you cancel and amend, and the new document numbers " +
-			"itself as the next revision.",
+			"Corrections are made in the BOM sheet on the Sales Order, not on the Drawing. The " +
+			"sheet is the master input: raw materials, dimensions, quantities and weights all come " +
+			"from it, so a revision means updating the sheet and loading it again — that way every " +
+			"changed detail travels together instead of being patched one field at a time.",
+		notes: [
+			"<b>Do not rework a Drawing by hand.</b> When a revision arrives, or the customer changes a weight, update the BOM sheet attached to the Sales Order and load it again. The Drawing carries the raw-material list as well as the weight, and editing figures on it one at a time leaves the sheet and the drawing telling different stories.",
+			"<b>Rev No is derived, never typed.</b> It is read from the document being amended, so the sequence cannot be broken by hand.",
+			"<b>Amending does not move the BOM.</b> A BOM already created from the earlier revision stays as it is — create a BOM from the new revision when it is ready, and it is that BOM which Material Planning should be pointed at.",
+		],
 		steps: [
 			"<b>Cancel</b> the submitted Drawing.",
 			"<b>Amend</b> it. Frappe creates a new document linked back to the cancelled one.",
 			"<b>Rev No</b> is set automatically: the previous drawing's Rev No plus one. An original imported drawing is Rev 0, its first amendment Rev 1, and so on.",
 			"Correct what changed, then submit and Mark as Final Revision as before.",
 		],
+	},
+];
+
+// BOM — created from a Drawing, one per drawing. Read-only in practice: everything on
+// it is derived, and nothing here is where costs are decided.
+const ERP_MANUAL_BOM_CHILDREN = [
+	{
+		id: "bom-what",
+		title: "What the BOM Holds",
+		kicker: "One per drawing",
+		purpose:
+			"Created by Create and Submit BOM on the Sales Order — one BOM per Drawing, built " +
+			"entirely from that drawing's own data. Nothing on it is typed. It exists so Material " +
+			"Planning has something to pull requirements from, and so every requirement stays " +
+			"traceable back to the drawing and sheet it came from.",
+		fields: [
+			{ name: "Item / Item Name", note: "The finished-goods item, from the drawing's FG Item — originally the sheet's FG Item column." },
+			{ name: "Quantity", note: "The drawing's No of Qty to Manufacture, which came from the sheet's Total Qty." },
+			{ name: "Drawing / DUNO Mark No / Customer Drawing Number", note: "Carried across so any requirement can be traced back to its drawing and its row in the sheet." },
+			{ name: "Project / Company / Currency", note: "Project from the drawing; company and its default currency from your setup." },
+			{ name: "Items table", note: "One row per raw material on the drawing — Material Code, the dimensions, Unit Weight, Sec Qty and Sec UOM, Item Group and Item Number, all as uploaded. Qty is the drawing's Total Qty for that row, so it already accounts for how many are being made." },
+		],
 		notes: [
-			"<b>Rev No is derived, never typed.</b> It is read from the document being amended, so the sequence cannot be broken by hand.",
-			"<b>Amending does not move the BOM.</b> A BOM already created from the earlier revision stays as it is — create a BOM from the new revision when it is ready, and it is that BOM which Material Planning should be pointed at.",
+			"<b>Everything here came from the sheet.</b> The BOM is the third copy of the same data — sheet, then Drawing, then BOM. That is why corrections belong in the sheet: change it there and reload, and all three agree. Editing a BOM by hand leaves it disagreeing with the drawing it was built from.",
+		],
+	},
+	{
+		id: "bom-operations",
+		title: "Operations and Workstations",
+		kicker: "Added automatically",
+		purpose:
+			"Every BOM gets the standard routing attached automatically — you do not choose it and " +
+			"you do not need to maintain it. It is there for information and for tracing work back " +
+			"afterwards, not because anything asks you to plan it here.",
+		steps: [
+			"<b>With Operations</b> is ticked and <b>Routing</b> is set to <b>Standard Manufacturing Routing</b> on every BOM, without being asked for.",
+			"That routing carries six operations, in order: <b>Material Issue, Fit-up, Welding, Final, Blasting, Painting</b>.",
+			"Each operation has a workstation of the same name, created alongside it.",
+			"The real sequence for a job is decided later, on the Production Plan's Process Planning table — which operations actually run, who performs each one, and which are skipped.",
+		],
+		notes: [
+			"<b>Informational only.</b> The operations on a BOM do not drive anything. Production is driven by the Production Plan's Process Planning rows, which create one Operation Entry each. The BOM's copy is there so the standard route is visible on the document and can be looked back at.",
+			"<b>Operating cost is not used.</b> The times on the routing are placeholders and the BOM's Operating Cost stays at zero — labour is not costed here.",
+		],
+	},
+	{
+		id: "bom-costing",
+		title: "Rates and Costing",
+		kicker: "An estimate, not the cost",
+		purpose:
+			"The value on a BOM is an estimate for reference only. The real raw-material cost of a " +
+			"job comes from the stock that is actually issued to it, at the rate that stock was " +
+			"actually valued at — which is known at Stock Entry time, not here.",
+		fields: [
+			{ name: "Rate Of Materials Based On", note: "Set to Valuation Rate. Each row is priced at the item's valuation at the moment the BOM is built." },
+			{ name: "Raw Material Cost / Total Cost", note: "The estimate that follows from those rates." },
+			{ name: "Operating Cost", note: "Zero — see Operations above." },
+		],
+		notes: [
+			"<b>Treat the BOM value as indicative.</b> It is a snapshot of valuation on the day the BOM was created. Valuation moves with every purchase, so the same BOM built a month later would show a different figure for identical material.",
+			"<b>The actual cost is recorded on the Stock Entry.</b> When material is issued against a job, the rate on that entry is what the stock was really worth, and that is what the raw-material cost of the job is calculated from. If you need to know what a job cost, look at its Stock Entries, not its BOM.",
+			"<b>A zero rate on a BOM means zero valuation, not free material.</b> If stock was received without a rate, its valuation is zero and every BOM using it will show zero for those rows. Fix it at the receipt — the BOM is only reporting what it was told.",
 		],
 	},
 ];
@@ -1208,6 +1274,7 @@ const ERP_MANUAL_GLOSSARY_CHILDREN = [
 
 const ERP_MANUAL_CATEGORIES = [
 	...ERP_MANUAL_STUB_CATEGORIES,
+	{ id: "bom", label: "BOM", children: ERP_MANUAL_BOM_CHILDREN },
 	{ id: "material-planning", label: "Material Planning", children: ERP_MANUAL_MATERIAL_PLANNING_CHILDREN },
 	{ id: "production-plan", label: "Production Plan", children: ERP_MANUAL_PRODUCTION_PLAN_CHILDREN },
 	{ id: "job-work-order", label: "Job Work Order", children: ERP_MANUAL_JOB_WORK_ORDER_CHILDREN },
