@@ -168,6 +168,14 @@ class MaterialPlanning(Document):
                 continue
             agg = needed.setdefault(row.item_code, {"length": 0.0, "width": 0.0, "thickness": set()})
             agg["length"] = max(agg["length"], flt(row.length))
+            # Width and Thickness belong to the Plates formula alone. A
+            # Structural's weight is Length x Unit Weight x Sec Qty, so a value
+            # in either column there describes nothing the item has, and
+            # demanding the purchase match it can only ever raise a false
+            # alarm -- as it did for a beam that picked up a stray 10 mm
+            # thickness from one line of an uploaded BOM sheet.
+            if (row.parent_item_group or "").strip() != "Plates":
+                continue
             agg["width"] = max(agg["width"], flt(row.width))
             if flt(row.thickness):
                 agg["thickness"].add(flt(row.thickness))

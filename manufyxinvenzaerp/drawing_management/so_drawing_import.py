@@ -195,6 +195,10 @@ def parse_bom_excel(so_name):
             item_data_map[item.name] = item
 
     # --- Warn for Plates missing thickness / Structurals missing unit weight in Excel ---
+    # A dimension filled in for a group that does not use it is called out here
+    # too, at the moment the sheet is read, so it reads against the sheet the
+    # user is still looking at. verify_raw_materials repeats the check and is
+    # the one that blocks -- this is the earlier, friendlier sighting.
     dim_warn = []
     for cdn, d in new_drawings.items():
         for item in d["items"]:
@@ -204,6 +208,12 @@ def parse_bom_excel(so_name):
                 dim_warn.append(_("{0} / {1}: Plates item missing Thickness in Excel").format(cdn, item["material_code"]))
             elif pig == "Structurals" and not flt(idata.get("custom_unit_weight")):
                 dim_warn.append(_("{0} / {1}: Structurals item missing Unit Weight in Item master").format(cdn, item["material_code"]))
+            unused = _check_unused_dimensions(frappe._dict(item), pig)
+            if unused:
+                dim_warn.append(
+                    _("{0} / {1}: {2} do not use {3} — clear that column in the sheet")
+                    .format(cdn, item["material_code"], pig, ", ".join(unused))
+                )
     if dim_warn:
         warnings.extend(dim_warn)
 
@@ -688,16 +698,120 @@ def _check_drawing_masters(so):
     return issues
 
 
+# Every dimension the weight formula reads, per group. A dimension NOT listed
+# for a group takes no part in that group's formula, so a value sitting in it
+# describes nothing -- see _check_unused_dimensions.
+GROUP_DIMENSIONS = {
+    "Structurals": {"length"},
+    "Plates": {"length", "width", "thickness"},
+    "Nuts and Bolts": set(),
+}
+DIMENSION_SHEET_COLUMNS = {
+    "length": "Length",
+    "width": "Width",
+    "thickness": "Thickness",
+}
+
+
+def _check_row_required(row, group):
+    """Inputs the group's formula cannot produce a weight without.
+
+    Mirrors dimension_formula.calculate_qty exactly: Structurals need Length x
+    Unit Weight x Sec Qty, Plates need those plus Width and Thickness, and Nuts
+    and Bolts convert Sec Qty (Nos) with the Unit Weight. Sec Qty was missing
+    from this list before -- a blank "Reqd Raw Material Qty" column made the
+    formula return nothing and the row was staged weighing zero, silently.
+    """
+    missing = []
+    for dim in sorted(GROUP_DIMENSIONS.get(group) or ()):
+        if not flt(row.get(dim)):
+            missing.append(DIMENSION_SHEET_COLUMNS[dim])
+    if not flt(row.get("sec_qty")):
+        missing.append(_("Reqd Raw Material Qty"))
+    if not flt(row.get("unit_weight")):
+        missing.append(_("Unit Weight (set it on the Item master)"))
+    return missing
+
+
+def _check_unused_dimensions(row, group):
+    """Dimensions filled in for a group whose formula never reads them.
+
+    A Structural's weight is Length x Unit Weight x Sec Qty -- Thickness and
+    Width play no part, so a Thickness typed against a beam is not a harmless
+    extra: it is copied into the Drawing, the BOM and Material Planning as a
+    real requirement, and Purchase Receipt matches batches on all three
+    dimensions strictly. The beam then arrives with no thickness, fails to
+    match, and the whole received batch is routed to Material Mapping instead
+    of Exact Match. Caught here, at the one point before drawings exist.
+    """
+    used = GROUP_DIMENSIONS.get(group)
+    if used is None:
+        return []
+    return [
+        DIMENSION_SHEET_COLUMNS[dim]
+        for dim in sorted(set(DIMENSION_SHEET_COLUMNS) - used)
+        if flt(row.get(dim))
+    ]
+
+
+def _check_drawing_headers(so):
+    """Header columns of each drawing that has not been created yet.
+
+    A blank FG Item or Total Qty is not reported anywhere else: the import
+    substitutes 1.0 for a missing Total Qty, so every total on the drawing
+    would silently be computed for a single piece.
+    """
+    rows = [r for r in (so.get("custom_duno_items") or []) if not r.get("drawing")]
+    if not rows:
+        return []
+
+    fg_codes = {r.item for r in rows if r.get("item")}
+    existing_fg = set(frappe.get_all(
+        "Item", filters={"name": ["in", list(fg_codes)]}, pluck="name"
+    )) if fg_codes else set()
+
+    issues = []
+    for r in rows:
+        label = r.get("drawing_number") or r.get("duno_mark_no") or "?"
+        if not r.get("item"):
+            issues.append(_("Drawing {0}: FG Item is missing").format(label))
+        elif r.item not in existing_fg:
+            issues.append(_("Drawing {0}: FG Item <b>{1}</b> is not in the Item master").format(label, r.item))
+        if not r.get("duno_mark_no"):
+            issues.append(_("Drawing {0}: DUNO/Mark No is missing").format(label))
+        if flt(r.get("total_quantity")) <= 0:
+            issues.append(
+                _("Drawing {0}: Total Qty is {1} — set how many are being made, "
+                  "otherwise every total is calculated for one piece.")
+                .format(label, flt(r.get("total_quantity")))
+            )
+    return issues
+
+
 @frappe.whitelist()
 def verify_raw_materials(so_name):
     """
     Validate all unlocked Raw Material rows on the Sales Order.
     Sets custom_raw_materials_verified = 1 if no issues found.
     Returns {issues: [...], verified: bool}.
+
+    This is the only gate between the uploaded sheet and the documents built
+    from it, so it checks every value the weight formula reads -- present ones
+    that should not be, absent ones that must be, and the weight the row ends
+    up carrying -- rather than a subset. Anything it reports has to be fixed in
+    the sheet and the file re-loaded; nothing here edits the staged rows,
+    because the sheet stays the single source of truth.
     """
     so = frappe.get_doc("Sales Order", so_name)
-    unlocked = [r for r in (so.custom_so_raw_materials or []) if not r.is_locked]
-    issues = _check_drawing_masters(so)
+    # r.get("is_locked"), never r.is_locked: frappe's Document class defines
+    # is_locked as a property (whether a FILE LOCK is held on the document),
+    # and a class property shadows the field of the same name on every
+    # instance -- the attribute reads False whatever the column holds. Reading
+    # it that way made this list every row, so rows already turned into
+    # Drawings were re-verified and could fail on a sheet correction that no
+    # longer applies to them.
+    unlocked = [r for r in (so.custom_so_raw_materials or []) if not r.get("is_locked")]
+    issues = _check_drawing_masters(so) + _check_drawing_headers(so)
 
     if not unlocked:
         verified = not issues
@@ -708,38 +822,75 @@ def verify_raw_materials(so_name):
         return {"issues": issues, "verified": verified, "modified": str(modified)}
 
     all_mat = {r.material_code for r in unlocked if r.material_code}
-    existing = set(frappe.db.get_all(
-        "Item", filters={"name": ["in", list(all_mat)]}, pluck="name"
-    )) if all_mat else set()
+    # The group and unit weight are read from the Item master rather than the
+    # staged row: the row holds a copy taken at import time, and an Item edited
+    # afterwards would otherwise be verified against values no longer in force.
+    item_master = {
+        d.name: d
+        for d in frappe.get_all(
+            "Item",
+            filters={"name": ["in", list(all_mat)]},
+            fields=["name", "custom_parent_item_group", "custom_unit_weight"],
+        )
+    } if all_mat else {}
+
+    # Drawings still carrying rows are reported once if they have none at all.
+    seen_cdns = {r.customer_drawing_number for r in unlocked if r.customer_drawing_number}
+    for r in (so.get("custom_duno_items") or []):
+        if not r.get("drawing") and r.get("drawing_number") and r.drawing_number not in seen_cdns:
+            issues.append(_("Drawing {0}: no raw material rows were loaded for it").format(r.drawing_number))
 
     for row in unlocked:
         cdn = row.customer_drawing_number or "?"
         mat = row.material_code or ""
-        pig = row.parent_item_group or ""
+        item_no = row.item_no or "?"
+
+        def _issue(text):
+            issues.append(_("Drawing {0} / {1} (Item {2}): {3}").format(cdn, mat or "?", item_no, text))
 
         if not mat:
-            issues.append(_("Drawing {0}, Item {1}: Material Code is missing").format(cdn, row.item_no or "?"))
+            issues.append(_("Drawing {0}, Item {1}: Material Code is missing").format(cdn, item_no))
             continue
 
-        if mat not in existing:
+        idata = item_master.get(mat)
+        if not idata:
             issues.append(_("Drawing {0} / {1}: Not found in Item master").format(cdn, mat))
             continue
 
-        if pig == "Plates":
-            missing = []
-            if not flt(row.thickness): missing.append("Thickness")
-            if not flt(row.width):     missing.append("Width")
-            if not flt(row.length):    missing.append("Length")
-            if not flt(row.unit_weight): missing.append("Unit Weight (check Item master)")
-            if missing:
-                issues.append(_("Drawing {0} / {1} (Plates): Missing — {2}").format(cdn, mat, ", ".join(missing)))
+        group = (idata.custom_parent_item_group or "").strip()
+        if group not in GROUP_DIMENSIONS:
+            _issue(_("Parent Item Group on the Item master is <b>{0}</b> — it must be one of {1}, "
+                     "or no weight can be calculated for this row.")
+                   .format(group or _("not set"), ", ".join(sorted(GROUP_DIMENSIONS))))
+            continue
 
-        elif pig == "Structurals":
-            missing = []
-            if not flt(row.length):      missing.append("Length")
-            if not flt(row.unit_weight): missing.append("Unit Weight (check Item master)")
-            if missing:
-                issues.append(_("Drawing {0} / {1} (Structurals): Missing — {2}").format(cdn, mat, ", ".join(missing)))
+        if (row.parent_item_group or "").strip() != group:
+            _issue(_("staged as <b>{0}</b> but the Item master now says <b>{1}</b> — "
+                     "re-load the sheet so the rows match the master.")
+                   .format(row.parent_item_group or _("blank"), group))
+            continue
+
+        missing = _check_row_required(row, group)
+        if missing:
+            _issue(_("{0} — missing {1}").format(group, ", ".join(missing)))
+
+        unused = _check_unused_dimensions(row, group)
+        if unused:
+            _issue(_("{0} do not use {1} — clear that column in the sheet. "
+                     "A value there is carried into the Drawing, BOM and Material Planning "
+                     "as a real requirement that the delivered material can never match.")
+                   .format(group, ", ".join(unused)))
+
+        # Last line of defence: whatever the reason, a row that ends up weighing
+        # nothing must not reach a Drawing.
+        expected = flt(_calc_qty(group, row.length, row.width, row.thickness,
+                                 flt(idata.custom_unit_weight), row.sec_qty), 3)
+        if expected <= 0:
+            if not missing:
+                _issue(_("calculated weight is zero — check the dimensions and the Item master's Unit Weight."))
+        elif abs(expected - flt(row.qty, 3)) > 0.01:
+            _issue(_("row weighs {0} Kg but the current dimensions and Unit Weight give {1} Kg — "
+                     "re-load the sheet.").format(flt(row.qty, 3), expected))
 
     verified = len(issues) == 0
     frappe.db.set_value("Sales Order", so_name, "custom_raw_materials_verified", 1 if verified else 0, update_modified=False)

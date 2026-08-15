@@ -12,7 +12,15 @@ def recalculate_raw_material_qty(doc, method):
             total_qty_map[dr.drawing_number] = flt(dr.total_quantity) or 1.0
 
     for row in (doc.custom_so_raw_materials or []):
-        if row.is_locked:
+        # row.get("is_locked"), never row.is_locked: frappe's Document class
+        # defines is_locked as a property (it reports whether a FILE LOCK is
+        # held on the document), and a class property shadows the field of the
+        # same name on every instance. The attribute therefore always reads
+        # False no matter what the column holds, so this loop was recalculating
+        # locked rows too -- rewriting rows a Drawing had already been built
+        # from whenever the Sales Order was saved. .get() reads the row's own
+        # data and returns the stored value.
+        if row.get("is_locked"):
             continue
         pig = row.parent_item_group or ""
         unit_wt = flt(row.unit_weight)
