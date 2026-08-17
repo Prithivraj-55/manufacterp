@@ -128,29 +128,29 @@ def run():
     check("plate off-cut", flt(plate, 3), 11.775)
 
     print()
-    print("=== the drawing weight is SUMMED across rows sharing a batch ===")
-    # One batch routinely covers many requirement rows -- fifteen PLATE10 rows on
-    # one batch on MIP-2026-00107. Keeping only the last row's weight, as the
-    # label lookups do, made the plan look like it needed 10 Kg where it needed
-    # 260, and the tab then reported almost the whole transfer as surplus.
+    print("=== the drawing weight is each row's SHARE of its requirement ===")
+    # drawing_planned_weight on a row is the WHOLE requirement's weight, not that
+    # row's share: a drawing needing 324.224 Kg of ISA100 filled from two batches
+    # carries 324.224 on both. Reading one row understated a batch covering many
+    # requirements (PLATE10 read 10 Kg where the plan needed 254); adding the rows
+    # up counted the split requirement twice (ISA100 read 818 where it needed 494).
     src = inspect.getsource(get_mip_pending_items)
-    check("drawing weight is accumulated, not overwritten",
-          "drawing_wt_by_key[key] = flt(drawing_wt_by_key.get(key, 0)" in src, True)
-    check("it is not built by the last-row-wins helper",
+    check("the requirement is identified by drawing and dimensions",
+          "r.customer_drawing_number or \"\"," in src, True)
+    check("each row takes a proportional share",
+          'flt(agg["weight"]) * (flt(r.qty) / flt(agg["qty"]))' in src, True)
+    check("it is not the last-row-wins helper",
           '_by_key("drawing_planned_weight")' in src, False)
-    check("and it is scaled for a partial transfer",
-          "drawing_wt_by_key.get((item_code, batch_no), 0)) * ratio" in src, True)
 
-    rows = [
-        {"key": ("PLATE10", "B1"), "dw": 10.0},
-        {"key": ("PLATE10", "B1"), "dw": 200.0},
-        {"key": ("PLATE10", "B1"), "dw": 49.834},
-    ]
-    summed = {}
-    for r in rows:
-        summed[r["key"]] = flt(summed.get(r["key"], 0) + r["dw"], 3)
-    check("three rows on one batch add up", summed[("PLATE10", "B1")], 259.834)
-    check("last-row-wins would have said", rows[-1]["dw"], 49.834)
+    # The real case from MIP-2026-00107: one 324.224 Kg requirement filled from
+    # two batches, 81.056 from one and 243.168 from the other.
+    requirement, parts = 324.224, [81.056, 243.168]
+    total = flt(sum(parts), 3)
+    shares = [flt(requirement * (part / total), 3) for part in parts]
+    check("the shares match what each row carries", shares, parts)
+    check("and they add back to the requirement", flt(sum(shares), 3), requirement)
+    check("adding the rows' own figures would double it",
+          flt(requirement * len(parts), 3), 648.448)
 
     print()
     print("=== consolidation groups by item, across batches ===")

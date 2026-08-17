@@ -280,19 +280,35 @@ def get_mip_pending_items(mip_name):
 
     duno_by_key = _by_key("duno_mark_no")
     # What the drawings actually call for, as opposed to what the reserved batches
-    # weigh. The consolidated excess tab is the difference between the two, so it
-    # has to travel with the row.
+    # weigh. The consolidated excess tab is the difference between the two.
     #
-    # SUMMED, not taken from one row: _by_key keeps the last row it sees for a
-    # key, which is right for a label like the DUNO but wrong for a weight. One
-    # batch routinely covers a dozen requirement rows -- fifteen PLATE10 rows on
-    # one batch here -- and keeping only the last made the plan look like it
-    # needed 10 Kg when it needed 260, so the excess tab reported almost the whole
-    # transfer as surplus.
+    # drawing_planned_weight on a row is the WHOLE requirement's weight, not that
+    # row's share of it: a drawing needing 324.224 Kg of ISA100 that is filled
+    # from two batches carries 324.224 on both rows. So neither reading is right
+    # on its own -- taking one row's figure understates a batch covering many
+    # requirements, and adding them up counts a split requirement twice. Each row
+    # is given its share instead, in proportion to the weight it actually carries,
+    # so the shares add back to the requirement exactly.
+    req_totals = {}
+    for r in (mip.raw_materials or []):
+        req_key = ((r.planned_item or r.item_code), r.customer_drawing_number or "",
+                   flt(r.length), flt(r.width), flt(r.thickness))
+        agg = req_totals.setdefault(req_key, {"weight": 0.0, "qty": 0.0})
+        agg["weight"] = flt(r.drawing_planned_weight)
+        agg["qty"] = flt(agg["qty"] + flt(r.qty), 3)
+
     drawing_wt_by_key = {}
     for r in (mip.raw_materials or []):
+        req_key = ((r.planned_item or r.item_code), r.customer_drawing_number or "",
+                   flt(r.length), flt(r.width), flt(r.thickness))
+        agg = req_totals.get(req_key) or {"weight": 0.0, "qty": 0.0}
+        share = (
+            flt(agg["weight"]) * (flt(r.qty) / flt(agg["qty"]))
+            if flt(agg["qty"]) else flt(agg["weight"])
+        )
         key = ((r.planned_item or r.item_code), r.batch_no or "")
-        drawing_wt_by_key[key] = flt(drawing_wt_by_key.get(key, 0) + flt(r.drawing_planned_weight), 3)
+        drawing_wt_by_key[key] = flt(drawing_wt_by_key.get(key, 0) + share, 3)
+
     so_by_key = _by_key("sales_order")
     cdn_by_key = _by_key("customer_drawing_number")
     drawing_by_duno = {d.duno_mark_no: d.drawing for d in (mip.drawing_items or []) if d.duno_mark_no}
