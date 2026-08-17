@@ -128,6 +128,31 @@ def run():
     check("plate off-cut", flt(plate, 3), 11.775)
 
     print()
+    print("=== the drawing weight is SUMMED across rows sharing a batch ===")
+    # One batch routinely covers many requirement rows -- fifteen PLATE10 rows on
+    # one batch on MIP-2026-00107. Keeping only the last row's weight, as the
+    # label lookups do, made the plan look like it needed 10 Kg where it needed
+    # 260, and the tab then reported almost the whole transfer as surplus.
+    src = inspect.getsource(get_mip_pending_items)
+    check("drawing weight is accumulated, not overwritten",
+          "drawing_wt_by_key[key] = flt(drawing_wt_by_key.get(key, 0)" in src, True)
+    check("it is not built by the last-row-wins helper",
+          '_by_key("drawing_planned_weight")' in src, False)
+    check("and it is scaled for a partial transfer",
+          "drawing_wt_by_key.get((item_code, batch_no), 0)) * ratio" in src, True)
+
+    rows = [
+        {"key": ("PLATE10", "B1"), "dw": 10.0},
+        {"key": ("PLATE10", "B1"), "dw": 200.0},
+        {"key": ("PLATE10", "B1"), "dw": 49.834},
+    ]
+    summed = {}
+    for r in rows:
+        summed[r["key"]] = flt(summed.get(r["key"], 0) + r["dw"], 3)
+    check("three rows on one batch add up", summed[("PLATE10", "B1")], 259.834)
+    check("last-row-wins would have said", rows[-1]["dw"], 49.834)
+
+    print()
     print("=== consolidation groups by item, across batches ===")
     rows = [
         {"item_code": "ISA100", "qty": 60.0, "drawing_planned_weight": 25.0},

@@ -279,10 +279,20 @@ def get_mip_pending_items(mip_name):
         }
 
     duno_by_key = _by_key("duno_mark_no")
-    # What the drawing actually calls for, as opposed to what the reserved batches
-    # weigh. The consolidated excess tab in the transfer popup is the difference
-    # between the two, so it has to travel with the row.
-    drawing_wt_by_key = _by_key("drawing_planned_weight")
+    # What the drawings actually call for, as opposed to what the reserved batches
+    # weigh. The consolidated excess tab is the difference between the two, so it
+    # has to travel with the row.
+    #
+    # SUMMED, not taken from one row: _by_key keeps the last row it sees for a
+    # key, which is right for a label like the DUNO but wrong for a weight. One
+    # batch routinely covers a dozen requirement rows -- fifteen PLATE10 rows on
+    # one batch here -- and keeping only the last made the plan look like it
+    # needed 10 Kg when it needed 260, so the excess tab reported almost the whole
+    # transfer as surplus.
+    drawing_wt_by_key = {}
+    for r in (mip.raw_materials or []):
+        key = ((r.planned_item or r.item_code), r.batch_no or "")
+        drawing_wt_by_key[key] = flt(drawing_wt_by_key.get(key, 0) + flt(r.drawing_planned_weight), 3)
     so_by_key = _by_key("sales_order")
     cdn_by_key = _by_key("customer_drawing_number")
     drawing_by_duno = {d.duno_mark_no: d.drawing for d in (mip.drawing_items or []) if d.duno_mark_no}
@@ -366,7 +376,11 @@ def get_mip_pending_items(mip_name):
             "drawing": drawing_by_duno.get(duno, ""),
             "sales_order": so_by_key.get((item_code, batch_no), ""),
             "customer_drawing_number": cdn_by_key.get((item_code, batch_no), ""),
-            "drawing_planned_weight": flt(drawing_wt_by_key.get((item_code, batch_no), 0), 3),
+            # Scaled by the same ratio as qty and Sec Qty: on a partial transfer
+            # the tab must compare what is being sent against the share of the
+            # requirement it covers, not against the whole of it.
+            "drawing_planned_weight": flt(
+                flt(drawing_wt_by_key.get((item_code, batch_no), 0)) * ratio, 3),
         })
 
     for row in result:
