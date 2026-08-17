@@ -1469,39 +1469,65 @@ function _show_return_excess_dialog(frm) {
 
 	function _is_dim_driven(g) { return g === "Structurals" || g === "Plates"; }
 
+	// Laid out the same way as the transfer popup's excess tab: one column per
+	// dimension rather than three boxes stacked in a cell, and the same rules
+	// about which of them an item actually uses -- Width belongs to the Plates
+	// formula alone, and Thickness is the batch's for good, since cutting changes
+	// Length and Width only.
+	let num = "form-control input-xs text-right";
 	let rows_html = rows.map(function(r) {
 		let g = r.parent_item_group;
-		let dims_html;
-		if (_is_dim_driven(g)) {
-			dims_html = `<input type="number" step="any" class="form-control form-control-sm _rex_length" placeholder="${__("Length (mm)")}" value="${flt(r.length)}" style="margin-bottom:4px;">`
-				+ (g === "Plates" ? `<input type="number" step="any" class="form-control form-control-sm _rex_width" placeholder="${__("Width (mm)")}" value="${flt(r.width)}" style="margin-bottom:4px;">` : "")
-				+ `<input type="number" step="any" class="form-control form-control-sm _rex_sec_qty" placeholder="${__("Sec Qty")}" value="${flt(r.sec_qty)}">`;
-		} else {
-			dims_html = `<span style="color:#adb5bd;font-size:11px;">${__("n/a")}</span>`;
+		let dim_driven = _is_dim_driven(g);
+		let uses_width = g === "Plates";
+
+		function box(cls, value, enabled) {
+			return `<input type="number" step="0.001" min="0" class="${num} ${cls}"
+				style="width:96px" value="${value ? flt(value, 3) : ""}"
+				${enabled ? "" : "disabled"}>`;
 		}
-		let qty_html = _is_dim_driven(g)
-			? `<span class="_rex_qty_preview">${format_number(flt(r.qty), null, 3)}</span>`
-			: `<input type="number" step="any" class="form-control form-control-sm _rex_qty" value="${flt(r.qty)}">`;
+
+		let qty_cell = dim_driven
+			? `<span class="_rex_qty_preview" style="font-weight:600">${format_number(flt(r.qty), null, 3)}</span>`
+			: `<input type="number" step="0.001" min="0" class="${num} _rex_qty" style="width:96px" value="${flt(r.qty, 3)}">`;
+
 		return `<tr data-name="${frappe.utils.escape_html(r.name)}" data-group="${frappe.utils.escape_html(g || "")}"
 			data-thickness="${flt(r.thickness)}" data-unit-weight="${flt(r.unit_weight)}">
-			<td style="padding:6px 8px;vertical-align:top;">${frappe.utils.escape_html(r.item_code || "")}</td>
-			<td style="padding:6px 8px;">${dims_html}</td>
-			<td style="padding:6px 8px;vertical-align:top;text-align:right;">${qty_html}</td>
-			<td style="padding:6px 8px;">
-				<input type="text" class="form-control form-control-sm _rex_reason" placeholder="${__("Reason (required)…")}" value="${frappe.utils.escape_html(r.return_reason || "")}">
+			<td style="padding:6px 8px">
+				${frappe.utils.escape_html(r.item_code || "")}
+				<div class="text-muted" style="font-size:11px">${frappe.utils.escape_html(g || "—")}</div>
+			</td>
+			<td style="padding:6px 8px">${box("_rex_length", r.length, dim_driven)}</td>
+			<td style="padding:6px 8px">${box("_rex_width", r.width, dim_driven && uses_width)}</td>
+			<td style="padding:6px 8px;text-align:right;white-space:nowrap">
+				${flt(r.thickness) ? format_number(flt(r.thickness), null, 2) : "—"}</td>
+			<td style="padding:6px 8px">${box("_rex_sec_qty", r.sec_qty, dim_driven)}</td>
+			<td style="padding:6px 8px;text-align:right;white-space:nowrap">${qty_cell}</td>
+			<td style="padding:6px 8px">
+				<input type="text" class="form-control input-xs _rex_reason"
+					placeholder="${__("Reason (required)…")}"
+					value="${frappe.utils.escape_html(r.return_reason || "")}">
 			</td>
 		</tr>`;
 	}).join("");
 
-	let table_html = `<table class="table table-bordered table-condensed" style="margin-bottom:0;">
+	let th = "padding:6px 8px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;white-space:nowrap;";
+	let table_html = `<div class="text-muted" style="font-size:12px;margin-bottom:10px">
+			${__("Measure the off-cut going back. Qty is calculated from the dimensions for Structurals and Plates — for anything else, type the weight directly.")}
+			<br>${__("Width is used by Plates only, and Thickness is the batch's own and cannot be changed: a cut alters Length and Width, never Thickness.")}
+		</div>
+		<div style="overflow-x:auto">
+		<table class="table table-bordered table-condensed" style="margin-bottom:0;font-size:12px">
 		<thead><tr>
-			<th style="padding:6px 8px;">${__("Item Code")}</th>
-			<th style="padding:6px 8px;width:170px;">${__("Length / Width / Sec Qty")}</th>
-			<th style="padding:6px 8px;width:100px;">${__("Qty (Kg)")}</th>
-			<th style="padding:6px 8px;">${__("Return Reason")}</th>
+			<th style="${th}">${__("Item Code")}</th>
+			<th style="${th}">${__("Length (mm)")}</th>
+			<th style="${th}">${__("Width (mm)")}</th>
+			<th style="${th}text-align:right">${__("Thickness (mm)")}</th>
+			<th style="${th}">${__("Sec Qty")}</th>
+			<th style="${th}text-align:right">${__("Qty (Kg)")}</th>
+			<th style="${th}min-width:240px">${__("Return Reason")}</th>
 		</tr></thead>
 		<tbody>${rows_html}</tbody>
-	</table>`;
+	</table></div>`;
 
 	let dialog = new frappe.ui.Dialog({
 		title: __("Return Excess Entry — Review Qty & Reason"),
@@ -1510,26 +1536,50 @@ function _show_return_excess_dialog(frm) {
 		primary_action_label: __("Create Return Entry"),
 		primary_action() {
 			let payload = [];
-			let missing_reason = false;
+			let missing_reason = [];
+			let incomplete = [];
 			dialog.$wrapper.find("tbody tr").each(function() {
 				let $tr = $(this);
 				let reason = ($tr.find("._rex_reason").val() || "").trim();
 				let g = $tr.data("group");
+				let item = ($tr.find("td").first().text() || "").trim().split("\n")[0];
 				let entry = { name: $tr.data("name"), return_reason: reason };
 				if (_is_dim_driven(g)) {
 					entry.length = flt($tr.find("._rex_length").val());
 					if (g === "Plates") entry.width = flt($tr.find("._rex_width").val());
 					entry.sec_qty = flt($tr.find("._rex_sec_qty").val());
+					// The same rule the rest of the app applies: a weight cannot be
+					// produced without every input its own group's formula reads, and
+					// a row that computes to nothing would be received as 0 Kg.
+					let need = [];
+					if (!entry.length) need.push(__("Length"));
+					if (g === "Plates" && !entry.width) need.push(__("Width"));
+					if (!entry.sec_qty) need.push(__("Sec Qty"));
+					if (!flt($tr.data("thickness")) && g === "Plates") need.push(__("Thickness (on the batch)"));
+					if (need.length) incomplete.push(item + " — " + need.join(", "));
 				} else {
 					entry.qty = flt($tr.find("._rex_qty").val());
+					if (entry.qty <= 0) incomplete.push(item + " — " + __("Qty"));
 				}
-				if (!reason) missing_reason = true;
+				if (!reason) missing_reason.push(item);
 				payload.push(entry);
 			});
-			if (missing_reason) {
+			if (incomplete.length) {
+				frappe.msgprint({
+					title: __("Measurements Incomplete"),
+					message: __("These rows cannot produce a weight until every figure their group's formula needs is filled in:")
+						+ "<ul style='margin:6px 0 0 18px'>"
+						+ incomplete.map(function(t) { return "<li>" + frappe.utils.escape_html(t) + "</li>"; }).join("")
+						+ "</ul>",
+					indicator: "orange",
+				});
+				return;
+			}
+			if (missing_reason.length) {
 				frappe.msgprint({
 					title: __("Reason Required"),
-					message: __("Please enter a Return Reason for every row before continuing."),
+					message: __("A Return Reason is what makes this stock explainable later. Enter one for: {0}",
+						[missing_reason.map(function(t) { return "<b>" + frappe.utils.escape_html(t) + "</b>"; }).join(", ")]),
 					indicator: "orange",
 				});
 				return;
