@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-08-16 02:22:39_
+_Generated: 2026-08-18 00:43:46_
 
 ## drawing
 
@@ -537,6 +537,7 @@ _Generated: 2026-08-16 02:22:39_
 | ` _assert_claimed_excess_unchanged` | no |
 | ` unlink_excess_claim` | no |
 | ` _sync_excess_return_from_raw_materials` | no |
+| ` _sync_excess_return_totals` | no |
 | ` _cut_sheet_sheet_qty` | no |
 | ` _sync_cut_sheet_calc` | no |
 | ` _warn_cut_sheet_mismatch` | no |
