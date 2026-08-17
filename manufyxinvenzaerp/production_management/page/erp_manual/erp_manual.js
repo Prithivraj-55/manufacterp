@@ -444,8 +444,266 @@ const ERP_MANUAL_BOM_CHILDREN = [
 	},
 ];
 
+// ─── Item — custom fields, validation rules, UOM config, batch naming. ──────────
+const ERP_MANUAL_ITEM_CHILDREN = [
+	{
+		id: "item-overview",
+		kind: "overview",
+		title: "How the Item Master Works Here",
+		kicker: "Start here",
+		purpose:
+			"The Item master is where every raw material and finished-goods item is configured. " +
+			"This app adds a small set of custom fields on top of standard ERPNext — they drive weight " +
+			"calculations, UOM rules, batch naming, and inspection gating across every module. " +
+			"Get them right on the item and everything downstream works automatically; leave them " +
+			"wrong and the formulas produce nothing, or wrong numbers.",
+	},
+	{
+		id: "item-custom-fields",
+		title: "Custom Fields",
+		kicker: "What was added and why",
+		purpose:
+			"Six custom fields added to the Item master. Together they classify the item, " +
+			"configure its UOM pair, set the weight constant the Kg formula needs, control " +
+			"how batches are named at receipt, and flag whether an incoming batch must pass " +
+			"inspection before it can be reserved in Material Planning.",
+		fields: [
+			{
+				name: "Material Spec",
+				note: "Free-text specification for the item — grade, standard, or any note that " +
+					"identifies the material beyond its name. Optional; does not drive any calculation.",
+			},
+			{
+				name: "Parent Item Group",
+				note: "<b>Mandatory.</b> A Link to an Item Group marked as a group (not a leaf). " +
+					"The three values that matter here are <b>Structurals</b>, <b>Plates</b>, and " +
+					"<b>Nuts and Bolts</b> — everything the weight formula, the UOM rules, and the " +
+					"batch-naming pattern does is branched on this field. Any other value means the " +
+					"item is treated as a non-formula item (no Kg calculation). " +
+					"<b>Locked</b> once transactions exist — cannot be changed after a Stock Ledger " +
+					"Entry, submitted Purchase Order or submitted Sales Order references this item.",
+			},
+			{
+				name: "Unit Weight",
+				note: "The item's weight constant — <b>kg/metre for Structurals</b> (e.g. ISMB400 = 61.6 kg/m), " +
+					"<b>density factor for Plates</b> (always 7.85 for steel plates, unitless — the formula " +
+					"multiplies Length × Width × Thickness × 7.85). " +
+					"<b>Mandatory for Structurals, Plates, and Nuts and Bolts</b> — without it the formula " +
+					"produces zero and every downstream Kg figure is wrong. " +
+					"<b>Locked</b> once transactions exist.",
+			},
+			{
+				name: "Secondary UOM",
+				note: "The item's second unit. For <b>Structurals and Plates</b> this is <b>Nos</b> (pieces); " +
+					"for <b>Nuts and Bolts</b> it is <b>Kg</b>. Set automatically when you choose a Parent " +
+					"Item Group. <b>Locked</b> once transactions exist.",
+			},
+			{
+				name: "Item Calculation Type",
+				note: "<b>Read-only, set automatically.</b> Shows which formula branch this item uses: " +
+					"<b>Formula Weight Calculation</b> for Structurals and Plates (Kg derived from dimensions); " +
+					"<b>Normal Weight Calculation</b> for Nuts and Bolts (Kg entered directly via Unit Weight × Nos). " +
+					"You cannot set this field by hand — it follows Parent Item Group.",
+			},
+			{
+				name: "Custom Batch Abbreviation",
+				note: "<b>Only shown when Has Batch No is ticked.</b> A short code used as the prefix of " +
+					"every batch created for this item on a Purchase Receipt or Stock Entry — e.g. " +
+					"<b>ISMB400</b>, <b>PLT10</b>, <b>ISA100</b>. " +
+					"<b>Mandatory for Structurals and Plates</b> when Has Batch No is on. " +
+					"<b>Locked</b> once any batch exists for this item — see Batch Naming below.",
+			},
+			{
+				name: "Inspection Required (Purchase Receipt)",
+				note: "A checkbox. When ticked, every Purchase Receipt for this item enters an " +
+					"inspection workflow — batches received cannot be reserved in Material Planning " +
+					"until the linked Inspection Entry is Completed. " +
+					"Leave it unticked for items you receive without an incoming-QC step.",
+			},
+		],
+		notes: [
+			"<b>Locked fields.</b> Five fields are locked once the item has any transaction (Stock Ledger Entry, " +
+				"submitted Purchase Order, submitted Sales Order): Parent Item Group, Default Unit of Measure, " +
+				"Unit Weight, Secondary UOM, and Custom Batch Abbreviation. Changing them after transactions " +
+				"exist would make historical stock balances and Kg calculations inconsistent — the system " +
+				"blocks the save with a clear message naming the locked field.",
+			"<b>Item Group filter follows Parent Item Group.</b> When you pick a Parent Item Group, the " +
+				"Item Group dropdown automatically filters to show only leaf groups whose parent matches — " +
+				"so you cannot accidentally put an ISMB under Plates.",
+		],
+	},
+	{
+		id: "item-uom-rules",
+		title: "UOM Configuration Rules",
+		kicker: "Which UOM goes where",
+		purpose:
+			"The system enforces a fixed UOM pair per item group. Setting Parent Item Group " +
+			"auto-fills the correct values; the server then validates them on save so a wrong " +
+			"combination is caught immediately rather than silently producing wrong formulas.",
+		fields: [
+			{
+				name: "Structurals (e.g. ISMB400, ISA100)",
+				note: "<b>Default UOM (stock_uom): Kg.</b> <b>Secondary UOM: Nos.</b> " +
+					"Weight formula: (Length ÷ 1000) × Unit Weight × Sec Qty.",
+			},
+			{
+				name: "Plates (e.g. PLATE10)",
+				note: "<b>Default UOM: Kg.</b> <b>Secondary UOM: Nos.</b> " +
+					"Weight formula: (L ÷ 1000) × (W ÷ 1000) × Thickness × Unit Weight × Sec Qty.",
+			},
+			{
+				name: "Nuts and Bolts",
+				note: "<b>Default UOM: Nos.</b> <b>Secondary UOM: Kg.</b> " +
+					"No dimension formula — Qty is the count (Nos), Sec Qty is the weight in Kg (Nos × Unit Weight).",
+			},
+		],
+		calcs: [
+			{
+				title: "Structural — ISMB400, Unit Weight 61.6 kg/m",
+				item: "ISMB400", group: "Structurals",
+				length: 6936, sec_qty: 2, unit_weight: 61.6,
+				formula: "(Length ÷ 1000) × Unit Weight × Sec Qty  =  (6936 ÷ 1000) × 61.6 × 2",
+				result: "854.51",
+			},
+			{
+				title: "Plate — PLATE10, Unit Weight 7.85",
+				item: "PLATE10", group: "Plates",
+				length: 500, width: 500, thickness: 3, sec_qty: 52, unit_weight: 7.85,
+				formula: "(L ÷ 1000) × (W ÷ 1000) × Thickness × Unit Weight × Sec Qty  =  (0.5) × (0.5) × 3 × 7.85 × 52",
+				result: "306.15",
+			},
+		],
+		notes: [
+			"<b>Choosing Parent Item Group auto-fills the UOM pair.</b> You do not need to set " +
+				"Default UOM or Secondary UOM manually — picking the group sets both instantly in the form.",
+			"<b>The server validates both fields on save.</b> If you override the auto-filled values " +
+				"with the wrong UOM, the save is blocked with a specific message — e.g. " +
+				"\"System is configured for Primary UOM as KG for Structurals. Select Default UOM as Kg.\"",
+			"<b>Nuts and Bolts reverses the pair.</b> For fasteners, Nos is the primary stock unit and " +
+				"Kg is secondary — the formula runs in reverse: Qty (Nos) × Unit Weight = Sec Qty (Kg). " +
+				"This is why the unit_weight on a bolt is weight-per-piece, not weight-per-metre.",
+		],
+	},
+	{
+		id: "item-batch-config",
+		title: "Batch Configuration and Naming",
+		kicker: "How batches get their names",
+		purpose:
+			"For Structurals and Plates, batches are created automatically at Purchase Receipt " +
+			"and their names are built from the item's Custom Batch Abbreviation plus the " +
+			"dimensions received. The name encodes exactly what the batch is — length, width, " +
+			"thickness — so you can identify a batch without opening it.",
+		fields: [
+			{
+				name: "Has Batch No",
+				note: "Standard ERPNext field. Must be ticked for Structurals and Plates. When ticked " +
+					"and the item is in a formula group, <b>Create New Batch</b> is forced on and " +
+					"<b>locked to read-only</b> — batch creation is always automatic for these items.",
+			},
+			{
+				name: "Custom Batch Abbreviation",
+				note: "The prefix every batch for this item starts with. Keep it short and unique — " +
+					"it is prepended to the dimension segments that follow. Examples: ISMB400, ISA100, PLT10.",
+			},
+		],
+		steps: [
+			"When a Purchase Receipt for a batch-tracked item is submitted, a batch is auto-created for each line.",
+			"The batch name is built as: <b>[Abbreviation]-[T{thickness}]-[L{length}]-[W{width}]-R[receipt suffix]</b>. " +
+				"Segments whose dimension is zero are omitted — a beam has no thickness, so T is skipped.",
+			"The receipt suffix is the last 3 digits of the PR number — e.g. PR-26-00006 → <b>006</b>.",
+			"If the generated name already exists a counter is appended: <b>-2</b>, <b>-3</b>, etc.",
+		],
+		examples: [
+			{
+				type: "do",
+				label: "ISMB400, Length 12000mm, from PR-26-00006",
+				text: "Abbreviation: ISMB400. No thickness, no width. → <b>ISMB400-L12000-R006</b>.",
+			},
+			{
+				type: "do",
+				label: "PLATE10, Thickness 3mm, Length 500mm, Width 500mm, from PR-26-00006",
+				text: "Abbreviation: PLT10. Thickness 3, Length 500, Width 500. → <b>PLT10-T3-L500-W500-R006</b>.",
+			},
+			{
+				type: "do",
+				label: "Stock Entry (Repack/Material Receipt) batch",
+				text: "Same pattern, but the suffix uses the SE number with a leading SR — " +
+					"<b>ISMB400-L5136-SR007</b>. Used when excess material is booked back in via a return entry.",
+			},
+			{
+				type: "dont",
+				label: "Sec Qty (Nos) is 0 on the Purchase Receipt line",
+				text: "The batch will be blocked from being created. Structurals and Plates are always " +
+					"counted in Nos — a batch with Sec Qty 0 breaks the Kg→Nos allocation in Material Planning. " +
+					"Fix the PR line (enter the correct piece count) before submitting.",
+			},
+		],
+		notes: [
+			"<b>Custom Batch Abbreviation cannot be changed once any batch exists</b> for the item. " +
+				"All existing batches start with the old prefix — changing it would leave them with a " +
+				"name that no longer matches the current item setting. Create a new item code if the " +
+				"abbreviation genuinely needs to change.",
+			"<b>Dimension fields on the batch are set at creation and can only be changed via specific " +
+				"system operations</b> (e.g. a Cut Sheet W2 resize after a transfer). They are not free-edit " +
+				"fields.",
+		],
+	},
+	{
+		id: "item-inspection",
+		title: "Inspection Required Flag",
+		kicker: "Gating batches in Material Planning",
+		purpose:
+			"When Inspection Required (Purchase Receipt) is ticked on an item, every batch " +
+			"received for it must pass a completed Inspection Entry before it can be reserved " +
+			"in Material Planning. This prevents uncommitted or rejected material from being " +
+			"allocated to a job before QC has signed off.",
+		steps: [
+			"Tick <b>Inspection Required (Purchase Receipt)</b> on the Item master and save.",
+			"Receive the item on a Purchase Receipt. An Inspection Call workflow opens on the receipt " +
+				"— create the Inspection Entry, run the quality check, and submit it as <b>Completed</b>.",
+			"Once the linked Purchase Receipt's Inspection Status is <b>Completed</b>, Material Planning " +
+				"allows the batch to be reserved. Until then, any Reserve attempt skips the batch and " +
+				"reports it as <b>blocked pending inspection</b>.",
+		],
+		fields: [
+			{ name: "Inspection Required (Purchase Receipt)", note: "The checkbox on the Item master." },
+			{ name: "Inspection Status (on Purchase Receipt)", note: "Open / Working / Completed — set by the Inspection Entry workflow. Only Completed unblocks the batch." },
+		],
+		notes: [
+			"<b>Fail-open for non-PR batches.</b> A batch with no traceable source Purchase Receipt " +
+				"(e.g. one created from a Material Receipt Stock Entry for an excess return) is never " +
+				"blocked — even if its item has Inspection Required ticked. The gate only applies to " +
+				"incoming purchased material.",
+			"<b>Items without the flag are never blocked</b>, regardless of any receipt's inspection status.",
+			"<b>Reassigning a blocked batch</b> in Material Planning produces a warning (not a hard error) " +
+				"— the batch assignment is saved but the row stays unreserved until inspection is complete.",
+		],
+	},
+	{
+		id: "item-group-fields",
+		title: "Item Group Custom Fields",
+		kicker: "Dimension rules per group",
+		purpose:
+			"Three custom fields on the Item Group master control which dimension columns are " +
+			"mandatory when a drawing row or BOM import row uses an item from that group. These " +
+			"are set on the group, not on each item — so adding a new material code to an " +
+			"existing group automatically inherits the right dimension rules.",
+		fields: [
+			{ name: "Mandatory Thickness", note: "When checked on a group, every import/drawing row for items in this group must have a Thickness value. Plates is the primary example." },
+			{ name: "Mandatory Length Value", note: "Required length dimension — applies to both Structurals and Plates." },
+			{ name: "Mandatory Width Value", note: "Required width dimension — Plates only." },
+		],
+		notes: [
+			"<b>These fields only appear on group-level Item Groups</b> (is_group = 1), not on leaf groups.",
+			"<b>Verify Raw Materials on the Sales Order reads these flags</b> to know which dimensions " +
+				"to check for completeness and which to flag as unused (a Structural must have Length but " +
+				"must NOT have Thickness or Width — having either is reported as an error).",
+		],
+	},
+];
+
 const ERP_MANUAL_STUB_CATEGORIES = [
-	{ id: "item", label: "Item", children: [] },
+	{ id: "item", label: "Item", children: ERP_MANUAL_ITEM_CHILDREN },
 	{ id: "sales-order", label: "Sales Order", children: ERP_MANUAL_SALES_ORDER_CHILDREN },
 	{ id: "drawing", label: "Drawing", children: ERP_MANUAL_DRAWING_CHILDREN },
 ];

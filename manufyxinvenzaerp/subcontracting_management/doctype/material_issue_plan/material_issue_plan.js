@@ -42,6 +42,11 @@ frappe.ui.form.on("Material Issue Plan", {
 		_add_pdf_button(frm);
 		_render_excess_action_btn(frm);
 		_add_final_stock_entry_button(frm);
+
+		// Recompute excess return totals on load so the summary fields are
+		// always in sync with the child table rows (previously only recalculated
+		// on field changes, leaving stale/zero values after save + reload).
+		_mip_excess_totals(frm);
 	},
 
 	load_drawings_btn(frm) {
@@ -1173,6 +1178,7 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 					"<div class='text-muted' style='font-weight:normal;font-size:10px'>" + __("system") + "</div></th>" +
 				"<th style='" + th + "'>" + __("Length (mm)") + "</th>" +
 				"<th style='" + th + "'>" + __("Width (mm)") + "</th>" +
+				"<th style='" + th + "'>" + __("Thickness (mm)") + "</th>" +
 				"<th style='" + th + "'>" + __("Sec Qty") + "</th>" +
 				"<th style='" + th + "text-align:right'>" + __("Excess Kg") +
 					"<div class='text-muted' style='font-weight:normal;font-size:10px'>" + __("entered") + "</div></th>" +
@@ -1184,6 +1190,11 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 			var sys = flt(e.transfer_kg - e.drawing_kg, 3);
 			var saved = (dlg._excess_plan || {})[code] || {};
 			var num = "<input type='number' step='0.001' min='0' class='form-control input-xs text-right ";
+			// Width is only used by the Plates formula -- Structurals rows never
+			// need it, so their Width box is read-only.
+			var w_cell = e.group === "Structurals"
+				? num + "mip-xs-width' style='width:100px' disabled value='" + (flt(saved.width) || "") + "'></td>"
+				: num + "mip-xs-width' style='width:100px' value='" + (flt(saved.width) || "") + "'></td>";
 			html += "<tr data-item='" + frappe.utils.escape_html(code) + "'>" +
 				"<td>" + frappe.utils.escape_html(code) +
 					"<div class='text-muted' style='font-size:11px'>" +
@@ -1193,7 +1204,8 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 				"<td class='text-right mip-xs-sys' style='white-space:nowrap;font-weight:600'>" +
 					format_number(sys, null, 3) + "</td>" +
 				"<td>" + num + "mip-xs-length' style='width:100px' value='" + (flt(saved.length) || "") + "'></td>" +
-				"<td>" + num + "mip-xs-width' style='width:100px' value='" + (flt(saved.width) || "") + "'></td>" +
+				"<td>" + w_cell +
+				"<td class='text-right' style='white-space:nowrap'>" + format_number(e.thickness, null, 2) + "</td>" +
 				"<td>" + num + "mip-xs-sec' style='width:90px' value='" + (flt(saved.sec_qty) || "") + "'></td>" +
 				"<td class='text-right mip-xs-kg' style='white-space:nowrap;font-weight:600'>—</td>" +
 				"<td class='text-right mip-xs-diff' style='white-space:nowrap;font-weight:600'>—</td>" +
@@ -1300,6 +1312,41 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 			});
 			if (!selected.length) {
 				frappe.msgprint(__("Please select at least one item."));
+				return;
+			}
+
+			// The second tab's measured off-cut is mandatory for every
+			// dimensioned item being moved: a Structurals/Plates row must have
+			// its Excess Return dimensions entered before it can transfer, or
+			// the off-cut leaves with no record of what is expected back. Other
+			// groups (e.g. Nuts and Bolts) have no off-cut weight and are exempt.
+			var excess_state = _collect_excess_plan_state();
+			var missing = [];
+			selected.forEach(function(s) {
+				if (missing.indexOf(s.item_code) !== -1) return;
+				var e = excess_state[s.item_code];
+				if (!e) return;
+				if (e.group !== "Structurals" && e.group !== "Plates") return;
+				// Nothing is being sent beyond what the drawings called for, so
+				// there is no off-cut to describe. Demanding dimensions here would
+				// be asking for the shape of something that does not exist.
+				if (flt(e.transfer_kg - e.drawing_kg, 3) <= 0) return;
+				var plan = (dlg._excess_plan || {})[s.item_code] || {};
+				var entered = _excess_weight({
+					custom_parent_item_group: e.group,
+					custom_thickness: e.thickness,
+					custom_unit_weight: e.unit_weight,
+				}, plan.length, plan.width, plan.sec_qty);
+				if (entered === null) missing.push(s.item_code);
+			});
+			if (missing.length) {
+				frappe.msgprint({
+					title: __("Excess Return Not Entered"),
+					message: __("Not allowed to transfer raw material without entering the excess return material return.")
+						+ "<br>" + __("Enter the off-cut dimensions on the <b>Consolidate item for excess return plan</b> tab for: {0}",
+							[missing.map(function(c) { return "<b>" + frappe.utils.escape_html(c) + "</b>"; }).join(", ")]),
+					indicator: "orange",
+				});
 				return;
 			}
 
