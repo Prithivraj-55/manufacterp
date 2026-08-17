@@ -165,6 +165,18 @@ def run():
     check("books the measured Kg", "\"qty\": entered_kg" in src, True)
     check("a second transfer accumulates", "target.qty = flt(flt(target.qty) + entered_kg" in src, True)
     check("a settled row is never drifted", "stock_entry_created" in src, True)
+    # The value has to be in the field's own option list, or the save that books
+    # the row is refused outright -- which is exactly what happened on the first
+    # real transfer through the new tab.
+    options = (frappe.get_meta("SCO Excess Material Item")
+               .get_field("source_table").options or "").split("\n")
+    check("the source table is an allowed option", CONSOLIDATED_EXCESS_SOURCE in options, True)
+    check("the existing options are untouched",
+          all(o in options for o in ("Material Planning Material Mapping",
+                                     "Material Planning Available Raw Material",
+                                     "Material Planning Unavailable Item",
+                                     "Round Up Sec Qty for Transfer")), True)
+
     round_src = inspect.getsource(_log_round_up_excess)
     check("the per-batch logger stands aside for a planned item",
           'if (excess_plan or {}).get(item["item_code"]):' in round_src, True)
