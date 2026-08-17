@@ -31,6 +31,7 @@ class MaterialIssuePlan(Document):
         _auto_suggest_excess_from_cut_sheet(self)
         _assert_claimed_excess_unchanged(self)
         _sync_excess_return_from_raw_materials(self)
+        _sync_excess_return_totals(self)
         _sync_batch_remarks(self)
         _sync_excess_availability(self)
         _sync_transferred_qty(self)
@@ -1012,6 +1013,20 @@ def _sync_excess_return_from_raw_materials(mip):
         target.thickness = row.thickness
         target.sec_qty = row.excess_sec_qty
         target.qty = row.excess_calc_qty
+
+
+def _sync_excess_return_totals(mip):
+    """Sum excess_return_items rows into the parent summary fields so they are
+    always correct after save — mirrors the client-side _mip_excess_totals but
+    runs server-side in validate() so the values are persisted even when no
+    child-row field change triggered the JS handler."""
+    total_kg = 0.0
+    total_nos = 0.0
+    for row in (mip.excess_return_items or []):
+        total_kg += flt(row.qty)
+        total_nos += flt(row.sec_qty)
+    mip.excess_return_total_kg = flt(total_kg, 3)
+    mip.excess_return_total_nos = flt(total_nos, 3)
 
 
 def _cut_sheet_sheet_qty(row):

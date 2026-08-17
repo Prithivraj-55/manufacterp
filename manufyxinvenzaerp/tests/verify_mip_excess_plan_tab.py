@@ -128,6 +128,31 @@ def run():
     check("plate off-cut", flt(plate, 3), 11.775)
 
     print()
+    print("=== the drawing weight is each row's SHARE of its requirement ===")
+    # drawing_planned_weight on a row is the WHOLE requirement's weight, not that
+    # row's share: a drawing needing 324.224 Kg of ISA100 filled from two batches
+    # carries 324.224 on both. Reading one row understated a batch covering many
+    # requirements (PLATE10 read 10 Kg where the plan needed 254); adding the rows
+    # up counted the split requirement twice (ISA100 read 818 where it needed 494).
+    src = inspect.getsource(get_mip_pending_items)
+    check("the requirement is identified by drawing and dimensions",
+          "r.customer_drawing_number or \"\"," in src, True)
+    check("each row takes a proportional share",
+          'flt(agg["weight"]) * (flt(r.qty) / flt(agg["qty"]))' in src, True)
+    check("it is not the last-row-wins helper",
+          '_by_key("drawing_planned_weight")' in src, False)
+
+    # The real case from MIP-2026-00107: one 324.224 Kg requirement filled from
+    # two batches, 81.056 from one and 243.168 from the other.
+    requirement, parts = 324.224, [81.056, 243.168]
+    total = flt(sum(parts), 3)
+    shares = [flt(requirement * (part / total), 3) for part in parts]
+    check("the shares match what each row carries", shares, parts)
+    check("and they add back to the requirement", flt(sum(shares), 3), requirement)
+    check("adding the rows' own figures would double it",
+          flt(requirement * len(parts), 3), 648.448)
+
+    print()
     print("=== consolidation groups by item, across batches ===")
     rows = [
         {"item_code": "ISA100", "qty": 60.0, "drawing_planned_weight": 25.0},
@@ -165,6 +190,18 @@ def run():
     check("books the measured Kg", "\"qty\": entered_kg" in src, True)
     check("a second transfer accumulates", "target.qty = flt(flt(target.qty) + entered_kg" in src, True)
     check("a settled row is never drifted", "stock_entry_created" in src, True)
+    # The value has to be in the field's own option list, or the save that books
+    # the row is refused outright -- which is exactly what happened on the first
+    # real transfer through the new tab.
+    options = (frappe.get_meta("SCO Excess Material Item")
+               .get_field("source_table").options or "").split("\n")
+    check("the source table is an allowed option", CONSOLIDATED_EXCESS_SOURCE in options, True)
+    check("the existing options are untouched",
+          all(o in options for o in ("Material Planning Material Mapping",
+                                     "Material Planning Available Raw Material",
+                                     "Material Planning Unavailable Item",
+                                     "Round Up Sec Qty for Transfer")), True)
+
     round_src = inspect.getsource(_log_round_up_excess)
     check("the per-batch logger stands aside for a planned item",
           'if (excess_plan or {}).get(item["item_code"]):' in round_src, True)

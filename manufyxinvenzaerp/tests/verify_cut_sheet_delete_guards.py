@@ -159,6 +159,14 @@ def run():
 
         print()
         print("=== claims are read live, not from the stored table ===")
+        # A Cut Sheet is unique per batch, so the previous section's sheet has to
+        # be gone before this one can make its own. It usually is -- the cancelled
+        # transfer deletes it -- but that section skips itself when the site has no
+        # cancelled Stock Entry, and this test must not depend on that.
+        for leftover in frappe.get_all("Cut Sheet", filters={"batch_no": BATCH}, pluck="name"):
+            frappe.delete_doc("Cut Sheet", leftover, force=1, ignore_permissions=True)
+            if ("Cut Sheet", leftover) in created:
+                created.remove(("Cut Sheet", leftover))
         cs4 = _make_sheet()
         created.append(("Cut Sheet", cs4.name))
         mm = frappe.db.get_value("Material Planning Material Mapping", {}, ["name", "parent"],
