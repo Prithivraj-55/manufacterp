@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-18 00:43:46_
+_Generated: 2026-08-18 01:04:31_
 
 ## Modules
 
@@ -26,7 +26,7 @@ _Generated: 2026-08-18 00:43:46_
 
 ## Python files
 
-_Total: 229_
+_Total: 230_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -244,6 +244,7 @@ _Total: 229_
 - tests/verify_reassign_batch_exact_match.py
 - tests/verify_reassign_batch_inspection_blocked.py
 - tests/verify_reservation_release_on_transfer.py
+- tests/verify_return_excess_dialog.py
 - tests/verify_se_duno_propagation.py
 - tests/verify_so_calculated_weight.py
 - tests/verify_soe_consumption_weight_kg.py
@@ -1439,6 +1440,12 @@ Functions:
   - 26:check:
   - 32:_reserved:
   - 36:run:
+
+### tests/verify_return_excess_dialog.py
+Functions:
+  - 29:check:
+  - 35:_dialog_source:
+  - 47:run:
 
 ### tests/verify_se_duno_propagation.py
 Functions:
