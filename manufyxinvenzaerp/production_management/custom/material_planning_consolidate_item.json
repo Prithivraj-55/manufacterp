@@ -1,0 +1,32 @@
+{
+ "custom_fields": [],
+ "custom_perms": [],
+ "doctype": "Material Planning Consolidate Item",
+ "links": [],
+ "property_setters": [
+  {
+   "_assign": null,
+   "_comments": null,
+   "_liked_by": null,
+   "_user_tags": null,
+   "creation": "2026-08-18 22:55:20.511373",
+   "default_value": null,
+   "doc_type": "Material Planning Consolidate Item",
+   "docstatus": 0,
+   "doctype_or_field": "DocField",
+   "field_name": "alternate_item",
+   "idx": 0,
+   "is_system_generated": 0,
+   "modified": "2026-08-03 19:32:19.576697",
+   "modified_by": "Administrator",
+   "module": null,
+   "name": "Material Planning Consolidate Item-alternate_item-description",
+   "owner": "Administrator",
+   "property": "description",
+   "property_type": "Text",
+   "row_name": null,
+   "value": "Set an alternate item for this consolidated purchase line. Dimensions apply to the alternate item, and the purchased batch is mapped to all original unavailable items."
+  }
+ ],
+ "sync_on_migrate": 1
+}

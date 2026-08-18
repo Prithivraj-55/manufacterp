@@ -135,8 +135,10 @@ manufyxinvenzaerp/
   the ERPNext base class (e.g. `BOM(ERPNextBOM)`, `CustomSubcontractingOrder`).
 - **Custom UOM fields**: each procurement/supply-chain doctype has a whitelisted
   `get_<X>_item_uom` link-field query (PO, PR, MR, SQ).
-- **Fixtures**: only `Custom Field` and `Property Setter` are exported; run
-  `bench --site manufact export-fixtures` to regenerate `fixtures/*.json`.
+- **Custom Field / Property Setter**: not fixtures (changed 2026-08-18) — per-doctype
+  `<module>/custom/<doctype>.json` files, synced automatically on `bench migrate`. Regenerate
+  a single doctype's file via `frappe.modules.utils.export_customizations(module=..., doctype=...,
+  sync_on_migrate=True)` (same function Customize Form's "Export Customizations" button calls).
 - **Batch secondary qty**: several controllers track `sec_qty` on Batch records and
   release/restore on Stock Entry submit/cancel.
 - **No scheduler_events** are registered (all commented out in hooks.py).
