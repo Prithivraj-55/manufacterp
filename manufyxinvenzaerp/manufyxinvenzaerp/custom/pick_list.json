@@ -1,0 +1,32 @@
+{
+ "custom_fields": [],
+ "custom_perms": [],
+ "doctype": "Pick List",
+ "links": [],
+ "property_setters": [
+  {
+   "_assign": null,
+   "_comments": null,
+   "_liked_by": null,
+   "_user_tags": null,
+   "creation": "2026-08-18 22:55:20.279496",
+   "default_value": null,
+   "doc_type": "Pick List",
+   "docstatus": 0,
+   "doctype_or_field": "DocField",
+   "field_name": "scan_barcode",
+   "idx": 0,
+   "is_system_generated": 1,
+   "modified": "2026-05-05 13:17:53.362078",
+   "modified_by": "Administrator",
+   "module": null,
+   "name": "Pick List-scan_barcode-hidden",
+   "owner": "Administrator",
+   "property": "hidden",
+   "property_type": "Check",
+   "row_name": null,
+   "value": "0"
+  }
+ ],
+ "sync_on_migrate": 1
+}

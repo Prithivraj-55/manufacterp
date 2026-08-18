@@ -27,7 +27,7 @@ A production-grade custom Frappe/ERPNext application (v15) built for manufacturi
   - [Subcontracting Management](#10-subcontracting-management)
 - [Custom Doctypes](#custom-doctypes)
 - [ERPNext Overrides](#erpnext-overrides)
-- [Fixtures & Custom Fields](#fixtures--custom-fields)
+- [Custom Fields & Property Setters](#custom-fields--property-setters)
 - [Test Suite](#test-suite)
 - [Installation](#installation)
 - [Key Bench Commands](#key-bench-commands)
@@ -64,7 +64,10 @@ manufyxinvenzaerp/
 │                               #   reference_copy.py (copy-from-parent-transaction helper) —
 │                               #   consolidates logic that was previously duplicated across
 │                               #   6-8 doctype-specific files each; see manufyxinvenzaerp_features.md §18.2
-├── fixtures/                  # custom_field.json, property_setter.json
+├── */custom/                  # Per-doctype Custom Field/Property Setter JSON (drawing_management,
+│                               #   production_management, subcontracting_management,
+│                               #   accounts_management, manufyxinvenzaerp) — see
+│                               #   "Custom Fields & Property Setters" below; no longer fixtures
 ├── public/js/                 # Client-side JS injected into core ERPNext doctypes
 ├── patches/                   # Data migration patches
 └── tests/                     # pytest test suite (run via bench; gated in CI as of 2026-07-16 — see below)
@@ -369,18 +372,21 @@ Client-side JS is injected into these ERPNext doctypes via `app_include_js` / `d
 
 ---
 
-## Fixtures & Custom Fields
+## Custom Fields & Property Setters
 
-All custom fields and property setters are managed as Frappe fixtures (not through `setup.py` at runtime in production). The fixture files are:
+Custom fields and property setters are **no longer fixture-based** (changed 2026-08-18). They live as per-doctype `custom/<doctype>.json` files under each module (`drawing_management/custom/`, `production_management/custom/`, `subcontracting_management/custom/`, `accounts_management/custom/`, and a catch-all `manufyxinvenzaerp/custom/` for doctypes with no natural module home), the same format produced by Customize Form's "Export Customizations" button. `bench migrate` syncs every file automatically (`sync_on_migrate: 1` in each), same as fixtures used to.
 
-- `fixtures/custom_field.json` — all custom fields added to standard ERPNext doctypes
-- `fixtures/property_setter.json` — field property overrides (mandatory, hidden, read-only flags)
-
-Regenerate after changes:
+Regenerate a doctype's file after changing its custom fields/property setters in the UI:
 
 ```bash
-bench --site manufact export-fixtures --app manufyxinvenzaerp
+bench --site manufact console
+>>> from frappe.modules.utils import export_customizations
+>>> export_customizations(module="Production Management", doctype="Material Planning", sync_on_migrate=True)
 ```
+
+(or use Customize Form's own "Export Customizations" button, which calls the same function.)
+
+**Note on scope**: some of these files also carry Custom Field/Property Setter records that were never this app's own — a few belong to `hrms`/`india_compliance` fields that happened to exist in the same site DB. They were moved 1:1 out of the old blanket `fixtures = ["Custom Field", "Property Setter"]` export rather than dropped, matching that export's prior scope exactly.
 
 ---
 
@@ -443,9 +449,6 @@ bench build --app manufyxinvenzaerp
 
 # Restart workers and web server
 bench restart
-
-# Export fixtures
-bench --site manufact export-fixtures --app manufyxinvenzaerp
 
 # Run all tests
 bench --site manufact run-tests --app manufyxinvenzaerp

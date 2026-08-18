@@ -1,6 +1,6 @@
 # hooks — manufyxinvenzaerp
 
-_Generated: 2026-08-18 01:04:31_
+_Generated: 2026-08-18 18:11:51_
 
 ## doc_events
 
@@ -148,7 +148,6 @@ doctype_js = {
 ## fixtures
 
 ```python
-fixtures = ["Custom Field", "Property Setter"]
 ```
 
 ## App lifecycle

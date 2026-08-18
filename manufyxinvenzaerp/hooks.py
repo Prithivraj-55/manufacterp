@@ -8,7 +8,10 @@ app_license = "mit"
 after_install = "manufyxinvenzaerp.setup.after_install"
 after_migrate = "manufyxinvenzaerp.setup.after_migrate"
 
-fixtures = ["Custom Field", "Property Setter"]
+# Custom Field / Property Setter customizations moved to per-doctype
+# <module>/custom/<doctype>.json files (frappe.modules.utils.export_customizations,
+# sync_on_migrate=True on every file) — see manufyxinvenzaerp/*/custom/. No longer
+# fixture-based.
 
 # Apps
 # ------------------

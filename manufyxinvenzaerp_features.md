@@ -284,9 +284,9 @@ All actions are triggered from the Production Plan / SCO via buttons:
 
 ---
 
-## 15. Custom Fields Summary (Fixtures)
+## 15. Custom Fields Summary
 
-Custom fields are exported as fixtures and applied across the following standard doctypes:
+Custom fields are exported per-doctype (`<module>/custom/<doctype>.json`, synced on `bench migrate` — see README's "Custom Fields & Property Setters" section; no longer fixture-based as of 2026-08-18) and applied across the following standard doctypes:
 
 | Doctype | Notable Custom Fields |
 |---|---|
@@ -409,6 +409,36 @@ A ten-report internal audit (functional/BRD, architecture, bugs, performance, co
 - Rotating the leaked production credential and deciding on a git-history scrub (§18.1) — ops action, not a code change.
 - Profiling the *rest* of Stock Entry submission time beyond this app's own two custom hooks (ERPNext core's own Stock Ledger/GL/valuation/Serial-and-Batch-Bundle processing) — the current fix only addresses this app's own custom-code overhead.
 - The remaining Phase 1 items requiring business sign-off (Drawing's "All"-role grant, the RFQ/Sales Order missing-dimension gate) or a dedicated design/regression-suite effort first (the batch-matching heuristic redesign, the `bom_class_override.py` fork reduction) — see `PROJ001 CLAUDE FILES/PHASE_1_Critical.md` for the full detail on each.
+
+---
+
+## 19. Custom Field / Property Setter: fixtures → per-doctype custom/*.json (2026-08-18)
+
+`hooks.py`'s `fixtures = ["Custom Field", "Property Setter"]` (unfiltered — exported every record of
+those two doctypes site-wide, not just this app's own) replaced with the standard Frappe "Export
+Customizations" mechanism: one `<module>/custom/<doctype>.json` file per doctype, each with
+`sync_on_migrate: 1`, synced automatically by `frappe.modules.utils.sync_customizations()` on every
+`bench migrate` — the exact function Customize Form's own "Export Customizations" button calls, not
+a reimplementation. See README's "Custom Fields & Property Setters" section for the mechanism and
+regeneration command.
+
+**Scope carried over 1:1, on purpose**: the old fixtures files spanned **112 doctypes**, not just the
+~20 this app's own docs describe touching — GST India fields on `GL Entry`/`Journal Entry`, HR fields
+on `Employee`/`Salary Slip`/`Timesheet`, and assorted core doctypes (`Task`, `Communication`, `Asset`,
+`Putaway Rule`, `Address`, etc.) that happen to carry Custom Field/Property Setter records in this
+site's DB but were never created by this app's own code. Per explicit instruction, these were moved
+1:1 rather than dropped, so current behavior is unchanged — they now live under a catch-all
+`manufyxinvenzaerp/custom/` folder (80 of the 112 files), separate from the ~32 files filed under this
+app's own thematic modules (`drawing_management/custom/`, `production_management/custom/`,
+`subcontracting_management/custom/`, `accounts_management/custom/`).
+
+**Verified**: live doctype list pulled fresh from `manufact`'s DB (not from the old, possibly-stale
+fixture files) — 848 Custom Field + 337 Property Setter records, matching exactly before and after a
+real `bench --site manufact migrate` run, which synced all 112 files cleanly with no errors.
+
+**Key files touched**: `hooks.py` (fixtures line removed), new `*/custom/*.json` (112 files across 5
+modules), `fixtures/custom_field.json` + `fixtures/property_setter.json` deleted, one-off migration
+script kept at `tests/move_fixtures_to_custom_json.py`.
 
 ---
 
