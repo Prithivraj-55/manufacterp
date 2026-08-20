@@ -111,55 +111,6 @@ def get_routing_operations_for_bom(bom_name):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @frappe.whitelist()
-def get_raw_materials_for_job_card(job_card_name):
-	"""Return enriched raw-material rows for a Job Card's consumption table.
-	Called once from the client script onload when the table is empty."""
-	jc = frappe.get_doc("Job Card", job_card_name)
-	if not jc.work_order:
-		return []
-
-	wo = frappe.get_doc("Work Order", jc.work_order)
-	wip_warehouse = wo.wip_warehouse
-	bom_no = wo.bom_no
-
-	rows = []
-	for item in wo.required_items:
-		item_data = frappe.db.get_value(
-			"Item",
-			item.item_code,
-			["custom_parent_item_group", "custom_unit_weight", "custom_secondary_uom", "stock_uom"],
-			as_dict=True,
-		) or {}
-
-		bom_item_data = {}
-		if bom_no:
-			bom_item_data = frappe.db.get_value(
-				"BOM Item",
-				{"parent": bom_no, "item_code": item.item_code},
-				["custom_length", "custom_width", "custom_thickness"],
-				as_dict=True,
-			) or {}
-
-		transferred_qty = _get_transferred_qty_for_item(item.item_code, wip_warehouse)
-		prev_data = _get_previous_operation_consumed(jc.work_order, item.item_code, jc.sequence_id)
-
-		rows.append({
-			"item_code": item.item_code,
-			"item_name": item.item_name,
-			"parent_item_group": item_data.get("custom_parent_item_group") or "",
-			"unit_weight": flt(item_data.get("custom_unit_weight")),
-			"stock_uom": item_data.get("stock_uom") or "",
-			"sec_uom": item_data.get("custom_secondary_uom") or "",
-			"length": flt(bom_item_data.get("custom_length")),
-			"width": flt(bom_item_data.get("custom_width")),
-			"thickness": flt(bom_item_data.get("custom_thickness")),
-			"transferred_qty": transferred_qty,
-			"prev_operation_consumed_stock_qty": flt(prev_data.get("consumed_stock_qty")),
-			"prev_operation_stock_uom": prev_data.get("stock_uom") or "",
-			"prev_operation_sec_qty": flt(prev_data.get("sec_qty")),
-			"prev_operation_sec_uom": prev_data.get("sec_uom") or "",
-		})
-	return rows
 
 
 def _get_transferred_qty_for_item(item_code, wip_warehouse):

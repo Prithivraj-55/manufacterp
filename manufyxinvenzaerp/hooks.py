@@ -66,8 +66,6 @@ doctype_js = {
     "Purchase Order": "public/js/purchase_order.js",
     "Purchase Receipt": "public/js/purchase_receipt.js",
     "Batch": "public/js/batch.js",
-    # "Job Card": "public/js/job_card.js",
-    # DISABLED (client change request Phase 0.4): Job Card reverted to standard.
     "Supplier Operation Entry": "public/js/supplier_operation_entry.js",
     "Inspection Entry": "public/js/inspection_entry.js",
     "Payment Request": "public/js/payment_request.js",
@@ -200,29 +198,11 @@ doc_events = {
 		"validate": "manufyxinvenzaerp.sq_management.supplier_quotation.validate_supplier_quotation",
 		"before_submit": "manufyxinvenzaerp.sq_management.supplier_quotation.before_submit_supplier_quotation",
 	},
-	# --- DISABLED (client change request Phase 0.4): Work Order & Job Card reverted to
-	# standard ERPNext. Kept commented for reference / possible future re-enable.
-	# "Work Order": {
-	# 	"on_submit": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_submit_work_order",
-	# 	"on_cancel": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_cancel_work_order",
-	# },
-	# "Job Card": {
-	# 	"validate": [
-	# 		"manufyxinvenzaerp.production_management.job_card.validate_job_card",
-	# 		"manufyxinvenzaerp.subcontracting_management.subcontracting.validate_job_card_drawing_entry",
-	# 		"manufyxinvenzaerp.production_management.inspection.validate_job_card_inspection",
-	# 	],
-	# 	"before_submit": [
-	# 		"manufyxinvenzaerp.subcontracting_management.subcontracting.before_submit_job_card_drawing_entry",
-	# 		"manufyxinvenzaerp.production_management.inspection.before_submit_job_card_inspection_gate",
-	# 	],
-	# 	"on_update": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_update_job_card_drawing_entry",
-	# 	"on_submit": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_submit_job_card_drawing_entry",
-	# },
+	# Work Order and Job Card carry no hooks from this app: they were reverted to
+	# standard ERPNext under the client's Phase 0.4 change request, and
+	# Subcontracting Order / Operation Entry do that work instead.
 	"Stock Entry": {
 		"validate": "manufyxinvenzaerp.production_management.stock_entry.validate_stock_entry",
-		# "before_submit": "manufyxinvenzaerp.production_management.job_card.before_submit_manufacture_stock_entry",
-		# DISABLED (Phase 0.4): only relevant to Work Order/Job Card's custom consumption flow.
 		"on_submit": "manufyxinvenzaerp.production_management.stock_entry.on_submit_stock_entry",
 		"on_cancel": "manufyxinvenzaerp.production_management.stock_entry.on_cancel_stock_entry",
 	},
