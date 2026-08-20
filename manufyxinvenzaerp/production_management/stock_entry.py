@@ -192,8 +192,28 @@ def on_submit_stock_entry(doc, method):
 
 
 def _reduce_batch_sec_qty(batch_no, consumed_qty):
-	current = flt(frappe.db.get_value("Batch", batch_no, "custom_sec_qty"))
-	frappe.db.set_value("Batch", batch_no, "custom_sec_qty", flt(current - flt(consumed_qty), 3))
+	"""Take `consumed_qty` pieces off the batch, atomically.
+
+	This used to read the figure, subtract in Python, and write it back. Two
+	entries consuming the same batch at once both read the same starting value and
+	the second write discarded the first: 10 - 3 and 10 - 4 submitted together
+	leave 6, not 3. The batch's piece count then drifts permanently, and it is what
+	every later transfer's proportional Sec Qty and every cut sheet's sizing are
+	worked out from.
+
+	Doing the arithmetic in the UPDATE means the database serialises the two, so
+	each subtraction is applied to whatever the other left behind.
+
+	The restore path on cancel passes a NEGATIVE quantity to add the pieces back,
+	and subtracting a negative works the same way here -- both directions go
+	through this one statement so they cannot drift apart.
+	"""
+	frappe.db.sql(
+		"""UPDATE `tabBatch`
+		   SET custom_sec_qty = ROUND(COALESCE(custom_sec_qty, 0) - %s, 3)
+		   WHERE name = %s""",
+		(flt(consumed_qty, 3), batch_no),
+	)
 
 
 # A cut is treated as finished once this much of its To Use (W1) weight has moved.
