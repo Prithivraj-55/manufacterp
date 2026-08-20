@@ -301,6 +301,21 @@ jobs:
             ROLLBACK_COMMIT=$(git rev-parse HEAD)
             echo "Rollback point: $ROLLBACK_COMMIT" | tee -a "$LOG_FILE"
 
+            # Anything edited directly on the server is stashed, not discarded.
+            # git pull would refuse to run over it, and the rollback below does a
+            # hard reset -- either way an uncommitted hotfix somebody made on live
+            # would be gone. Stashing keeps it recoverable with `git stash list`.
+            if [ -n "$(git status --porcelain)" ]; then
+              echo "" | tee -a "$LOG_FILE"
+              echo "NOTE: the server has uncommitted local changes:" | tee -a "$LOG_FILE"
+              git status --short | tee -a "$LOG_FILE"
+              STASH_LABEL="pre-deploy $(date +'%Y-%m-%d %H:%M:%S')"
+              git stash push -u -m "$STASH_LABEL" 2>&1 | tee -a "$LOG_FILE"
+              echo "They have been stashed as: $STASH_LABEL" | tee -a "$LOG_FILE"
+              echo "Recover with:  cd $APP_PATH && git stash list && git stash pop" | tee -a "$LOG_FILE"
+              echo "" | tee -a "$LOG_FILE"
+            fi
+
             # ── Rollback, used by every failure below ────────────────────────
             # The code is put back automatically: that is safe, and it fixes the
             # common failures (a bad build, an import error, a broken client
