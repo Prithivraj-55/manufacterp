@@ -51,9 +51,9 @@ Ask first, every time, going forward.)
 |-------------------------------------|-----------------------------------------------------------------------------------|
 | `.claude/references/app_map.md`     | Any task — always read first; contains full file inventory and method index       |
 | `.claude/references/doctypes.md`    | Adding/changing a doctype, controller, or child table                             |
-| `.claude/references/hooks.md`       | Touching doc_events, override_doctype_class, fixtures, or app lifecycle hooks     |
+| `.claude/references/hooks.md`       | Touching doc_events, override_doctype_class, or app lifecycle hooks               |
 | `.claude/references/api.md`         | Adding or calling a `@frappe.whitelist()` method; checking existing API surface   |
-| `.claude/references/deployment.md`  | Running bench commands, migrating, exporting fixtures, restarting                 |
+| `.claude/references/deployment.md`  | Running bench commands, migrating, restarting, the CI pipeline and deploy backups |
 | `.claude/references/client_change_request_progress.md` | Continuing the in-progress client change request — status of every phase, what's done, what's next |
 
 ## App architecture overview
@@ -99,27 +99,33 @@ manufyxinvenzaerp/
 ├── subcontracting_management/    # Subcontracting Order override; Supplier Operation Entry
 │   ├── overrides.py              # CustomSubcontractingOrder class
 │   ├── subcontracting.py         # Whitelisted: create_sco_from_production_plan,
-│   │                             #   create_work_order_from_pp, create_supplier_operation_entries,
-│   │                             #   create_send_to_subcontractor_entry, create_wip_transfer_stock_entry,
+│   │                             #   create_supplier_operation_entries,
+│   │                             #   create_send_to_subcontractor_entry,
 │   │                             #   create_return_stock_entry
+│   │                             #   (the Work Order / Job Card functions were
+│   │                             #    removed 2026-08-20 — see below)
 │   └── doctype/
 │       ├── supplier_operation_entry/   # Custom doctype for subcontracting ops
 │       └── supplier_operation_item/    # Child table
 │
 ├── config/                   # Frappe app config (__init__.py only)
-├── fixtures/                 # custom_field.json, property_setter.json (exported via bench)
+├── <module>/custom/          # Custom Field + Property Setter, one file per doctype.
+│                             #   112 files, 848 fields, 337 property setters.
+│                             #   Replaced fixtures/ on 2026-08-18 — see below.
+├── manufyxinvenzaerp/page/   # Desk pages: bulk_permissions
 ├── public/js/                # Client-side JS injected into core doctypes:
 │   │                         #   item.js, bom.js, production_plan.js,
 │   │                         #   purchase_order.js, purchase_receipt.js
 ├── patches/                  # Data migration patches
-└── tests/                    # Test suite (pytest via bench)
-    ├── test_material_planning.py
-    ├── test_e2e_material_planning.py
-    ├── test_purchase_order_creation.py
-    ├── test_alternate_item.py
-    ├── test_classification_logic.py
-    ├── test_po_edge_cases.py
-    └── test_unavailable_actions.py
+└── tests/                    # 79 files, two kinds:
+    ├── test_*.py             #   unittest, run by `bench run-tests` and by CI
+    └── verify_*.py           #   64 standalone checks, each with a run() called
+                              #   directly: `bench --site manufact execute
+                              #   manufyxinvenzaerp.tests.<name>.run`
+                              #   They print OK/FAIL per assertion and finish with
+                              #   "ALL n CHECKS PASSED". Each one opens with WHY it
+                              #   exists — the bug it was written for — so a failure
+                              #   is readable without digging up the history.
 ```
 
 ## Coding conventions
@@ -135,12 +141,34 @@ manufyxinvenzaerp/
   the ERPNext base class (e.g. `BOM(ERPNextBOM)`, `CustomSubcontractingOrder`).
 - **Custom UOM fields**: each procurement/supply-chain doctype has a whitelisted
   `get_<X>_item_uom` link-field query (PO, PR, MR, SQ).
-- **Custom Field / Property Setter**: not fixtures (changed 2026-08-18) — per-doctype
-  `<module>/custom/<doctype>.json` files, synced automatically on `bench migrate`. Regenerate
-  a single doctype's file via `frappe.modules.utils.export_customizations(module=..., doctype=...,
-  sync_on_migrate=True)` (same function Customize Form's "Export Customizations" button calls).
+- **Custom Field / Property Setter**: NOT fixtures any more (changed 2026-08-18). They live in
+  per-doctype `<module>/custom/<doctype>.json` files — 112 files, 848 custom fields, 337 property
+  setters — synced on every `bench migrate` by Frappe's own `sync_customizations`. Two things
+  follow from that, and both have caught people out:
+    - The sync only INSERTS and UPDATES. It never deletes, so removing a field from a JSON file
+      does not remove it from a site; it just stops being managed. Delete it in the UI as well.
+    - `setup.py` still creates ~140 of these fields through `create_custom_fields`, and it runs on
+      `after_migrate`, AFTER the sync. So where the two disagree, **setup.py wins**. If you edit a
+      field in Customize Form and re-export it, check `setup.py` does not define it differently or
+      your change is overwritten on the next migrate.
+  Re-export one doctype with `frappe.modules.utils.export_customizations(module, doctype,
+  sync_on_migrate=True)` — the same function Customize Form's "Export Customizations" button calls.
+  A file living in a module that is not in `modules.txt` will never sync, so keep them under the
+  five registered modules.
 - **Batch secondary qty**: several controllers track `sec_qty` on Batch records and
-  release/restore on Stock Entry submit/cancel.
+  release/restore on Stock Entry submit/cancel. The adjustment is a single atomic UPDATE
+  (`_reduce_batch_sec_qty`) — never read-modify-write, or two entries consuming one batch
+  lose a write between them.
+- **Work Order and Job Card carry NO customizations.** Every field, client script, hook and
+  helper this app once added to them was removed — first disabled under the client's Phase 0.4
+  change request, then deleted outright on 2026-08-20 (1,827 lines). Subcontracting Order and
+  Operation Entry do that work instead. Do not re-add anything to those two doctypes without
+  checking why they were reverted.
+- **`bom_class_override.py` is a copy of ERPNext's `bom.py`.** Its module-level functions
+  (`get_children`, `item_query`, `make_variant_bom`, `get_bom_items`, `get_list_context`) are
+  ERPNext's own, called by the BOM form and tree view by dotted path. A dead-code sweep will
+  flag them as unreferenced because nothing in THIS app calls them. Removing them breaks the
+  BOM form.
 - **No scheduler_events** are registered (all commented out in hooks.py).
 
 ## Quick bench commands
@@ -160,8 +188,11 @@ bench build --app manufyxinvenzaerp
 # Restart workers and web server
 bench restart
 
-# Export fixtures (Custom Field, Property Setter)
-bench --site manufact export-fixtures --app manufyxinvenzaerp
+# Re-export ONE doctype's customizations after changing its fields in the UI.
+# There is no export-fixtures step any more — see "Custom Field / Property Setter".
+bench --site manufact console
+>>> from frappe.modules.utils import export_customizations
+>>> export_customizations("Production Management", "Material Planning", sync_on_migrate=True)
 
 # Run app tests
 bench --site manufact run-tests --app manufyxinvenzaerp
@@ -176,8 +207,33 @@ bench --site manufact console
 bench --site manufact execute manufyxinvenzaerp.sample_data.create_sample_data
 ```
 
+## Deployment and CI
+
+The pipeline is `.github/workflows/main.yml`, triggered by a push to `main`. A push to
+`devbranch` whose commit message contains `[autodeploy]` is merged to `main` by
+`auto-merge-devbranch.yml`, which is what starts it.
+
+  1. **Test gate** — spins up a throwaway bench with MariaDB and two Redis service
+     containers, installs the app, and runs the suite. It must pass before anything is
+     deployed. The system-dependency step installs nothing when the runner image already
+     has what is needed; it used to hang for six minutes on a stalled apt mirror.
+  2. **SSH Deploy** — only runs when the repository variable `LIVE_DEPLOY` is `true`
+     (Settings → Secrets and variables → Actions → Variables). Unset it to exercise CI
+     without touching the live server.
+
+Every deploy takes a database backup BEFORE anything is touched, checks it with `gzip -t`,
+and copies it to `frappe-bench/deploy-backups` — out of Frappe's own backup folder, which
+it prunes on its own schedule. Last 10 kept. Any failure rolls the code back to the commit
+the server was on and restarts it; uncommitted edits found on the server are stashed, not
+discarded. The database is deliberately NOT restored automatically — that would discard
+whatever users did since the backup — so the log prints the restore command instead.
+
 ## Regenerating this knowledge base
 
-Run `.claude/update_skill.sh` from the app root to rescan and rewrite
-`.claude/references/app_map.md`. This is also wired to the post-commit git hook so it
-runs automatically after every commit.
+Run `.claude/update_skill.sh` from the app root. It rewrites the four generated files —
+`app_map.md`, `doctypes.md`, `hooks.md` and `api.md` — by rescanning the source. It is also
+wired to the post-commit git hook, so it runs after every commit.
+
+`SKILL.md` itself is hand-written and is NOT regenerated: anything above that a script
+cannot infer — why Work Order carries no customizations, which sweeps produce false
+positives, which of two mechanisms wins — has to be edited here by hand.

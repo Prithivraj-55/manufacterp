@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-08-18 18:11:51_
+_Generated: 2026-08-21 00:22:13_
 
 ## drawing
 
@@ -84,6 +84,17 @@ _Generated: 2026-08-18 18:11:51_
 
 ---
 
+## rate_schedule_price_log
+
+| Key | Value |
+|-----|-------|
+| Module | drawing_management |
+| Path | `drawing_management/doctype/rate_schedule_price_log` |
+| Controller | `drawing_management/doctype/rate_schedule_price_log/rate_schedule_price_log.py` |
+| Client script | none |
+
+---
+
 ## rate_schedule
 
 | Key | Value |
@@ -100,17 +111,6 @@ _Generated: 2026-08-18 18:11:51_
 | ` before_insert` | no |
 | ` validate` | no |
 | ` _track_rate_change` | no |
-
----
-
-## rate_schedule_price_log
-
-| Key | Value |
-|-----|-------|
-| Module | drawing_management |
-| Path | `drawing_management/doctype/rate_schedule_price_log` |
-| Controller | `drawing_management/doctype/rate_schedule_price_log/rate_schedule_price_log.py` |
-| Client script | none |
 
 ---
 
@@ -147,6 +147,17 @@ _Generated: 2026-08-18 18:11:51_
 
 ---
 
+## cut_sheet_allocation
+
+| Key | Value |
+|-----|-------|
+| Module | production_management |
+| Path | `production_management/doctype/cut_sheet_allocation` |
+| Controller | `production_management/doctype/cut_sheet_allocation/cut_sheet_allocation.py` |
+| Client script | none |
+
+---
+
 ## cut_sheet
 
 | Key | Value |
@@ -177,17 +188,6 @@ _Generated: 2026-08-18 18:11:51_
 | ` release_cut_sheet_allocation` | no |
 | ` apply_w2_to_batch` | no |
 | ` revert_w2_from_batch` | no |
-
----
-
-## cut_sheet_allocation
-
-| Key | Value |
-|-----|-------|
-| Module | production_management |
-| Path | `production_management/doctype/cut_sheet_allocation` |
-| Controller | `production_management/doctype/cut_sheet_allocation/cut_sheet_allocation.py` |
-| Client script | none |
 
 ---
 
@@ -244,6 +244,67 @@ _Generated: 2026-08-18 18:11:51_
 | Module | production_management |
 | Path | `production_management/doctype/job_card_raw_material` |
 | Controller | `production_management/doctype/job_card_raw_material/job_card_raw_material.py` |
+| Client script | none |
+
+---
+
+## material_planning_available_raw_material
+
+| Key | Value |
+|-----|-------|
+| Module | production_management |
+| Path | `production_management/doctype/material_planning_available_raw_material` |
+| Controller | `production_management/doctype/material_planning_available_raw_material/material_planning_available_raw_material.py` |
+| Client script | none |
+
+---
+
+## material_planning_batch_change_log
+
+| Key | Value |
+|-----|-------|
+| Module | production_management |
+| Path | `production_management/doctype/material_planning_batch_change_log` |
+| Controller | `production_management/doctype/material_planning_batch_change_log/material_planning_batch_change_log.py` |
+| Client script | none |
+
+---
+
+## material_planning_bom_item
+
+| Key | Value |
+|-----|-------|
+| Module | production_management |
+| Path | `production_management/doctype/material_planning_bom_item` |
+| Controller | `production_management/doctype/material_planning_bom_item/material_planning_bom_item.py` |
+| Client script | none |
+
+---
+
+## material_planning_consolidate_item
+
+| Key | Value |
+|-----|-------|
+| Module | production_management |
+| Path | `production_management/doctype/material_planning_consolidate_item` |
+| Controller | `production_management/doctype/material_planning_consolidate_item/material_planning_consolidate_item.py` |
+| Client script | none |
+
+### Methods
+
+| Method | Whitelisted |
+|--------|-------------|
+| ` recalculate` | no |
+
+---
+
+## material_planning_material_mapping
+
+| Key | Value |
+|-----|-------|
+| Module | production_management |
+| Path | `production_management/doctype/material_planning_material_mapping` |
+| Controller | `production_management/doctype/material_planning_material_mapping/material_planning_material_mapping.py` |
 | Client script | none |
 
 ---
@@ -312,6 +373,7 @@ _Generated: 2026-08-18 18:11:51_
 | ` _add` | no |
 | ` _sec_nos_for_weight` | no |
 | ` _refresh_touched_cut_sheets` | no |
+| ` _require_write` | no |
 | ` reserve_batches` | no |
 | ` _get_batch_reserved_by_self` | no |
 | ` get_available_excess_batches` | no |
@@ -345,67 +407,6 @@ _Generated: 2026-08-18 18:11:51_
 | ` auto_purchase_from_mp` | no |
 | ` _collect_batch_mapping_issues` | no |
 | ` complete_batch_mapping` | no |
-
----
-
-## material_planning_available_raw_material
-
-| Key | Value |
-|-----|-------|
-| Module | production_management |
-| Path | `production_management/doctype/material_planning_available_raw_material` |
-| Controller | `production_management/doctype/material_planning_available_raw_material/material_planning_available_raw_material.py` |
-| Client script | none |
-
----
-
-## material_planning_batch_change_log
-
-| Key | Value |
-|-----|-------|
-| Module | production_management |
-| Path | `production_management/doctype/material_planning_batch_change_log` |
-| Controller | `production_management/doctype/material_planning_batch_change_log/material_planning_batch_change_log.py` |
-| Client script | none |
-
----
-
-## material_planning_bom_item
-
-| Key | Value |
-|-----|-------|
-| Module | production_management |
-| Path | `production_management/doctype/material_planning_bom_item` |
-| Controller | `production_management/doctype/material_planning_bom_item/material_planning_bom_item.py` |
-| Client script | none |
-
----
-
-## material_planning_consolidate_item
-
-| Key | Value |
-|-----|-------|
-| Module | production_management |
-| Path | `production_management/doctype/material_planning_consolidate_item` |
-| Controller | `production_management/doctype/material_planning_consolidate_item/material_planning_consolidate_item.py` |
-| Client script | none |
-
-### Methods
-
-| Method | Whitelisted |
-|--------|-------------|
-| ` recalculate` | no |
-
----
-
-## material_planning_material_mapping
-
-| Key | Value |
-|-----|-------|
-| Module | production_management |
-| Path | `production_management/doctype/material_planning_material_mapping` |
-| Controller | `production_management/doctype/material_planning_material_mapping/material_planning_material_mapping.py` |
-| Client script | none |
 
 ---
 
@@ -486,6 +487,17 @@ _Generated: 2026-08-18 18:11:51_
 
 ---
 
+## material_issue_plan_consolidate_item
+
+| Key | Value |
+|-----|-------|
+| Module | subcontracting_management |
+| Path | `subcontracting_management/doctype/material_issue_plan_consolidate_item` |
+| Controller | `subcontracting_management/doctype/material_issue_plan_consolidate_item/material_issue_plan_consolidate_item.py` |
+| Client script | none |
+
+---
+
 ## material_issue_plan
 
 | Key | Value |
@@ -503,7 +515,6 @@ _Generated: 2026-08-18 18:11:51_
 | ` validate` | no |
 | ` on_trash` | no |
 | ` create_from_subcontracting_order` | no |
-| ` create_from_work_order` | no |
 | ` populate_from_production_plan` | no |
 | ` _mip_refresh_blocked_message` | no |
 | ` check_mip_raw_materials_refreshable` | no |
@@ -536,21 +547,9 @@ _Generated: 2026-08-18 18:11:51_
 | ` _auto_suggest_excess_from_cut_sheet` | no |
 | ` refresh_weight_summary` | no |
 | ` get_target_context` | no |
-| ` _resolve_warehouses` | no |
 | ` get_mip_batch_plan_html` | no |
 | ` download_mip_batch_plan_pdf` | no |
 | ` _render_mip_batch_plan_html` | no |
-
----
-
-## material_issue_plan_consolidate_item
-
-| Key | Value |
-|-----|-------|
-| Module | subcontracting_management |
-| Path | `subcontracting_management/doctype/material_issue_plan_consolidate_item` |
-| Controller | `subcontracting_management/doctype/material_issue_plan_consolidate_item/material_issue_plan_consolidate_item.py` |
-| Client script | none |
 
 ---
 
