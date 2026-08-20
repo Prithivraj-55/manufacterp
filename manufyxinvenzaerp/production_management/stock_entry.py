@@ -752,7 +752,7 @@ def _update_sco_transferred_weight(sco_name):
 	  - qty from submitted 'Material Transfer' SEs that go CNC warehouse → supplier/WIP warehouse.
 	Also refreshes Op-1 SOE's available_to_consume_kg if it is still in draft.
 
-	supplier_warehouse resolution mirrors get_target_context/_resolve_warehouses in
+	supplier_warehouse resolution mirrors get_target_context in
 	material_issue_plan.py: the Material Issue Plan's own field takes priority (it is
 	what the transfer itself was actually resolved against), falling back to the SCO's
 	core field for a Supplier Job/Supplier with Material flow. An Internal Job SCO has

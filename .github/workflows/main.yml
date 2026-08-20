@@ -251,21 +251,70 @@ jobs:
             fi
 
             BACKUP_DIR="$BENCH_PATH/sites/$SITE/private/backups"
-            BACKUP_FILE=$(ls -t "$BACKUP_DIR"/*-database.sql.gz 2>/dev/null | head -n1)
+            FRESH=$(ls -t "$BACKUP_DIR"/*-database.sql.gz 2>/dev/null | head -n1)
 
-            if [ -z "$BACKUP_FILE" ] || [ ! -s "$BACKUP_FILE" ]; then
+            if [ -z "$FRESH" ] || [ ! -s "$FRESH" ]; then
               echo "ERROR: no non-empty backup file found in $BACKUP_DIR — deploy aborted" | tee -a "$LOG_FILE"
+              echo "Nothing has been changed on the server." | tee -a "$LOG_FILE"
               exit 1
             fi
 
-            echo "Backup: $BACKUP_FILE ($(du -h "$BACKUP_FILE" | cut -f1))" | tee -a "$LOG_FILE"
-            echo "✅ Backup verified on disk" | tee -a "$LOG_FILE"
+            # The file has to be readable as a gzip archive, not merely present.
+            # A truncated or half-written dump passes an existence check and then
+            # fails at the moment it is actually needed, which is the worst
+            # possible time to discover it.
+            if ! gzip -t "$FRESH" 2>&1 | tee -a "$LOG_FILE"; then
+              echo "ERROR: backup failed its integrity check — deploy aborted" | tee -a "$LOG_FILE"
+              echo "Nothing has been changed on the server." | tee -a "$LOG_FILE"
+              exit 1
+            fi
+
+            # Kept out of Frappe's own backup directory on purpose. Frappe prunes
+            # that folder on its own schedule (keep_backups_for_hours), and a
+            # deploy backup that quietly disappears before anyone notices a
+            # problem is not a backup. This copy is ours and is pruned only by the
+            # line at the bottom of this script.
+            SAFE_DIR="$BENCH_PATH/deploy-backups"
+            mkdir -p "$SAFE_DIR"
+            STAMP=$(date +'%Y-%m-%d_%H-%M-%S')
+            BACKUP_FILE="$SAFE_DIR/${STAMP}-predeploy-database.sql.gz"
+            cp "$FRESH" "$BACKUP_FILE"
+
+            # The site's own config travels with it: without site_config.json the
+            # dump cannot be restored into a working site.
+            cp "$BENCH_PATH/sites/$SITE/site_config.json" \
+               "$SAFE_DIR/${STAMP}-predeploy-site_config.json" 2>/dev/null || true
+
+            if [ ! -s "$BACKUP_FILE" ] || ! gzip -t "$BACKUP_FILE" 2>/dev/null; then
+              echo "ERROR: the preserved copy is unreadable — deploy aborted" | tee -a "$LOG_FILE"
+              exit 1
+            fi
+
+            echo "Backup taken   : $FRESH" | tee -a "$LOG_FILE"
+            echo "Preserved copy : $BACKUP_FILE ($(du -h "$BACKUP_FILE" | cut -f1))" | tee -a "$LOG_FILE"
+            echo "Integrity      : gzip -t passed on both" | tee -a "$LOG_FILE"
+            echo "✅ Backup verified and preserved before any change" | tee -a "$LOG_FILE"
 
             # The commit the server is on right now. If anything below fails, the
             # code goes back to exactly this.
             cd "$APP_PATH" || { echo "ERROR: App path not found: $APP_PATH" | tee -a "$LOG_FILE"; exit 1; }
             ROLLBACK_COMMIT=$(git rev-parse HEAD)
             echo "Rollback point: $ROLLBACK_COMMIT" | tee -a "$LOG_FILE"
+
+            # Anything edited directly on the server is stashed, not discarded.
+            # git pull would refuse to run over it, and the rollback below does a
+            # hard reset -- either way an uncommitted hotfix somebody made on live
+            # would be gone. Stashing keeps it recoverable with `git stash list`.
+            if [ -n "$(git status --porcelain)" ]; then
+              echo "" | tee -a "$LOG_FILE"
+              echo "NOTE: the server has uncommitted local changes:" | tee -a "$LOG_FILE"
+              git status --short | tee -a "$LOG_FILE"
+              STASH_LABEL="pre-deploy $(date +'%Y-%m-%d %H:%M:%S')"
+              git stash push -u -m "$STASH_LABEL" 2>&1 | tee -a "$LOG_FILE"
+              echo "They have been stashed as: $STASH_LABEL" | tee -a "$LOG_FILE"
+              echo "Recover with:  cd $APP_PATH && git stash list && git stash pop" | tee -a "$LOG_FILE"
+              echo "" | tee -a "$LOG_FILE"
+            fi
 
             # ── Rollback, used by every failure below ────────────────────────
             # The code is put back automatically: that is safe, and it fixes the
@@ -388,6 +437,13 @@ jobs:
             # ── Old log cleanup (keep last 20 deploys only) ──────────────────
             cd "$LOG_DIR" && ls -t | tail -n +21 | xargs -r rm --
 
+            # ── Preserved backups: keep the last 10 deploys ──────────────────
+            # Ten deploys back is far enough to cover a problem noticed days
+            # later, and this prunes by count rather than age so a quiet week
+            # cannot age them all out.
+            cd "$SAFE_DIR" && ls -t *-predeploy-database.sql.gz 2>/dev/null | tail -n +11 | xargs -r rm --
+            cd "$SAFE_DIR" && ls -t *-predeploy-site_config.json 2>/dev/null | tail -n +11 | xargs -r rm --
+
       - name: Notify Telegram - Deploy completed
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -395,7 +451,7 @@ jobs:
         run: |
           curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${CHAT_ID}" \
-            --data-urlencode "text=Live deploy completed"
+            --data-urlencode "text=Live deploy completed. A pre-deploy database backup was taken and kept in frappe-bench/deploy-backups (last 10 retained)."
 
       - name: Notify Telegram - Issue detected
         if: failure()
@@ -412,7 +468,7 @@ jobs:
             *) STEP_DESC="Unknown step" ;;
           esac
 
-          MESSAGE="Issue: ${STEP_DESC} process failed. Remaining steps stopped."
+          MESSAGE="Issue: ${STEP_DESC} process failed. The code was rolled back to the previous commit and the site restarted. A pre-deploy database backup is in frappe-bench/deploy-backups - the deploy log names the exact file and the restore command, if the database also needs putting back."
 
           curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${CHAT_ID}" \

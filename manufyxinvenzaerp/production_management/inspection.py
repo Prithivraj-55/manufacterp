@@ -50,12 +50,6 @@ def _inspection_applicable(doc):
 	return doc.operation in INSPECTION_OPERATIONS
 
 
-# ─── Job Card / SOE / Purchase Receipt hooks ─────────────────────────────────
-
-def validate_job_card_inspection(doc, method):
-	_validate_inspection_call_log(doc)
-
-
 def validate_soe_inspection(doc, method):
 	_validate_inspection_call_log(doc)
 
@@ -70,10 +64,6 @@ def _validate_inspection_call_log(doc):
 	for idx, row in enumerate(doc.get("custom_inspection_call_log") or [], start=1):
 		if not row.round_no:
 			row.round_no = idx
-
-
-def before_submit_job_card_inspection_gate(doc, method):
-	_before_submit_inspection_gate(doc)
 
 
 def before_submit_soe_inspection_gate(doc, method):
@@ -99,7 +89,7 @@ def _before_submit_inspection_gate(doc):
 		)
 
 
-# ─── Whitelisted API (called from job_card.js / supplier_operation_entry.js /
+# ─── Whitelisted API (called from supplier_operation_entry.js /
 #     purchase_receipt.js) ────────────────────────────────────────────────────
 
 @frappe.whitelist()

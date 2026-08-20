@@ -69,22 +69,6 @@ def create_from_subcontracting_order(sco_name):
 
 
 @frappe.whitelist()
-def create_from_work_order(wo_name):
-    """Create (or return the existing) Material Issue Plan pre-filled from a Work Order."""
-    existing = frappe.db.get_value("Material Issue Plan", {"work_order": wo_name})
-    if existing:
-        return existing
-
-    wo = frappe.db.get_value("Work Order", wo_name, ["company", "production_plan"], as_dict=True)
-    if not wo or not wo.production_plan:
-        frappe.throw(_("This Work Order has no linked Production Plan."))
-
-    mip = frappe.new_doc("Material Issue Plan")
-    mip.company = wo.company
-    mip.production_plan = wo.production_plan
-    mip.work_order = wo_name
-    mip.insert(ignore_permissions=True)
-    return mip.name
 
 
 @frappe.whitelist()
@@ -1402,24 +1386,6 @@ def get_target_context(mip):
             "ref_field": "custom_wo_ref",
         })
     frappe.throw(_("This Material Issue Plan has no linked Subcontracting Order or Work Order."))
-
-
-def _resolve_warehouses(mip):
-    """Source + target warehouses for the live weight-summary calc.
-    MIP's own supplier_warehouse takes priority; falls back to SCO/WO."""
-    source_warehouse = mip.source_warehouse or None
-    target_warehouses = [w for w in [mip.cnc_warehouse] if w]
-
-    if mip.supplier_warehouse:
-        target_warehouses.append(mip.supplier_warehouse)
-    elif mip.subcontracting_order:
-        supplier_warehouse = frappe.db.get_value("Subcontracting Order", mip.subcontracting_order, "supplier_warehouse")
-        if supplier_warehouse:
-            target_warehouses.append(supplier_warehouse)
-    elif mip.work_order:
-        wip_warehouse = frappe.db.get_value("Work Order", mip.work_order, "wip_warehouse")
-        if wip_warehouse:
-            target_warehouses.append(wip_warehouse)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
