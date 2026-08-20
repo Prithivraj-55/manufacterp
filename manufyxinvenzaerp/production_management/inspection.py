@@ -287,7 +287,20 @@ def on_submit_inspection_entry(doc, method):
 		return
 
 	if parent_doctype == "Purchase Receipt":
+		# Two different remarks are in play and they are not interchangeable.
+		#
+		# `remarks` below is the DOCUMENT-level summary written onto the Inspection
+		# Call Log at the end of this function, and joining every row's note is the
+		# right thing there -- it describes the inspection as a whole.
+		#
+		# A BATCH is different. It gets its own row's note, or the inspector's
+		# overall note, and nothing else. It used to fall back to this joined
+		# summary, so a batch that passed cleanly was branded with a defect
+		# recorded against a different item on the same receipt -- and that text
+		# then followed the batch into Material Planning and Stock Entry. Quality
+		# traceability saying something untrue is worse than saying nothing.
 		remarks = doc.overall_remarks or "; ".join(row.remarks for row in doc.items if row.remarks) or ""
+		batch_fallback = doc.overall_remarks or ""
 		for row in doc.items:
 			if not row.pr_item_row:
 				continue
@@ -301,7 +314,10 @@ def on_submit_inspection_entry(doc, method):
 				},
 			)
 			for row_batch_no in _resolve_pr_item_batch_nos(row.pr_item_row):
-				frappe.db.set_value("Batch", row_batch_no, "custom_batch_remarks", row.remarks or remarks)
+				frappe.db.set_value(
+					"Batch", row_batch_no, "custom_batch_remarks",
+					row.remarks or batch_fallback,
+				)
 	elif parent_doctype == "Supplier Operation Entry":
 		remarks = doc.overall_remarks or doc.rework_remarks or ""
 		_apply_soe_inspection_results(doc)
