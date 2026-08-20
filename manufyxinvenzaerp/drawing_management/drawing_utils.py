@@ -466,11 +466,31 @@ def _cascade_customer_weight(drawing_name, new_weight):
         for mip_name in mip_names:
             refresh_weight_summary(mip_name)
 
+    # Operation Entry keeps its own copy of the figure, and it was the one document
+    # this cascade never reached. Every planning document agreed on the new weight
+    # while the sheet the shop floor actually works from still showed the old one,
+    # with nothing on screen to say the two disagreed.
+    #
+    # Submitted and cancelled entries are updated too, deliberately. The weight is
+    # descriptive -- it drives no stock movement or costing -- and leaving a
+    # correction out of a submitted entry would freeze the wrong number into the
+    # document people read, with no way to put it right.
+    soe_detail_rows = frappe.get_all(
+        "SOE Drawing Detail",
+        filters={"drawing": drawing_name, "parenttype": "Supplier Operation Entry"},
+        fields=["name"],
+    )
+    for row in soe_detail_rows:
+        frappe.db.set_value(
+            "SOE Drawing Detail", row.name, "customer_provided_weight_kg", new_weight
+        )
+
     return {
         "production_plan_items_updated": len(pp_item_rows),
         "drawing_rows_updated": len(drawing_item_rows),
         "subcontracting_orders_updated": len([1 for t, _p in touched if t == "Subcontracting Order"]),
         "material_issue_plans_updated": len(mip_names),
+        "operation_entry_rows_updated": len(soe_detail_rows),
     }
 
 

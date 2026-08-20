@@ -438,9 +438,18 @@ def create_drawings_from_import(so_name, batch_start=0, batch_size=30):
     results = []
     created = []  # (duno_row_name, drawing_name, cdn)
 
-    for dr in batch:
+    for row_no, dr in enumerate(batch):
         cdn = dr.drawing_number
         result = {"drawing_number": cdn, "drawing": None, "status": "error", "error": ""}
+        # One savepoint per drawing, so a failure undoes ONLY the drawing that
+        # failed. Before this, the rollback in the handler below was a plain
+        # frappe.db.rollback() -- it ended the whole transaction, taking every
+        # drawing already inserted in this batch of 30 with it. The user saw one
+        # error message and simply had fewer drawings than the sheet described,
+        # with nothing saying which had been lost. On a 500-drawing import that is
+        # up to 29 good drawings destroyed by one bad row.
+        savepoint = "mfx_drawing_%d" % row_no
+        frappe.db.savepoint(savepoint)
         try:
             item_data = item_cache.get(dr.item) or frappe._dict()
             no_of_qty = flt(dr.total_quantity) or 1
@@ -504,7 +513,8 @@ def create_drawings_from_import(so_name, batch_start=0, batch_size=30):
             created.append((dr.name, drawing.name, cdn))
 
         except Exception as e:
-            frappe.db.rollback()
+            # Back to this drawing's own savepoint, not the start of the request.
+            frappe.db.rollback(save_point=savepoint)
             frappe.local.message_log = []
             result["error"] = str(e)
 
