@@ -86,13 +86,15 @@ frappe.ui.form.on("Drawing", {
 										"Weight changed from {0} Kg to {1} Kg.<br>Sales Order updated: {2}<br>" +
 										"Production Plan Items updated: {3}<br>Drawing rows (Subcontracting Order / " +
 										"Material Issue Plan) updated: {4}<br>Subcontracting Orders re-totalled: {5}<br>" +
-										"Material Issue Plans refreshed: {6}<br><br>" +
+										"Material Issue Plans refreshed: {6}<br>" +
+										"Operation Entry drawing rows updated: {7}<br><br>" +
 										"Batch allocation/reservation was <b>not</b> changed automatically — " +
 										"reallocate manually if needed.",
 										[
 											m.old_weight, m.new_weight, m.sales_order_updated ? __("Yes") : __("No"),
 											m.production_plan_items_updated, m.drawing_rows_updated,
 											m.subcontracting_orders_updated, m.material_issue_plans_updated,
+											m.operation_entry_rows_updated,
 										]
 									),
 								});
