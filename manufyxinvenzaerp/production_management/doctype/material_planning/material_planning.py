@@ -2499,6 +2499,22 @@ def _refresh_touched_cut_sheets(mp):
 
 
 @frappe.whitelist()
+def _require_write(mp):
+    """Refuse a reservation action to anyone who cannot write the plan.
+
+    reserve_batches carried this check from the start; the other four whitelisted
+    actions that change reservations did not, so a user who could not edit a
+    Material Planning could still reserve, unreserve or reassign its batches by
+    calling the method directly. They are the same class of action on the same
+    document and now share one guard rather than four copies that could drift.
+    """
+    if not frappe.has_permission("Material Planning", "write", doc=mp):
+        frappe.throw(
+            _("Not permitted to change reservations on this Material Planning"),
+            frappe.PermissionError,
+        )
+
+
 def reserve_batches(material_planning_name):
     """
     Reserve batches in material_mapping with partial-stock awareness.
@@ -2509,8 +2525,7 @@ def reserve_batches(material_planning_name):
     Returns updated rows + list of partially reserved items for JS warning.
     """
     mp = frappe.get_doc("Material Planning", material_planning_name)
-    if not frappe.has_permission("Material Planning", "write", doc=mp):
-        frappe.throw(_("Not permitted to reserve batches on this Material Planning"), frappe.PermissionError)
+    _require_write(mp)
     if not mp.material_mapping:
         frappe.throw(_("No items in Material Mapping to reserve."))
     if not mp.for_warehouse:
@@ -3148,6 +3163,7 @@ def reserve_exact_match_batches(material_planning_name):
     the batch_no / required_qty field names used by that child doctype.
     """
     mp = frappe.get_doc("Material Planning", material_planning_name)
+    _require_write(mp)
     if not mp.available_raw_materials:
         frappe.throw(_("No items in Available Raw Materials to reserve."))
     if not mp.for_warehouse:
@@ -3284,6 +3300,7 @@ def unreserve_exact_match_batches(material_planning_name, row_names):
         row_names = json.loads(row_names)
 
     mp = frappe.get_doc("Material Planning", material_planning_name)
+    _require_write(mp)
     target = set(row_names)
     unreserved_count = 0
 
@@ -3387,6 +3404,7 @@ def unreserve_batches(material_planning_name, row_names):
         row_names = json.loads(row_names)
 
     mp = frappe.get_doc("Material Planning", material_planning_name)
+    _require_write(mp)
     target = set(row_names)
     unreserved_count = 0
 
@@ -3562,6 +3580,7 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
     new_unit_weight = flt(new_item_data.get("custom_unit_weight"))
 
     mp = frappe.get_doc("Material Planning", material_planning_name)
+    _require_write(mp)
     warnings = []
 
     if source_table == "Material Planning Material Mapping":
