@@ -3654,10 +3654,20 @@ frappe.ui.form.on("Supplier Operation Entry", {
 
 \t\t// Testing convenience -- fills Consumption Log with one row per drawing at its
 \t\t// full available quantity in one click, instead of adding rows one by one.
+\t\t//
+\t\t// Shown only where Manufyxinvenza Settings enables Auto Purchase, the same
+\t\t// switch that reveals the Auto Purchase section on Material Planning. Both
+\t\t// are shortcuts for testing rather than steps in the real process, and a
+\t\t// button that fills a consumption log with every drawing at its full
+\t\t// quantity is not one to leave in front of an operator on a live site.
 \t\tif (frm.doc.docstatus === 0 && !frm.is_new()) {
-\t\t\tfrm.add_custom_button(__("Add All Drawing"), function() {
-\t\t\t\t_add_all_drawing_to_log(frm);
-\t\t\t}, __("Testing"));
+\t\t\tfrappe.db.get_single_value("Manufyxinvenza Settings", "auto_purchase_from_material_planning")
+\t\t\t\t.then(function(enabled) {
+\t\t\t\t\tif (!enabled) return;
+\t\t\t\t\tfrm.add_custom_button(__("Add All Drawing"), function() {
+\t\t\t\t\t\t_add_all_drawing_to_log(frm);
+\t\t\t\t\t}, __("Testing"));
+\t\t\t\t});
 \t\t}
 \t}
 });

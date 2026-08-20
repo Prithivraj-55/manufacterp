@@ -1361,7 +1361,7 @@ const ERP_MANUAL_SOE_CHILDREN = [
 			"Status must be set to Completed before a Supplier Operation Entry can be submitted, and every earlier operation in the sequence must already be submitted too.",
 		],
 		buttons: [
-			{ name: "Add All Drawing (Testing group)", note: "Fills Consumption Log with one row per drawing at its full available quantity in one click, instead of adding rows one by one. For quick testing/data entry, not a normal production step." },
+			{ name: "Add All Drawing (Testing group)", note: "Fills Consumption Log with one row per drawing at its full available quantity in one click, instead of adding rows one by one. For quick testing or data entry, not a normal production step — which is why it only appears when <b>Auto Purchase from Material Planning</b> is ticked in Manufyxinvenza Settings, the same switch that reveals the Auto Purchase section on Material Planning. Leave that off on a live site and this button is not there at all." },
 		],
 		notes: [
 			"If Inspection Mandatory is ticked for this operation, Consumption Log no longer completes anything directly — see Inspection for what happens instead.",
