@@ -21,6 +21,9 @@ jobs:
   test:
     name: Run App Test Suite
     runs-on: ubuntu-latest
+    # A whole-job cap. Individual steps carry their own where they are known to
+    # be able to hang; this is the backstop so a run can never sit for an hour.
+    timeout-minutes: 30
 
     services:
       mariadb:
@@ -75,12 +78,45 @@ jobs:
 
       - name: Install system dependencies
         id: install-sysdeps
+        # Was hanging for 6+ minutes and then being cancelled. Three changes:
+        #
+        #  * Only two packages are actually needed. redis comes from the service
+        #    containers above on the very ports bench expects (13000/11000), so
+        #    installing redis-server was pointless; wkhtmltopdf is only used to
+        #    render PDFs at runtime, which no test does, and it drags in the whole
+        #    X11 and font stack.
+        #  * apt is told to give up on a stalled mirror instead of waiting on it
+        #    forever, which is what the silence in the log was.
+        #  * The step is capped, so a bad mirror costs four minutes and a clear
+        #    failure rather than an open-ended hang someone has to cancel by hand.
+        timeout-minutes: 4
         env:
           DEBIAN_FRONTEND: noninteractive
           NEEDRESTART_MODE: a
         run: |
-          sudo -E apt-get update
-          sudo -E apt-get install -y redis-server wkhtmltopdf mariadb-client libmysqlclient-dev
+          set -euo pipefail
+
+          need=""
+          command -v mysql >/dev/null 2>&1 || need="$need mariadb-client"
+          # mysqlclient builds against this; frappe v15 uses pymysql, but a
+          # transitive dependency can still want the headers.
+          dpkg -s libmysqlclient-dev >/dev/null 2>&1 || need="$need libmysqlclient-dev"
+
+          if [ -z "$need" ]; then
+            echo "Nothing to install — the runner image already has what is needed."
+            exit 0
+          fi
+
+          echo "Installing:$need"
+          APT_OPTS="-o Acquire::Retries=3 \
+                    -o Acquire::http::Timeout=20 \
+                    -o Acquire::https::Timeout=20 \
+                    -o Acquire::ForceIPv4=true"
+
+          # A single archive rather than the runner's mirror list: when one entry
+          # in that list stalls, apt waits on it, and that is the hang.
+          sudo -E apt-get $APT_OPTS update
+          sudo -E apt-get $APT_OPTS install -y --no-install-recommends $need
 
       - name: Install bench
         id: install-bench
@@ -158,6 +194,12 @@ jobs:
     name: SSH Deploy
     runs-on: ubuntu-latest
     needs: test
+    timeout-minutes: 30
+    # The live server is only touched when the repository variable LIVE_DEPLOY is
+    # set to "true" (Settings → Secrets and variables → Actions → Variables).
+    # With it unset the test gate still runs on every push, so the pipeline can be
+    # exercised and watched without deploying anything.
+    if: vars.LIVE_DEPLOY == 'true'
 
     steps:
       - name: Checkout code
@@ -190,25 +232,92 @@ jobs:
             echo " Site     : $SITE"                           | tee -a "$LOG_FILE"
             echo "============================================" | tee -a "$LOG_FILE"
 
-            # ── Step 1: Git Pull ─────────────────────────────────────────────
+            # ── Step 0: Backup, before anything is touched ───────────────────
+            # Nothing below runs until there is a database backup on disk and it
+            # has actually been written. A deploy that cannot be undone is not a
+            # deploy anyone should start.
             echo "" | tee -a "$LOG_FILE"
-            echo "[STEP 1/5] Git Pull" | tee -a "$LOG_FILE"
+            echo "[STEP 0/6] Backup — taken before any change" | tee -a "$LOG_FILE"
             echo "--------------------------------------------" | tee -a "$LOG_FILE"
 
+            cd "$BENCH_PATH" || { echo "ERROR: Bench path not found" | tee -a "$LOG_FILE"; exit 1; }
+
+            bench --site "$SITE" backup 2>&1 | tee -a "$LOG_FILE"
+            BACKUP_STATUS=${PIPESTATUS[0]}
+            if [ $BACKUP_STATUS -ne 0 ]; then
+              echo "ERROR: backup failed with exit code $BACKUP_STATUS — deploy aborted" | tee -a "$LOG_FILE"
+              echo "Nothing has been changed on the server." | tee -a "$LOG_FILE"
+              exit 1
+            fi
+
+            BACKUP_DIR="$BENCH_PATH/sites/$SITE/private/backups"
+            BACKUP_FILE=$(ls -t "$BACKUP_DIR"/*-database.sql.gz 2>/dev/null | head -n1)
+
+            if [ -z "$BACKUP_FILE" ] || [ ! -s "$BACKUP_FILE" ]; then
+              echo "ERROR: no non-empty backup file found in $BACKUP_DIR — deploy aborted" | tee -a "$LOG_FILE"
+              exit 1
+            fi
+
+            echo "Backup: $BACKUP_FILE ($(du -h "$BACKUP_FILE" | cut -f1))" | tee -a "$LOG_FILE"
+            echo "✅ Backup verified on disk" | tee -a "$LOG_FILE"
+
+            # The commit the server is on right now. If anything below fails, the
+            # code goes back to exactly this.
             cd "$APP_PATH" || { echo "ERROR: App path not found: $APP_PATH" | tee -a "$LOG_FILE"; exit 1; }
+            ROLLBACK_COMMIT=$(git rev-parse HEAD)
+            echo "Rollback point: $ROLLBACK_COMMIT" | tee -a "$LOG_FILE"
+
+            # ── Rollback, used by every failure below ────────────────────────
+            # The code is put back automatically: that is safe, and it fixes the
+            # common failures (a bad build, an import error, a broken client
+            # script) by returning the site to the version that was working.
+            #
+            # The DATABASE is deliberately NOT restored automatically. A restore
+            # would discard every transaction users have made since the backup was
+            # taken minutes earlier, and on a live ERP that is worse than the
+            # failure it is trying to undo. The exact command is printed instead,
+            # so a human decides.
+            rollback() {
+              REASON="$1"
+              echo "" | tee -a "$LOG_FILE"
+              echo "============================================" | tee -a "$LOG_FILE"
+              echo " ROLLING BACK — $REASON" | tee -a "$LOG_FILE"
+              echo "============================================" | tee -a "$LOG_FILE"
+
+              cd "$APP_PATH" && git reset --hard "$ROLLBACK_COMMIT" 2>&1 | tee -a "$LOG_FILE"
+              cd "$BENCH_PATH" || exit 1
+              bench build --app manufyxinvenzaerp 2>&1 | tee -a "$LOG_FILE" || true
+              bench --site "$SITE" clear-cache 2>&1 | tee -a "$LOG_FILE" || true
+              bench restart 2>&1 | tee -a "$LOG_FILE" || true
+
+              echo "" | tee -a "$LOG_FILE"
+              echo "Code is back on $ROLLBACK_COMMIT and the site has been restarted." | tee -a "$LOG_FILE"
+              echo "" | tee -a "$LOG_FILE"
+              echo "If the DATABASE also needs restoring, run this on the server:" | tee -a "$LOG_FILE"
+              echo "  cd $BENCH_PATH" | tee -a "$LOG_FILE"
+              echo "  bench --site $SITE restore $BACKUP_FILE" | tee -a "$LOG_FILE"
+              echo "" | tee -a "$LOG_FILE"
+              echo "That discards anything done on the site since the backup, so check first." | tee -a "$LOG_FILE"
+              exit 1
+            }
+
+            # ── Step 1: Git Pull ─────────────────────────────────────────────
+            echo "" | tee -a "$LOG_FILE"
+            echo "[STEP 1/6] Git Pull" | tee -a "$LOG_FILE"
+            echo "--------------------------------------------" | tee -a "$LOG_FILE"
 
             git pull 2>&1 | tee -a "$LOG_FILE"
             GIT_STATUS=${PIPESTATUS[0]}
 
             if [ $GIT_STATUS -ne 0 ]; then
               echo "ERROR: git pull failed with exit code $GIT_STATUS" | tee -a "$LOG_FILE"
-              exit 1
+              rollback "git pull failed"
             fi
             echo "✅ Git pull successful" | tee -a "$LOG_FILE"
 
             # ── Step 2: Bench Build ──────────────────────────────────────────
             echo "" | tee -a "$LOG_FILE"
-            echo "[STEP 2/5] Bench Build — compiling JS/CSS/Vue assets" | tee -a "$LOG_FILE"
+            echo "[STEP 2/6] Bench Build — compiling JS/CSS/Vue assets" | tee -a "$LOG_FILE"
             echo "--------------------------------------------" | tee -a "$LOG_FILE"
 
             cd "$BENCH_PATH" || { echo "ERROR: Bench path not found" | tee -a "$LOG_FILE"; exit 1; }
@@ -218,13 +327,13 @@ jobs:
 
             if [ $BUILD_STATUS -ne 0 ]; then
               echo "ERROR: bench build failed with exit code $BUILD_STATUS" | tee -a "$LOG_FILE"
-              exit 1
+              rollback "bench build failed"
             fi
             echo "✅ Bench build successful" | tee -a "$LOG_FILE"
 
             # ── Step 3: Clear Cache ──────────────────────────────────────────
             echo "" | tee -a "$LOG_FILE"
-            echo "[STEP 3/5] Clear Cache — removing stale metadata & controllers" | tee -a "$LOG_FILE"
+            echo "[STEP 3/6] Clear Cache — removing stale metadata & controllers" | tee -a "$LOG_FILE"
             echo "--------------------------------------------" | tee -a "$LOG_FILE"
 
             bench --site "$SITE" clear-cache 2>&1 | tee -a "$LOG_FILE"
@@ -232,13 +341,13 @@ jobs:
 
             if [ $CACHE_STATUS -ne 0 ]; then
               echo "ERROR: clear-cache failed with exit code $CACHE_STATUS" | tee -a "$LOG_FILE"
-              exit 1
+              rollback "clear-cache failed"
             fi
             echo "✅ Cache cleared successfully" | tee -a "$LOG_FILE"
 
             # ── Step 4: Bench Migrate ────────────────────────────────────────
             echo "" | tee -a "$LOG_FILE"
-            echo "[STEP 4/5] Bench Migrate — applying schema changes" | tee -a "$LOG_FILE"
+            echo "[STEP 4/6] Bench Migrate — applying schema changes" | tee -a "$LOG_FILE"
             echo "--------------------------------------------" | tee -a "$LOG_FILE"
 
             bench --site "$SITE" migrate 2>&1 | tee -a "$LOG_FILE"
@@ -246,13 +355,15 @@ jobs:
 
             if [ $MIGRATE_STATUS -ne 0 ]; then
               echo "ERROR: bench migrate failed with exit code $MIGRATE_STATUS" | tee -a "$LOG_FILE"
-              exit 1
+              echo "A failed migrate is the one case where the database may also need" | tee -a "$LOG_FILE"
+              echo "restoring — the schema may be part-changed. Read the command below." | tee -a "$LOG_FILE"
+              rollback "bench migrate failed"
             fi
             echo "✅ Bench migrate successful" | tee -a "$LOG_FILE"
 
             # ── Step 5: Bench Restart ────────────────────────────────────────
             echo "" | tee -a "$LOG_FILE"
-            echo "[STEP 5/5] Bench Restart — reloading workers & scheduler" | tee -a "$LOG_FILE"
+            echo "[STEP 5/6] Bench Restart — reloading workers & scheduler" | tee -a "$LOG_FILE"
             echo "--------------------------------------------" | tee -a "$LOG_FILE"
 
             bench restart 2>&1 | tee -a "$LOG_FILE"
@@ -260,7 +371,7 @@ jobs:
 
             if [ $RESTART_STATUS -ne 0 ]; then
               echo "ERROR: bench restart failed with exit code $RESTART_STATUS" | tee -a "$LOG_FILE"
-              exit 1
+              rollback "bench restart failed"
             fi
             echo "✅ Bench restart successful" | tee -a "$LOG_FILE"
 
@@ -270,6 +381,8 @@ jobs:
             echo " ✅ DEPLOY COMPLETED SUCCESSFULLY"           | tee -a "$LOG_FILE"
             echo " Finished : $(date)"                         | tee -a "$LOG_FILE"
             echo " Log file : $LOG_FILE"                       | tee -a "$LOG_FILE"
+            echo " Backup   : $BACKUP_FILE"                    | tee -a "$LOG_FILE"
+            echo " (kept, in case something surfaces later)"   | tee -a "$LOG_FILE"
             echo "============================================" | tee -a "$LOG_FILE"
 
             # ── Old log cleanup (keep last 20 deploys only) ──────────────────
