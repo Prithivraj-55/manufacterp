@@ -27,6 +27,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt, now
 
+from manufyxinvenzaerp.utils.decision_log import log_decision
 from manufyxinvenzaerp.utils.dimension_formula import calculate_qty
 
 # Sec Nos comparisons are made to 3 decimals everywhere else in this app; the same
@@ -552,6 +553,18 @@ def apply_w2_to_batch(cut_sheet_name, stock_entry):
         "w2_applied_on": now(),
         "status": "Consumed",
     }, update_modified=False)
+    log_decision(
+        "Cut Sheet Balance",
+        reference_doctype="Cut Sheet",
+        reference_name=cs.name,
+        item_code=cs.item_code,
+        batch_no=cs.batch_no,
+        previous_sec_qty=flt(cs.sheet_sec_qty),
+        sec_qty=flt(cs.w2_sec_qty),
+        qty=flt(cs.w2_calc_qty),
+        details=_("Batch {0} resized in place to the balance: {1} x {2}, {3} Nos.").format(
+            cs.batch_no, flt(cs.w2_length), flt(cs.w2_width), flt(cs.w2_sec_qty)),
+    )
     return True
 
 

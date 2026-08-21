@@ -6,6 +6,8 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import ceil, flt, now, today
 
+from manufyxinvenzaerp.utils.decision_log import log_decision
+
 #  Material Mapping "Status" (batch_mapped) ────────────────────────────────────
 #  A plain Data field, so these strings ARE the vocabulary. Rows fulfilled from
 #  another job's leftovers read "Excess Mapped ..." so the screen says where the
@@ -2626,6 +2628,21 @@ def reserve_batches(material_planning_name):
     _refresh_touched_cut_sheets(mp)
     frappe.db.commit()
 
+    # One entry for the whole press of the button rather than one per row -- see
+    # utils/decision_log. The count and the weight are what make it answerable
+    # later; which rows they were is still on the plan itself.
+    log_decision(
+        "Reserve",
+        reference_doctype="Material Planning",
+        reference_name=mp.name,
+        rows_affected=reserved_count,
+        qty=sum(flt(r.reserved_qty) for r in mp.material_mapping if r.is_reserved),
+        details=_("Reserved {0} row(s) in Material Mapping from {1}.{2}").format(
+            reserved_count, mp.for_warehouse,
+            _(" {0} row(s) only partly covered.").format(len(partial_rows)) if partial_rows else "",
+        ),
+    )
+
     return {
         "rows": [
             {
@@ -3272,6 +3289,18 @@ def reserve_exact_match_batches(material_planning_name):
     _refresh_touched_cut_sheets(mp)
     frappe.db.commit()
 
+    log_decision(
+        "Reserve",
+        reference_doctype="Material Planning",
+        reference_name=mp.name,
+        rows_affected=reserved_count,
+        qty=sum(flt(r.reserved_qty) for r in mp.available_raw_materials if r.is_reserved),
+        details=_("Reserved {0} row(s) in Exact Match from {1}.{2}").format(
+            reserved_count, mp.for_warehouse,
+            _(" {0} row(s) only partly covered.").format(len(partial_rows)) if partial_rows else "",
+        ),
+    )
+
     return {
         "rows": [
             {
@@ -3318,6 +3347,14 @@ def unreserve_exact_match_batches(material_planning_name, row_names):
     mp.save(ignore_permissions=True)
     _refresh_touched_cut_sheets(mp)
     frappe.db.commit()
+
+    log_decision(
+        "Unreserve",
+        reference_doctype="Material Planning",
+        reference_name=mp.name,
+        rows_affected=unreserved_count,
+        details=_("Released {0} row(s) in Exact Match.").format(unreserved_count),
+    )
 
     return [
         {
@@ -3432,6 +3469,14 @@ def unreserve_batches(material_planning_name, row_names):
     mp.save(ignore_permissions=True)
     _refresh_touched_cut_sheets(mp)
     frappe.db.commit()
+
+    log_decision(
+        "Unreserve",
+        reference_doctype="Material Planning",
+        reference_name=mp.name,
+        rows_affected=unreserved_count,
+        details=_("Released {0} row(s) in Material Mapping.").format(unreserved_count),
+    )
 
     return [
         {
@@ -3624,6 +3669,22 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
         })
         mp.save(ignore_permissions=True)
         _mark_excess_item_mapped(new_batch_no, material_planning_name, row_name)
+        # Reassignment is genuinely a per-row decision, so one entry per row here --
+        # unlike Reserve, which is one decision covering however many rows.
+        log_decision(
+            "Reassign Batch",
+            reference_doctype="Material Planning",
+            reference_name=mp.name,
+            row_reference=row_name,
+            item_code=row.item_code,
+            batch_no=old_batch,
+            new_batch_no=new_batch_no or "",
+            previous_sec_qty=old_sec_qty,
+            sec_qty=flt(row.batch_sec_qty),
+            previous_qty=old_qty,
+            qty=flt(row.batch_calc_qty),
+            details=_batch_change_remarks(row.item_code, old_batch, new_batch_no, material_issue_plan),
+        )
 
     else:
         row = next((r for r in mp.available_raw_materials if r.name == row_name), None)
@@ -3704,6 +3765,20 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
         })
         mp.save(ignore_permissions=True)
         _mark_excess_item_mapped(new_batch_no, material_planning_name, target_row_name)
+        log_decision(
+            "Reassign Batch",
+            reference_doctype="Material Planning",
+            reference_name=mp.name,
+            row_reference=target_row_name,
+            item_code=item_code,
+            batch_no=old_batch,
+            new_batch_no=new_batch_no or "",
+            previous_sec_qty=old_sec_qty,
+            sec_qty=new_sec_qty,
+            previous_qty=old_qty,
+            qty=new_qty,
+            details=_batch_change_remarks(item_code, old_batch, new_batch_no, material_issue_plan),
+        )
 
     # Dry-run validation — the same check the JS already runs before/after save.
     mp = frappe.get_doc("Material Planning", material_planning_name)

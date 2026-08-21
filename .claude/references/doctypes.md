@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-08-21 10:06:07_
+_Generated: 2026-08-21 12:56:31_
 
 ## drawing
 
@@ -245,6 +245,23 @@ _Generated: 2026-08-21 10:06:07_
 | Path | `production_management/doctype/job_card_raw_material` |
 | Controller | `production_management/doctype/job_card_raw_material/job_card_raw_material.py` |
 | Client script | none |
+
+---
+
+## manufyx_decision_log
+
+| Key | Value |
+|-----|-------|
+| Module | production_management |
+| Path | `production_management/doctype/manufyx_decision_log` |
+| Controller | `production_management/doctype/manufyx_decision_log/manufyx_decision_log.py` |
+| Client script | none |
+
+### Methods
+
+| Method | Whitelisted |
+|--------|-------------|
+| ` on_trash` | no |
 
 ---
 

@@ -123,7 +123,7 @@ a genuine call through, and that the setting is put back whatever happens.
 
 ---
 
-## Item D — Decision log  `[ ]`  *(Q4)*
+## Item D — Decision log  `[x]`  *(Q4)*
 
 A single append-only log of the decisions that people later argue about: **who reserved
 a batch, who unreserved it, who reassigned it, who rounded a quantity up, and why.**
@@ -136,6 +136,33 @@ place, with a report to read it back.
 
 Built **before** Items F and H, so those write into it as they go instead of being
 retrofitted afterwards.
+
+**Done.** New `Manufyx Decision Log` doctype, written only by `log_decision()` in
+`utils/decision_log.py`, never from a screen. Five decisions are recorded: Reserve,
+Unreserve, Reassign Batch, Round Up at Transfer, Cut Sheet Balance -- across Material
+Planning (both tables), the Material Issue Plan transfer popup and the Cut Sheet.
+
+Who and when come free from the entry's own owner and creation.
+
+Two properties the tests pin down:
+
+- **One entry per decision, not per row.** Reserving a plan is one press of one button
+  covering however many rows, so it is one entry carrying the count and the total
+  weight. Reassigning a batch really is per row, so that is one entry each.
+- **Logging can never break the thing it is logging.** Every failure is swallowed to
+  the error log. A reservation that went through and then failed because its log entry
+  could not be written would be worse than having no log.
+
+One thing found by running the existing tests rather than by reasoning: a Dynamic Link
+from the log made a Cut Sheet **undeletable** once its balance was recorded -- an audit
+trail holding its own subject hostage. Fixed with `ignore_links_on_delete` in hooks,
+and the property is now a test of its own.
+
+Readable from the Manufyx Decision Log list, filterable by decision, reference type and
+item. Not yet linked from the workspace -- say the word and I will add it.
+
+`doctype/manufyx_decision_log/`, `utils/decision_log.py`, `hooks.py`,
+`tests/verify_decision_log.py` (27 checks)
 
 ---
 

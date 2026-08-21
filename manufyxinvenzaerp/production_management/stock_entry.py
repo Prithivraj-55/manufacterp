@@ -1,6 +1,7 @@
 import frappe
 from frappe import _
 from frappe.utils import flt, now
+from manufyxinvenzaerp.utils.decision_log import log_decision
 from manufyxinvenzaerp.utils.dimension_formula import calculate_qty
 from manufyxinvenzaerp.utils.reference_copy import copy_reference_fields_if_blank
 
@@ -435,6 +436,19 @@ def _apply_cut_sheet_w2_as_new_batch(cut_sheet_name, stock_entry):
 		"w2_batch_no": new_batch,
 		"status": "Consumed",
 	}, update_modified=False)
+	log_decision(
+		"Cut Sheet Balance",
+		reference_doctype="Cut Sheet",
+		reference_name=cs.name,
+		item_code=cs.item_code,
+		batch_no=cs.batch_no,
+		new_batch_no=new_batch,
+		previous_sec_qty=flt(cs.sheet_sec_qty),
+		sec_qty=flt(cs.w2_sec_qty),
+		qty=flt(cs.w2_calc_qty),
+		details=_("Batch {0} emptied into new batch {1} carrying the balance ({2})." ).format(
+			cs.batch_no, new_batch, repack),
+	)
 	frappe.msgprint(
 		_("Batch {0} was cut per {1}. Its balance is now batch {2} ({3}).").format(
 			frappe.bold(cs.batch_no), cs.name, frappe.bold(new_batch),

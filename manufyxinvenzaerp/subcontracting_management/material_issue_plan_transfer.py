@@ -16,6 +16,7 @@ import frappe
 from frappe import _
 from frappe.utils import flt
 
+from manufyxinvenzaerp.utils.decision_log import log_decision
 from manufyxinvenzaerp.subcontracting_management.subcontracting import _get_mp_reserved_batches
 from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
     _clear_transfer_draft,
@@ -551,6 +552,24 @@ def _log_round_up_excess(mip, items, excess_plan=None):
         if excess_kg <= 0:
             continue
         _apply_transfer_excess_to_raw_materials(mip, item, excess_kg)
+
+        # Rounding a fractional piece count up to whole pieces is a person's decision,
+        # taken here rather than by the plan, and the surplus it creates is exactly the
+        # kind of figure someone asks about weeks later. One entry per row rounded.
+        log_decision(
+            "Round Up at Transfer",
+            reference_doctype="Material Issue Plan",
+            reference_name=mip.name,
+            item_code=item.get("item_code"),
+            batch_no=item.get("batch_no"),
+            previous_sec_qty=flt(item.get("planned_sec_qty")),
+            sec_qty=flt(item.get("custom_sec_qty")),
+            qty=excess_kg,
+            details=_("Rounded {0} up to {1} Nos on batch {2}, {3} Kg of surplus to return.").format(
+                flt(item.get("planned_sec_qty"), 3), flt(item.get("custom_sec_qty"), 3),
+                item.get("batch_no") or "", flt(excess_kg, 3),
+            ),
+        )
 
         # What the user measured in the popup's excess row wins over the placeholder
         # derived from the batch. They are looking at the actual off-cut; the batch's
