@@ -243,17 +243,116 @@ against 120 Kg reserved wiped both rows to (0, 0).
 
 ---
 
-## Item G — T6d: retire the old excess fields  `[ ]`
+## Item G — Retire Excess Return AND Cut Sheet from the raw-material table  `[x]`
 
-The excess fields on the Material Issue Plan raw-material row —
-`excess_return_applicable`, `excess_calc_qty`, `excess_length/width/sec_qty`,
-`excess_return_date` — were replaced by the transfer popup's excess tab (T6a–T6c, live).
-They are now a second, stale way to say the same thing. Remove them along with
-`_sync_excess_return_from_raw_materials`, the Cut Sheet W2 auto-suggest that writes them
-and the client handlers keyed to them.
+**Scope grew on 21 August.** The original T6d retired only the excess fields. The
+client extended it: *both* features come out of Material Issue Plan Raw Material,
+because each now lives somewhere better —
 
-Half a day. Must land before Item H, which rewrites what feeds this table.
-Field deletion — I will confirm again immediately before running it.
+- **Excess Return** is its own table on the same document (Excess Material Items),
+  which already collects every item with its dimensions.
+- **Cut Sheet** is its own doctype, where the nesting is stated once against the batch
+  and shared across jobs, instead of being re-typed on every line that draws from it.
+
+What stays is **reference only**: where the chosen batch has a Cut Sheet against it,
+the row still shows the To Use (W1) and Balance (W2) dimensions, read-only, taken from
+that Cut Sheet. They are what the transfer's Stock Entry carries, so they belong in
+front of whoever is making it — but they are no longer typed, calculated or acted on
+here.
+
+### G1 — Excess Return comes out
+
+Fields removed from `Material Issue Plan Raw Material`: `section_excess_return`,
+`excess_return_applicable`, `excess_calc_qty`, `col_break_excess_return`,
+`excess_length`, `excess_width`, `excess_sec_qty`, `excess_return_date`.
+
+Code removed: `_sync_excess_return_from_raw_materials` and its call on every save,
+`_RAW_TO_EXCESS_FIELDS`, the three grid handlers and `_recalc_excess_calc_qty` in the
+client script.
+
+`excess_qty` and `transfer_excess_kg` **stay** — different fields, still used by the
+transfer popup and the weight summary.
+
+### G2 — Cut Sheet functionality comes out
+
+Fields removed: `cut_sheet`, `use_length`, `use_width`, `use_sec_qty`, `use_calc_qty`,
+`balance_length`, `balance_width`, `balance_sec_qty`, `balance_calc_qty`,
+`precut_length`, `precut_width`, `precut_sec_qty`, and `w2_repack_entry` (added in
+Item B for this path, unnecessary once the path goes).
+
+Code removed: `_sync_cut_sheet_calc`, `_warn_cut_sheet_mismatch`, `_cut_sheet_sheet_qty`,
+`_cut_sheet_seed`, `_auto_suggest_excess_from_cut_sheet`, and in `stock_entry.py` the
+whole Material-Issue-Plan-driven resize — `_resize_cut_sheet_batches`,
+`_apply_cut_sheet_batch_size`, `_reapply_cut_sheet_batch_sizes` and
+`_apply_cut_sheet_balance_as_new_batch`.
+
+That last group is the real prize. The batch's balance was being written by **two**
+independent mechanisms — this one and the Cut Sheet doctype's own
+`apply_w2_to_batch` — which is exactly the sort of duplication that made four batches
+go stranded. Afterwards there is one.
+
+### G3 — What replaces the two things the removed fields still did
+
+Neither can simply vanish, and both have a source that is better than the one going:
+
+1. **The transfer cap.** A cut-sheet row must offer only its To Use (W1) weight for
+   transfer, never the whole batch. Today that cap reads `use_calc_qty` off the raw
+   material row (`material_issue_plan_transfer.py:254`). It moves to the Cut Sheet
+   itself, reached through the Material Planning row's `cut_sheet_ref`. To be
+   confirmed while building: the Material Planning row's `batch_calc_qty` is already
+   set to the W1 weight by `_mp_apply_cut_sheet_to_row`, and `reserved_qty` follows
+   it, so the cap may already be redundant. If it is, it goes rather than moves.
+
+2. **The Stock Entry's dimensions.** Already sourced from Material Planning, not from
+   here — `_get_mp_reserved_batches` reads the mapping row's `batch_length/width`,
+   which the same function sets to W1. Nothing to move.
+
+### G4 — The reference fields that stay
+
+A new read-only group on the row, populated from the Cut Sheet when the batch has one:
+`cut_sheet_ref` (link), `cs_use_length`, `cs_use_width`, `cs_use_sec_qty`,
+`cs_balance_length`, `cs_balance_width`, `cs_balance_sec_qty`. Shown only where
+`cut_sheet_ref` is set. Nothing writes back to them and nothing acts on them.
+
+### G5 — Tests
+
+Retired with the features they cover: `verify_mip_excess_auto_suggest`,
+`verify_mip_excess_qty_fields`, `verify_mip_cut_sheet`, `verify_cut_sheet_chain`
+(which tests the Material-Issue-Plan-driven resize chain specifically, and is the one
+already failing on stale data). Touched, not retired: `verify_excess_claim_lifecycle`,
+`verify_excess_material_mapping_row_btn`, `verify_mip_return_excess_reason`,
+`verify_transfer_draft`.
+
+A new `verify_mip_raw_material_slimmed` replaces them: the fields are gone, the
+reference fields are present and read-only, the transfer still caps at W1, and the
+Cut Sheet doctype is now the only thing that writes a batch's balance.
+
+### Not in this item
+
+Material Planning's own two tables carry the same `use_*` / `balance_*` fields
+(`Material Planning Material Mapping`, `Material Planning Available Raw Material`).
+The client's instruction named the Material Issue Plan's table, and those two are
+where a row claims pieces from a sheet, so they stay for now. Worth raising
+separately: they duplicate the Cut Sheet doctype in the same way this table did.
+
+**Done.** 24 fields off the row, ~19,000 characters of code out of five modules, five
+test modules retired and three rewritten against the shapes that remain.
+
+Two deviations from the plan above, both worth naming:
+
+- `verify_mip_return_excess_reason` was listed as "touched, not retired" and was in
+  fact retired. Both ends of it are gone -- its setup used the Cut Sheet auto-suggest
+  and its final assertion read the raw-material row's `excess_calc_qty` write-back --
+  so what was left would have been a new test, not a trimmed one. **Coverage lost: the
+  mandatory Return Reason on Return Excess Entry.** Worth rebuilding against the new
+  shape; say the word.
+- The transfer cap was re-sourced rather than dropped. It could be argued redundant --
+  the mapping row's `batch_calc_qty` is already the To Use weight and `reserved_qty`
+  follows it -- but that is an invariant to prove, not to assume, so `_cut_sheet_caps`
+  now reads the same `use_calc_qty` from Material Planning, where the cut plan is
+  actually decided.
+
+`tests/verify_mip_raw_material_slimmed.py` -- 30 checks.
 
 ---
 

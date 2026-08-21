@@ -286,82 +286,19 @@ function _add_update_batch_button(frm) {
 	);
 }
 
-// Per-row "Update Batch" button (Button field on the child doctype) — opens the
+// Per-row "Update Batch" button (Button field on the child doctype) -- opens the
 // same dialog as the grid toolbar button, pre-filtered/pre-selected onto this row.
-// excess_length/width/sec_qty changes get a live Excess Calc Qty preview here
-// (client change request Phase 5.3) — the authoritative calc + excess_return_items
-// sync happens server-side on save (validate() -> _sync_excess_return_from_raw_materials),
-// this is just immediate feedback while the user is still typing.
-// use_length/width/sec_qty and balance_length/width/sec_qty get the same kind
-// of live W1/W2 Kg preview (client change request Phase 5.2) -- authoritative
-// calc + the actual transferred-qty cap / post-submit batch resize both happen
-// server-side (material_issue_plan.py's validate(), material_issue_plan_transfer.py,
-// production_management/stock_entry.py).
+//
+// Nothing else on this row is typed any more. Excess Return moved to the Excess
+// Material Items table on this same document, and the cut plan to the Cut Sheet
+// doctype, where a sheet's nesting is stated once against its batch and shared by
+// every job drawing from it. The Cut Sheet sizes still shown on the row are read
+// only, because they are what the transfer's Stock Entry carries.
 frappe.ui.form.on("Material Issue Plan Raw Material", {
 	update_batch_btn(frm, cdt, cdn) {
 		_show_update_batch_dialog(frm, locals[cdt][cdn].name);
 	},
-	excess_length(frm, cdt, cdn) { _recalc_excess_calc_qty(cdt, cdn); },
-	excess_width(frm, cdt, cdn) { _recalc_excess_calc_qty(cdt, cdn); },
-	excess_sec_qty(frm, cdt, cdn) { _recalc_excess_calc_qty(cdt, cdn); },
-	// Only To Use drives the numbers. Balance Calc Qty is whatever the sheet has left
-	// once To Use comes off it, so editing the Balance dimensions no longer changes it
-	// -- they describe the SHAPE of the off-cut, which is checked against that weight
-	// server-side on save (_warn_cut_sheet_mismatch).
-	use_length(frm, cdt, cdn) { _recalc_cut_sheet_qty(cdt, cdn); },
-	use_width(frm, cdt, cdn) { _recalc_cut_sheet_qty(cdt, cdn); },
-	use_sec_qty(frm, cdt, cdn) { _recalc_cut_sheet_qty(cdt, cdn); },
 });
-
-function _recalc_excess_calc_qty(cdt, cdn) {
-	let row = locals[cdt][cdn];
-	let g = row.parent_item_group;
-	let qty = null;
-	if (g === "Structurals") {
-		if (row.excess_length && row.unit_weight && row.excess_sec_qty) {
-			qty = (row.excess_length / 1000) * row.unit_weight * row.excess_sec_qty;
-		}
-	} else if (g === "Plates") {
-		if (row.excess_length && row.excess_width && row.thickness && row.unit_weight && row.excess_sec_qty) {
-			qty = (row.excess_length / 1000) * (row.excess_width / 1000) * row.thickness * row.unit_weight * row.excess_sec_qty;
-		}
-	}
-	frappe.model.set_value(cdt, cdn, "excess_calc_qty", qty !== null ? flt(qty, 3) : 0);
-}
-
-// Weight from dimensions -- the client-side twin of utils/dimension_formula.calculate_qty.
-function _cut_sheet_weight(row, L, W, S) {
-	let g = row.parent_item_group;
-	if (g === "Structurals") {
-		if (L && row.unit_weight && S) return (L / 1000) * row.unit_weight * S;
-	} else if (g === "Plates") {
-		if (L && W && row.thickness && row.unit_weight && S) {
-			return (L / 1000) * (W / 1000) * row.thickness * row.unit_weight * S;
-		}
-	}
-	return null;
-}
-
-// Live W1/W2 preview while typing. Authoritative calc is server-side on save
-// (_sync_cut_sheet_calc); the transferred-qty cap and post-submit batch resize are in
-// material_issue_plan_transfer.py / production_management/stock_entry.py.
-function _recalc_cut_sheet_qty(cdt, cdn) {
-	let row = locals[cdt][cdn];
-
-	let w1 = _cut_sheet_weight(row, row.use_length, row.use_width, row.use_sec_qty);
-	frappe.model.set_value(cdt, cdn, "use_calc_qty", w1 !== null ? flt(w1, 3) : 0);
-
-	// The whole sheet before cutting: its pre-cut size once one is recorded, otherwise
-	// the batch dimensions carried on the row. Same order as the server -- after a
-	// transfer has resized the batch to its Balance, the row's own dimensions describe
-	// the remnant rather than the sheet.
-	let sheet = (row.precut_length || row.precut_width)
-		? _cut_sheet_weight(row, row.precut_length, row.precut_width, row.precut_sec_qty)
-		: _cut_sheet_weight(row, row.length, row.width, row.sec_qty);
-
-	let w2 = (sheet !== null && w1 !== null) ? Math.max(sheet - w1, 0) : 0;
-	frappe.model.set_value(cdt, cdn, "balance_calc_qty", flt(w2, 3));
-}
 
 // ── Transfer readiness pre-flight check ──────────────────────────────────────
 

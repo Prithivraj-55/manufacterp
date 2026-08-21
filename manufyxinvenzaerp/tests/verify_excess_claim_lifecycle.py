@@ -138,10 +138,18 @@ def run():
     # An off-cut worth 20 Kg (2000mm x 1 Nos x 10 kg/m) is left over.
     mip.reload()
     raw = next(r for r in mip.raw_materials if r.item_code == item)
-    raw.excess_return_applicable, raw.excess_length, raw.excess_sec_qty = 1, 2000, 1
-    mip.save(ignore_permissions=True)
-    mip.reload()
-    excess = next(r for r in mip.excess_return_items if r.item_code == item)
+    # Booked straight into the Excess Material Items table, which is now the only
+    # place an off-cut is described -- the raw-material row's own Excess Return
+    # fields, and the save-time sync that copied them across, are gone.
+    excess = mip.append("excess_return_items", {
+        "item_code": item,
+        "parent_item_group": raw.parent_item_group,
+        "unit_weight": raw.unit_weight,
+        "length": 2000, "width": 0, "thickness": raw.thickness,
+        "sec_qty": 1, "qty": 20,
+        "source_table": raw.source_table, "source_row": raw.source_row,
+        "source_mip_raw_material_row": raw.name,
+    })
     excess.return_reason = "Off-cut from lifecycle test"
     mip.save(ignore_permissions=True)
     frappe.db.commit()
@@ -210,15 +218,6 @@ def run():
 
     # ── B: dimensions are locked while claimed ────────────────────────────────
     print("\n=== B: dimensions locked while claimed ===")
-
-    def _edit_via_raw_material():
-        d = frappe.get_doc("Material Issue Plan", mip.name)
-        r = next(x for x in d.raw_materials if x.item_code == item)
-        r.excess_length = 1500
-        d.save(ignore_permissions=True)
-
-    ok, detail = _throws(_edit_via_raw_material, "already reserved")
-    check("editing the raw-material row's excess dimensions is refused", ok, detail)
 
     def _edit_via_excess_grid():
         d = frappe.get_doc("Material Issue Plan", mip.name)
@@ -299,16 +298,13 @@ def run():
     check("claiming row is no longer virtual or reserved",
           not mp2.material_mapping[0].is_virtual_excess and not mp2.material_mapping[0].is_reserved)
 
-    # Corrected from the raw-material row, which is where the user enters excess
-    # dimensions and the only end that sticks: for a row sourced from raw_materials,
-    # _sync_excess_return_from_raw_materials recomputes the excess row from
-    # excess_length/width/sec_qty on every save, so typing into the excess grid
-    # directly would just be overwritten on the next save. (Rows booked by
-    # _log_round_up_excess have no raw-material row behind them and are edited in
-    # the grid directly.)
+    # Corrected in the Excess Material Items grid, which is now the only end there
+    # is. The raw-material row used to carry its own excess dimensions and win on
+    # every save; both it and that sync are gone.
     d = frappe.get_doc("Material Issue Plan", mip.name)
-    r = next(x for x in d.raw_materials if x.item_code == item)
-    r.excess_length = 1800
+    r = next(x for x in d.excess_return_items if x.name == excess.name)
+    r.length = 1800
+    r.qty = 18
     d.save(ignore_permissions=True)
     frappe.db.commit()
     check("dimensions are editable once unlinked",

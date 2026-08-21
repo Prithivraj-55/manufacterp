@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-08-21 13:07:26_
+_Generated: 2026-08-21 13:44:38_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -155,33 +155,33 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `refresh_weight_summary` | 1224 |
-| `get_mip_batch_plan_html` | 1400 |
-| `download_mip_batch_plan_pdf` | 1406 |
-| `check_mip_raw_materials_refreshable` | 192 |
-| `refresh_mip_raw_materials_manual` | 206 |
-| `refresh_mip_raw_materials` | 226 |
-| `save_transfer_draft` | 483 |
-| `create_from_subcontracting_order` | 53 |
-| `get_transfer_draft` | 532 |
-| `` | 72 |
-| `populate_from_production_plan` | 75 |
-| `unlink_excess_claim` | 863 |
+| `get_mip_batch_plan_html` | 1137 |
+| `download_mip_batch_plan_pdf` | 1143 |
+| `check_mip_raw_materials_refreshable` | 175 |
+| `refresh_mip_raw_materials_manual` | 189 |
+| `refresh_mip_raw_materials` | 209 |
+| `save_transfer_draft` | 457 |
+| `create_from_subcontracting_order` | 50 |
+| `get_transfer_draft` | 506 |
+| `` | 69 |
+| `populate_from_production_plan` | 72 |
+| `unlink_excess_claim` | 822 |
+| `refresh_weight_summary` | 961 |
 ## subcontracting_management/material_issue_plan_transfer.py
 
 | Method | Line |
 |--------|------|
-| `create_mip_partial_transfer` | 1044 |
-| `get_mip_cnc_pending_items` | 1122 |
-| `create_mip_cnc_partial_forward` | 1179 |
-| `create_mip_cnc_forward_entry` | 1301 |
-| `create_mip_excess_return_entry` | 1374 |
-| `get_mip_pending_items` | 222 |
-| `update_transfer_sec_qty` | 421 |
-| `has_cnc_stock` | 742 |
-| `get_mip_cnc_button_state` | 762 |
-| `get_mip_readiness_check` | 836 |
-| `create_mip_transfer_entry` | 994 |
+| `create_mip_transfer_entry` | 1022 |
+| `create_mip_partial_transfer` | 1072 |
+| `get_mip_cnc_pending_items` | 1150 |
+| `create_mip_cnc_partial_forward` | 1207 |
+| `create_mip_cnc_forward_entry` | 1329 |
+| `create_mip_excess_return_entry` | 1402 |
+| `get_mip_pending_items` | 257 |
+| `update_transfer_sec_qty` | 449 |
+| `has_cnc_stock` | 770 |
+| `get_mip_cnc_button_state` | 790 |
+| `get_mip_readiness_check` | 864 |
 ## subcontracting_management/subcontracting.py
 
 | Method | Line |

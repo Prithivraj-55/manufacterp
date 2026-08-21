@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-08-21 13:07:26_
+_Generated: 2026-08-21 13:44:38_
 
 ## drawing
 
@@ -545,23 +545,16 @@ _Generated: 2026-08-21 13:07:26_
 | ` _clear_transfer_draft` | no |
 | ` _sync_consolidate_items` | no |
 | ` _batch_stock_in` | no |
-| ` _cut_sheet_seed` | no |
-| ` _carry_forward_editable_fields` | no |
+| ` _cut_sheet_reference` | no |
 | ` _lookup_drawing_planned_weight` | no |
 | ` _drawing_planned_weights` | no |
 | ` _throw_claimed_excess_locked` | no |
-| ` _claimed_excess_differs` | no |
 | ` _assert_claimed_excess_unchanged` | no |
 | ` unlink_excess_claim` | no |
-| ` _sync_excess_return_from_raw_materials` | no |
 | ` _sync_excess_return_totals` | no |
-| ` _cut_sheet_sheet_qty` | no |
-| ` _sync_cut_sheet_calc` | no |
-| ` _warn_cut_sheet_mismatch` | no |
 | ` _sync_batch_remarks` | no |
 | ` _maybe_mark_completed` | no |
 | ` recheck_mip_completion` | no |
-| ` _auto_suggest_excess_from_cut_sheet` | no |
 | ` refresh_weight_summary` | no |
 | ` get_target_context` | no |
 | ` get_mip_batch_plan_html` | no |

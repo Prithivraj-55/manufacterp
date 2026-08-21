@@ -218,6 +218,41 @@ def _tag_stock_entry(se_dict, mip_name, ctx):
     return se_dict
 
 
+def _cut_sheet_caps(mip):
+    """The To Use (W1) weight each cut batch may offer, keyed by (item, batch).
+
+    Read from the Material Planning rows, which is where the cut plan is decided and
+    where the Cut Sheet is chosen. It used to be read from the Material Issue Plan's
+    own copy of those fields; those copies are gone, along with the second, parallel
+    way of cutting a sheet that came with them.
+
+    Keyed on the BATCH's item (planned_item where the batch belongs to a different
+    item from the requirement), matching how _get_mp_reserved_batches names its rows.
+    """
+    caps = {}
+    mp_names = _linked_mp_names(mip)
+    if not mp_names:
+        return caps
+
+    for child_dt, batch_field in (
+        ("Material Planning Material Mapping", "batch"),
+        ("Material Planning Available Raw Material", "batch_no"),
+    ):
+        for r in frappe.get_all(
+            child_dt,
+            filters={"parent": ["in", list(mp_names)], "cut_sheet": 1},
+            fields=["item_code", batch_field + " as batch_no", "use_calc_qty"]
+                   + (["planned_item"] if child_dt.endswith("Material Mapping") else []),
+        ):
+            if not r.batch_no or not flt(r.use_calc_qty):
+                continue
+            key = (r.get("planned_item") or r.item_code, r.batch_no)
+            # Several rows can cut the same batch; the batch may offer all their
+            # pieces, so the caps add up rather than the last one winning.
+            caps[key] = flt(flt(caps.get(key, 0)) + flt(r.use_calc_qty), 3)
+    return caps
+
+
 @frappe.whitelist()
 def get_mip_pending_items(mip_name):
     """Raw-material items reserved for this plan but not yet transferred. Each row
@@ -243,19 +278,12 @@ def get_mip_pending_items(mip_name):
             mp_name, source_warehouse, primary_warehouse, duno_filter=duno_scope.get(mp_name)
         ))
 
-    # Cut Sheet (client change request Phase 5.2): a row flagged Cut Sheet only
-    # ever offers its To Use (W1) qty for transfer -- the Balance (W2) portion
-    # is what the same batch gets resized down to on submit, not more material
-    # to send onward. Capping here (rather than after the primary_done/cnc_done
-    # netting below) means once W1 has been fully transferred, this row simply
-    # stops appearing as pending -- the untransferred remainder is never offered.
-    # Keyed on the BATCH's item (planned_item), matching how _get_mp_reserved_batches
-    # names its rows -- see the note on duno_by_key below.
-    cut_sheet_qty_by_key = {
-        ((r.planned_item or r.item_code), r.batch_no): flt(r.use_calc_qty)
-        for r in (mip.raw_materials or [])
-        if r.cut_sheet and r.batch_no
-    }
+    # A row drawing from a Cut Sheet only ever offers its To Use (W1) weight for
+    # transfer -- the Balance (W2) is what stays behind on the batch, not more
+    # material to send onward. Capping here (rather than after the primary_done/
+    # cnc_done netting below) means once W1 has been fully transferred the row
+    # simply stops appearing as pending; the remainder is never offered.
+    cut_sheet_qty_by_key = _cut_sheet_caps(mip)
     for item in raw_items:
         cap = cut_sheet_qty_by_key.get((item["item_code"], item.get("batch_no")))
         if cap is not None:
@@ -1491,37 +1519,14 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
     frappe.db.commit()
     se.insert(ignore_permissions=True)
 
-    # Push the finalized (possibly user-edited) return dimensions back onto
-    # the source raw_materials row's own Excess Length/Width/Sec Qty, so the
-    # Reqd/Issued/Excess Qty figures (Phase 5.3) reflect what was ACTUALLY
-    # returned rather than only the originally auto-suggested value.
-    #
-    # This pushes the DIMENSIONS, not excess_calc_qty directly: validate()'s
-    # own _sync_excess_return_from_raw_materials unconditionally recomputes
-    # every raw_materials row's excess_calc_qty from its OWN excess_length/
-    # width/sec_qty on every save (Structurals/Plates only -- see
-    # calculate_qty), regardless of stock_entry_created, so setting
-    # excess_calc_qty directly here would just get silently overwritten the
-    # moment mip.save() below runs validate(). Updating the dimensions lets
-    # that same recompute produce the correct answer instead of fighting it.
-    # Keyed by (source_table, source_row) -- the stable reference back to the
-    # underlying Material Planning row -- not by the raw_materials row's own
-    # name, which gets regenerated (and so would no longer match r's own
-    # source_mip_raw_material_row) every time refresh_mip_raw_materials runs.
-    raw_material_by_row = {
-        (row.source_table, row.source_row): row
-        for row in (mip.raw_materials or [])
-        if row.source_row
-    }
+    # The excess row itself is the record of what came back, dimensions and all.
+    # This used to copy those dimensions onto the raw-material row as well, because
+    # that row carried its own editable Excess Length/Width/Sec Qty and a recompute
+    # on every save that would otherwise have overwritten them. Both are gone: the
+    # Excess Material Items table is the one place an off-cut is described.
     for r in mip.excess_return_items:
-        if r.name not in new_row_names:
-            continue
-        r.stock_entry_created = 1
-        src = raw_material_by_row.get((r.source_table, r.source_row))
-        if src and (r.parent_item_group or "") in _DIMENSION_DRIVEN_GROUPS:
-            src.excess_length = r.length
-            src.excess_width = r.width
-            src.excess_sec_qty = r.sec_qty
+        if r.name in new_row_names:
+            r.stock_entry_created = 1
 
     mip.save(ignore_permissions=True)
 

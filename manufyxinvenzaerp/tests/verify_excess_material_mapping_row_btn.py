@@ -145,9 +145,17 @@ def run():
     assert row.source_table == "Material Planning Available Raw Material"
     assert flt(row.unit_weight) == 10, f"unit_weight bug not fixed, got {row.unit_weight}"
 
-    row.excess_return_applicable = 1
-    row.excess_length = 2000
-    row.excess_sec_qty = 1
+    # Booked straight into the Excess Material Items table -- the raw-material row's
+    # own Excess Return fields are gone, along with the sync that copied them over.
+    mip.append("excess_return_items", {
+        "item_code": item,
+        "parent_item_group": row.parent_item_group,
+        "unit_weight": row.unit_weight,
+        "length": 2000, "width": 0, "thickness": row.thickness,
+        "sec_qty": 1, "qty": 20,
+        "source_table": row.source_table, "source_row": row.source_row,
+        "source_mip_raw_material_row": row.name,
+    })
     mip.save(ignore_permissions=True)
     mip.reload()
     excess_row = next(r for r in mip.excess_return_items if r.item_code == item)
