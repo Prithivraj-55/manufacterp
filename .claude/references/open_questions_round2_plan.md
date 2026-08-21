@@ -139,7 +139,7 @@ retrofitted afterwards.
 
 ---
 
-## Item E — LM3: match batches to receipt lines properly  `[ ]`
+## Item E — LM3: match batches to receipt lines properly  `[x]`
 
 `_setup_batch_from_purchase_receipt` picks the receipt line by **counting how many
 batches already exist** for that item on that receipt, and using the count as an index.
@@ -153,10 +153,22 @@ how fragile the match is.
 that line's own dimensions, and hand them to ERPNext instead of letting it auto-create.
 That gives a real 1:1 line-to-batch link rather than a positional guess.
 
-Half a day, plus a careful test pass: two lines of one item with different lengths, two
-with identical lengths, and a receipt with rejected quantity.
+**Done, and by a smaller change than planned.** Pre-creating the batches ourselves
+turned out to be unnecessary: ERPNext writes the Serial and Batch Bundle back onto a
+line only *after* that line's batch exists, so the line being dealt with is always the
+first line of this item with no bundle yet. That is exact, where counting was a guess,
+and it needed no change to how batches are created.
 
-`purchase_receipt_management/purchase_receipt.py:48-127`
+`_row_awaiting_batch` now decides it, for receipts and for Repack / Material Receipt
+Stock Entries alike -- the Stock Entry side had the same defect and now shares the rule.
+
+`tests/verify_batch_receipt_line_match.py` -- 11 checks. The case it pins down is the
+one the old rule got wrong: line 1 against an existing batch, line 2 needing a new one.
+Confirmed it discriminates by putting the old rule back and watching it stamp 3000 mm
+onto a 9000 mm bar.
+
+`purchase_receipt_management/purchase_receipt.py` (`_row_awaiting_batch`,
+`_setup_batch_from_purchase_receipt`, `_setup_batch_from_stock_entry`)
 
 ---
 

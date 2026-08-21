@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-21 09:59:26_
+_Generated: 2026-08-21 10:06:07_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-08-21 09:59:26_
 
 ## Python files
 
-_Total: 239_
+_Total: 240_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -197,6 +197,7 @@ _Total: 239_
 - tests/test_purchase_order_creation.py
 - tests/test_unavailable_actions.py
 - tests/verify_auto_purchase_gated.py
+- tests/verify_batch_receipt_line_match.py
 - tests/verify_batch_remark_isolation.py
 - tests/verify_batch_remarks.py
 - tests/verify_batch_sec_qty_atomic.py
@@ -1050,22 +1051,23 @@ Functions:
   - 32:validate_purchase_receipt:
   - 43:before_submit_purchase_receipt:
   - 48:before_insert_batch:
-  - 56:_setup_batch_from_purchase_receipt:
-  - 128:_setup_batch_from_stock_entry:
-  - 199:_get_receipt_suffix:
-  - 207:_get_se_suffix:
-  - 215:_copy_from_po_item:
-  - 221:_recalculate_qty:
-  - 236:_check_missing_fields:
-  - 242:_resolve_pr_batch_no:
-  - 257:get_mp_for_pr:
-  - 277:_pr_dimensions_match:
-  - 295:_build_mapping_row:
-  - 359:allocate_pr_stock_to_mp:
-  - 723:_archive_consolidate_items:
-  - 787:on_submit_purchase_receipt:
-  - 852:_get_batch_from_bundle:
-  - 864:get_pr_mp_allocations:
+  - 56:_row_awaiting_batch:
+  - 83:_setup_batch_from_purchase_receipt:
+  - 144:_setup_batch_from_stock_entry:
+  - 217:_get_receipt_suffix:
+  - 225:_get_se_suffix:
+  - 233:_copy_from_po_item:
+  - 239:_recalculate_qty:
+  - 254:_check_missing_fields:
+  - 260:_resolve_pr_batch_no:
+  - 275:get_mp_for_pr:
+  - 295:_pr_dimensions_match:
+  - 313:_build_mapping_row:
+  - 377:allocate_pr_stock_to_mp:
+  - 741:_archive_consolidate_items:
+  - 805:on_submit_purchase_receipt:
+  - 870:_get_batch_from_bundle:
+  - 882:get_pr_mp_allocations:
 
 ### rfq_management/request_for_quotation.py
 Functions:
@@ -1316,6 +1318,14 @@ Functions:
   - 36:_set_flag:
   - 41:_call:
   - 50:run:
+
+### tests/verify_batch_receipt_line_match.py
+Functions:
+  - 39:check:
+  - 45:_warehouse:
+  - 52:_receipt:
+  - 67:_batches_of:
+  - 76:run:
 
 ### tests/verify_batch_remark_isolation.py
 Functions:
@@ -1781,9 +1791,9 @@ Functions:
 - `production_management/doctype/cut_sheet/cut_sheet.py:324` — `get_cut_sheet_for_batch`
 - `production_management/doctype/cut_sheet/cut_sheet.py:358` — `allocate_cut_sheet`
 - `purchase_receipt_management/purchase_receipt.py:16` — `get_pr_item_uom`
-- `purchase_receipt_management/purchase_receipt.py:257` — `get_mp_for_pr`
-- `purchase_receipt_management/purchase_receipt.py:359` — `allocate_pr_stock_to_mp`
-- `purchase_receipt_management/purchase_receipt.py:864` — `get_pr_mp_allocations`
+- `purchase_receipt_management/purchase_receipt.py:275` — `get_mp_for_pr`
+- `purchase_receipt_management/purchase_receipt.py:377` — `allocate_pr_stock_to_mp`
+- `purchase_receipt_management/purchase_receipt.py:882` — `get_pr_mp_allocations`
 
 ## hooks.py — doc_events
 
