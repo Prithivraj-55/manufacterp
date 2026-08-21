@@ -1,9 +1,10 @@
 """Transfer / CNC / excess-return Stock Entries issued from a Material Issue Plan.
 
-Mirrors the equivalent SCO functions in subcontracting.py (create_send_to_subcontractor_entry,
-get_sco_pending_items, create_partial_transfer, create_cnc_to_supplier_entry,
-create_return_stock_entry) but keyed by Material Issue Plan instead of SCO/WO directly, so a
-single implementation serves both this round (SCO) and the deferred WO round without changes.
+Keyed by Material Issue Plan rather than by SCO/WO directly, so one implementation
+serves both this round (SCO) and the deferred WO round without changes. It replaced an
+equivalent set of SCO-keyed functions in subcontracting.py, which nothing called once
+the issue plan became the way material leaves the warehouse; those have since been
+removed.
 Every Stock Entry created here dual-writes custom_mip_ref alongside the standard
 subcontracting_order/custom_sco_ref (or custom_wo_ref) fields, so the existing SCO/WO weight
 rollups in production_management/stock_entry.py keep working unchanged, fed by these entries
@@ -16,6 +17,7 @@ import frappe
 from frappe import _
 from frappe.utils import flt
 
+from manufyxinvenzaerp.utils.decision_log import log_decision
 from manufyxinvenzaerp.subcontracting_management.subcontracting import _get_mp_reserved_batches
 from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
     _clear_transfer_draft,
@@ -217,6 +219,41 @@ def _tag_stock_entry(se_dict, mip_name, ctx):
     return se_dict
 
 
+def _cut_sheet_caps(mip):
+    """The To Use (W1) weight each cut batch may offer, keyed by (item, batch).
+
+    Read from the Material Planning rows, which is where the cut plan is decided and
+    where the Cut Sheet is chosen. It used to be read from the Material Issue Plan's
+    own copy of those fields; those copies are gone, along with the second, parallel
+    way of cutting a sheet that came with them.
+
+    Keyed on the BATCH's item (planned_item where the batch belongs to a different
+    item from the requirement), matching how _get_mp_reserved_batches names its rows.
+    """
+    caps = {}
+    mp_names = _linked_mp_names(mip)
+    if not mp_names:
+        return caps
+
+    for child_dt, batch_field in (
+        ("Material Planning Material Mapping", "batch"),
+        ("Material Planning Available Raw Material", "batch_no"),
+    ):
+        for r in frappe.get_all(
+            child_dt,
+            filters={"parent": ["in", list(mp_names)], "cut_sheet": 1},
+            fields=["item_code", batch_field + " as batch_no", "use_calc_qty"]
+                   + (["planned_item"] if child_dt.endswith("Material Mapping") else []),
+        ):
+            if not r.batch_no or not flt(r.use_calc_qty):
+                continue
+            key = (r.get("planned_item") or r.item_code, r.batch_no)
+            # Several rows can cut the same batch; the batch may offer all their
+            # pieces, so the caps add up rather than the last one winning.
+            caps[key] = flt(flt(caps.get(key, 0)) + flt(r.use_calc_qty), 3)
+    return caps
+
+
 @frappe.whitelist()
 def get_mip_pending_items(mip_name):
     """Raw-material items reserved for this plan but not yet transferred. Each row
@@ -242,19 +279,12 @@ def get_mip_pending_items(mip_name):
             mp_name, source_warehouse, primary_warehouse, duno_filter=duno_scope.get(mp_name)
         ))
 
-    # Cut Sheet (client change request Phase 5.2): a row flagged Cut Sheet only
-    # ever offers its To Use (W1) qty for transfer -- the Balance (W2) portion
-    # is what the same batch gets resized down to on submit, not more material
-    # to send onward. Capping here (rather than after the primary_done/cnc_done
-    # netting below) means once W1 has been fully transferred, this row simply
-    # stops appearing as pending -- the untransferred remainder is never offered.
-    # Keyed on the BATCH's item (planned_item), matching how _get_mp_reserved_batches
-    # names its rows -- see the note on duno_by_key below.
-    cut_sheet_qty_by_key = {
-        ((r.planned_item or r.item_code), r.batch_no): flt(r.use_calc_qty)
-        for r in (mip.raw_materials or [])
-        if r.cut_sheet and r.batch_no
-    }
+    # A row drawing from a Cut Sheet only ever offers its To Use (W1) weight for
+    # transfer -- the Balance (W2) is what stays behind on the batch, not more
+    # material to send onward. Capping here (rather than after the primary_done/
+    # cnc_done netting below) means once W1 has been fully transferred the row
+    # simply stops appearing as pending; the remainder is never offered.
+    cut_sheet_qty_by_key = _cut_sheet_caps(mip)
     for item in raw_items:
         cap = cut_sheet_qty_by_key.get((item["item_code"], item.get("batch_no")))
         if cap is not None:
@@ -552,6 +582,24 @@ def _log_round_up_excess(mip, items, excess_plan=None):
             continue
         _apply_transfer_excess_to_raw_materials(mip, item, excess_kg)
 
+        # Rounding a fractional piece count up to whole pieces is a person's decision,
+        # taken here rather than by the plan, and the surplus it creates is exactly the
+        # kind of figure someone asks about weeks later. One entry per row rounded.
+        log_decision(
+            "Round Up at Transfer",
+            reference_doctype="Material Issue Plan",
+            reference_name=mip.name,
+            item_code=item.get("item_code"),
+            batch_no=item.get("batch_no"),
+            previous_sec_qty=flt(item.get("planned_sec_qty")),
+            sec_qty=flt(item.get("custom_sec_qty")),
+            qty=excess_kg,
+            details=_("Rounded {0} up to {1} Nos on batch {2}, {3} Kg of surplus to return.").format(
+                flt(item.get("planned_sec_qty"), 3), flt(item.get("custom_sec_qty"), 3),
+                item.get("batch_no") or "", flt(excess_kg, 3),
+            ),
+        )
+
         # What the user measured in the popup's excess row wins over the placeholder
         # derived from the batch. They are looking at the actual off-cut; the batch's
         # standard dimensions are only a stand-in for "one whole piece, mostly unused"
@@ -603,7 +651,6 @@ def _log_round_up_excess(mip, items, excess_plan=None):
                 "uom": item.get("uom") or "Kg",
                 "qty": excess_kg,
                 "return_warehouse": return_warehouse,
-                "return_type": "Return to Own Warehouse",
                 "return_reason": _(
                     "Rounding surplus from \"Round Up Sec Qty for Transfer\" -- placeholder "
                     "dimensions (standard piece size); confirm the exact leftover once "
@@ -709,7 +756,6 @@ def _log_consolidated_excess(mip, items, excess_plan):
                 "uom": item.get("uom") or "Kg",
                 "qty": entered_kg,
                 "return_warehouse": entry.get("return_warehouse") or mip.source_warehouse or "",
-                "return_type": "Return to Own Warehouse",
                 "return_reason": reason,
             })
             by_key[code] = target
@@ -1396,10 +1442,11 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
     for r in (mip.excess_return_items or []):
         if r.get("stock_entry_created"):
             continue
-        if r.get("return_type") == "Retain at Supplier (Virtual)":
-            # Never physically returns to any warehouse -- no Stock Entry/Batch
-            # for this row at all; it's claimed directly from this table via
-            # Excess Material Mapping's virtual-excess picker instead.
+        if r.get("billed_to_consume"):
+            # Never comes back, so there is nothing to receive: it stays in the
+            # supplier's warehouse and the job's final Stock Entry consumes it from
+            # there, which is what puts its cost on the job rather than in the free
+            # pool. No return entry, no batch, and no other plan can claim it.
             continue
         # A claimed row is deliberately NOT skipped: bringing the off-cut back is
         # exactly how a virtual claim stops being a paper promise. The batch this
@@ -1416,7 +1463,7 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
                 # because that save runs AFTER the Stock Entry is inserted -- by
                 # then a refused edit would already have left a stray draft behind.
                 _throw_claimed_excess_locked(r)
-            if group in _DIMENSION_DRIVEN_GROUPS:
+            if group in _DIMENSION_DRIVEN_GROUPS and not r.get("enter_weight_instead_of_pieces"):
                 if override.get("length") not in (None, ""):
                     r.length = flt(override.get("length"), 3)
                 if override.get("width") not in (None, ""):
@@ -1430,6 +1477,18 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
                 r.qty = flt(override.get("qty"), 3)
             if (override.get("return_reason") or "").strip():
                 r.return_reason = override.get("return_reason").strip()
+
+        # "Enter Weight, Not Pieces": the weight is what somebody typed, so the piece
+        # count is derived from it rather than the other way round. It matters that
+        # this happens BEFORE the Stock Entry is built: for Structurals and Plates the
+        # entry recomputes its own qty from Length x Sec Nos, so a row whose Sec Nos
+        # did not agree with its weight would quietly ship a different amount than the
+        # one on screen. Left fractional on purpose -- 18 Kg of a 4.906 Kg piece is
+        # 3.669 of one, and rounding up would claim a piece that is not coming back.
+        if r.get("enter_weight_instead_of_pieces") and (r.parent_item_group or "") in _DIMENSION_DRIVEN_GROUPS:
+            per_piece = calculate_qty(r.parent_item_group, r.length, r.width, r.thickness, r.unit_weight, 1)
+            if per_piece:
+                r.sec_qty = flt(flt(r.qty) / flt(per_piece), 3)
 
         qty = flt(r.qty, 3)
         if not r.item_code or qty <= 0:
@@ -1472,37 +1531,14 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
     frappe.db.commit()
     se.insert(ignore_permissions=True)
 
-    # Push the finalized (possibly user-edited) return dimensions back onto
-    # the source raw_materials row's own Excess Length/Width/Sec Qty, so the
-    # Reqd/Issued/Excess Qty figures (Phase 5.3) reflect what was ACTUALLY
-    # returned rather than only the originally auto-suggested value.
-    #
-    # This pushes the DIMENSIONS, not excess_calc_qty directly: validate()'s
-    # own _sync_excess_return_from_raw_materials unconditionally recomputes
-    # every raw_materials row's excess_calc_qty from its OWN excess_length/
-    # width/sec_qty on every save (Structurals/Plates only -- see
-    # calculate_qty), regardless of stock_entry_created, so setting
-    # excess_calc_qty directly here would just get silently overwritten the
-    # moment mip.save() below runs validate(). Updating the dimensions lets
-    # that same recompute produce the correct answer instead of fighting it.
-    # Keyed by (source_table, source_row) -- the stable reference back to the
-    # underlying Material Planning row -- not by the raw_materials row's own
-    # name, which gets regenerated (and so would no longer match r's own
-    # source_mip_raw_material_row) every time refresh_mip_raw_materials runs.
-    raw_material_by_row = {
-        (row.source_table, row.source_row): row
-        for row in (mip.raw_materials or [])
-        if row.source_row
-    }
+    # The excess row itself is the record of what came back, dimensions and all.
+    # This used to copy those dimensions onto the raw-material row as well, because
+    # that row carried its own editable Excess Length/Width/Sec Qty and a recompute
+    # on every save that would otherwise have overwritten them. Both are gone: the
+    # Excess Material Items table is the one place an off-cut is described.
     for r in mip.excess_return_items:
-        if r.name not in new_row_names:
-            continue
-        r.stock_entry_created = 1
-        src = raw_material_by_row.get((r.source_table, r.source_row))
-        if src and (r.parent_item_group or "") in _DIMENSION_DRIVEN_GROUPS:
-            src.excess_length = r.length
-            src.excess_width = r.width
-            src.excess_sec_qty = r.sec_qty
+        if r.name in new_row_names:
+            r.stock_entry_created = 1
 
     mip.save(ignore_permissions=True)
 

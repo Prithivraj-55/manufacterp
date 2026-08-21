@@ -50,6 +50,8 @@
   "w2_applied",
   "w2_applied_stock_entry",
   "w2_applied_on",
+  "w2_repack_entry",
+  "w2_batch_no",
   "section_allocations",
   "allocations"
  ],
@@ -177,10 +179,10 @@
    "read_only": 1
   },
   {
-   "description": "The piece this sheet is cut into. Thickness always comes from the batch — a cut changes Length and Width, never how thick the steel is.",
+   "description": "The piece this sheet is cut into. Thickness always comes from the batch \u2014 a cut changes Length and Width, never how thick the steel is.",
    "fieldname": "section_w1",
    "fieldtype": "Section Break",
-   "label": "W1 — Piece to Cut"
+   "label": "W1 \u2014 Piece to Cut"
   },
   {
    "fieldname": "w1_length",
@@ -198,7 +200,7 @@
    "fieldtype": "Column Break"
   },
   {
-   "description": "How many of these pieces this sheet yields. Entered by hand — a suggestion is offered from the geometry, but the nesting is yours to decide.",
+   "description": "How many of these pieces this sheet yields. Entered by hand \u2014 a suggestion is offered from the geometry, but the nesting is yours to decide.",
    "fieldname": "w1_sec_qty",
    "fieldtype": "Float",
    "label": "W1 Sec Nos (available)",
@@ -259,7 +261,7 @@
    "description": "What is left of the sheet once the cutting is done. Entered by hand. Written onto the batch when the first transfer from this Cut Sheet is submitted.",
    "fieldname": "section_w2",
    "fieldtype": "Section Break",
-   "label": "W2 — Balance"
+   "label": "W2 \u2014 Balance"
   },
   {
    "fieldname": "w2_length",
@@ -307,6 +309,24 @@
    "fieldname": "w2_applied_on",
    "fieldtype": "Datetime",
    "label": "Applied On",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.w2_repack_entry",
+   "description": "The Repack Stock Entry that emptied this sheet's batch and created the balance batch. Only used while \"Create New Batch for Cut Sheet Stock Entry\" is switched on in Manufyxinvenza Settings.",
+   "fieldname": "w2_repack_entry",
+   "fieldtype": "Link",
+   "label": "W2 Repack Entry",
+   "options": "Stock Entry",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.w2_batch_no",
+   "description": "The new batch holding the balance (W2). The sheet's original batch keeps its own name and its own dimensions.",
+   "fieldname": "w2_batch_no",
+   "fieldtype": "Link",
+   "label": "W2 Batch",
+   "options": "Batch",
    "read_only": 1
   },
   {

@@ -2582,7 +2582,7 @@ function _show_excess_material_mapping_dialog(frm, existing_row) {
 		{
 			fieldtype: "HTML",
 			fieldname: "excess_legend",
-			options: `<div style="font-size:12px;color:#888;margin-bottom:4px;">${__("Returned Batch")} = ${__("physically back in your own warehouse")}. ${__("Not Yet Returned")} = ${__("still just a row in some Material Issue Plan's Excess Material Items table -- not present in any warehouse yet, either because it's flagged Retain at Supplier (never will be) or it simply hasn't been returned yet. Claim as many pieces as you need -- the rest stays free for other jobs. No Stock Entry is created by claiming it.")}</div>`,
+			options: `<div style="font-size:12px;color:#888;margin-bottom:4px;">${__("Returned Batch")} = ${__("physically back in your own warehouse")}. ${__("Not Yet Returned")} = ${__("still just a row in some Material Issue Plan's Excess Material Items table -- not in any warehouse yet, simply because it has not been walked back to stock. Claim as many pieces as you need; the rest stays free for other jobs, and claiming creates no Stock Entry. Off-cuts marked Billed to Consume are never offered here: they are charged to their own job and consumed at the supplier.")}</div>`,
 		},
 		{ fieldtype: "HTML", fieldname: "excess_html" },
 		{ fieldtype: "Section Break" },
@@ -2748,8 +2748,9 @@ function _show_excess_material_mapping_dialog(frm, existing_row) {
 				<td style="${td}">-</td>
 			</tr>`;
 			}
-			let source_label = r.return_type === "Retain at Supplier (Virtual)"
-				? __("At Supplier (Virtual)") : __("Not Yet Returned (Pending)");
+			// Everything offered here is an off-cut that has not come back yet; the
+			// ones that never will are Billed to Consume and are not offered at all.
+			let source_label = __("Not Yet Returned (Pending)");
 			return `
 			<tr data-idx="${i}" style="cursor:pointer;">
 				<td style="${td}">${frappe.utils.escape_html(r.item_code)}</td>

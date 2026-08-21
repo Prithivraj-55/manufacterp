@@ -286,82 +286,19 @@ function _add_update_batch_button(frm) {
 	);
 }
 
-// Per-row "Update Batch" button (Button field on the child doctype) — opens the
+// Per-row "Update Batch" button (Button field on the child doctype) -- opens the
 // same dialog as the grid toolbar button, pre-filtered/pre-selected onto this row.
-// excess_length/width/sec_qty changes get a live Excess Calc Qty preview here
-// (client change request Phase 5.3) — the authoritative calc + excess_return_items
-// sync happens server-side on save (validate() -> _sync_excess_return_from_raw_materials),
-// this is just immediate feedback while the user is still typing.
-// use_length/width/sec_qty and balance_length/width/sec_qty get the same kind
-// of live W1/W2 Kg preview (client change request Phase 5.2) -- authoritative
-// calc + the actual transferred-qty cap / post-submit batch resize both happen
-// server-side (material_issue_plan.py's validate(), material_issue_plan_transfer.py,
-// production_management/stock_entry.py).
+//
+// Nothing else on this row is typed any more. Excess Return moved to the Excess
+// Material Items table on this same document, and the cut plan to the Cut Sheet
+// doctype, where a sheet's nesting is stated once against its batch and shared by
+// every job drawing from it. The Cut Sheet sizes still shown on the row are read
+// only, because they are what the transfer's Stock Entry carries.
 frappe.ui.form.on("Material Issue Plan Raw Material", {
 	update_batch_btn(frm, cdt, cdn) {
 		_show_update_batch_dialog(frm, locals[cdt][cdn].name);
 	},
-	excess_length(frm, cdt, cdn) { _recalc_excess_calc_qty(cdt, cdn); },
-	excess_width(frm, cdt, cdn) { _recalc_excess_calc_qty(cdt, cdn); },
-	excess_sec_qty(frm, cdt, cdn) { _recalc_excess_calc_qty(cdt, cdn); },
-	// Only To Use drives the numbers. Balance Calc Qty is whatever the sheet has left
-	// once To Use comes off it, so editing the Balance dimensions no longer changes it
-	// -- they describe the SHAPE of the off-cut, which is checked against that weight
-	// server-side on save (_warn_cut_sheet_mismatch).
-	use_length(frm, cdt, cdn) { _recalc_cut_sheet_qty(cdt, cdn); },
-	use_width(frm, cdt, cdn) { _recalc_cut_sheet_qty(cdt, cdn); },
-	use_sec_qty(frm, cdt, cdn) { _recalc_cut_sheet_qty(cdt, cdn); },
 });
-
-function _recalc_excess_calc_qty(cdt, cdn) {
-	let row = locals[cdt][cdn];
-	let g = row.parent_item_group;
-	let qty = null;
-	if (g === "Structurals") {
-		if (row.excess_length && row.unit_weight && row.excess_sec_qty) {
-			qty = (row.excess_length / 1000) * row.unit_weight * row.excess_sec_qty;
-		}
-	} else if (g === "Plates") {
-		if (row.excess_length && row.excess_width && row.thickness && row.unit_weight && row.excess_sec_qty) {
-			qty = (row.excess_length / 1000) * (row.excess_width / 1000) * row.thickness * row.unit_weight * row.excess_sec_qty;
-		}
-	}
-	frappe.model.set_value(cdt, cdn, "excess_calc_qty", qty !== null ? flt(qty, 3) : 0);
-}
-
-// Weight from dimensions -- the client-side twin of utils/dimension_formula.calculate_qty.
-function _cut_sheet_weight(row, L, W, S) {
-	let g = row.parent_item_group;
-	if (g === "Structurals") {
-		if (L && row.unit_weight && S) return (L / 1000) * row.unit_weight * S;
-	} else if (g === "Plates") {
-		if (L && W && row.thickness && row.unit_weight && S) {
-			return (L / 1000) * (W / 1000) * row.thickness * row.unit_weight * S;
-		}
-	}
-	return null;
-}
-
-// Live W1/W2 preview while typing. Authoritative calc is server-side on save
-// (_sync_cut_sheet_calc); the transferred-qty cap and post-submit batch resize are in
-// material_issue_plan_transfer.py / production_management/stock_entry.py.
-function _recalc_cut_sheet_qty(cdt, cdn) {
-	let row = locals[cdt][cdn];
-
-	let w1 = _cut_sheet_weight(row, row.use_length, row.use_width, row.use_sec_qty);
-	frappe.model.set_value(cdt, cdn, "use_calc_qty", w1 !== null ? flt(w1, 3) : 0);
-
-	// The whole sheet before cutting: its pre-cut size once one is recorded, otherwise
-	// the batch dimensions carried on the row. Same order as the server -- after a
-	// transfer has resized the batch to its Balance, the row's own dimensions describe
-	// the remnant rather than the sheet.
-	let sheet = (row.precut_length || row.precut_width)
-		? _cut_sheet_weight(row, row.precut_length, row.precut_width, row.precut_sec_qty)
-		: _cut_sheet_weight(row, row.length, row.width, row.sec_qty);
-
-	let w2 = (sheet !== null && w1 !== null) ? Math.max(sheet - w1, 0) : 0;
-	frappe.model.set_value(cdt, cdn, "balance_calc_qty", flt(w2, 3));
-}
 
 // ── Transfer readiness pre-flight check ──────────────────────────────────────
 
@@ -1653,11 +1590,24 @@ frappe.ui.form.on("SCO Excess Material Item", {
 	width(frm, cdt, cdn)     { if (frm.doctype === "Material Issue Plan" && !locals[cdt][cdn].stock_entry_created) _mip_excess_calc(frm, cdt, cdn); },
 	thickness(frm, cdt, cdn) { if (frm.doctype === "Material Issue Plan" && !locals[cdt][cdn].stock_entry_created) _mip_excess_calc(frm, cdt, cdn); },
 	sec_qty(frm, cdt, cdn)   { if (frm.doctype === "Material Issue Plan" && !locals[cdt][cdn].stock_entry_created) _mip_excess_calc(frm, cdt, cdn); },
+	enter_weight_instead_of_pieces(frm, cdt, cdn) {
+		if (frm.doctype !== "Material Issue Plan") return;
+		if (locals[cdt][cdn].stock_entry_created) return;
+		// Recompute in whichever direction is now the live one, so the row is
+		// consistent the moment the tick changes rather than at the next keystroke.
+		_mip_excess_calc(frm, cdt, cdn);
+		frm.fields_dict.excess_return_items.grid.refresh_row(cdn);
+	},
 	qty(frm, cdt, cdn) {
 		if (frm.doctype !== "Material Issue Plan") return;
 		var row = locals[cdt][cdn];
-		if (!row.stock_entry_created && row.parent_item_group === "Nuts and Bolts" && row.unit_weight) {
-			frappe.model.set_value(cdt, cdn, "sec_qty", flt(row.unit_weight * flt(row.qty), 3));
+		if (!row.stock_entry_created) {
+			if (row.enter_weight_instead_of_pieces) {
+				// The typed weight is the truth now; the piece count follows from it.
+				_mip_excess_sec_from_qty(frm, cdt, cdn);
+			} else if (row.parent_item_group === "Nuts and Bolts" && row.unit_weight) {
+				frappe.model.set_value(cdt, cdn, "sec_qty", flt(row.unit_weight * flt(row.qty), 3));
+			}
 		}
 		_mip_excess_totals(frm);
 	},
@@ -1695,18 +1645,40 @@ frappe.ui.form.on("SCO Excess Material Item", {
 	},
 });
 
-function _mip_excess_calc(frm, cdt, cdn) {
-	var row = locals[cdt][cdn];
+// Weight of ONE piece of this off-cut's shape. Both directions hang off it: pieces
+// times this is the weight, weight divided by this is the pieces.
+function _mip_excess_kg_per_piece(row) {
 	var g = row.parent_item_group;
-	var qty = null;
 	if (g === "Structurals") {
-		if (row.length && row.unit_weight && row.sec_qty) qty = (row.length / 1000) * row.unit_weight * row.sec_qty;
+		if (row.length && row.unit_weight) return (row.length / 1000) * row.unit_weight;
 	} else if (g === "Plates") {
-		if (row.length && row.width && row.thickness && row.unit_weight && row.sec_qty) {
-			qty = (row.length / 1000) * (row.width / 1000) * row.thickness * row.unit_weight * row.sec_qty;
+		if (row.length && row.width && row.thickness && row.unit_weight) {
+			return (row.length / 1000) * (row.width / 1000) * row.thickness * row.unit_weight;
 		}
 	}
-	if (qty !== null) frappe.model.set_value(cdt, cdn, "qty", flt(qty, 3));
+	return 0;
+}
+
+// Pieces -> weight, the usual direction: the shape and the count are known.
+function _mip_excess_calc(frm, cdt, cdn) {
+	var row = locals[cdt][cdn];
+	if (row.enter_weight_instead_of_pieces) {
+		// Ticked, the weight is what was typed, so the count is what follows.
+		_mip_excess_sec_from_qty(frm, cdt, cdn);
+		return;
+	}
+	var per = _mip_excess_kg_per_piece(row);
+	if (per && row.sec_qty) frappe.model.set_value(cdt, cdn, "qty", flt(per * flt(row.sec_qty), 3));
+	_mip_excess_totals(frm);
+}
+
+// Weight -> pieces, the other direction. Left fractional on purpose, the same way a
+// Material Planning row's Sec Nos is: 18 Kg of a 4.90625 Kg piece is 3.669 of one,
+// and rounding it up here would quietly claim a piece that is not being returned.
+function _mip_excess_sec_from_qty(frm, cdt, cdn) {
+	var row = locals[cdt][cdn];
+	var per = _mip_excess_kg_per_piece(row);
+	frappe.model.set_value(cdt, cdn, "sec_qty", per ? flt(flt(row.qty) / per, 3) : 0);
 	_mip_excess_totals(frm);
 }
 
@@ -2053,13 +2025,41 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 			dialog.set_value("length", flt(d.custom_length));
 			dialog.set_value("width", flt(d.custom_width));
 			dialog.set_value("thickness", flt(d.custom_thickness));
-			_calc_new_qty();
+			_refresh_alloc_figures();
 		});
 	}
 	dialog.fields_dict.new_batch_no.df.onchange = () => _fetch_batch_dims(dialog.get_value("new_batch_no"));
 
+	// Weight of ONE piece of the chosen batch, in the row's own item group. The
+	// inverse of _calc_new_qty: given a weight, how many pieces is that.
+	function _kg_per_piece() {
+		if (!selected_row) return 0;
+		let g = selected_row.parent_item_group;
+		let uw = flt(selected_row.unit_weight);
+		let l = flt(dialog.get_value("length"));
+		let w = flt(dialog.get_value("width"));
+		let t = flt(dialog.get_value("thickness"));
+		if (g === "Structurals" && l && uw) return (l / 1000) * uw;
+		if (g === "Plates" && l && w && t && uw) return (l / 1000) * (w / 1000) * t * uw;
+		return 0;
+	}
+
+	// Which figure is typed and which is worked out depends on the checkbox, so both
+	// paths run through here rather than each caller deciding for itself.
+	function _refresh_alloc_figures() {
+		if (dialog.get_value("reserve_without_dimensions")) {
+			let kg = flt(selected_row && selected_row.reqd_kg);
+			let per = _kg_per_piece();
+			dialog.set_value("calculated_qty", flt(kg, 3));
+			dialog.set_value("sec_qty", per ? flt(kg / per, 3) : 0);
+		} else {
+			_calc_new_qty();
+		}
+	}
+
 	function _calc_new_qty() {
 		if (!selected_row) return;
+		if (dialog.get_value("reserve_without_dimensions")) return;
 		let g = selected_row.parent_item_group;
 		let uw = flt(selected_row.unit_weight);
 		let l = flt(dialog.get_value("length"));
@@ -2082,9 +2082,21 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 	// Sec Nos is derived from it server-side (_apply_rwd_fractional_nos), left fractional
 	// until someone rounds it to whole pieces at transfer time.
 	function _toggle_rwd(checked) {
+		// Ticked, the two figures swap roles: the row reserves its Required Qty in Kg
+		// and Sec Nos is that weight expressed in pieces -- shown here rather than left
+		// blank until the server works it out, so the fraction is visible before
+		// anything is reserved. Untick it and Sec Nos is typed again, weight follows.
 		dialog.fields_dict.sec_qty.df.read_only = checked ? 1 : 0;
+		dialog.fields_dict.sec_qty.df.description = checked
+			? __("Worked out from the Required Qty -- fractional on purpose; whole pieces are settled at transfer time.")
+			: "";
 		dialog.fields_dict.sec_qty.refresh();
-		if (checked) dialog.set_value("sec_qty", 0);
+		dialog.fields_dict.calculated_qty.df.description = checked
+			? __("The row's own Required Qty. This is what gets reserved.")
+			: __("Worked out from Sec Qty (Nos) and the batch's dimensions.");
+		dialog.fields_dict.calculated_qty.refresh();
+		if (!checked) dialog.set_value("sec_qty", 0);
+		_refresh_alloc_figures();
 	}
 	dialog.fields_dict.reserve_without_dimensions.df.onchange = () =>
 		_toggle_rwd(dialog.get_value("reserve_without_dimensions"));

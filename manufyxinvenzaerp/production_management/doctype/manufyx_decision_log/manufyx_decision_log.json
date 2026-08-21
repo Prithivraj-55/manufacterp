@@ -1,0 +1,183 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:MFX-DL-{YYYY}-{#####}",
+ "creation": "2026-08-21 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "action",
+  "reference_doctype",
+  "reference_name",
+  "row_reference",
+  "col_break_head",
+  "item_code",
+  "batch_no",
+  "new_batch_no",
+  "rows_affected",
+  "section_figures",
+  "previous_sec_qty",
+  "sec_qty",
+  "col_break_figures",
+  "previous_qty",
+  "qty",
+  "section_why",
+  "reason",
+  "details"
+ ],
+ "fields": [
+  {
+   "fieldname": "action",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Decision",
+   "options": "Reserve\nUnreserve\nReassign Batch\nRound Up at Transfer\nCut Sheet Balance",
+   "reqd": 1
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Reference Type",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Dynamic Link",
+   "in_list_view": 1,
+   "label": "Reference",
+   "options": "reference_doctype"
+  },
+  {
+   "description": "The child row the decision was made on, where it was made on one row rather than a whole document.",
+   "fieldname": "row_reference",
+   "fieldtype": "Data",
+   "label": "Row"
+  },
+  {
+   "fieldname": "col_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Item Code",
+   "options": "Item"
+  },
+  {
+   "fieldname": "batch_no",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Batch",
+   "options": "Batch"
+  },
+  {
+   "depends_on": "eval:doc.new_batch_no",
+   "fieldname": "new_batch_no",
+   "fieldtype": "Link",
+   "label": "New Batch",
+   "options": "Batch"
+  },
+  {
+   "description": "How many rows this one decision covered. Reserving a plan is one decision, not one per row.",
+   "fieldname": "rows_affected",
+   "fieldtype": "Int",
+   "label": "Rows Affected"
+  },
+  {
+   "fieldname": "section_figures",
+   "fieldtype": "Section Break",
+   "label": "Figures"
+  },
+  {
+   "fieldname": "previous_sec_qty",
+   "fieldtype": "Float",
+   "label": "Previous Sec Qty (Nos)",
+   "precision": "3"
+  },
+  {
+   "fieldname": "sec_qty",
+   "fieldtype": "Float",
+   "label": "Sec Qty (Nos)",
+   "precision": "3"
+  },
+  {
+   "fieldname": "col_break_figures",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "previous_qty",
+   "fieldtype": "Float",
+   "label": "Previous Qty (Kg)",
+   "precision": "3"
+  },
+  {
+   "fieldname": "qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Qty (Kg)",
+   "precision": "3"
+  },
+  {
+   "fieldname": "section_why",
+   "fieldtype": "Section Break",
+   "label": "Why"
+  },
+  {
+   "description": "The reason given at the time, where the screen asked for one.",
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Reason"
+  },
+  {
+   "description": "What happened, in one line, so the entry reads on its own.",
+   "fieldname": "details",
+   "fieldtype": "Small Text",
+   "label": "Details"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-21 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Production Management",
+ "name": "Manufyx Decision Log",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Manufacturing User",
+   "share": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Stock User",
+   "share": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

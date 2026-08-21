@@ -313,374 +313,6 @@ def create_supplier_operation_entries(sco_name):
     return _create_soes_for_sco(sco)
 
 
-@frappe.whitelist()
-def create_send_to_subcontractor_entry(sco_name):
-    """Create draft Stock Entries for raw-material transfer.
-
-    Items with cnc_process=1 (and a CNC Warehouse set on the SCO) are routed to the
-    CNC warehouse via a 'Material Transfer' SE; all other items go to the supplier
-    warehouse via a 'Send to Subcontractor' SE.  Returns a dict with keys
-    ``supplier_se`` and/or ``cnc_se`` depending on which entries were created.
-    """
-    sco = frappe.get_doc("Subcontracting Order", sco_name)
-    if not sco.supplier_warehouse:
-        frappe.throw(_("Please set the Supplier Warehouse on the Subcontracting Order first."))
-    if not sco.get("custom_source_warehouse"):
-        frappe.throw(_("Please set the Source Warehouse (RM) on the Subcontracting Order first."))
-    if sco.docstatus != 1:
-        frappe.throw(_("Subcontracting Order must be submitted first."))
-
-    pp_name = sco.custom_production_plan
-    if not pp_name:
-        frappe.throw(_("Subcontracting Order is not linked to a Production Plan."))
-
-    pp = frappe.get_doc("Production Plan", pp_name)
-    source_warehouse = sco.custom_source_warehouse
-    supplier_warehouse = sco.supplier_warehouse
-    cnc_warehouse = sco.get("custom_cnc_warehouse") or ""
-
-    # Collect items from all Material Plannings linked to PP items.
-    # Deduplicate MP names — the same MP may be linked to multiple PP items (drawings),
-    # and calling _get_mp_reserved_batches more than once per MP would sum batches N times.
-    raw_items = []
-    seen_mps = set()
-    for pi in pp.po_items:
-        mp_name = pi.get("custom_material_planning")
-        if not mp_name or mp_name in seen_mps:
-            continue
-        seen_mps.add(mp_name)
-        raw_items.extend(_get_mp_reserved_batches(mp_name, source_warehouse, supplier_warehouse))
-
-    if not raw_items:
-        frappe.throw(_("No reserved batches found in Material Planning to transfer. "
-                       "Ensure batches are reserved in the linked Material Planning documents."))
-
-    # Split into supplier items and CNC items; deduplicate within each bucket.
-    supplier_merged = {}
-    cnc_merged = {}
-    for item in raw_items:
-        is_cnc = bool(item.pop("cnc_process", 0)) and bool(cnc_warehouse)
-        key = (item["item_code"], item.get("batch_no") or "")
-        if is_cnc:
-            target = cnc_merged
-            item["t_warehouse"] = cnc_warehouse
-        else:
-            target = supplier_merged
-        if key in target:
-            target[key]["qty"] = flt(target[key]["qty"] + item["qty"], 3)
-            target[key]["custom_sec_qty"] = flt(
-                target[key].get("custom_sec_qty", 0) + item.get("custom_sec_qty", 0), 3
-            )
-        else:
-            target[key] = item.copy()
-
-    result = {}
-
-    if supplier_merged:
-        # CustomStockEntry.validate_subcontract_order skips the ERPNext supplied_items
-        # check for PP-flow SCOs, so setting subcontracting_order is now safe and lets
-        # Frappe's connections panel discover these SEs via the standard Link field.
-        se = frappe.get_doc({
-            "doctype": "Stock Entry",
-            "stock_entry_type": "Send to Subcontractor",
-            "subcontracting_order": sco_name,
-            "custom_sco_ref": sco_name,
-            "company": sco.company,
-            "items": list(supplier_merged.values()),
-        })
-        se.insert(ignore_permissions=True)
-        result["supplier_se"] = se.name
-
-    if cnc_merged and cnc_warehouse:
-        cnc_se = frappe.get_doc({
-            "doctype": "Stock Entry",
-            "stock_entry_type": "Material Transfer",
-            "subcontracting_order": sco_name,
-            "custom_sco_ref": sco_name,
-            "company": sco.company,
-            "items": list(cnc_merged.values()),
-        })
-        cnc_se.insert(ignore_permissions=True)
-        result["cnc_se"] = cnc_se.name
-
-    if not result:
-        frappe.throw(_("No items to transfer."))
-
-    return result
-
-
-@frappe.whitelist()
-def get_sco_pending_items(sco_name):
-    """Return raw-material items not yet transferred for this SCO.
-
-    Each row includes item_name, batch_no, qty (Kg), custom_sec_qty (Nos), cnc_process,
-    and all SE item fields needed to create a transfer entry.
-    Draft and submitted SEs both count as transferred (docstatus != 2).
-    """
-    sco = frappe.get_doc("Subcontracting Order", sco_name)
-    if not sco.custom_production_plan:
-        frappe.throw(_("Subcontracting Order is not linked to a Production Plan."))
-    if not sco.custom_source_warehouse:
-        frappe.throw(_("Please set the Source Warehouse (RM) on the Subcontracting Order first."))
-
-    source_warehouse = sco.custom_source_warehouse
-    supplier_warehouse = sco.supplier_warehouse
-    cnc_warehouse = sco.get("custom_cnc_warehouse") or ""
-
-    # Collect all reserved items from MPs linked to the Production Plan
-    raw_items = []
-    seen_mps = set()
-    pp = frappe.get_doc("Production Plan", sco.custom_production_plan)
-    for pi in pp.po_items:
-        mp_name = pi.get("custom_material_planning")
-        if not mp_name or mp_name in seen_mps:
-            continue
-        seen_mps.add(mp_name)
-        raw_items.extend(_get_mp_reserved_batches(mp_name, source_warehouse, supplier_warehouse))
-
-    if not raw_items:
-        return []
-
-    # Aggregate total reserved per (item_code, batch_no, is_cnc)
-    totals = {}
-    for item in raw_items:
-        is_cnc = bool(item.get("cnc_process")) and bool(cnc_warehouse)
-        key = (item["item_code"], item.get("batch_no") or "", is_cnc)
-        if key in totals:
-            totals[key]["qty"] = flt(totals[key]["qty"] + item["qty"], 3)
-            totals[key]["custom_sec_qty"] = flt(
-                totals[key]["custom_sec_qty"] + item.get("custom_sec_qty", 0), 3
-            )
-        else:
-            totals[key] = dict(item)
-            totals[key]["cnc_process"] = 1 if is_cnc else 0
-
-    # Already transferred to supplier warehouse (Send to Subcontractor SEs, not cancelled)
-    supplier_done = {}
-    for r in frappe.db.sql("""
-        SELECT sed.item_code, sed.batch_no,
-               SUM(sed.qty) AS qty,
-               SUM(IFNULL(sed.custom_sec_qty, 0)) AS sec_qty
-        FROM `tabStock Entry Detail` sed
-        JOIN `tabStock Entry` se ON se.name = sed.parent
-        WHERE se.custom_sco_ref = %s
-          AND se.stock_entry_type = 'Send to Subcontractor'
-          AND se.docstatus != 2
-        GROUP BY sed.item_code, sed.batch_no
-    """, sco_name, as_dict=True):
-        supplier_done[(r.item_code, r.batch_no or "")] = flt(r.qty)
-
-    # Already transferred to CNC warehouse (Material Transfer SEs, not cancelled)
-    cnc_done = {}
-    if cnc_warehouse:
-        for r in frappe.db.sql("""
-            SELECT sed.item_code, sed.batch_no,
-                   SUM(sed.qty) AS qty,
-                   SUM(IFNULL(sed.custom_sec_qty, 0)) AS sec_qty
-            FROM `tabStock Entry Detail` sed
-            JOIN `tabStock Entry` se ON se.name = sed.parent
-            WHERE se.custom_sco_ref = %s
-              AND se.stock_entry_type = 'Material Transfer'
-              AND se.docstatus != 2
-              AND sed.t_warehouse = %s
-            GROUP BY sed.item_code, sed.batch_no
-        """, (sco_name, cnc_warehouse), as_dict=True):
-            cnc_done[(r.item_code, r.batch_no or "")] = flt(r.qty)
-
-    # Compute pending items
-    result = []
-    for (item_code, batch_no, is_cnc), item in totals.items():
-        done_qty = (cnc_done if is_cnc else supplier_done).get((item_code, batch_no), 0)
-        pending_qty = flt(item["qty"] - done_qty, 3)
-        if pending_qty <= 0:
-            continue
-
-        total_qty = flt(item["qty"])
-        ratio = pending_qty / total_qty if total_qty else 0
-        result.append({
-            "item_code": item_code,
-            "item_name": frappe.db.get_value("Item", item_code, "item_name") or item_code,
-            "batch_no": batch_no,
-            "qty": pending_qty,
-            "uom": item.get("uom") or "Kg",
-            "custom_sec_qty": flt(flt(item.get("custom_sec_qty", 0)) * ratio, 3),
-            "custom_sec_uom": item.get("custom_sec_uom") or "",
-            "s_warehouse": source_warehouse,
-            "t_warehouse": cnc_warehouse if is_cnc else supplier_warehouse,
-            "cnc_process": 1 if is_cnc else 0,
-            "use_serial_batch_fields": 1,
-            "custom_length": flt(item.get("custom_length", 0), 3),
-            "custom_width": flt(item.get("custom_width", 0), 3),
-            "custom_thickness": flt(item.get("custom_thickness", 0), 3),
-            "custom_unit_weight": flt(item.get("custom_unit_weight", 0), 4),
-            "custom_parent_item_group": item.get("custom_parent_item_group") or "",
-        })
-
-    return result
-
-
-@frappe.whitelist()
-def create_partial_transfer(sco_name, selected_items_json, transfer_type):
-    """Create a draft Stock Entry for the caller-selected raw-material items.
-
-    transfer_type: "supplier" → Send to Subcontractor to supplier_warehouse
-                   "cnc"      → Material Transfer to custom_cnc_warehouse
-    """
-    import json as _json
-    selected = _json.loads(selected_items_json) if isinstance(selected_items_json, str) else selected_items_json
-
-    if not selected:
-        frappe.throw(_("No items selected for transfer."))
-
-    sco = frappe.get_doc("Subcontracting Order", sco_name)
-    if sco.docstatus != 1:
-        frappe.throw(_("Subcontracting Order must be submitted first."))
-    if not sco.supplier_warehouse:
-        frappe.throw(_("Please set the Supplier Warehouse on the Subcontracting Order first."))
-    if not sco.custom_source_warehouse:
-        frappe.throw(_("Please set the Source Warehouse (RM) on the Subcontracting Order first."))
-
-    if transfer_type == "cnc":
-        t_warehouse = sco.get("custom_cnc_warehouse")
-        if not t_warehouse:
-            frappe.throw(_("No CNC Warehouse set on this Subcontracting Order."))
-        se_type = "Material Transfer"
-    else:
-        t_warehouse = sco.supplier_warehouse
-        se_type = "Send to Subcontractor"
-
-    se_items = []
-    for item in selected:
-        se_items.append({
-            "item_code": item["item_code"],
-            "batch_no": item.get("batch_no") or "",
-            "use_serial_batch_fields": 1,
-            "qty": flt(item["qty"]),
-            "uom": item.get("uom") or "Kg",
-            "s_warehouse": sco.custom_source_warehouse,
-            "t_warehouse": t_warehouse,
-            "custom_sec_qty": flt(item.get("custom_sec_qty") or 0),
-            "custom_sec_uom": item.get("custom_sec_uom") or "",
-            "custom_length": flt(item.get("custom_length") or 0),
-            "custom_width": flt(item.get("custom_width") or 0),
-            "custom_thickness": flt(item.get("custom_thickness") or 0),
-            "custom_unit_weight": flt(item.get("custom_unit_weight") or 0),
-            "custom_parent_item_group": item.get("custom_parent_item_group") or "",
-        })
-
-    se = frappe.get_doc({
-        "doctype": "Stock Entry",
-        "stock_entry_type": se_type,
-        "subcontracting_order": sco_name,
-        "custom_sco_ref": sco_name,
-        "company": sco.company,
-        "items": se_items,
-    })
-    se.insert(ignore_permissions=True)
-    return se.name
-
-
-@frappe.whitelist()
-def create_cnc_to_supplier_entry(sco_name):
-    """Transfer materials currently in the CNC warehouse to the supplier warehouse.
-
-    Queries all submitted CNC Material Transfer SEs linked to this SCO, subtracts
-    any quantity already forwarded to the supplier, and creates a new draft
-    'Material Transfer' SE for the net remaining quantity.
-    """
-    sco = frappe.get_doc("Subcontracting Order", sco_name)
-    if sco.docstatus != 1:
-        frappe.throw(_("Subcontracting Order must be submitted first."))
-
-    cnc_warehouse = sco.get("custom_cnc_warehouse")
-    if not cnc_warehouse:
-        frappe.throw(_("No CNC Warehouse set on the Subcontracting Order."))
-    if not sco.supplier_warehouse:
-        frappe.throw(_("Please set the Supplier Warehouse on the Subcontracting Order first."))
-
-    # Items sent from source → CNC (grouped by item + batch)
-    sent_rows = frappe.db.sql(
-        """
-        SELECT sed.item_code, sed.batch_no,
-               SUM(sed.qty) AS qty,
-               MAX(sed.uom) AS uom,
-               MAX(sed.custom_sec_qty) AS custom_sec_qty,
-               MAX(sed.custom_sec_uom) AS custom_sec_uom,
-               MAX(sed.custom_length) AS custom_length,
-               MAX(sed.custom_width) AS custom_width,
-               MAX(sed.custom_thickness) AS custom_thickness,
-               MAX(sed.custom_unit_weight) AS custom_unit_weight,
-               MAX(sed.custom_parent_item_group) AS custom_parent_item_group
-        FROM `tabStock Entry Detail` sed
-        JOIN `tabStock Entry` se ON se.name = sed.parent
-        WHERE se.custom_sco_ref = %s
-          AND se.stock_entry_type = 'Material Transfer'
-          AND se.docstatus = 1
-          AND sed.t_warehouse = %s
-        GROUP BY sed.item_code, sed.batch_no
-        HAVING SUM(sed.qty) > 0
-        """,
-        (sco_name, cnc_warehouse),
-        as_dict=True,
-    )
-
-    if not sent_rows:
-        frappe.throw(_("No CNC materials found. Ensure the CNC stock entry has been submitted."))
-
-    # Items already forwarded from CNC → supplier
-    fwd_rows = frappe.db.sql(
-        """
-        SELECT sed.item_code, sed.batch_no, SUM(sed.qty) AS qty
-        FROM `tabStock Entry Detail` sed
-        JOIN `tabStock Entry` se ON se.name = sed.parent
-        WHERE se.custom_sco_ref = %s
-          AND se.stock_entry_type = 'Material Transfer'
-          AND se.docstatus = 1
-          AND sed.s_warehouse = %s
-          AND sed.t_warehouse = %s
-        GROUP BY sed.item_code, sed.batch_no
-        """,
-        (sco_name, cnc_warehouse, sco.supplier_warehouse),
-        as_dict=True,
-    )
-    already = {(r.item_code, r.batch_no or ""): flt(r.qty) for r in fwd_rows}
-
-    se_items = []
-    for r in sent_rows:
-        key = (r.item_code, r.batch_no or "")
-        net_qty = flt(r.qty, 3) - already.get(key, 0)
-        if net_qty <= 0:
-            continue
-        se_items.append({
-            "item_code": r.item_code,
-            "batch_no": r.batch_no,
-            "use_serial_batch_fields": 1,
-            "qty": flt(net_qty, 3),
-            "uom": r.uom or frappe.db.get_value("Item", r.item_code, "stock_uom") or "Kg",
-            "s_warehouse": cnc_warehouse,
-            "t_warehouse": sco.supplier_warehouse,
-            "custom_sec_qty": flt(r.custom_sec_qty, 3),
-            "custom_sec_uom": r.custom_sec_uom or "",
-            "custom_length": flt(r.custom_length, 3),
-            "custom_width": flt(r.custom_width, 3),
-            "custom_thickness": flt(r.custom_thickness, 3),
-            "custom_unit_weight": flt(r.custom_unit_weight, 4),
-            "custom_parent_item_group": r.custom_parent_item_group or "",
-        })
-
-    if not se_items:
-        frappe.throw(_("All CNC materials have already been transferred to the supplier warehouse."))
-
-    se = frappe.get_doc({
-        "doctype": "Stock Entry",
-        "stock_entry_type": "Material Transfer",
-        "subcontracting_order": sco_name,
-        "custom_sco_ref": sco_name,
-        "company": sco.company,
-        "items": se_items,
-    })
-    se.insert(ignore_permissions=True)
-    return se.name
 
 
 @frappe.whitelist()
@@ -729,62 +361,6 @@ def get_soe_summary(sco_name):
     return soes
 
 
-@frappe.whitelist()
-def create_return_stock_entry(sco_name, target_warehouse):
-    """Create a draft 'Material Receipt' Stock Entry that inwards the off-cut / balance
-    material listed in the SCO's Excess Material Return table.
-
-    The transferred raw material is cut and consumed into the finished good, so the leftover
-    is the same item in NEW dimensions. It is therefore received as fresh stock (new batches,
-    which inherit the entered dimensions via the Batch before_insert hook) rather than
-    transferred back. Weight (Kg) per row is recomputed from the dimensions on validate.
-    """
-    sco = frappe.get_doc("Subcontracting Order", sco_name)
-    if not target_warehouse:
-        frappe.throw(_("Please set the Finished Goods/Return Warehouse on the Subcontracting Order first."))
-
-    se_items = []
-    new_row_names = []
-    for r in (sco.get("custom_excess_return_items") or []):
-        if r.get("stock_entry_created"):
-            continue  # already has an SE — skip
-        qty = flt(r.qty, 3)
-        if not r.item_code or qty <= 0:
-            continue
-        new_row_names.append(r.name)
-        se_items.append({
-            "item_code": r.item_code,
-            "qty": qty,
-            "uom": r.get("uom") or frappe.db.get_value("Item", r.item_code, "stock_uom") or "Kg",
-            "t_warehouse": target_warehouse,
-            "custom_parent_item_group": r.get("parent_item_group") or "",
-            "custom_unit_weight": flt(r.get("unit_weight"), 4),
-            "custom_sec_qty": flt(r.get("sec_qty"), 3),
-            "custom_sec_uom": r.get("sec_uom") or "",
-            "custom_length": flt(r.get("length"), 3),
-            "custom_width": flt(r.get("width"), 3),
-            "custom_thickness": flt(r.get("thickness"), 3),
-        })
-
-    if not se_items:
-        frappe.throw(_("No new off-cut items to process. All rows already have a Stock Entry created, "
-                       "or no rows with Weight (Kg) > 0 exist."))
-
-    se = frappe.get_doc({
-        "doctype": "Stock Entry",
-        "stock_entry_type": "Material Receipt",
-        "company": sco.company,
-        "items": se_items,
-    })
-    se.insert(ignore_permissions=True)
-
-    # Lock the processed rows so they cannot be re-submitted
-    for r in sco.get("custom_excess_return_items"):
-        if r.name in new_row_names:
-            r.stock_entry_created = 1
-    sco.save(ignore_permissions=True)
-
-    return se.name
 
 
 @frappe.whitelist()
@@ -1856,6 +1432,20 @@ def _get_mp_excess_by_duno(mp_name):
     return excess
 
 
+def _sec_qty_for_reserved(full_sec_qty, reserved_qty, full_qty):
+    """The piece count that goes with the weight still reserved.
+
+    A row that has been partly transferred keeps the remainder of its reservation,
+    so the transfer list must offer the piece count that goes with THAT weight --
+    not the row's original count, which would offer four pieces against half a
+    row's worth of steel. Where nothing has been taken the two are the same and
+    this changes nothing."""
+    full_sec_qty, reserved_qty, full_qty = flt(full_sec_qty), flt(reserved_qty), flt(full_qty)
+    if full_qty <= 0 or full_sec_qty <= 0 or reserved_qty >= full_qty:
+        return flt(full_sec_qty, 3)
+    return flt(full_sec_qty * (reserved_qty / full_qty), 3)
+
+
 def _get_mp_reserved_batches(mp_name, source_warehouse, supplier_warehouse, duno_filter=None):
     """Return SE item dicts for reserved batches in a Material Planning document.
     Includes sec_qty, dimensions, and unit_weight for each SE line.
@@ -1919,7 +1509,7 @@ def _get_mp_reserved_batches(mp_name, source_warehouse, supplier_warehouse, duno
             "uom": _stock_uom(se_item_code),
             "s_warehouse": source_warehouse,
             "t_warehouse": supplier_warehouse,
-            "custom_sec_qty": flt(r.batch_sec_qty, 3),
+            "custom_sec_qty": _sec_qty_for_reserved(r.batch_sec_qty, qty, r.batch_calc_qty),
             "custom_sec_uom": r.sec_uom or "",
             "custom_length": flt(r.batch_length, 3),
             "custom_width": flt(r.batch_width, 3),
@@ -1937,7 +1527,7 @@ def _get_mp_reserved_batches(mp_name, source_warehouse, supplier_warehouse, duno
         "Material Planning Available Raw Material",
         filters=arm_filters,
         fields=[
-            "item_code", "batch_no", "reserved_qty", "available_qty",
+            "item_code", "batch_no", "reserved_qty", "available_qty", "required_qty",
             "sec_qty", "sec_uom", "length", "width", "thickness", "parent_item_group", "cnc_process",
         ],
     )
@@ -1953,7 +1543,7 @@ def _get_mp_reserved_batches(mp_name, source_warehouse, supplier_warehouse, duno
                 "uom": _stock_uom(r.item_code),
                 "s_warehouse": source_warehouse,
                 "t_warehouse": supplier_warehouse,
-                "custom_sec_qty": flt(r.sec_qty, 3),
+                "custom_sec_qty": _sec_qty_for_reserved(r.sec_qty, qty, r.required_qty),
                 "custom_sec_uom": r.sec_uom or "",
                 "custom_length": flt(r.length, 3),
                 "custom_width": flt(r.width, 3),
@@ -1980,25 +1570,6 @@ def _get_pp_planned_qty(pp_name, customer_drawing_number, duno_mark_no):
     return flt(result)
 
 
-@frappe.whitelist()
-def backfill_drawing_item_qty(sco_name):
-    """Populate qty_to_manufacture on all SCO Drawing Items for an existing SCO
-    by reading planned_qty from the linked Production Plan Items.
-    Called once after the field is added; subsequent SCOs are populated on creation."""
-    sco = frappe.get_doc("Subcontracting Order", sco_name)
-    pp_name = sco.get("custom_production_plan")
-    if not pp_name:
-        frappe.throw(_("Subcontracting Order is not linked to a Production Plan."))
-
-    updated = 0
-    for d in (sco.get("custom_drawing_items") or []):
-        qty = _get_pp_planned_qty(pp_name, d.get("customer_drawing_number"), d.get("duno_mark_no"))
-        if qty:
-            frappe.db.set_value("SCO Drawing Item", d.name, "qty_to_manufacture", flt(qty, 3))
-            updated += 1
-
-    frappe.db.commit()
-    return updated
 
 
 def _get_supplier_wh_consumption_items(sco, supplier_warehouse=None):

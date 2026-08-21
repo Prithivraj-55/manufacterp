@@ -51,10 +51,10 @@ frappe.query_reports["Excess Material Return Report"] = {
 			options: "\nInternal Job\nSupplier Job\nSupplier with Material",
 		},
 		{
-			fieldname: "return_type",
-			label: __("Return Type"),
+			fieldname: "billed_to_consume",
+			label: __("Billed to Consume"),
 			fieldtype: "Select",
-			options: "\nReturn to Own Warehouse\nRetain at Supplier (Virtual)",
+			options: "\nBilled to Consume\nComing Back",
 		},
 		{
 			// Defaults to the last three months so the report opens on the question

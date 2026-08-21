@@ -113,15 +113,6 @@ def get_routing_operations_for_bom(bom_name):
 @frappe.whitelist()
 
 
-def _get_transferred_qty_for_item(item_code, wip_warehouse):
-	"""Query actual stock of item_code in wip_warehouse from tabBin."""
-	if not wip_warehouse:
-		return 0.0
-	result = frappe.db.sql(
-		"SELECT SUM(actual_qty) FROM `tabBin` WHERE item_code=%s AND warehouse=%s",
-		(item_code, wip_warehouse),
-	)
-	return flt(result[0][0]) if result else 0.0
 
 
 def _get_previous_operation_consumed(work_order, item_code, current_sequence_id):

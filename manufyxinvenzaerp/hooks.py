@@ -156,6 +156,13 @@ override_doctype_class = {
     "Stock Entry": "manufyxinvenzaerp.subcontracting_management.overrides.CustomStockEntry",
 }
 
+# A decision log entry must never stop the document it describes from being deleted.
+# Frappe refuses to delete anything a Link or Dynamic Link still points at, so
+# without this a Cut Sheet became undeletable the moment its balance was recorded --
+# an audit trail holding its own subject hostage. The entries survive the deletion
+# and keep the name of what was deleted, which is what makes them worth reading.
+ignore_links_on_delete = ["Manufyx Decision Log"]
+
 # Document Events
 # ---------------
 # Hook on document methods and events

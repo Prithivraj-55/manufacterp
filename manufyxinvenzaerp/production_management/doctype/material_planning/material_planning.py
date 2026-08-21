@@ -6,6 +6,8 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import ceil, flt, now, today
 
+from manufyxinvenzaerp.utils.decision_log import log_decision
+
 #  Material Mapping "Status" (batch_mapped) ────────────────────────────────────
 #  A plain Data field, so these strings ARE the vocabulary. Rows fulfilled from
 #  another job's leftovers read "Excess Mapped ..." so the screen says where the
@@ -2626,6 +2628,21 @@ def reserve_batches(material_planning_name):
     _refresh_touched_cut_sheets(mp)
     frappe.db.commit()
 
+    # One entry for the whole press of the button rather than one per row -- see
+    # utils/decision_log. The count and the weight are what make it answerable
+    # later; which rows they were is still on the plan itself.
+    log_decision(
+        "Reserve",
+        reference_doctype="Material Planning",
+        reference_name=mp.name,
+        rows_affected=reserved_count,
+        qty=sum(flt(r.reserved_qty) for r in mp.material_mapping if r.is_reserved),
+        details=_("Reserved {0} row(s) in Material Mapping from {1}.{2}").format(
+            reserved_count, mp.for_warehouse,
+            _(" {0} row(s) only partly covered.").format(len(partial_rows)) if partial_rows else "",
+        ),
+    )
+
     return {
         "rows": [
             {
@@ -2837,7 +2854,7 @@ def get_available_virtual_excess_items(mp_name, item_code=None):
     """List every excess raw-material row entered in an Excess Material Items
     table (Material Issue Plan) that isn't PHYSICALLY in any warehouse yet --
     i.e. stock_entry_created is still 0, whether that's because it's flagged
-    'Retain at Supplier (Virtual)' (will never physically return) or it's
+    not been walked back to stock yet, or it
     simply still Pending under the default 'Return to Own Warehouse' type
     (will return eventually, just hasn't yet -- client feedback: the
     Excess Material Return Report already lists these Pending rows, but the
@@ -2849,18 +2866,22 @@ def get_available_virtual_excess_items(mp_name, item_code=None):
     since a specific off-cut can't be meaningfully divided across the live
     stock-summation logic used for real batches.
 
-    Claiming a still-physically-pending row (default return_type) does NOT
-    stop it from later being returned for real -- create_mip_excess_return_entry
-    skips any row that's already claimed (mapped_material_planning set,
-    checked there directly) regardless of return_type, so the same off-cut
-    can never be double-allocated: once claimed here, its eventual physical
-    return is the claiming job's own responsibility to chase down, not a
-    fresh pool of stock for someone else to grab."""
+    Claiming a row that has not physically come back yet does NOT stop it from
+    being returned for real later -- create_mip_excess_return_entry skips any row
+    already claimed (mapped_material_planning set, checked there directly), so the
+    same off-cut can never be double-allocated: once claimed here, chasing down its
+    eventual return is the claiming job's own business, not a fresh pool of stock
+    for someone else to grab.
+
+    A row marked Billed to Consume never appears here at all. It is charged to its
+    own job and consumed at the supplier, so there is nothing left for another plan
+    to take."""
     mp = frappe.get_doc("Material Planning", mp_name)
 
     filters = {
         "parenttype": "Material Issue Plan",
         "stock_entry_created": 0,
+        "billed_to_consume": 0,
     }
     if item_code:
         filters["item_code"] = item_code
@@ -2870,7 +2891,7 @@ def get_available_virtual_excess_items(mp_name, item_code=None):
         filters=filters,
         fields=["name", "parent", "item_code", "item_name", "parent_item_group",
                 "unit_weight", "length", "width", "thickness", "sec_qty", "sec_uom",
-                "qty", "uom", "return_type"],
+                "qty", "uom"],
     )
     rows = [r for r in rows if r.item_code and flt(r.qty) > 0]
     # Drop the ones already fully spoken for. Availability is counted from the rows
@@ -2916,7 +2937,6 @@ def get_available_virtual_excess_items(mp_name, item_code=None):
             "qty": flt(r.qty),
             "uom": r.uom or "Kg",
             "supplier": supplier_by_sco.get(sco_by_mip.get(r.parent)) or "",
-            "return_type": r.return_type or "Return to Own Warehouse",
             # What the picker actually offers: the planned Sec Nos alongside how many
             # of those pieces are still free.
             "planned_sec_qty": flt(availability[r.name]["total_sec_qty"]),
@@ -2964,13 +2984,18 @@ def claim_virtual_excess_mapping(mp_name, excess_row_name, row_name=None, unavai
         "SCO Excess Material Item", excess_row_name,
         ["parent", "parenttype", "item_code", "item_name", "parent_item_group", "unit_weight",
          "length", "width", "thickness", "sec_qty", "sec_uom", "qty", "uom",
-         "return_type", "mapped_material_planning", "stock_entry_created"],
+         "billed_to_consume", "mapped_material_planning", "stock_entry_created"],
         as_dict=True,
     )
     if not excess:
         frappe.throw(_("Excess Material Item row {0} not found.").format(excess_row_name))
     if excess.stock_entry_created:
         frappe.throw(_("This row has already been physically returned to stock -- use the normal batch-based Excess Material Mapping instead."))
+    if excess.billed_to_consume:
+        frappe.throw(
+            _("This off-cut is Billed to Consume: it stays where it is, is charged to "
+              "its own job and is consumed there, so no other plan can take it.")
+        )
     if flt(excess.qty) <= 0:
         frappe.throw(_("Excess item has no quantity to claim."))
 
@@ -3055,10 +3080,11 @@ def claim_virtual_excess_mapping(mp_name, excess_row_name, row_name=None, unavai
 
     row.batch = ""
     row.planned_item = excess.item_code
-    row.batch_mapped = (
-        BATCH_EXCESS_AT_SUPPLIER if excess.return_type == "Retain at Supplier (Virtual)"
-        else BATCH_EXCESS_PENDING_RETURN
-    )
+    # Every claimable off-cut is one that has not come back yet -- the ones that
+    # never will are Billed to Consume, and those are not offered for claiming at all.
+    # BATCH_EXCESS_AT_SUPPLIER stays in the "counts as mapped" set for rows saved
+    # before Return Type was retired.
+    row.batch_mapped = BATCH_EXCESS_PENDING_RETURN
     row.batch_parent_item_group = excess.parent_item_group or ""
     row.batch_length = flt(excess.length)
     row.batch_width = flt(excess.width)
@@ -3272,6 +3298,18 @@ def reserve_exact_match_batches(material_planning_name):
     _refresh_touched_cut_sheets(mp)
     frappe.db.commit()
 
+    log_decision(
+        "Reserve",
+        reference_doctype="Material Planning",
+        reference_name=mp.name,
+        rows_affected=reserved_count,
+        qty=sum(flt(r.reserved_qty) for r in mp.available_raw_materials if r.is_reserved),
+        details=_("Reserved {0} row(s) in Exact Match from {1}.{2}").format(
+            reserved_count, mp.for_warehouse,
+            _(" {0} row(s) only partly covered.").format(len(partial_rows)) if partial_rows else "",
+        ),
+    )
+
     return {
         "rows": [
             {
@@ -3318,6 +3356,14 @@ def unreserve_exact_match_batches(material_planning_name, row_names):
     mp.save(ignore_permissions=True)
     _refresh_touched_cut_sheets(mp)
     frappe.db.commit()
+
+    log_decision(
+        "Unreserve",
+        reference_doctype="Material Planning",
+        reference_name=mp.name,
+        rows_affected=unreserved_count,
+        details=_("Released {0} row(s) in Exact Match.").format(unreserved_count),
+    )
 
     return [
         {
@@ -3432,6 +3478,14 @@ def unreserve_batches(material_planning_name, row_names):
     mp.save(ignore_permissions=True)
     _refresh_touched_cut_sheets(mp)
     frappe.db.commit()
+
+    log_decision(
+        "Unreserve",
+        reference_doctype="Material Planning",
+        reference_name=mp.name,
+        rows_affected=unreserved_count,
+        details=_("Released {0} row(s) in Material Mapping.").format(unreserved_count),
+    )
 
     return [
         {
@@ -3624,6 +3678,22 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
         })
         mp.save(ignore_permissions=True)
         _mark_excess_item_mapped(new_batch_no, material_planning_name, row_name)
+        # Reassignment is genuinely a per-row decision, so one entry per row here --
+        # unlike Reserve, which is one decision covering however many rows.
+        log_decision(
+            "Reassign Batch",
+            reference_doctype="Material Planning",
+            reference_name=mp.name,
+            row_reference=row_name,
+            item_code=row.item_code,
+            batch_no=old_batch,
+            new_batch_no=new_batch_no or "",
+            previous_sec_qty=old_sec_qty,
+            sec_qty=flt(row.batch_sec_qty),
+            previous_qty=old_qty,
+            qty=flt(row.batch_calc_qty),
+            details=_batch_change_remarks(row.item_code, old_batch, new_batch_no, material_issue_plan),
+        )
 
     else:
         row = next((r for r in mp.available_raw_materials if r.name == row_name), None)
@@ -3704,6 +3774,20 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
         })
         mp.save(ignore_permissions=True)
         _mark_excess_item_mapped(new_batch_no, material_planning_name, target_row_name)
+        log_decision(
+            "Reassign Batch",
+            reference_doctype="Material Planning",
+            reference_name=mp.name,
+            row_reference=target_row_name,
+            item_code=item_code,
+            batch_no=old_batch,
+            new_batch_no=new_batch_no or "",
+            previous_sec_qty=old_sec_qty,
+            sec_qty=new_sec_qty,
+            previous_qty=old_qty,
+            qty=new_qty,
+            details=_batch_change_remarks(item_code, old_batch, new_batch_no, material_issue_plan),
+        )
 
     # Dry-run validation — the same check the JS already runs before/after save.
     mp = frappe.get_doc("Material Planning", material_planning_name)
@@ -3781,23 +3865,6 @@ def _apply_batch_to_mapping_row(row, new_batch_no, new_item, dimensions, sec_qty
     )
 
 
-@frappe.whitelist()
-def _test_simulate_se_release(batch_nos, se_type="Material Issue"):
-    """Test helper: simulate a Stock Entry submit that consumes the given batch(es)."""
-    from manufyxinvenzaerp.production_management.stock_entry import _release_material_planning_reservations
-    if isinstance(batch_nos, str):
-        batch_nos = json.loads(batch_nos)
-
-    class _FakeRow:
-        def __init__(self, b): self.batch_no = b; self.is_finished_item = False
-        def get(self, k, d=None): return getattr(self, k, d)
-
-    class _FakeSE:
-        def __init__(self, t, bs): self.stock_entry_type = t; self.items = [_FakeRow(b) for b in bs]
-
-    _release_material_planning_reservations(_FakeSE(se_type, batch_nos))
-    frappe.db.commit()
-    return "OK"
 
 
 @frappe.whitelist()
@@ -4290,7 +4357,22 @@ def auto_purchase_from_mp(material_planning_name):
     for the "Create Material Request" button (client change request Phase 2.4):
     Consolidate Item is the purchasing-facing table, deduped by item_code across
     every drawing/sales order that needed it.
+
+    Refused outright unless Manufyxinvenza Settings switches Auto Purchase on. It is a
+    testing aid rather than a production feature -- it chains MR -> PO -> PR with no
+    rollback, so a failure part-way leaves a half-built chain behind. The Settings
+    switch hides the button on the form, but this method stays whitelisted and any API
+    key can reach it, so the refusal belongs here rather than in the client script.
     """
+    if not frappe.db.get_single_value(
+        "Manufyxinvenza Settings", "auto_purchase_from_material_planning"
+    ):
+        frappe.throw(
+            _("Auto Purchase is switched off. Enable 'Auto Purchase from Material Planning' "
+              "in Manufyxinvenza Settings first."),
+            frappe.PermissionError,
+        )
+
     from frappe.utils import today
     from erpnext.stock.doctype.material_request.material_request import (
         make_purchase_order as _mr_to_po,

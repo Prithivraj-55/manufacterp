@@ -28,23 +28,23 @@ def get_data(filters):
 		row_filters["stock_entry_created"] = 1
 	# "All" -> no stock_entry_created filter
 
-	if filters.get("return_type"):
-		row_filters["return_type"] = filters["return_type"]
+	if filters.get("billed_to_consume"):
+		row_filters["billed_to_consume"] = 1 if filters["billed_to_consume"] == "Billed to Consume" else 0
 
 	rows = frappe.get_all(
 		"SCO Excess Material Item",
 		filters=row_filters,
 		fields=["name", "parent", "item_code", "item_name", "parent_item_group",
 				"length", "width", "thickness", "sec_qty", "sec_uom", "qty", "uom",
-				"stock_entry_created", "return_type", "return_reason",
+				"stock_entry_created", "billed_to_consume", "return_reason",
 				"source_mip_raw_material_row", "mapped_material_planning"],
 	)
 
 	if status == "Pending Return":
-		# Retain-at-Supplier material is never coming back by definition, so it is
-		# not a missed return -- listing it here would pad the chase-list with rows
-		# nobody can act on.
-		rows = [r for r in rows if r.return_type != "Retain at Supplier (Virtual)"]
+		# Billed-to-Consume material is never coming back by definition, so it is not
+		# a missed return -- listing it here would pad the chase-list with rows nobody
+		# can act on.
+		rows = [r for r in rows if not r.billed_to_consume]
 
 	if not rows:
 		return []
@@ -172,8 +172,9 @@ def get_data(filters):
 			"sec_uom": r.sec_uom,
 			"weight_kg": flt(r.qty),
 			"uom": r.uom,
-			"return_type": r.return_type or "Return to Own Warehouse",
-			"status": _("Returned") if r.stock_entry_created else (
+			"billed_to_consume": 1 if r.billed_to_consume else 0,
+			"status": _("Billed to Consume") if r.billed_to_consume else
+			_("Returned") if r.stock_entry_created else (
 				_("Fully Claimed") if claims and available_sec <= 0.001
 				else _("Partly Claimed") if claims
 				else _("Pending")
@@ -218,7 +219,7 @@ def get_columns():
 		{"label": _("Free Sec Nos"), "fieldname": "available_sec_qty", "fieldtype": "Float", "width": 110},
 		{"label": _("Free (Kg)"), "fieldname": "available_kg", "fieldtype": "Float", "width": 100},
 		{"label": _("UOM"), "fieldname": "uom", "fieldtype": "Link", "options": "UOM", "width": 80},
-		{"label": _("Return Type"), "fieldname": "return_type", "fieldtype": "Data", "width": 170},
+		{"label": _("Billed to Consume"), "fieldname": "billed_to_consume", "fieldtype": "Check", "width": 130},
 		{"label": _("Status"), "fieldname": "status", "fieldtype": "Data", "width": 120},
 		{"label": _("Return Reason"), "fieldname": "return_reason", "fieldtype": "Data", "width": 180},
 		{"label": _("Days Pending"), "fieldname": "days_pending", "fieldtype": "Int", "width": 100},

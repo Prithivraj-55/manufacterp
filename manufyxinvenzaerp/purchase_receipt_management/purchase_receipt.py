@@ -53,30 +53,47 @@ def before_insert_batch(doc, method):
         _setup_batch_from_stock_entry(doc)
 
 
+def _row_awaiting_batch(rows):
+    """The document row the batch being created right now belongs to.
+
+    ERPNext makes one batch per stock ledger entry and only then writes the Serial
+    and Batch Bundle back onto the row it came from, one row at a time. So while a
+    batch is being inserted, every row already dealt with carries a bundle and the
+    one being dealt with does not -- which makes "the first row of this item with no
+    bundle yet" an exact answer.
+
+    It replaces counting how many batches already exist for this document and using
+    the count as an index. That was only ever a guess, and it guessed wrong whenever
+    the batches were not created in row order or a row already had a batch of its
+    own: the batch then took another line's Length and Width, and nothing said so.
+    A row that has been dealt with can never be picked here, however the batches
+    were ordered.
+
+    Falls back to the first row when every row already has a bundle, so a batch
+    created outside that sequence still gets this item's dimensions rather than
+    none at all."""
+    if not rows:
+        return None
+    for row in rows:
+        if not row.get("serial_and_batch_bundle"):
+            return row
+    return rows[0]
+
+
 def _setup_batch_from_purchase_receipt(doc):
-    # When multiple rows of the same item exist in the PR, count how many batches
-    # have already been created for this PR + item to pick the correct row by idx.
-    already_created = frappe.db.count(
-        "Batch",
-        filters={
-            "reference_doctype": "Purchase Receipt",
-            "reference_name": doc.reference_name,
-            "item": doc.item,
-        },
-    )
     pr_items = frappe.db.get_all(
         "Purchase Receipt Item",
         filters={"parent": doc.reference_name, "item_code": doc.item},
         fields=[
+            "name", "serial_and_batch_bundle",
             "custom_thickness", "custom_length", "custom_width", "custom_sec_qty",
             "custom_sec_uom", "custom_parent_item_group",
         ],
         order_by="idx asc",
     )
-    if not pr_items:
+    pr_item = _row_awaiting_batch(pr_items)
+    if not pr_item:
         return
-    row_index = already_created if already_created < len(pr_items) else 0
-    pr_item = pr_items[row_index]
 
     batch_prefix = frappe.db.get_value("Item", doc.item, "custom_batch_prefix")
     if not batch_prefix:
@@ -110,10 +127,9 @@ def _setup_batch_from_purchase_receipt(doc):
     # created with Sec Qty 0 breaks Kg -> Nos allocation in Material Planning
     # (_alloc_sec_qty) with no visible error until someone notices downstream.
     # before_submit_purchase_receipt already requires Sec Qty > 0 on the PR line
-    # itself, so landing here means the row_index match above (best-effort — there
-    # is no direct back-reference from an auto-created batch to its source PR row)
-    # picked up the wrong line, most likely because several rows share identical
-    # dimensions. Fail loudly here rather than silently persist a corrupt batch.
+    # itself, so landing here means _row_awaiting_batch matched a line that has no
+    # piece count -- which should not be reachable. Fail loudly rather than silently
+    # persist a corrupt batch.
     if pr_item.custom_parent_item_group in ("Structurals", "Plates") and not flt(pr_item.custom_sec_qty):
         frappe.throw(
             _(
@@ -127,30 +143,32 @@ def _setup_batch_from_purchase_receipt(doc):
 
 def _setup_batch_from_stock_entry(doc):
     """Set batch name and dimensions for batches created from Repack or Material Receipt SE."""
-    se = frappe.get_doc("Stock Entry", doc.reference_name)
-    if se.stock_entry_type not in ("Repack", "Material Receipt"):
+    se_type = frappe.db.get_value("Stock Entry", doc.reference_name, "stock_entry_type")
+    if se_type not in ("Repack", "Material Receipt"):
         return
 
-    matching_rows = [
-        r for r in se.items
-        if r.item_code == doc.item
-        and (se.stock_entry_type == "Material Receipt" or r.is_finished_item)
-    ]
-    if not matching_rows:
-        return
-
-    # Count batches already inserted for this SE + item to pick the correct row.
-    # before_insert fires before this batch is committed, so existing count = index of current row.
-    already_created = frappe.db.count(
-        "Batch",
-        filters={
-            "reference_doctype": "Stock Entry",
-            "reference_name": doc.reference_name,
-            "item": doc.item,
-        },
+    # Read from the database rather than the Stock Entry document: the bundle that
+    # says a row has been dealt with is written straight to the row with db_set,
+    # which a document already in memory would not show.
+    rows = frappe.db.get_all(
+        "Stock Entry Detail",
+        filters={"parent": doc.reference_name, "item_code": doc.item},
+        fields=[
+            "name", "serial_and_batch_bundle", "is_finished_item",
+            "custom_thickness", "custom_length", "custom_width", "custom_sec_qty",
+            "custom_sec_uom", "custom_parent_item_group", "custom_source_mip_excess_row",
+            "custom_existing_supplier_invoice_no", "custom_existing_invoice_wt",
+            "custom_existing_inward_date",
+        ],
+        order_by="idx asc",
     )
-    row_index = already_created if already_created < len(matching_rows) else 0
-    target_row = matching_rows[row_index]
+    matching_rows = [
+        r for r in rows
+        if se_type == "Material Receipt" or r.is_finished_item
+    ]
+    target_row = _row_awaiting_batch(matching_rows)
+    if not target_row:
+        return
 
     batch_prefix = frappe.db.get_value("Item", doc.item, "custom_batch_prefix")
     if not batch_prefix:
@@ -159,7 +177,7 @@ def _setup_batch_from_stock_entry(doc):
     t = int(flt(target_row.custom_thickness)) if target_row.custom_thickness else None
     l = int(flt(target_row.custom_length)) if target_row.custom_length else None
     w = int(flt(target_row.custom_width)) if target_row.custom_width else None
-    suffix = _get_se_suffix(se.name)
+    suffix = _get_se_suffix(doc.reference_name)
 
     parts = [batch_prefix]
     if t:

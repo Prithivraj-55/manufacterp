@@ -27,6 +27,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt, now
 
+from manufyxinvenzaerp.utils.decision_log import log_decision
 from manufyxinvenzaerp.utils.dimension_formula import calculate_qty
 
 # Sec Nos comparisons are made to 3 decimals everywhere else in this app; the same
@@ -552,22 +553,49 @@ def apply_w2_to_batch(cut_sheet_name, stock_entry):
         "w2_applied_on": now(),
         "status": "Consumed",
     }, update_modified=False)
+    log_decision(
+        "Cut Sheet Balance",
+        reference_doctype="Cut Sheet",
+        reference_name=cs.name,
+        item_code=cs.item_code,
+        batch_no=cs.batch_no,
+        previous_sec_qty=flt(cs.sheet_sec_qty),
+        sec_qty=flt(cs.w2_sec_qty),
+        qty=flt(cs.w2_calc_qty),
+        details=_("Batch {0} resized in place to the balance: {1} x {2}, {3} Nos.").format(
+            cs.batch_no, flt(cs.w2_length), flt(cs.w2_width), flt(cs.w2_sec_qty)),
+    )
     return True
 
 
 def revert_w2_from_batch(cut_sheet_name):
     """Undo the write-back when the transfer that triggered it is cancelled -- the
-    steel is back in the rack uncut, so the batch has to say so again."""
+    steel is back in the rack uncut, so the batch has to say so again.
+
+    Which "write-back" that was depends on how the sheet was applied. With
+    "Create New Batch for Cut Sheet Stock Entry" switched on there is nothing to put
+    back on the batch, because its dimensions were never touched: what has to be
+    undone is the Repack that emptied it, which puts the steel back under the
+    original batch and empties the balance batch again."""
     cs = frappe.get_doc("Cut Sheet", cut_sheet_name)
     if not cs.w2_applied:
         return False
-    frappe.db.set_value("Batch", cs.batch_no, {
-        "custom_length": flt(cs.sheet_length),
-        "custom_width": flt(cs.sheet_width),
-        "custom_sec_qty": flt(cs.sheet_sec_qty),
-    })
+
+    if cs.get("w2_repack_entry"):
+        from manufyxinvenzaerp.production_management.stock_entry import (
+            _cancel_cut_sheet_repack,
+        )
+        _cancel_cut_sheet_repack(cs.w2_repack_entry, cs.batch_no)
+    else:
+        frappe.db.set_value("Batch", cs.batch_no, {
+            "custom_length": flt(cs.sheet_length),
+            "custom_width": flt(cs.sheet_width),
+            "custom_sec_qty": flt(cs.sheet_sec_qty),
+        })
+
     frappe.db.set_value("Cut Sheet", cs.name, {
         "w2_applied": 0, "w2_applied_stock_entry": "", "w2_applied_on": None,
+        "w2_repack_entry": "", "w2_batch_no": "",
         "status": "Fully Allocated" if flt(cs.available_sec_qty) <= QTY_EPSILON else "Active",
     }, update_modified=False)
     return True

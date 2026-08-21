@@ -1093,7 +1093,7 @@ const ERP_MANUAL_MATERIAL_PLANNING_CHILDREN = [
 			},
 		],
 		notes: [
-			"“Retain at Supplier (Virtual)” material is flagged that way because it will NEVER physically return to your warehouse — it's used/consumed directly at the supplier. “Pending Return” material is just excess that hasn't been walked back to stock yet, but eventually will be — claiming it now doesn't stop that from happening later; it just reserves the outcome in advance.",
+			"“Pending Return” material is excess that hasn't been walked back to stock yet, but eventually will be — claiming it now doesn't stop that from happening later; it just reserves the outcome in advance. Material marked “Billed to Consume” never appears here at all: it is charged to its own job and consumed at the supplier, so there is nothing left for another job to take.",
 			"Where these rows go at transfer time. A claimed off-cut still at the supplier has no batch in your source warehouse, so it can never appear in the transfer popup's list — there is physically nothing to move, and it is already sitting where the transfer would have sent it. Rather than leaving a silent gap, the popup shows a blue panel: “N item(s) are already at <supplier warehouse> — no transfer needed”, listing each one. It is information, not a problem: it never blocks the rest of the transfer.",
 			"Edit dimensions on the raw-material row, not in the Excess Material Items grid. For any excess row created from a raw-material row, the Excess Length/Width/Sec Qty fields on that raw-material row are the source of truth — the Excess Material Items row is recalculated from them on every save, so typing directly into the grid gets overwritten. The exception is a rounding-surplus row (Return Reason mentions “Round Up Sec Qty for Transfer”), which has no raw-material row behind it and is edited in the grid directly.",
 		],
@@ -1663,7 +1663,7 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 			"another job while it is still at the supplier.",
 		fields: [
 			{ name: "Length / Width / Sec Nos", note: "The off-cut's real dimensions. Rows planned on the transfer popup's second tab arrive with what you measured there. Rounding-surplus rows arrive with placeholder dimensions (one standard piece) — overwrite them with what you actually measure." },
-			{ name: "Return Type", note: "“Return to Own Warehouse” is the normal case. “Retain at Supplier (Virtual)” means it will never physically come back — it is consumed there — and such rows are skipped by the return entry." },
+			{ name: "Billed to Consume", note: "Tick it when the off-cut is not coming back: it stays where it is, is charged to this job, and the job's final Stock Entry consumes it out of the supplier's warehouse. No return entry is made for it, and no other plan can claim it. Everything not ticked is simply returned." },
 			{ name: "Return Reason", note: "Mandatory before a return entry can be created. It is what makes the returned stock explainable months later." },
 			{ name: "Availability", note: "Allocated and Available, in Sec Nos and Kg — how much of this off-cut other jobs have claimed and how much is still free." },
 			{ name: "Unlink Claim", note: "Releases a Material Planning's claim so the dimensions can be corrected. The off-cut then goes back into the picker for anyone to claim." },
@@ -1714,7 +1714,7 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 			"received and the plan closes itself.",
 		steps: [
 			"<b>Make Final Stock Entry</b> appears when all operations are done. It creates a draft Manufacture Stock Entry consuming the supplier-warehouse raw material and producing the finished item into the Finished Goods Warehouse — review it and submit from there.",
-			"The plan moves to <b>Completed</b> by itself once finished goods have been received AND every Excess Material Items row is resolved: returned, claimed by another job, or flagged Retain at Supplier.",
+			"The plan moves to <b>Completed</b> by itself once finished goods have been received AND every Excess Material Items row is resolved: returned, claimed by another job, or marked Billed to Consume.",
 			"Completed is one-way. The document locks; nothing later moves it back.",
 		],
 		notes: [
@@ -1751,7 +1751,7 @@ const ERP_MANUAL_REPORTS_CHILDREN = [
 			"use the reports below instead of piecing it together from individual plans.",
 		steps: [
 			"<b>Manufyxinvenza Stock Balance</b> — open from the Awesomebar. Item-and-batch-wise on-hand quantity, what's reserved against which Material Planning, and what's genuinely free — the same free-Kg figures the Exact Match and Excess Material Mapping pickers use internally, but for every item and warehouse at once.",
-			"<b>Excess Material Return Report</b> — the chase-list for off-cuts. Defaults to “Pending Return” (still out there AND actually coming back — drops anything already returned or flagged Retain at Supplier) over the last three months, and names every Material Planning holding a piece of each off-cut.",
+			"<b>Excess Material Return Report</b> — the chase-list for off-cuts. Defaults to “Pending Return” (still out there AND actually coming back — drops anything already returned or marked Billed to Consume) over the last three months, and names every Material Planning holding a piece of each off-cut.",
 			"<b>Cut Sheet Report</b> — which plates are cut, who is drawing from them, and what is left. “W2 Not Written” filters to sheets that have been cut but never had their balance written back to the batch — the state where the plate in the rack and the system disagree.",
 		],
 	},
@@ -1769,7 +1769,7 @@ const ERP_MANUAL_GLOSSARY_CHILDREN = [
 			{ name: "Sec Qty / Sec Nos", note: "The same idea under two names used interchangeably across the app — a count of physical pieces (bars, plates, cut pieces). Fractional at planning time, whole when material actually moves." },
 			{ name: "Alternate Item", note: "A substitute item used in place of what was originally required." },
 			{ name: "Consolidated", note: "Multiple drawings' requirements for the same item code, combined into one purchasing line." },
-			{ name: "Virtual / Pending Return", note: "An off-cut claimed by a job while still at the supplier. No batch, no stock entry — a promise, until it physically returns. “Retain at Supplier” means it never will; “Pending Return” means it hasn't yet." },
+			{ name: "Pending Return", note: "An off-cut claimed by a job while it is still at the supplier. No batch, no stock entry — a promise, until it physically returns. An off-cut that is never coming back is marked Billed to Consume instead, and cannot be claimed at all." },
 			{ name: "CNC Process", note: "Marks that a piece needs CNC cutting at your own facility before it can go to the supplier — routes it through the Material Issue Plan's CNC Warehouse first." },
 			{ name: "W1 / W2", note: "On a Cut Sheet: W1 is the piece being cut, W2 the remnant left on the plate afterwards." },
 			{ name: "DUNO / Mark No", note: "The drawing-level identifier that keeps every row traceable back to exactly which piece, on which drawing, it belongs to." },
