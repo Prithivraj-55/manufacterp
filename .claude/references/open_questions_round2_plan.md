@@ -36,7 +36,7 @@ sit in Stores as free stock — not reserved, not mapped, not consumed by anythi
 
 ---
 
-## Item B — "Create New Batch for Cut Sheet Stock Entry" option  `[ ]`  *(Q6)*
+## Item B — "Create New Batch for Cut Sheet Stock Entry" option  `[x]`  *(Q6)*
 
 New checkbox on **Manufyxinvenza Settings**, in the existing Cut Sheet section beside
 `cut_sheet_tolerance_percent`.
@@ -86,9 +86,24 @@ Also in scope:
   removes the new batch instead, and refuses once anything has claimed it.
 - **Valuation** on the new batch is verified on test rather than assumed.
 
+**Done.** Both cut paths carry the mode -- the Cut Sheet doctype and the Material
+Issue Plan's own cut rows. `tests/verify_cut_sheet_new_batch.py` walks the client's
+worked example end to end in both modes: 30 checks, all passing.
+
+One design consequence worth knowing: in new-batch mode the repack cannot fire on the
+FIRST transfer the way the in-place write does. Emptying the batch while other jobs
+still have pieces to collect would take the plate out from under them, so it waits
+until everything the sheet promised has left the warehouse. For a sheet cut for one
+job -- the worked example -- those are the same moment.
+
+If the repack cannot be made for any reason, the attempt is rolled back to a savepoint
+and the balance is written in place instead, with a message saying why. The transfer
+that triggered it always stands.
+
 `manufyxinvenza_settings.json`, `production_management/stock_entry.py`
-(`_apply_cut_sheet_batch_size`, `_apply_cut_sheet_w2`), `doctype/cut_sheet/cut_sheet.py`
-(`apply_w2_to_batch`, `revert_w2_from_batch`)
+(`_repack_remnant_to_new_batch`, `_apply_cut_sheet_w2_as_new_batch`,
+`_apply_cut_sheet_balance_as_new_batch`, `_repoint_reservations`,
+`_cancel_cut_sheet_repack`), `doctype/cut_sheet/cut_sheet.py` (`revert_w2_from_batch`)
 
 ---
 
@@ -216,7 +231,7 @@ than a bulk delete. Report only; nothing removed without your word.
 
 ## Also open, from chat rather than the document
 
-## Item J — Cut Sheet: Reserve Without Dimensions, two-way  `[ ]`
+## Item J — Cut Sheet: Reserve Without Dimensions, two-way  `[~]`
 
 > "if i enable, then reqd qty (18) needs to set in Calc Qty (Kg), based on this Sec Nos
 > is calculated on a read-only field, around 1.9. If unchecked, Sec Qty (NOS) is

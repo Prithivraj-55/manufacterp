@@ -70,7 +70,8 @@
   "balance_calc_qty",
   "precut_length",
   "precut_width",
-  "precut_sec_qty"
+  "precut_sec_qty",
+  "w2_repack_entry"
  ],
  "fields": [
   {
@@ -147,7 +148,7 @@
    "in_list_view": 1,
    "label": "Reqd Kg",
    "read_only": 1,
-   "description": "The original required weight for this raw material, straight from Material Planning's own required qty — fixed regardless of which batch is currently mapped/reassigned against it (unlike Reqd Qty, which reflects whatever batch is currently reserved and changes on every reassignment)."
+   "description": "The original required weight for this raw material, straight from Material Planning's own required qty \u2014 fixed regardless of which batch is currently mapped/reassigned against it (unlike Reqd Qty, which reflects whatever batch is currently reserved and changes on every reassignment)."
   },
   {
    "fieldname": "section_batch_details",
@@ -240,7 +241,7 @@
    "in_list_view": 1,
    "label": "Reqd Qty",
    "read_only": 1,
-   "description": "Weight of the batch actually mapped/reserved against this requirement — required to transfer."
+   "description": "Weight of the batch actually mapped/reserved against this requirement \u2014 required to transfer."
   },
   {
    "fetch_from": "item_code.stock_uom",
@@ -300,7 +301,7 @@
    "in_list_view": 1,
    "label": "Excess Qty",
    "read_only": 1,
-   "description": "Reqd Qty minus the drawing's planned raw material weight — the surplus this mapped batch carries beyond what the drawing actually needs."
+   "description": "Reqd Qty minus the drawing's planned raw material weight \u2014 the surplus this mapped batch carries beyond what the drawing actually needs."
   },
   {
    "fieldname": "transfer_excess_kg",
@@ -308,7 +309,7 @@
    "in_list_view": 1,
    "label": "Transfer Excess Kg",
    "read_only": 1,
-   "description": "Surplus created by rounding this row's Sec Nos up to whole pieces at transfer time — the difference between the whole pieces actually issued and the fractional Sec Nos planned. Accumulates across partial transfers, and is booked into the Excess Material Items table to be returned. Separate from Excess Qty, which measures the mapped batch against the drawing instead."
+   "description": "Surplus created by rounding this row's Sec Nos up to whole pieces at transfer time \u2014 the difference between the whole pieces actually issued and the fractional Sec Nos planned. Accumulates across partial transfers, and is booked into the Excess Material Items table to be returned. Separate from Excess Qty, which measures the mapped batch against the drawing instead."
   },
   {
    "fieldname": "drawing_planned_weight",
@@ -316,7 +317,7 @@
    "hidden": 1,
    "label": "Drawing Planned Weight",
    "read_only": 1,
-   "description": "Engineering weight for this raw material off the drawing (Sales Order Drawing Raw Material's Total Weight) — the basis Excess Qty is measured against."
+   "description": "Engineering weight for this raw material off the drawing (Sales Order Drawing Raw Material's Total Weight) \u2014 the basis Excess Qty is measured against."
   },
   {
    "fieldname": "section_flags",
@@ -414,7 +415,7 @@
   {
    "fieldname": "col_break_cut_sheet_use",
    "fieldtype": "Column Break",
-   "label": "To Use (W1 — Transferred)"
+   "label": "To Use (W1 \u2014 Transferred)"
   },
   {
    "fieldname": "use_length",
@@ -437,7 +438,7 @@
   {
    "fieldname": "use_calc_qty",
    "fieldtype": "Float",
-   "label": "To Use Calc Qty (Kg) — W1",
+   "label": "To Use Calc Qty (Kg) \u2014 W1",
    "read_only": 1,
    "depends_on": "eval:doc.cut_sheet",
    "description": "Auto-calculated from To Use Length/Width/Sec Qty (Thickness reuses this row's own batch Thickness). This is the qty actually transferred."
@@ -445,7 +446,7 @@
   {
    "fieldname": "col_break_cut_sheet_balance",
    "fieldtype": "Column Break",
-   "label": "Balance (W2 — Remains)"
+   "label": "Balance (W2 \u2014 Remains)"
   },
   {
    "fieldname": "balance_length",
@@ -468,7 +469,7 @@
   {
    "fieldname": "balance_calc_qty",
    "fieldtype": "Float",
-   "label": "Balance Calc Qty (Kg) — W2",
+   "label": "Balance Calc Qty (Kg) \u2014 W2",
    "read_only": 1,
    "depends_on": "eval:doc.cut_sheet",
    "description": "Auto-calculated from Balance Length/Width/Sec Qty. This is what the SAME batch's own dimensions get resized to once the transfer Stock Entry submits."
@@ -493,6 +494,15 @@
    "fieldtype": "Float",
    "label": "Pre-Cut Sec Qty",
    "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.w2_repack_entry",
+   "description": "The Repack Stock Entry that emptied this batch and created the balance batch, where \"Create New Batch for Cut Sheet Stock Entry\" is switched on in Manufyxinvenza Settings.",
+   "fieldname": "w2_repack_entry",
+   "fieldtype": "Link",
+   "label": "W2 Repack Entry",
+   "options": "Stock Entry",
    "read_only": 1
   }
  ],

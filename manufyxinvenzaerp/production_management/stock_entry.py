@@ -1,6 +1,7 @@
 import frappe
 from frappe import _
 from frappe.utils import flt, now
+from manufyxinvenzaerp.utils.dimension_formula import calculate_qty
 from manufyxinvenzaerp.utils.reference_copy import copy_reference_fields_if_blank
 
 FORMULA_GROUPS = {"Structurals", "Plates"}
@@ -279,6 +280,8 @@ def _apply_cut_sheet_w2(doc, cancelling=False):
 			# that cut the sheet, and its write-back must stand.
 			if frappe.db.get_value("Cut Sheet", cs_name, "w2_applied_stock_entry") == doc.name:
 				revert_w2_from_batch(cs_name)
+		elif _cut_sheet_creates_new_batch():
+			_apply_cut_sheet_w2_as_new_batch(cs_name, doc.name)
 		else:
 			apply_w2_to_batch(cs_name, doc.name)
 
@@ -324,7 +327,7 @@ def _apply_cut_sheet_batch_size(mip_name, item_code, batch_no):
 		"Material Issue Plan Raw Material",
 		filters={"parent": mip_name, "cut_sheet": 1, "item_code": item_code, "batch_no": batch_no},
 		fields=["name", "idx", "use_calc_qty", "balance_length", "balance_width", "balance_sec_qty",
-		        "precut_length", "precut_width", "precut_sec_qty"],
+		        "precut_length", "precut_width", "precut_sec_qty", "w2_repack_entry"],
 		order_by="idx asc",
 	)
 	if not rows:
@@ -363,6 +366,11 @@ def _apply_cut_sheet_batch_size(mip_name, item_code, batch_no):
 			break
 		completed = r
 
+	if _cut_sheet_creates_new_batch():
+		# The batch is never rewritten in this mode -- see _cut_sheet_creates_new_batch.
+		_apply_cut_sheet_balance_as_new_batch(rows, completed, batch_no)
+		return
+
 	if completed:
 		target = (completed.balance_length, completed.balance_width, completed.balance_sec_qty)
 	else:
@@ -373,6 +381,318 @@ def _apply_cut_sheet_batch_size(mip_name, item_code, batch_no):
 		"custom_width": flt(target[1]),
 		"custom_sec_qty": flt(target[2]),
 	})
+
+
+def _apply_cut_sheet_w2_as_new_batch(cut_sheet_name, stock_entry):
+	"""New-batch mode for the Cut Sheet doctype (see _cut_sheet_creates_new_batch).
+
+	Unlike the in-place version this cannot fire on the FIRST transfer. Emptying the
+	batch while other jobs still have pieces to collect would take the plate out from
+	under them, so it waits until everything the sheet promised has left the warehouse.
+	Where a sheet is cut for one job -- the client's own worked example -- the first
+	transfer is also the last, and the two versions fire at the same moment.
+
+	If the repack cannot be made for any reason, the transfer that triggered it must
+	still stand: the attempt is rolled back to a savepoint and the balance is written
+	onto the batch the old way, with a message saying so."""
+	from manufyxinvenzaerp.production_management.doctype.cut_sheet.cut_sheet import (
+		apply_w2_to_batch,
+	)
+
+	cs = frappe.get_doc("Cut Sheet", cut_sheet_name)
+	if cs.w2_applied or not cs.batch_no:
+		return False
+	if not (flt(cs.w2_length) or flt(cs.w2_width) or flt(cs.w2_sec_qty)):
+		# No balance was planned -- the sheet is used up rather than leaving a remnant.
+		return False
+
+	remaining = flt(sum(flt(r.qty) for r in _batch_stock_by_warehouse(cs.batch_no)), 3)
+	if remaining - flt(cs.w2_calc_qty) > _CUT_SHEET_TOLERANCE_KG:
+		return False  # pieces still to be issued; the plate is not a remnant yet
+
+	savepoint = "mfx_cut_sheet_repack"
+	frappe.db.savepoint(savepoint)
+	try:
+		repack, new_batch = _repack_remnant_to_new_batch(
+			cs.batch_no,
+			{"length": cs.w2_length, "width": cs.w2_width, "sec_qty": cs.w2_sec_qty},
+			cs.name,
+		)
+	except Exception as e:
+		frappe.db.rollback(save_point=savepoint)
+		frappe.msgprint(
+			_("The balance of {0} could not be moved into a new batch ({1}), so batch {2} "
+			  "has been resized in place instead.").format(cs.name, str(e), cs.batch_no),
+			title=_("Cut Sheet Balance"), indicator="orange",
+		)
+		return apply_w2_to_batch(cut_sheet_name, stock_entry)
+
+	frappe.db.set_value("Cut Sheet", cs.name, {
+		"w2_applied": 1,
+		"w2_applied_stock_entry": stock_entry,
+		"w2_applied_on": now(),
+		"w2_repack_entry": repack,
+		"w2_batch_no": new_batch,
+		"status": "Consumed",
+	}, update_modified=False)
+	frappe.msgprint(
+		_("Batch {0} was cut per {1}. Its balance is now batch {2} ({3}).").format(
+			frappe.bold(cs.batch_no), cs.name, frappe.bold(new_batch),
+			frappe.utils.get_link_to_form("Stock Entry", repack)),
+		title=_("Cut Sheet Balance"), indicator="green",
+	)
+	return True
+
+
+def _apply_cut_sheet_balance_as_new_batch(rows, completed, batch_no):
+	"""New-batch mode for the Material Issue Plan's own cut rows.
+
+	Same rule as the Cut Sheet doctype: the balance becomes its own batch only once
+	the whole chain of cuts on this batch has actually been transferred. Until then
+	the batch is left exactly as it is -- in this mode its dimensions are never
+	rewritten, so there is nothing to do while the cutting is still in progress.
+
+	Cancelling a transfer walks the chain back, so a repack made earlier is cancelled
+	again here when the last cut stops being complete."""
+	held = next((r for r in rows if r.get("w2_repack_entry")), None)
+	finished = completed is not None and completed.name == rows[-1].name
+
+	if finished and not held:
+		last = rows[-1]
+		savepoint = "mfx_mip_cut_repack"
+		frappe.db.savepoint(savepoint)
+		try:
+			repack, new_batch = _repack_remnant_to_new_batch(
+				batch_no,
+				{"length": last.balance_length, "width": last.balance_width,
+				 "sec_qty": last.balance_sec_qty},
+				last.name,
+			)
+		except Exception as e:
+			frappe.db.rollback(save_point=savepoint)
+			frappe.msgprint(
+				_("The balance of batch {0} could not be moved into a new batch ({1}). "
+				  "The batch has been left as it is.").format(batch_no, str(e)),
+				title=_("Cut Sheet Balance"), indicator="orange",
+			)
+			return False
+		frappe.db.set_value("Material Issue Plan Raw Material", last.name,
+		                    {"w2_repack_entry": repack}, update_modified=False)
+		frappe.msgprint(
+			_("Batch {0} is fully cut. Its balance is now batch {1} ({2}).").format(
+				frappe.bold(batch_no), frappe.bold(new_batch),
+				frappe.utils.get_link_to_form("Stock Entry", repack)),
+			title=_("Cut Sheet Balance"), indicator="green",
+		)
+		return True
+
+	if not finished and held:
+		_cancel_cut_sheet_repack(held.w2_repack_entry, batch_no)
+		frappe.db.set_value("Material Issue Plan Raw Material", held.name,
+		                    {"w2_repack_entry": ""}, update_modified=False)
+		return True
+
+	return False
+
+
+def _cut_sheet_creates_new_batch():
+	"""Manufyxinvenza Settings -> "Create New Batch for Cut Sheet Stock Entry".
+
+	Off, which is how every site behaves today: the sheet's own batch is rewritten to
+	the Balance (W2) dimensions once the cut has been transferred -- same batch, same
+	name, new size. On: the batch is never rewritten. A Repack empties it into a NEW
+	batch carrying W2, so a document already issued against the original still reads
+	true, and the old name no longer describes something that is not there any more."""
+	return bool(frappe.db.get_single_value(
+		"Manufyxinvenza Settings", "create_new_batch_for_cut_sheet_stock_entry"
+	))
+
+
+def _batch_stock_by_warehouse(batch_no):
+	"""Where a batch's stock physically sits and how much, from submitted bundles.
+
+	Warehouse by warehouse rather than one total: a Repack has to name the warehouse
+	it works in, and a plate that somehow sits in two places is not something to
+	guess at."""
+	return frappe.db.sql(
+		"""
+		SELECT sbe.warehouse AS warehouse, COALESCE(SUM(sbe.qty), 0) AS qty
+		FROM `tabSerial and Batch Entry` sbe
+		JOIN `tabSerial and Batch Bundle` sbb ON sbb.name = sbe.parent
+		WHERE sbe.batch_no = %s AND sbb.docstatus = 1
+		GROUP BY sbe.warehouse
+		HAVING COALESCE(SUM(sbe.qty), 0) > %s
+		""",
+		(batch_no, _CUT_SHEET_TOLERANCE_KG),
+		as_dict=True,
+	)
+
+
+def _repack_remnant_to_new_batch(batch_no, w2, source_label):
+	"""Empty `batch_no` into a NEW batch carrying the balance (W2) dimensions.
+
+	`w2` is {"length", "width", "sec_qty"} -- the off-cut's shape, entered by hand.
+	Thickness, item and unit weight come from the batch and its item, since cutting
+	changes length and width only.
+
+	Two rows, one Repack:
+
+	  out  the whole of what is physically left of the old batch. Its quantity is a
+	       ledger fact, not a formula result, so the row deliberately carries NO
+	       dimensions: validate_stock_entry recomputes qty from Length x Sec Qty for
+	       Structurals and Plates, and with the plate's own 12000 mm on the row it
+	       would try to move a full sheet that is no longer there. It does carry the
+	       piece count, so the emptied batch drops to zero pieces -- and gets them
+	       back if this is ever cancelled.
+	  in   the balance, with W2's dimensions and Sec Qty. This row DOES carry its
+	       group, so validate_stock_entry computes its Kg from those dimensions --
+	       which is exactly the guarantee wanted: the new batch's size, piece count
+	       and weight cannot disagree with each other.
+
+	The difference between the two is the saw-cut loss, and a Repack absorbs it by
+	design -- in and out are not required to match. That is what removes the rounding
+	question the in-place version left open.
+
+	Returns (stock_entry_name, new_batch_no). Raises on anything it will not guess at;
+	callers run it inside a savepoint and fall back to rewriting the batch in place."""
+	batch = frappe.db.get_value(
+		"Batch", batch_no,
+		["item", "custom_thickness", "custom_sec_qty", "custom_length", "custom_width"],
+		as_dict=True,
+	)
+	if not batch or not batch.item:
+		raise ValueError("Batch %s no longer exists" % batch_no)
+
+	item = frappe.db.get_value(
+		"Item", batch.item, ["custom_unit_weight", "custom_parent_item_group"], as_dict=True
+	) or frappe._dict()
+
+	stock = _batch_stock_by_warehouse(batch_no)
+	if not stock:
+		raise ValueError("Batch %s holds no stock to repack" % batch_no)
+	if len(stock) > 1:
+		raise ValueError(
+			"Batch %s is spread across %d warehouses; a cut sheet's plate is expected in one"
+			% (batch_no, len(stock))
+		)
+
+	warehouse = stock[0].warehouse
+	remaining = flt(stock[0].qty, 3)
+
+	group = (item.custom_parent_item_group or "").strip()
+	unit_weight = flt(item.custom_unit_weight)
+	w2_kg = flt(calculate_qty(
+		group, flt(w2.get("length")), flt(w2.get("width")),
+		flt(batch.custom_thickness), unit_weight, flt(w2.get("sec_qty")),
+	) or 0, 3)
+	if w2_kg <= _CUT_SHEET_TOLERANCE_KG:
+		raise ValueError("No balance left on batch %s to carry into a new batch" % batch_no)
+	if w2_kg - remaining > _CUT_SHEET_TOLERANCE_KG:
+		raise ValueError(
+			"Balance of %s Kg is more than the %s Kg still in %s"
+			% (w2_kg, remaining, batch_no)
+		)
+
+	se = frappe.get_doc({
+		"doctype": "Stock Entry",
+		"stock_entry_type": "Repack",
+		"remarks": _("Cut Sheet balance ({0}): batch {1} repacked into its off-cut")
+			.format(source_label, batch_no),
+		"items": [
+			{
+				"item_code": batch.item,
+				"qty": remaining,
+				"s_warehouse": warehouse,
+				"batch_no": batch_no,
+				"custom_sec_qty": flt(batch.custom_sec_qty),
+				"custom_unit_weight": unit_weight,
+			},
+			{
+				"item_code": batch.item,
+				"qty": w2_kg,
+				"t_warehouse": warehouse,
+				"is_finished_item": 1,
+				"custom_parent_item_group": group,
+				"custom_unit_weight": unit_weight,
+				"custom_length": flt(w2.get("length")),
+				"custom_width": flt(w2.get("width")),
+				"custom_thickness": flt(batch.custom_thickness),
+				"custom_sec_qty": flt(w2.get("sec_qty")),
+			},
+		],
+	})
+	# This entry moves a batch into its own off-cut. It is not a consumption, so the
+	# reservations standing on that batch must survive it -- they are re-pointed at the
+	# new batch below instead. The flag rides on the document object we submit, which is
+	# the same object the on_submit hook is handed.
+	se.flags.mfx_cut_sheet_repack = True
+	se.insert(ignore_permissions=True)
+	se.submit()
+
+	new_batch = frappe.db.get_value(
+		"Batch", {"reference_doctype": "Stock Entry", "reference_name": se.name}, "name"
+	)
+	if not new_batch:
+		raise ValueError("Repack %s created no batch for the balance" % se.name)
+
+	_repoint_reservations(batch_no, new_batch)
+	return se.name, new_batch
+
+
+def _repoint_reservations(old_batch, new_batch):
+	"""Move any live reservation from the emptied batch onto the one that now holds
+	the steel. Without this a row would go on reserving a batch with nothing in it --
+	the in-place version never needed it, because there the name never changed."""
+	moved = 0
+	for child_dt, batch_field in (
+		("Material Planning Material Mapping", "batch"),
+		("Material Planning Available Raw Material", "batch_no"),
+	):
+		for name in frappe.get_all(
+			child_dt, filters={batch_field: old_batch, "is_reserved": 1}, pluck="name"
+		):
+			frappe.db.set_value(child_dt, name, batch_field, new_batch, update_modified=False)
+			moved += 1
+	return moved
+
+
+def _cancel_cut_sheet_repack(se_name, old_batch):
+	"""Undo a balance repack when the transfer that triggered it is cancelled.
+
+	`old_batch` is passed in rather than read back off the entry: cancelling clears
+	batch_no from every row, so by the time this matters the document no longer says
+	which batch it emptied."""
+	if not se_name or not frappe.db.exists("Stock Entry", se_name):
+		return False
+	se = frappe.get_doc("Stock Entry", se_name)
+	if se.docstatus != 1:
+		return False
+
+	new_batch = frappe.db.get_value(
+		"Batch", {"reference_doctype": "Stock Entry", "reference_name": se.name}, "name"
+	)
+	if new_batch:
+		# Anything taken out of the balance batch since means this cannot be unwound
+		# quietly: say so here rather than let the cancellation fail on negative stock.
+		out = flt(frappe.db.sql(
+			"""
+			SELECT COALESCE(SUM(sbe.qty), 0)
+			FROM `tabSerial and Batch Entry` sbe
+			JOIN `tabSerial and Batch Bundle` sbb ON sbb.name = sbe.parent
+			WHERE sbe.batch_no = %s AND sbb.docstatus = 1 AND sbe.qty < 0
+			""",
+			new_batch,
+		)[0][0])
+		if out:
+			frappe.throw(
+				_("Balance batch {0} has already been used, so the cut cannot be undone. "
+				  "Reverse whatever consumed it first.").format(new_batch)
+			)
+		if old_batch:
+			_repoint_reservations(new_batch, old_batch)
+
+	se.cancel()
+	return True
 
 
 def _batch_total_kg_all_wh(batch_no):
@@ -512,6 +832,12 @@ def _release_material_planning_reservations(doc):
 	resolved, falls back to the legacy batch-wide behaviour on the Material Mapping table.
 	"""
 	if doc.stock_entry_type not in RESERVATION_RELEASING_SE_TYPES:
+		return
+
+	# A Cut Sheet balance repack empties a batch into its own off-cut. Nothing is
+	# consumed, so every reservation standing on it is still owed material --
+	# _repack_remnant_to_new_batch re-points them at the new batch itself.
+	if doc.flags.get("mfx_cut_sheet_repack"):
 		return
 
 	consumed_batches = _collect_consumed_batches(doc)

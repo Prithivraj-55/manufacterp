@@ -7,7 +7,8 @@
   "auto_purchase_section",
   "auto_purchase_from_material_planning",
   "cut_sheet_section",
-  "cut_sheet_tolerance_percent"
+  "cut_sheet_tolerance_percent",
+  "create_new_batch_for_cut_sheet_stock_entry"
  ],
  "fields": [
   {
@@ -19,7 +20,7 @@
    "fieldname": "auto_purchase_from_material_planning",
    "fieldtype": "Check",
    "label": "Auto Purchase from Material Planning",
-   "description": "When enabled, shows an Auto Purchase button on Material Planning to automatically create MR → PO → PR in one click for all unavailable items."
+   "description": "When enabled, shows an Auto Purchase button on Material Planning to automatically create MR \u2192 PO \u2192 PR in one click for all unavailable items."
   },
   {
    "fieldname": "cut_sheet_section",
@@ -32,6 +33,13 @@
    "label": "Cut Sheet Tolerance (%)",
    "default": "2",
    "description": "How far To Use (W1) + Balance (W2) may differ from the sheet being cut before a warning is shown. Cutting always loses a little to the saw, so a small gap is normal; the warning is there to catch a mis-typed dimension. Set 0 to warn on any difference at all. Never blocks a save."
+  },
+  {
+   "default": "0",
+   "description": "Off: the sheet's own batch is rewritten to the Balance (W2) dimensions once the cut has been transferred -- same batch, same name, new size. On: the batch is never rewritten -- a Repack Stock Entry empties it and creates a NEW batch carrying the W2 dimensions, Sec Qty and Kg, so documents already issued against the original still read true.",
+   "fieldname": "create_new_batch_for_cut_sheet_stock_entry",
+   "fieldtype": "Check",
+   "label": "Create New Batch for Cut Sheet Stock Entry"
   }
  ],
  "issingle": 1,

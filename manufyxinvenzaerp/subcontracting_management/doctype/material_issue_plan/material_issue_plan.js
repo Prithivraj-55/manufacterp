@@ -2053,13 +2053,41 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 			dialog.set_value("length", flt(d.custom_length));
 			dialog.set_value("width", flt(d.custom_width));
 			dialog.set_value("thickness", flt(d.custom_thickness));
-			_calc_new_qty();
+			_refresh_alloc_figures();
 		});
 	}
 	dialog.fields_dict.new_batch_no.df.onchange = () => _fetch_batch_dims(dialog.get_value("new_batch_no"));
 
+	// Weight of ONE piece of the chosen batch, in the row's own item group. The
+	// inverse of _calc_new_qty: given a weight, how many pieces is that.
+	function _kg_per_piece() {
+		if (!selected_row) return 0;
+		let g = selected_row.parent_item_group;
+		let uw = flt(selected_row.unit_weight);
+		let l = flt(dialog.get_value("length"));
+		let w = flt(dialog.get_value("width"));
+		let t = flt(dialog.get_value("thickness"));
+		if (g === "Structurals" && l && uw) return (l / 1000) * uw;
+		if (g === "Plates" && l && w && t && uw) return (l / 1000) * (w / 1000) * t * uw;
+		return 0;
+	}
+
+	// Which figure is typed and which is worked out depends on the checkbox, so both
+	// paths run through here rather than each caller deciding for itself.
+	function _refresh_alloc_figures() {
+		if (dialog.get_value("reserve_without_dimensions")) {
+			let kg = flt(selected_row && selected_row.reqd_kg);
+			let per = _kg_per_piece();
+			dialog.set_value("calculated_qty", flt(kg, 3));
+			dialog.set_value("sec_qty", per ? flt(kg / per, 3) : 0);
+		} else {
+			_calc_new_qty();
+		}
+	}
+
 	function _calc_new_qty() {
 		if (!selected_row) return;
+		if (dialog.get_value("reserve_without_dimensions")) return;
 		let g = selected_row.parent_item_group;
 		let uw = flt(selected_row.unit_weight);
 		let l = flt(dialog.get_value("length"));
@@ -2082,9 +2110,21 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 	// Sec Nos is derived from it server-side (_apply_rwd_fractional_nos), left fractional
 	// until someone rounds it to whole pieces at transfer time.
 	function _toggle_rwd(checked) {
+		// Ticked, the two figures swap roles: the row reserves its Required Qty in Kg
+		// and Sec Nos is that weight expressed in pieces -- shown here rather than left
+		// blank until the server works it out, so the fraction is visible before
+		// anything is reserved. Untick it and Sec Nos is typed again, weight follows.
 		dialog.fields_dict.sec_qty.df.read_only = checked ? 1 : 0;
+		dialog.fields_dict.sec_qty.df.description = checked
+			? __("Worked out from the Required Qty -- fractional on purpose; whole pieces are settled at transfer time.")
+			: "";
 		dialog.fields_dict.sec_qty.refresh();
-		if (checked) dialog.set_value("sec_qty", 0);
+		dialog.fields_dict.calculated_qty.df.description = checked
+			? __("The row's own Required Qty. This is what gets reserved.")
+			: __("Worked out from Sec Qty (Nos) and the batch's dimensions.");
+		dialog.fields_dict.calculated_qty.refresh();
+		if (!checked) dialog.set_value("sec_qty", 0);
+		_refresh_alloc_figures();
 	}
 	dialog.fields_dict.reserve_without_dimensions.df.onchange = () =>
 		_toggle_rwd(dialog.get_value("reserve_without_dimensions"));

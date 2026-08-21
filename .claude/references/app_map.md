@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-21 00:22:13_
+_Generated: 2026-08-21 09:59:26_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-08-21 00:22:13_
 
 ## Python files
 
-_Total: 236_
+_Total: 239_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -196,6 +196,7 @@ _Total: 236_
 - tests/test_po_edge_cases.py
 - tests/test_purchase_order_creation.py
 - tests/test_unavailable_actions.py
+- tests/verify_auto_purchase_gated.py
 - tests/verify_batch_remark_isolation.py
 - tests/verify_batch_remarks.py
 - tests/verify_batch_sec_qty_atomic.py
@@ -214,6 +215,7 @@ _Total: 236_
 - tests/verify_cut_sheet_chain.py
 - tests/verify_cut_sheet_delete_guards.py
 - tests/verify_cut_sheet_doctype.py
+- tests/verify_cut_sheet_new_batch.py
 - tests/verify_cut_sheet_w2_derived.py
 - tests/verify_drawing_import_savepoint.py
 - tests/verify_drawing_weight_cascade2.py
@@ -248,6 +250,7 @@ _Total: 236_
 - tests/verify_reservation_permission_guard.py
 - tests/verify_reservation_release_on_transfer.py
 - tests/verify_return_excess_dialog.py
+- tests/verify_rwd_two_way.py
 - tests/verify_se_duno_propagation.py
 - tests/verify_so_calculated_weight.py
 - tests/verify_soe_consumption_weight_kg.py
@@ -962,31 +965,38 @@ Functions:
 
 ### production_management/stock_entry.py
 Functions:
-  - 10:validate_stock_entry:
-  - 48:_sync_batch_remarks:
-  - 66:_copy_from_material_request_item:
-  - 78:on_submit_stock_entry:
-  - 194:_reduce_batch_sec_qty:
-  - 223:_resize_cut_sheet_batches:
-  - 230:_restore_cut_sheet_batches:
-  - 239:_apply_cut_sheet_w2:
-  - 286:_reapply_cut_sheet_batch_sizes:
-  - 309:_apply_cut_sheet_batch_size:
-  - 378:_batch_total_kg_all_wh:
-  - 391:_populate_manufacture_sec_qty:
-  - 413:_collect_consumed_batches:
-  - 461:_linked_material_plannings:
-  - 504:_release_material_planning_reservations:
-  - 573:_refresh_linked_mip_weight:
-  - 604:on_cancel_stock_entry:
-  - 633:_cancelled_row_batch_no:
-  - 672:_restore_batch_sec_qty:
-  - 692:_restore_material_planning_reservations:
-  - 749:_update_sco_transferred_weight:
-  - 860:_update_sco_cnc_weight:
-  - 908:_update_wo_transferred_weight:
-  - 951:_update_wo_cnc_weight:
-  - 998:_calc_qty:
+  - 11:validate_stock_entry:
+  - 49:_sync_batch_remarks:
+  - 67:_copy_from_material_request_item:
+  - 79:on_submit_stock_entry:
+  - 195:_reduce_batch_sec_qty:
+  - 224:_resize_cut_sheet_batches:
+  - 231:_restore_cut_sheet_batches:
+  - 240:_apply_cut_sheet_w2:
+  - 289:_reapply_cut_sheet_batch_sizes:
+  - 312:_apply_cut_sheet_batch_size:
+  - 386:_apply_cut_sheet_w2_as_new_batch:
+  - 447:_apply_cut_sheet_balance_as_new_batch:
+  - 498:_cut_sheet_creates_new_batch:
+  - 511:_batch_stock_by_warehouse:
+  - 531:_repack_remnant_to_new_batch:
+  - 642:_repoint_reservations:
+  - 659:_cancel_cut_sheet_repack:
+  - 698:_batch_total_kg_all_wh:
+  - 711:_populate_manufacture_sec_qty:
+  - 733:_collect_consumed_batches:
+  - 781:_linked_material_plannings:
+  - 824:_release_material_planning_reservations:
+  - 899:_refresh_linked_mip_weight:
+  - 930:on_cancel_stock_entry:
+  - 959:_cancelled_row_batch_no:
+  - 998:_restore_batch_sec_qty:
+  - 1018:_restore_material_planning_reservations:
+  - 1075:_update_sco_transferred_weight:
+  - 1186:_update_sco_cnc_weight:
+  - 1234:_update_wo_transferred_weight:
+  - 1277:_update_wo_cnc_weight:
+  - 1324:_calc_qty:
 
 ### production_plan_management/production_plan.py
 Functions:
@@ -1300,6 +1310,13 @@ Functions:
   - 29:_mock_sbb:
   - 38:_ensure_batch_items:
 
+### tests/verify_auto_purchase_gated.py
+Functions:
+  - 30:check:
+  - 36:_set_flag:
+  - 41:_call:
+  - 50:run:
+
 ### tests/verify_batch_remark_isolation.py
 Functions:
   - 27:check:
@@ -1397,6 +1414,17 @@ Functions:
   - 38:_throws:
   - 46:plate_kg:
   - 50:run:
+
+### tests/verify_cut_sheet_new_batch.py
+Functions:
+  - 50:check:
+  - 56:_company:
+  - 60:_warehouse:
+  - 69:_ensure_item:
+  - 94:_stock:
+  - 98:_dims:
+  - 105:_make_entry:
+  - 115:run:
 
 ### tests/verify_cut_sheet_w2_derived.py
 Functions:
@@ -1556,6 +1584,12 @@ Functions:
   - 29:check:
   - 35:_dialog_source:
   - 47:run:
+
+### tests/verify_rwd_two_way.py
+Functions:
+  - 31:check:
+  - 37:_js:
+  - 43:run:
 
 ### tests/verify_se_duno_propagation.py
 Functions:
@@ -1741,7 +1775,7 @@ Functions:
 - `production_management/doctype/material_planning/material_planning.py:4167` — `update_so_difference_kg`
 - `production_management/doctype/material_planning/material_planning.py:4197` — `auto_suggest_consolidate_dimensions`
 - `production_management/doctype/material_planning/material_planning.py:4285` — `auto_purchase_from_mp`
-- `production_management/doctype/material_planning/material_planning.py:4459` — `complete_batch_mapping`
+- `production_management/doctype/material_planning/material_planning.py:4474` — `complete_batch_mapping`
 - `production_management/doctype/cut_sheet/cut_sheet.py:259` — `suggest_w1_sec_qty`
 - `production_management/doctype/cut_sheet/cut_sheet.py:300` — `get_available_cut_sheets`
 - `production_management/doctype/cut_sheet/cut_sheet.py:324` — `get_cut_sheet_for_batch`
