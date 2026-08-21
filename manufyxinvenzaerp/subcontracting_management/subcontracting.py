@@ -1856,6 +1856,20 @@ def _get_mp_excess_by_duno(mp_name):
     return excess
 
 
+def _sec_qty_for_reserved(full_sec_qty, reserved_qty, full_qty):
+    """The piece count that goes with the weight still reserved.
+
+    A row that has been partly transferred keeps the remainder of its reservation,
+    so the transfer list must offer the piece count that goes with THAT weight --
+    not the row's original count, which would offer four pieces against half a
+    row's worth of steel. Where nothing has been taken the two are the same and
+    this changes nothing."""
+    full_sec_qty, reserved_qty, full_qty = flt(full_sec_qty), flt(reserved_qty), flt(full_qty)
+    if full_qty <= 0 or full_sec_qty <= 0 or reserved_qty >= full_qty:
+        return flt(full_sec_qty, 3)
+    return flt(full_sec_qty * (reserved_qty / full_qty), 3)
+
+
 def _get_mp_reserved_batches(mp_name, source_warehouse, supplier_warehouse, duno_filter=None):
     """Return SE item dicts for reserved batches in a Material Planning document.
     Includes sec_qty, dimensions, and unit_weight for each SE line.
@@ -1919,7 +1933,7 @@ def _get_mp_reserved_batches(mp_name, source_warehouse, supplier_warehouse, duno
             "uom": _stock_uom(se_item_code),
             "s_warehouse": source_warehouse,
             "t_warehouse": supplier_warehouse,
-            "custom_sec_qty": flt(r.batch_sec_qty, 3),
+            "custom_sec_qty": _sec_qty_for_reserved(r.batch_sec_qty, qty, r.batch_calc_qty),
             "custom_sec_uom": r.sec_uom or "",
             "custom_length": flt(r.batch_length, 3),
             "custom_width": flt(r.batch_width, 3),
@@ -1937,7 +1951,7 @@ def _get_mp_reserved_batches(mp_name, source_warehouse, supplier_warehouse, duno
         "Material Planning Available Raw Material",
         filters=arm_filters,
         fields=[
-            "item_code", "batch_no", "reserved_qty", "available_qty",
+            "item_code", "batch_no", "reserved_qty", "available_qty", "required_qty",
             "sec_qty", "sec_uom", "length", "width", "thickness", "parent_item_group", "cnc_process",
         ],
     )
@@ -1953,7 +1967,7 @@ def _get_mp_reserved_batches(mp_name, source_warehouse, supplier_warehouse, duno
                 "uom": _stock_uom(r.item_code),
                 "s_warehouse": source_warehouse,
                 "t_warehouse": supplier_warehouse,
-                "custom_sec_qty": flt(r.sec_qty, 3),
+                "custom_sec_qty": _sec_qty_for_reserved(r.sec_qty, qty, r.required_qty),
                 "custom_sec_uom": r.sec_uom or "",
                 "custom_length": flt(r.length, 3),
                 "custom_width": flt(r.width, 3),

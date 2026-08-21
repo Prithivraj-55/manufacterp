@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-21 12:56:31_
+_Generated: 2026-08-21 13:07:26_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-08-21 12:56:31_
 
 ## Python files
 
-_Total: 244_
+_Total: 245_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -242,6 +242,7 @@ _Total: 244_
 - tests/verify_mp_inspection_gate.py
 - tests/verify_mp_multi_mr_guard_message.py
 - tests/verify_mp_view_all_filters.py
+- tests/verify_partial_transfer_reservation.py
 - tests/verify_per_row_unreserve.py
 - tests/verify_pp_naming.py
 - tests/verify_pr_allocation_single_table.py
@@ -997,19 +998,22 @@ Functions:
   - 673:_cancel_cut_sheet_repack:
   - 712:_batch_total_kg_all_wh:
   - 725:_populate_manufacture_sec_qty:
-  - 747:_collect_consumed_batches:
-  - 795:_linked_material_plannings:
-  - 838:_release_material_planning_reservations:
-  - 913:_refresh_linked_mip_weight:
-  - 944:on_cancel_stock_entry:
-  - 973:_cancelled_row_batch_no:
-  - 1012:_restore_batch_sec_qty:
-  - 1032:_restore_material_planning_reservations:
-  - 1089:_update_sco_transferred_weight:
-  - 1200:_update_sco_cnc_weight:
-  - 1248:_update_wo_transferred_weight:
-  - 1291:_update_wo_cnc_weight:
-  - 1338:_calc_qty:
+  - 762:_linked_material_plannings:
+  - 808:_consumed_qty_by_batch:
+  - 846:_reservation_rows:
+  - 861:_release_rows_by_qty:
+  - 899:_restore_rows_by_qty:
+  - 940:_release_material_planning_reservations:
+  - 1007:_refresh_linked_mip_weight:
+  - 1038:on_cancel_stock_entry:
+  - 1067:_cancelled_row_batch_no:
+  - 1106:_restore_batch_sec_qty:
+  - 1126:_restore_material_planning_reservations:
+  - 1159:_update_sco_transferred_weight:
+  - 1270:_update_sco_cnc_weight:
+  - 1318:_update_wo_transferred_weight:
+  - 1361:_update_wo_cnc_weight:
+  - 1408:_calc_qty:
 
 ### production_plan_management/production_plan.py
 Functions:
@@ -1213,12 +1217,13 @@ Functions:
   - 1728:_get_mp_drawing_weights_by_duno:
   - 1754:_get_mp_mapped_weight_by_duno:
   - 1836:_get_mp_excess_by_duno:
-  - 1859:_get_mp_reserved_batches:
-  - 1969:_get_pp_planned_qty:
-  - 1984:backfill_drawing_item_qty:
-  - 2004:_get_supplier_wh_consumption_items:
-  - 2085:_build_jc_drawing_rows:
-  - 2118:_populate_jcs_for_wo:
+  - 1859:_sec_qty_for_reserved:
+  - 1873:_get_mp_reserved_batches:
+  - 1983:_get_pp_planned_qty:
+  - 1998:backfill_drawing_item_qty:
+  - 2018:_get_supplier_wh_consumption_items:
+  - 2099:_build_jc_drawing_rows:
+  - 2132:_populate_jcs_for_wo:
 
 ### tests/create_full_test_entry.py
 Functions:
@@ -1556,6 +1561,14 @@ Functions:
   - 42:_js:
   - 51:run:
 
+### tests/verify_partial_transfer_reservation.py
+Functions:
+  - 37:check:
+  - 43:_warehouse:
+  - 50:_entry:
+  - 60:_held:
+  - 65:run:
+
 ### tests/verify_per_row_unreserve.py
 Functions:
   - 15:run:
@@ -1750,12 +1763,12 @@ Functions:
 - `subcontracting_management/subcontracting.py:687` — `get_soe_summary`
 - `subcontracting_management/subcontracting.py:733` — `create_return_stock_entry`
 - `subcontracting_management/subcontracting.py:791` — `create_finished_goods_entry`
-- `subcontracting_management/subcontracting.py:1984` — `backfill_drawing_item_qty`
-- `subcontracting_management/subcontracting.py:2069` — ``
-- `subcontracting_management/subcontracting.py:2072` — ``
-- `subcontracting_management/subcontracting.py:2075` — ``
-- `subcontracting_management/subcontracting.py:2078` — ``
-- `subcontracting_management/subcontracting.py:2081` — ``
+- `subcontracting_management/subcontracting.py:1998` — `backfill_drawing_item_qty`
+- `subcontracting_management/subcontracting.py:2083` — ``
+- `subcontracting_management/subcontracting.py:2086` — ``
+- `subcontracting_management/subcontracting.py:2089` — ``
+- `subcontracting_management/subcontracting.py:2092` — ``
+- `subcontracting_management/subcontracting.py:2095` — ``
 - `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:53` — `create_from_subcontracting_order`
 - `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:72` — ``
 - `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:75` — `populate_from_production_plan`

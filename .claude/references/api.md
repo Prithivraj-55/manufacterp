@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-08-21 12:56:31_
+_Generated: 2026-08-21 13:07:26_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -187,12 +187,12 @@ All `@frappe.whitelist()` methods. Call from JS:
 | Method | Line |
 |--------|------|
 | `create_sco_and_mip_from_production_plan` | 189 |
-| `backfill_drawing_item_qty` | 1984 |
-| `` | 2069 |
-| `` | 2072 |
-| `` | 2075 |
-| `` | 2078 |
-| `` | 2081 |
+| `backfill_drawing_item_qty` | 1998 |
+| `` | 2083 |
+| `` | 2086 |
+| `` | 2089 |
+| `` | 2092 |
+| `` | 2095 |
 | `delete_sco_and_mip_for_production_plan` | 214 |
 | `create_sco_from_production_plan` | 26 |
 | `` | 294 |

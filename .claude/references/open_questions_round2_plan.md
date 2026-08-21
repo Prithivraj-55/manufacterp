@@ -199,7 +199,7 @@ onto a 9000 mm bar.
 
 ---
 
-## Item F — M3+M4: partial transfer should release only what moved  `[ ]`
+## Item F — M3+M4: partial transfer should release only what moved  `[x]`
 
 `_release_material_planning_reservations` (`stock_entry.py:504`) clears `is_reserved`,
 `reserved_qty` and `shortfall_qty` outright for every Material Planning row holding a
@@ -217,8 +217,29 @@ only when it reaches zero.
   has been transferred" from the reservation being gone; both become quantity-aware, so
   a part-transferred row correctly stays in the pending list with its remainder.
 
-One to two days. The largest of the audit items, and the one with the most ways to be
-subtly wrong, so it gets its own tests before and after.
+**Done.** A row now gives up only what left the warehouse, keeps the remainder, and is
+released outright only when the remainder reaches zero. Where several rows share one
+batch they give it up one at a time in document order.
+
+Cancelling unwinds in the **opposite** order -- releasing fills from the front, so
+unwinding from the back returns the steel to the rows that gave it up. Cancelling the
+most recent transfer lands exactly where it started, to the kilo and on the right rows.
+Named limitation: cancelling an *older* transfer while a later one still stands is
+still right to the kilo, but the total can come back on the wrong row of a shared
+batch. Making that exact too would mean recording what every row gave up to every
+entry; the aggregate is what free stock is computed from, so the trade is named rather
+than paid for.
+
+The pending-transfer list needed no change -- `_get_mp_reserved_batches` already offers
+`reserved_qty`, which is now the remainder. Its Sec Qty did: it offered the row's full
+piece count against a part-transferred weight, so `_sec_qty_for_reserved` scales it.
+
+`tests/verify_partial_transfer_reservation.py` -- 11 checks, including the round trip
+back to the starting 120 Kg. Confirmed it discriminates: on the old code a 30 Kg move
+against 120 Kg reserved wiped both rows to (0, 0).
+
+`production_management/stock_entry.py` (`_consumed_qty_by_batch`, `_reservation_rows`,
+`_release_rows_by_qty`, `_restore_rows_by_qty`), `subcontracting_management/subcontracting.py`
 
 ---
 

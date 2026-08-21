@@ -744,39 +744,6 @@ def _populate_manufacture_sec_qty(doc):
 		row.custom_sec_qty = flt(total_sec * (flt(row.qty) / total_kg), 3)
 
 
-def _collect_consumed_batches(doc):
-	"""
-	Collect batch_nos consumed by this SE.
-	v15 SBB system: batch_no on SE Detail may be NULL (or cleared on cancel).
-	Always also look up SBBs linked via voucher_no (any docstatus — on cancel they're docstatus=2).
-	"""
-	batches = set()
-	for row in doc.items:
-		if row.batch_no and not row.get("is_finished_item"):
-			batches.add(row.batch_no)
-
-	# Always supplement from SBBs linked to this SE — handles v15 SBB-tracked batches
-	# and the case where batch_no is cleared on SE Detail after cancel.
-	voucher_no = getattr(doc, "name", None)
-	sbb_list = frappe.get_all(
-		"Serial and Batch Bundle",
-		filters={"voucher_no": voucher_no} if voucher_no else {"name": "__nonexistent__"},
-		fields=["name"],
-	) if voucher_no else []
-	if sbb_list:
-		sbb_names = [d.name for d in sbb_list]
-		sbe_rows = frappe.get_all(
-			"Serial and Batch Entry",
-			filters={"parent": ["in", sbb_names]},
-			fields=["batch_no"],
-		)
-		for r in sbe_rows:
-			if r.batch_no:
-				batches.add(r.batch_no)
-
-	return batches
-
-
 # Stock Entry types that move reserved material out of the warehouse it was reserved
 # in, and therefore release (on submit) or restore (on cancel) the Material Planning
 # reservations behind it. One constant so the two stay in step -- a type released on
@@ -835,6 +802,141 @@ def _linked_material_plannings(doc):
 	return mps
 
 
+_RESERVATION_EPSILON = 0.001
+
+
+def _consumed_qty_by_batch(doc):
+	"""How much of each batch this entry moved OUT, batch by batch.
+
+	Only the outward side counts. A transfer carries the same batch twice -- out of
+	the source warehouse and into the target -- and summing both would net to nothing,
+	so the bundles are filtered to Outward. That is also the side the reservation was
+	held against: the material stopped being available in the warehouse it was
+	reserved in, which is the whole reason the reservation moves.
+
+	Falls back to the rows' own batch_no where no bundle exists, for entries simple
+	enough not to have one. Cancelled bundles are included deliberately -- on cancel
+	that is the only record left of what moved."""
+	moved = {}
+	voucher_no = getattr(doc, "name", None)
+	if voucher_no:
+		for r in frappe.db.sql(
+			"""
+			SELECT sbe.batch_no AS batch_no, COALESCE(SUM(ABS(sbe.qty)), 0) AS qty
+			FROM `tabSerial and Batch Entry` sbe
+			JOIN `tabSerial and Batch Bundle` sbb ON sbb.name = sbe.parent
+			WHERE sbb.voucher_no = %s
+			  AND sbb.type_of_transaction = 'Outward'
+			  AND sbe.batch_no IS NOT NULL
+			GROUP BY sbe.batch_no
+			""",
+			voucher_no,
+			as_dict=True,
+		):
+			moved[r.batch_no] = flt(flt(moved.get(r.batch_no, 0)) + flt(r.qty), 3)
+
+	if not moved:
+		for row in doc.items:
+			if row.batch_no and not row.get("is_finished_item") and row.get("s_warehouse"):
+				moved[row.batch_no] = flt(flt(moved.get(row.batch_no, 0)) + flt(row.qty), 3)
+
+	return moved
+
+
+def _reservation_rows(child_dt, batch_field, batch_no, extra_filters, fields):
+	"""Rows reserving one batch, in the order they will give it up.
+
+	Document order, then row order -- the same sequential rule used when a
+	consolidated receipt is shared out. It matters that it is an order at all: spread
+	a partial transfer proportionally across every row and each one is left holding a
+	fraction it can never transfer cleanly, where filling one row at a time leaves
+	whole reservations behind and the shortfall lands on the last."""
+	filters = dict(extra_filters or {})
+	filters[batch_field] = batch_no
+	return frappe.get_all(
+		child_dt, filters=filters, fields=fields, order_by="parent asc, idx asc"
+	)
+
+
+def _release_rows_by_qty(child_dt, rows, moved_qty, se_is_cnc_transfer):
+	"""Take `moved_qty` Kg off these rows' reservations, one row at a time.
+
+	A row gives up only what actually left. Where that covers its whole reservation
+	the row is released outright; where it covers part, the row keeps the remainder
+	and stays reserved, so a half-finished transfer no longer hands the other half
+	back to the free pool.
+
+	Returns (rows_released, rows_reduced) for the caller to report."""
+	cleared = {"is_reserved": 0, "reserved_qty": 0, "shortfall_qty": 0, "reserved_on": None}
+	remaining = flt(moved_qty, 3)
+	released = reduced = 0
+
+	for r in rows:
+		if r.get("cnc_process") and not se_is_cnc_transfer:
+			continue  # preserve CNC reservations when submitting a non-CNC SE
+		held = flt(r.get("reserved_qty"), 3)
+		if held <= _RESERVATION_EPSILON:
+			# Reserved but holding nothing -- there is no quantity to reduce, so the
+			# flag is simply cleared and nothing is charged against what moved.
+			frappe.db.set_value(child_dt, r.name, cleared, update_modified=False)
+			released += 1
+			continue
+		if remaining <= _RESERVATION_EPSILON:
+			break
+		take = min(held, remaining)
+		left = flt(held - take, 3)
+		if left <= _RESERVATION_EPSILON:
+			frappe.db.set_value(child_dt, r.name, cleared, update_modified=False)
+			released += 1
+		else:
+			frappe.db.set_value(child_dt, r.name, {"reserved_qty": left}, update_modified=False)
+			reduced += 1
+		remaining = flt(remaining - take, 3)
+
+	return released, reduced
+
+
+def _restore_rows_by_qty(child_dt, rows, moved_qty, qty_field):
+	"""Put `moved_qty` Kg back, filling each row up to what it originally needed.
+
+	The mirror image of _release_rows_by_qty, and deliberately in the OPPOSITE order:
+	releasing fills from the front, so unwinding from the back returns the steel to
+	the rows that gave it up, in the order they gave it. Cancelling the most recent
+	transfer -- much the commonest case -- then lands exactly where it started.
+
+	Cancel an older transfer while a later one still stands and the total is still
+	right to the kilo, but it can come back on the wrong row of a shared batch. Making
+	that exact as well would mean recording what every row gave up to every entry;
+	the aggregate is what the free-stock figures are computed from, so the trade is
+	worth naming rather than paying for.
+
+	Restoring each row to its full requirement regardless -- which is what this used
+	to do -- gave back more than was ever released whenever two transfers had been
+	made and only one was cancelled."""
+	remaining = flt(moved_qty, 3)
+	restored = 0
+
+	for r in reversed(rows):
+		if remaining <= _RESERVATION_EPSILON:
+			break
+		full = flt(r.get(qty_field), 3)
+		held = flt(r.get("reserved_qty"), 3) if r.get("is_reserved") else 0.0
+		room = flt(full - held, 3)
+		if room <= _RESERVATION_EPSILON:
+			continue
+		give = min(room, remaining)
+		frappe.db.set_value(
+			child_dt, r.name,
+			{"is_reserved": 1, "reserved_qty": flt(held + give, 3),
+			 "shortfall_qty": 0, "reserved_on": now()},
+			update_modified=False,
+		)
+		remaining = flt(remaining - give, 3)
+		restored += 1
+
+	return restored
+
+
 def _release_material_planning_reservations(doc):
 	"""
 	After a consumption Stock Entry is submitted, clear is_reserved on the Material Planning
@@ -854,12 +956,12 @@ def _release_material_planning_reservations(doc):
 	if doc.flags.get("mfx_cut_sheet_repack"):
 		return
 
-	consumed_batches = _collect_consumed_batches(doc)
-	if not consumed_batches:
+	moved_by_batch = _consumed_qty_by_batch(doc)
+	if not moved_by_batch:
 		return
 
 	linked_mps = _linked_material_plannings(doc)
-	cleared = {"is_reserved": 0, "reserved_qty": 0, "shortfall_qty": 0, "reserved_on": None}
+	fields = ["name", "idx", "parent", "cnc_process", "reserved_qty"]
 
 	if linked_mps:
 		# When a primary (non-CNC) SE is submitted, preserve CNC row reservations so
@@ -875,39 +977,31 @@ def _release_material_planning_reservations(doc):
 		)
 
 		# Scoped release: only this consumption's own MP reservations, on both tables.
-		for child_dt, batch_field in (
-			("Material Planning Material Mapping", "batch"),
-			("Material Planning Available Raw Material", "batch_no"),
-		):
-			rows = frappe.get_all(
-				child_dt,
-				filters={
-					batch_field: ["in", list(consumed_batches)],
-					"parent": ["in", list(linked_mps)],
-					"is_reserved": 1,
-				},
-				fields=["name", "cnc_process"],
-			)
-			for r in rows:
-				if r.cnc_process and not se_is_cnc_transfer:
-					continue  # preserve CNC reservations when submitting a non-CNC SE
-				frappe.db.set_value(child_dt, r.name, cleared, update_modified=False)
+		for batch_no, moved in moved_by_batch.items():
+			for child_dt, batch_field in (
+				("Material Planning Material Mapping", "batch"),
+				("Material Planning Available Raw Material", "batch_no"),
+			):
+				rows = _reservation_rows(
+					child_dt, batch_field, batch_no,
+					{"parent": ["in", list(linked_mps)], "is_reserved": 1}, fields,
+				)
+				if rows:
+					_release_rows_by_qty(child_dt, rows, moved, se_is_cnc_transfer)
 		return
 
 	# Fallback (no Production Plan link): batch-wide release across BOTH tables.
 	# It used to cover Material Mapping only, so an exact-match reservation whose entry
 	# could not be traced to a plan stayed held forever, and the batch's free qty was
 	# under-reported to every later plan even though its stock had gone.
-	for child_dt, batch_field in (
-		("Material Planning Material Mapping", "batch"),
-		("Material Planning Available Raw Material", "batch_no"),
-	):
-		for name in frappe.get_all(
-			child_dt,
-			filters={batch_field: ["in", list(consumed_batches)], "is_reserved": 1},
-			pluck="name",
+	for batch_no, moved in moved_by_batch.items():
+		for child_dt, batch_field in (
+			("Material Planning Material Mapping", "batch"),
+			("Material Planning Available Raw Material", "batch_no"),
 		):
-			frappe.db.set_value(child_dt, name, cleared, update_modified=False)
+			rows = _reservation_rows(child_dt, batch_field, batch_no, {"is_reserved": 1}, fields)
+			if rows:
+				_release_rows_by_qty(child_dt, rows, moved, True)
 
 
 def _refresh_linked_mip_weight(sco_ref=None, wo_ref=None):
@@ -1039,51 +1133,27 @@ def _restore_material_planning_reservations(doc):
 	if doc.stock_entry_type not in RESERVATION_RELEASING_SE_TYPES:
 		return
 
-	consumed_batches = _collect_consumed_batches(doc)
-	if not consumed_batches:
+	moved_by_batch = _consumed_qty_by_batch(doc)
+	if not moved_by_batch:
 		return
 
 	linked_mps = _linked_material_plannings(doc)
 
-	def _reserve(child_dt, name, qty):
-		frappe.db.set_value(
-			child_dt, name,
-			{"is_reserved": 1, "reserved_qty": flt(qty), "shortfall_qty": 0, "reserved_on": now()},
-			update_modified=False,
-		)
-
-	if linked_mps:
-		# Scoped restore on both tables (qty source differs per child table).
+	# Rows already holding part of their reservation are included, not just released
+	# ones: a partial transfer left them reserved for the remainder, and cancelling it
+	# has to top them back up rather than skip over them.
+	for batch_no, moved in moved_by_batch.items():
 		for child_dt, batch_field, qty_field in (
 			("Material Planning Material Mapping", "batch", "qty"),
 			("Material Planning Available Raw Material", "batch_no", "required_qty"),
 		):
-			rows = frappe.get_all(
-				child_dt,
-				filters={
-					batch_field: ["in", list(consumed_batches)],
-					"parent": ["in", list(linked_mps)],
-					"is_reserved": 0,
-				},
-				fields=["name", qty_field],
+			extra = {"parent": ["in", list(linked_mps)]} if linked_mps else {}
+			rows = _reservation_rows(
+				child_dt, batch_field, batch_no, extra,
+				["name", "idx", "parent", "is_reserved", "reserved_qty", qty_field],
 			)
-			for r in rows:
-				_reserve(child_dt, r.name, r.get(qty_field))
-		return
-
-	# Fallback (no Production Plan link): batch-wide restore across BOTH tables, mirroring
-	# the release fallback exactly -- releasing on submit without restoring on cancel
-	# would strand the reservation.
-	for child_dt, batch_field, qty_field in (
-		("Material Planning Material Mapping", "batch", "qty"),
-		("Material Planning Available Raw Material", "batch_no", "required_qty"),
-	):
-		for r in frappe.get_all(
-			child_dt,
-			filters={batch_field: ["in", list(consumed_batches)], "is_reserved": 0},
-			fields=["name", qty_field],
-		):
-			_reserve(child_dt, r.name, r.get(qty_field))
+			if rows:
+				_restore_rows_by_qty(child_dt, rows, moved, qty_field)
 
 
 def _update_sco_transferred_weight(sco_name):
