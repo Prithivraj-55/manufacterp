@@ -691,12 +691,12 @@ def _cut_sheet_reference(mp_row):
         return {}
     return {
         "cut_sheet_ref": ref,
-        "cs_use_length": flt(cs.get("w1_length")),
-        "cs_use_width": flt(cs.get("w1_width")),
-        "cs_use_sec_qty": flt(cs.get("w1_sec_qty")),
-        "cs_balance_length": flt(cs.get("w2_length")),
-        "cs_balance_width": flt(cs.get("w2_width")),
-        "cs_balance_sec_qty": flt(cs.get("w2_sec_qty")),
+        "use_length": flt(cs.get("w1_length")),
+        "use_width": flt(cs.get("w1_width")),
+        "use_sec_qty": flt(cs.get("w1_sec_qty")),
+        "balance_length": flt(cs.get("w2_length")),
+        "balance_width": flt(cs.get("w2_width")),
+        "balance_sec_qty": flt(cs.get("w2_sec_qty")),
     }
 
 

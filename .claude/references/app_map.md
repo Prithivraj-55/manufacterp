@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-21 13:44:38_
+_Generated: 2026-08-21 14:37:02_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-08-21 13:44:38_
 
 ## Python files
 
-_Total: 241_
+_Total: 242_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -217,6 +217,7 @@ _Total: 241_
 - tests/verify_create_operation_and_inspection_gate.py
 - tests/verify_cut_sheet_delete_guards.py
 - tests/verify_cut_sheet_doctype.py
+- tests/verify_cut_sheet_fields_consistent.py
 - tests/verify_cut_sheet_new_batch.py
 - tests/verify_cut_sheet_w2_derived.py
 - tests/verify_decision_log.py
@@ -1420,6 +1421,11 @@ Functions:
   - 46:plate_kg:
   - 50:run:
 
+### tests/verify_cut_sheet_fields_consistent.py
+Functions:
+  - 47:check:
+  - 53:run:
+
 ### tests/verify_cut_sheet_new_batch.py
 Functions:
   - 50:check:
@@ -1506,10 +1512,10 @@ Functions:
 
 ### tests/verify_mip_raw_material_slimmed.py
 Functions:
-  - 46:check:
-  - 52:_source:
-  - 56:_row_queries:
-  - 70:run:
+  - 49:check:
+  - 55:_source:
+  - 59:_row_queries:
+  - 73:run:
 
 ### tests/verify_mixed_sco_regression.py
 Functions:

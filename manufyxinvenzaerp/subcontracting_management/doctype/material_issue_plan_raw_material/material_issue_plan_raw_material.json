@@ -48,15 +48,16 @@
   "is_unavailable",
   "col_break_flags_2",
   "cnc_process",
-  "section_cut_sheet_ref",
+  "section_cut_sheet",
   "cut_sheet_ref",
-  "cs_use_length",
-  "cs_use_width",
-  "cs_use_sec_qty",
-  "col_break_cut_sheet_ref",
-  "cs_balance_length",
-  "cs_balance_width",
-  "cs_balance_sec_qty"
+  "col_break_cut_sheet_use",
+  "use_length",
+  "use_width",
+  "use_sec_qty",
+  "col_break_cut_sheet_balance",
+  "balance_length",
+  "balance_width",
+  "balance_sec_qty"
  ],
  "fields": [
   {
@@ -338,55 +339,62 @@
    "read_only": 1
   },
   {
-   "fieldname": "section_cut_sheet_ref",
+   "fieldname": "section_cut_sheet",
    "fieldtype": "Section Break",
-   "label": "Cut Sheet (reference)",
+   "label": "Cut Sheet",
    "depends_on": "eval:doc.cut_sheet_ref",
-   "description": "Read from the Cut Sheet this batch is cut to. The nesting is decided there and in Material Planning; nothing on this row changes it."
+   "description": "The cut this batch is nested to, read from its Cut Sheet. To Use is the piece that gets transferred; Balance is what stays on the sheet afterwards. Every figure here is read-only -- the nesting is decided once on the Cut Sheet itself, so one plate cannot be described two different ways."
   },
   {
    "fieldname": "cut_sheet_ref",
    "fieldtype": "Link",
    "label": "Cut Sheet",
    "read_only": 1,
-   "options": "Cut Sheet"
+   "options": "Cut Sheet",
+   "description": "The nesting plan these pieces come from."
   },
   {
-   "fieldname": "cs_use_length",
+   "fieldname": "col_break_cut_sheet_use",
+   "fieldtype": "Column Break",
+   "label": "To Use (W1)"
+  },
+  {
+   "fieldname": "use_length",
    "fieldtype": "Float",
    "label": "To Use Length (mm)",
    "read_only": 1
   },
   {
-   "fieldname": "cs_use_width",
+   "fieldname": "use_width",
    "fieldtype": "Float",
    "label": "To Use Width (mm)",
    "read_only": 1
   },
   {
-   "fieldname": "cs_use_sec_qty",
+   "fieldname": "use_sec_qty",
    "fieldtype": "Float",
    "label": "To Use Sec Qty (Nos)",
    "read_only": 1
   },
   {
-   "fieldname": "col_break_cut_sheet_ref",
-   "fieldtype": "Column Break"
+   "fieldname": "col_break_cut_sheet_balance",
+   "fieldtype": "Column Break",
+   "label": "Balance (W2)"
   },
   {
-   "fieldname": "cs_balance_length",
+   "fieldname": "balance_length",
    "fieldtype": "Float",
    "label": "Balance Length (mm)",
    "read_only": 1
   },
   {
-   "fieldname": "cs_balance_width",
+   "fieldname": "balance_width",
    "fieldtype": "Float",
    "label": "Balance Width (mm)",
    "read_only": 1
   },
   {
-   "fieldname": "cs_balance_sec_qty",
+   "fieldname": "balance_sec_qty",
    "fieldtype": "Float",
    "label": "Balance Sec Qty (Nos)",
    "read_only": 1

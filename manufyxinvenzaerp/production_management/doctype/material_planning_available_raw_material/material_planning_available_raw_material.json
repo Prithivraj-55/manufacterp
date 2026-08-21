@@ -273,13 +273,14 @@
    "fieldtype": "Section Break",
    "label": "Cut Sheet",
    "collapsible": 1,
-   "depends_on": "eval:doc.cut_sheet"
+   "depends_on": "eval:doc.cut_sheet_ref",
+   "description": "The cut this batch is nested to, read from its Cut Sheet. To Use is the piece that gets transferred; Balance is what stays on the sheet afterwards. Every figure here is read-only -- the nesting is decided once on the Cut Sheet itself, so one plate cannot be described two different ways."
   },
   {
    "fieldname": "cut_sheet",
    "fieldtype": "Check",
    "label": "Cut Sheet",
-   "description": "Take this requirement from a Cut Sheet -- a nesting plan stated once against the batch. Pick the sheet, enter how many pieces, and the weight follows. The same sheet can serve other rows and other Material Plannings until its pieces run out."
+   "description": "Ticked when the chosen batch has a Cut Sheet against it. A batch either has a nesting plan or it does not, so this follows the batch rather than being set by hand."
   },
   {
    "fieldname": "cut_sheet_ref",
@@ -293,9 +294,8 @@
   {
    "fieldname": "col_break_cut_sheet_use",
    "fieldtype": "Column Break",
-   "label": "To Use (W1 — Transferred)",
-   "hidden": 1,
-   "read_only": 1
+   "label": "To Use (W1)",
+   "hidden": 1
   },
   {
    "fieldname": "use_length",
@@ -314,23 +314,22 @@
   {
    "fieldname": "use_sec_qty",
    "fieldtype": "Float",
-   "label": "To Use Sec Qty",
+   "label": "To Use Sec Qty (Nos)",
    "hidden": 1,
    "read_only": 1
   },
   {
    "fieldname": "use_calc_qty",
    "fieldtype": "Float",
-   "label": "To Use Calc Qty (Kg) — W1",
+   "label": "To Use Weight (Kg)",
    "read_only": 1,
    "hidden": 1
   },
   {
    "fieldname": "col_break_cut_sheet_balance",
    "fieldtype": "Column Break",
-   "label": "Balance (W2 — Remains)",
-   "hidden": 1,
-   "read_only": 1
+   "label": "Balance (W2)",
+   "hidden": 1
   },
   {
    "fieldname": "balance_length",
@@ -349,14 +348,14 @@
   {
    "fieldname": "balance_sec_qty",
    "fieldtype": "Float",
-   "label": "Balance Sec Qty",
+   "label": "Balance Sec Qty (Nos)",
    "hidden": 1,
    "read_only": 1
   },
   {
    "fieldname": "balance_calc_qty",
    "fieldtype": "Float",
-   "label": "Balance Calc Qty (Kg) — W2",
+   "label": "Balance Weight (Kg)",
    "read_only": 1,
    "hidden": 1
   }

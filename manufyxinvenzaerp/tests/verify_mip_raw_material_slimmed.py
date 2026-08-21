@@ -30,15 +30,18 @@ GONE_EXCESS = [
     "col_break_excess_return", "excess_length", "excess_width", "excess_sec_qty",
     "excess_return_date",
 ]
+# The editable cut plan, and the two figures it drove. The SIZES survive as
+# read-only mirrors under the same names -- one vocabulary for one idea, shared
+# with both Material Planning tables -- so what is gone is the piece that made
+# this row a second place to decide a cut: the tick, the calculated weights, the
+# pre-cut memory, and the repack this table used to own.
 GONE_CUT_SHEET = [
-    "section_cut_sheet", "cut_sheet", "use_length", "use_width", "use_sec_qty",
-    "use_calc_qty", "balance_length", "balance_width", "balance_sec_qty",
-    "balance_calc_qty", "precut_length", "precut_width", "precut_sec_qty",
-    "w2_repack_entry",
+    "cut_sheet", "use_calc_qty", "balance_calc_qty",
+    "precut_length", "precut_width", "precut_sec_qty", "w2_repack_entry",
 ]
 REFERENCE = [
-    "cut_sheet_ref", "cs_use_length", "cs_use_width", "cs_use_sec_qty",
-    "cs_balance_length", "cs_balance_width", "cs_balance_sec_qty",
+    "cut_sheet_ref", "use_length", "use_width", "use_sec_qty",
+    "balance_length", "balance_width", "balance_sec_qty",
 ]
 KEPT = ["excess_qty", "transfer_excess_kg", "qty", "transferred_qty", "batch_no"]
 
@@ -89,7 +92,7 @@ def run():
     check("every one of them read-only",
           sorted(f for f in REFERENCE if not meta.get_field(f).read_only), [])
     check("shown only where there is a cut sheet",
-          meta.get_field("section_cut_sheet_ref").depends_on, "eval:doc.cut_sheet_ref")
+          meta.get_field("section_cut_sheet").depends_on, "eval:doc.cut_sheet_ref")
     check("and it points at the Cut Sheet itself",
           meta.get_field("cut_sheet_ref").options, "Cut Sheet")
 
