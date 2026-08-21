@@ -1,9 +1,10 @@
 """Transfer / CNC / excess-return Stock Entries issued from a Material Issue Plan.
 
-Mirrors the equivalent SCO functions in subcontracting.py (create_send_to_subcontractor_entry,
-get_sco_pending_items, create_partial_transfer, create_cnc_to_supplier_entry,
-create_return_stock_entry) but keyed by Material Issue Plan instead of SCO/WO directly, so a
-single implementation serves both this round (SCO) and the deferred WO round without changes.
+Keyed by Material Issue Plan rather than by SCO/WO directly, so one implementation
+serves both this round (SCO) and the deferred WO round without changes. It replaced an
+equivalent set of SCO-keyed functions in subcontracting.py, which nothing called once
+the issue plan became the way material leaves the warehouse; those have since been
+removed.
 Every Stock Entry created here dual-writes custom_mip_ref alongside the standard
 subcontracting_order/custom_sco_ref (or custom_wo_ref) fields, so the existing SCO/WO weight
 rollups in production_management/stock_entry.py keep working unchanged, fed by these entries

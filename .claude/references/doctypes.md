@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-08-21 14:37:02_
+_Generated: 2026-08-21 14:48:43_
 
 ## drawing
 
@@ -410,10 +410,6 @@ _Generated: 2026-08-21 14:37:02_
 | ` _batch_change_remarks` | no |
 | ` reassign_batch` | no |
 | ` _apply_batch_to_mapping_row` | no |
-| ` _test_simulate_se_release` | no |
-| ` __init__` | no |
-| ` get` | no |
-| ` __init__` | no |
 | ` make_production_plan` | no |
 | ` make_material_request` | no |
 | ` make_material_request_from_consolidate` | no |

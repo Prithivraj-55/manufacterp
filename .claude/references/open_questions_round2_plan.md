@@ -378,7 +378,7 @@ Three to four days.
 
 ---
 
-## Item I — The 11 whitelisted methods with no caller  `[ ]`
+## Item I — The whitelisted methods with no caller  `[x]`
 
 Found during the dead-code sweep, left alone because "no caller in this app" is not the
 same as "unreachable" — a client script, an integration or an API key can call any of

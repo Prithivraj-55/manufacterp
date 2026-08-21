@@ -3856,23 +3856,6 @@ def _apply_batch_to_mapping_row(row, new_batch_no, new_item, dimensions, sec_qty
     )
 
 
-@frappe.whitelist()
-def _test_simulate_se_release(batch_nos, se_type="Material Issue"):
-    """Test helper: simulate a Stock Entry submit that consumes the given batch(es)."""
-    from manufyxinvenzaerp.production_management.stock_entry import _release_material_planning_reservations
-    if isinstance(batch_nos, str):
-        batch_nos = json.loads(batch_nos)
-
-    class _FakeRow:
-        def __init__(self, b): self.batch_no = b; self.is_finished_item = False
-        def get(self, k, d=None): return getattr(self, k, d)
-
-    class _FakeSE:
-        def __init__(self, t, bs): self.stock_entry_type = t; self.items = [_FakeRow(b) for b in bs]
-
-    _release_material_planning_reservations(_FakeSE(se_type, batch_nos))
-    frappe.db.commit()
-    return "OK"
 
 
 @frappe.whitelist()

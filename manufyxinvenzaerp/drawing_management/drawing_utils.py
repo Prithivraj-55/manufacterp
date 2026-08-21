@@ -4,42 +4,6 @@ from frappe.utils import flt
 from manufyxinvenzaerp.utils.dimension_formula import calculate_qty
 
 
-@frappe.whitelist()
-def create_drawings_from_so(so_name):
-    """Create one Drawing per Sales Order item. Blocks if any Drawing already exists for this SO."""
-    existing = frappe.db.get_value("Drawing", {"sales_order": so_name}, "name")
-    if existing:
-        frappe.throw(
-            _(
-                "Drawings already exist for this Sales Order ({0}). "
-                "Open the existing drawings from the connections panel."
-            ).format(existing)
-        )
-
-    so = frappe.get_doc("Sales Order", so_name)
-    created = []
-    for item in so.items:
-        drawing = frappe.get_doc(
-            {
-                "doctype": "Drawing",
-                "sales_order": so_name,
-                "so_item_reference": item.name,
-                "customer": so.customer,
-                "customer_name": so.customer_name,
-                "customer_no": so.customer,
-                "project": so.get("project"),
-                "cust_po_no": so.get("po_no"),
-                "fg_item_code": item.item_code,
-                "fg_item_name": item.item_name,
-                "fg_description": item.description,
-                "no_of_qty_to_manufacture": item.qty,
-                "status": "Working",
-            }
-        )
-        drawing.insert(ignore_permissions=True)
-        created.append(drawing.name)
-
-    return created
 
 
 @frappe.whitelist()

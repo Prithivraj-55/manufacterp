@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-08-21 14:37:02_
+_Generated: 2026-08-21 14:48:43_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -32,13 +32,12 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `create_production_plan_from_bom` | 204 |
-| `parse_drawing_items_csv` | 258 |
-| `update_customer_provided_weight` | 379 |
-| `mark_as_final_revision` | 46 |
-| `get_batches_for_drawing_item` | 60 |
-| `create_drawings_from_so` | 8 |
-| `create_bom_from_drawing` | 92 |
+| `create_production_plan_from_bom` | 168 |
+| `parse_drawing_items_csv` | 222 |
+| `get_batches_for_drawing_item` | 24 |
+| `update_customer_provided_weight` | 343 |
+| `create_bom_from_drawing` | 56 |
+| `mark_as_final_revision` | 10 |
 ## drawing_management/so_drawing_import.py
 
 | Method | Line |
@@ -97,14 +96,13 @@ All `@frappe.whitelist()` methods. Call from JS:
 | `check_mapping_batch_availability` | 3374 |
 | `unreserve_batches` | 3435 |
 | `reassign_batch` | 3600 |
-| `_test_simulate_se_release` | 3860 |
-| `make_production_plan` | 3879 |
-| `make_material_request` | 3950 |
-| `make_material_request_from_consolidate` | 4104 |
-| `update_so_difference_kg` | 4242 |
-| `auto_suggest_consolidate_dimensions` | 4272 |
-| `auto_purchase_from_mp` | 4360 |
-| `complete_batch_mapping` | 4549 |
+| `make_production_plan` | 3862 |
+| `make_material_request` | 3933 |
+| `make_material_request_from_consolidate` | 4087 |
+| `update_so_difference_kg` | 4225 |
+| `auto_suggest_consolidate_dimensions` | 4255 |
+| `auto_purchase_from_mp` | 4343 |
+| `complete_batch_mapping` | 4532 |
 | `@frappe.validate_and_sanitize_search_inputs` | 711 |
 | `get_bom_info` | 737 |
 | `get_so_drawings_for_bom_picker` | 789 |
@@ -171,40 +169,34 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `create_mip_transfer_entry` | 1022 |
-| `create_mip_partial_transfer` | 1072 |
-| `get_mip_cnc_pending_items` | 1150 |
-| `create_mip_cnc_partial_forward` | 1207 |
-| `create_mip_cnc_forward_entry` | 1329 |
-| `create_mip_excess_return_entry` | 1402 |
-| `get_mip_pending_items` | 257 |
-| `update_transfer_sec_qty` | 449 |
-| `has_cnc_stock` | 770 |
-| `get_mip_cnc_button_state` | 790 |
-| `get_mip_readiness_check` | 864 |
+| `create_mip_transfer_entry` | 1023 |
+| `create_mip_partial_transfer` | 1073 |
+| `get_mip_cnc_pending_items` | 1151 |
+| `create_mip_cnc_partial_forward` | 1208 |
+| `create_mip_cnc_forward_entry` | 1330 |
+| `create_mip_excess_return_entry` | 1403 |
+| `get_mip_pending_items` | 258 |
+| `update_transfer_sec_qty` | 450 |
+| `has_cnc_stock` | 771 |
+| `get_mip_cnc_button_state` | 791 |
+| `get_mip_readiness_check` | 865 |
 ## subcontracting_management/subcontracting.py
 
 | Method | Line |
 |--------|------|
+| `` | 1640 |
+| `` | 1643 |
+| `` | 1646 |
+| `` | 1649 |
+| `` | 1652 |
 | `create_sco_and_mip_from_production_plan` | 189 |
-| `backfill_drawing_item_qty` | 1998 |
-| `` | 2083 |
-| `` | 2086 |
-| `` | 2089 |
-| `` | 2092 |
-| `` | 2095 |
 | `delete_sco_and_mip_for_production_plan` | 214 |
 | `create_sco_from_production_plan` | 26 |
 | `` | 294 |
 | `create_supplier_operation_entries` | 297 |
-| `create_send_to_subcontractor_entry` | 317 |
-| `get_sco_pending_items` | 413 |
-| `create_partial_transfer` | 523 |
-| `create_cnc_to_supplier_entry` | 584 |
-| `get_soe_summary` | 687 |
-| `create_return_stock_entry` | 733 |
-| `create_finished_goods_entry` | 791 |
+| `get_soe_summary` | 319 |
+| `create_finished_goods_entry` | 367 |
 
 ## Total
 
-_123 whitelisted methods_
+_115 whitelisted methods_
