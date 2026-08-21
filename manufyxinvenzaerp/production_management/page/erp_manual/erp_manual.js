@@ -10,6 +10,13 @@
 // followed for the categories not yet written up, kept visible as "Coming Soon"
 // so the intended shape is there even before the content is.
 //
+// Expanded since: Item gained the Batch Record, Inspection gained the call/round
+// mechanics and the incoming-goods (Purchase Receipt) path, Reports gained the four
+// reports it never covered, and two categories were added -- Purchase & Procurement
+// (Material Request -> RFQ/SQ -> Purchase Order -> Purchase Receipt, the chain that
+// starts where Material Planning finds a shortfall) and Reference (every status flow
+// in one place, plus Manufyxinvenza Settings). Nothing that was here was removed.
+//
 // Layout/tree/scrollspy come from the shared renderer
 // (public/js/manual_renderer.js) via manufyx_render_manual_tree(); this file is
 // only the content. A leaf uses the same shape as the old flat manuals: {id,
@@ -49,9 +56,12 @@ frappe.pages["erp-manual"].on_page_load = function (wrapper) {
 				"operations, <b>Job work order</b> is the single execution document for all of " +
 				"them, <b>Material Issue Plan</b> is where reserved stock physically leaves the " +
 				"warehouse, and each operation runs through <b>Supplier Operation Entry</b> — " +
-				"gated by <b>Inspection</b> wherever QC sign-off is required. Those five are fully " +
-				"written up on the left. Item, Sales Order and Drawing are placed in the tree " +
-				"because the flow starts with them, but are not written up yet."
+				"gated by <b>Inspection</b> wherever QC sign-off is required. Upstream of all of it, " +
+				"<b>Item</b>, <b>Sales Order</b>, <b>Drawing</b> and <b>BOM</b> are where a job is " +
+				"defined in the first place, and <b>Purchase &amp; Procurement</b> is how anything " +
+				"Material Planning could not find in stock gets bought. Every category on the left " +
+				"is written up; <b>Reference</b> holds every status flow and the site settings, and " +
+				"<b>Glossary</b> the terms used throughout."
 			),
 		},
 		categories: ERP_MANUAL_CATEGORIES,
@@ -698,6 +708,48 @@ const ERP_MANUAL_ITEM_CHILDREN = [
 			"<b>Verify Raw Materials on the Sales Order reads these flags</b> to know which dimensions " +
 				"to check for completeness and which to flag as unused (a Structural must have Length but " +
 				"must NOT have Thickness or Width — having either is reported as an error).",
+		],
+	},
+	{
+		id: "item-batch-record",
+		title: "The Batch Record",
+		kicker: "What a batch carries, and where its name comes from",
+		purpose:
+			"A batch is the physical piece — one bar, one plate, one bundle — and it is what " +
+			"Material Planning reserves against. Batches are not created by hand: submitting a " +
+			"Purchase Receipt creates one per receipt line, named from the item's own Custom Batch " +
+			"Abbreviation plus the dimensions on that line, so the name alone tells you what the " +
+			"piece is.",
+		fields: [
+			{ name: "Length / Width / Thickness", note: "Copied from the Purchase Receipt line that created this batch, and <b>read-only</b> afterwards. Exact Match in Material Planning compares these three numbers against the requirement, so a batch whose dimensions were edited after the fact would silently match the wrong rows." },
+			{ name: "Sec Qty / Sec UOM", note: "How many physical pieces this batch holds, and in what unit (normally Nos). This is what every Kg → Nos calculation downstream divides by." },
+			{ name: "Batch Remarks", note: "Read-only. Carried over from the Inspection Call remarks recorded against this batch's source Purchase Receipt, so a QC note stays attached to the piece rather than living only on the receipt. It is copied onward onto Stock Entry rows that move this batch." },
+			{ name: "Reservations", note: "A live panel, not a stored field — shows every Material Planning currently holding a claim on this batch and how much each one has taken. This is the quickest way to answer “who has already spoken for this bar?”" },
+			{ name: "Source MIP Excess Row", note: "Set only on batches created by an Excess Return Entry. Records which Material Issue Plan excess row this off-cut came back from, so a returned remnant can be traced to the job that produced it." },
+			{ name: "Existing Supplier Invoice No / Existing Invoice Wt / Existing Inward Date", note: "Read-only supplier-document details captured at receipt, kept on the batch for traceability back to the paperwork the material arrived on." },
+		],
+		steps: [
+			"On Purchase Receipt submit, ERPNext creates one batch per stock ledger entry, and this app names it before it is inserted.",
+			"The name is built as <b>Abbreviation-T{thickness}-L{length}-W{width}-R{receipt suffix}</b>, dropping any dimension the line does not carry — a Structural has no Width or Thickness, so its name is just Abbreviation-L…-R….",
+			"If that exact name already exists, <b>-2</b> (then -3, and so on) is appended, so two identical pieces received on different days never collide.",
+			"Dimensions, Sec Qty and Sec UOM are copied from the receipt line onto the batch at the same moment.",
+		],
+		examples: [
+			{
+				type: "do",
+				label: "A plate batch name reads back as the plate",
+				text: "Item <b>PLATE10</b> with Custom Batch Abbreviation <code>PL10</code>, received 10 mm thick × 6000 long × 1500 wide on receipt …-00042, becomes <b>PL10-T10-L6000-W1500-R00042</b> — thickness, length, width and the receipt it came in on, all readable without opening anything.",
+			},
+			{
+				type: "dont",
+				label: "Don't put two identical-dimension rows for the same item on one receipt",
+				text: "The batch being created is matched back to its line by finding the first row of that item that has no batch yet. Two rows with identical Length, Width and Thickness cannot be told apart, and the receipt is refused with a message telling you to give them distinct dimensions or split the receipt — deliberately loud, because a batch that silently took the wrong line's piece count breaks Kg → Nos allocation later with no visible error.",
+			},
+		],
+		notes: [
+			"An item with no <b>Custom Batch Abbreviation</b> set gets ERPNext's default batch naming instead — see <b>Batch Configuration and Naming</b> above.",
+			"Batches are also created by Stock Entry, not just Purchase Receipt: a Repack raised by a Cut Sheet, or a Material Receipt, both name their batches the same way, using the Stock Entry number as the suffix instead of the receipt number.",
+			"Structurals and Plates are always piece-tracked. A batch of either that somehow resolved to Sec Qty 0 is rejected outright rather than saved, because nothing downstream can divide by it.",
 		],
 	},
 ];
@@ -1421,6 +1473,62 @@ const ERP_MANUAL_INSPECTION_CHILDREN = [
 			"Total Checked / Cleared / Rework Qty still appear (read-only) at the top of the Inspection Entry for reporting — they're auto-totalled from the Inspection Items rows, not entered directly.",
 		],
 	},
+	{
+		id: "insp-calls",
+		title: "Inspection Calls and Rounds",
+		kicker: "How QC gets asked, and how retries are counted",
+		purpose:
+			"Inspection is a conversation between two teams, and the Inspection Call Log is the " +
+			"record of it. Manufacturing or Purchasing logs a call to say material is ready to be " +
+			"looked at; QC records the result on a separate Inspection Entry. One round is one " +
+			"call and its answer, and a rejection simply starts another round.",
+		fields: [
+			{ name: "Round No", note: "Numbered from 1 upward. Filled in automatically if left blank, so rounds stay in order however they were entered." },
+			{ name: "Inspection Call Date", note: "When QC is being asked to attend." },
+			{ name: "Round Status (Pending / Completed)", note: "Pending until this round's Inspection Entry is submitted." },
+			{ name: "Inspection Entry", note: "Link to the entry that answered this round. Blank while the round is still pending." },
+			{ name: "Rework Remarks", note: "What came back from that round." },
+			{ name: "Inspection Status (on the source document)", note: "Open / Working / Completed. On submit of an Inspection Entry, the source document's Inspection Status is set to whatever status the inspector chose — it mirrors the inspector's own judgement rather than being re-derived from the accepted and rejected numbers." },
+		],
+		steps: [
+			"<b>Create Inspection</b> on the source document logs a new call round.",
+			"Creating an Inspection Entry picks up the most recent round that is still Pending and has no entry against it, and links itself back onto that round. If no such round exists, you are told to log a call first.",
+			"The inspector fills in the result, sets Status to Completed, and submits — which closes that round and mirrors the status back onto the source document.",
+			"A rejection needs no special handling: log another call, and round 2 begins.",
+		],
+		notes: [
+			"The two gates are deliberately different. A <b>Supplier Operation Entry</b> only needs at least one inspection call logged before it can be submitted — the intent is that QC has been engaged, not that sign-off is complete. A <b>Purchase Receipt</b> is stricter and will not submit until its Inspection Status actually reads Completed.",
+			"Round counts and rework attempts are what the <b>Inspection Status Report</b> reports on — see Reports.",
+		],
+	},
+	{
+		id: "insp-purchase-receipt",
+		title: "Incoming Goods Inspection",
+		kicker: "Inspecting what a supplier delivered",
+		purpose:
+			"The same Inspection Entry document also inspects incoming material on a Purchase " +
+			"Receipt. Where an operation inspection asks “are these finished pieces acceptable”, " +
+			"this one asks it of each delivered line — and the receipt cannot be submitted until " +
+			"it has an answer.",
+		fields: [
+			{ name: "Inspection Required (on the Item)", note: "This is the switch. Incoming inspection applies to a Purchase Receipt only when at least one item on it has Inspection Required ticked on its Item master — it is opt-in per item, not per receipt." },
+			{ name: "Inspection Items (on the Inspection Entry)", note: "One row per inspection-required line on the receipt, with its item code, received Qty and a link back to the exact receipt row. Lines whose item does not require inspection are not included at all." },
+			{ name: "Accepted Qty / Rejected Qty", note: "Entered per line. This is a per-row result, not one verdict for the whole delivery, so a receipt can be part-accepted line by line." },
+			{ name: "Inspection Accepted Qty / Rejected Qty / Remarks (on the receipt row)", note: "Read-only. Written back onto the Purchase Receipt's own rows when the Inspection Entry is submitted, so the result stays visible on the receipt itself." },
+		],
+		steps: [
+			"On the Purchase Receipt, click <b>Create Inspection</b> and set the call date. The receipt is still in draft at this point — that is the intended order.",
+			"Create the Inspection Entry from the logged call. It arrives prefilled with one row per inspection-required line.",
+			"Record Accepted Qty and Rejected Qty per line, add remarks, set Status to Completed and submit.",
+			"The results are written back onto the receipt rows, and the receipt's Inspection Status becomes Completed.",
+			"Submit the Purchase Receipt. Batches are created at that point, not before — so nothing enters stock ahead of its QC result.",
+		],
+		notes: [
+			"Rejected material goes to the row's <b>Rejected Storage Location</b>, kept apart from accepted stock.",
+			"Any QC remark recorded against the receipt is carried onto the batch as <b>Batch Remarks</b>, so it stays with the physical piece rather than only on the paperwork.",
+			"A receipt where no item requires inspection has no gate at all and submits normally.",
+		],
+	},
 ];
 
 // ─── Material Issue Plan — migrated verbatim from the old Material Issue Plan
@@ -1755,6 +1863,79 @@ const ERP_MANUAL_REPORTS_CHILDREN = [
 			"<b>Cut Sheet Report</b> — which plates are cut, who is drawing from them, and what is left. “W2 Not Written” filters to sheets that have been cut but never had their balance written back to the batch — the state where the plate in the rack and the system disagree.",
 		],
 	},
+	{
+		id: "rpt-production",
+		title: "Production Report",
+		kicker: "Every operation, every job, one row each",
+		purpose:
+			"The operation-level view across all live jobs. One row per drawing per operation, so " +
+			"the question “where is this job actually up to” is answered without opening a single " +
+			"Supplier Operation Entry.",
+		fields: [
+			{ name: "Filters", note: "Production Plan (Team), Job Type, Subcontracting Order, Supplier, Sales Order, Operation, Status, and a From/To date range." },
+			{ name: "Traceability columns", note: "Production Plan, Project, Job Type, Subcontracting Order, Supplier, Sales Order, Customer, Drawing, DUNO/Mark No, Cust Drawing No." },
+			{ name: "Operation columns", note: "Operation, Seq, Status, Inspection Mandatory, Inspection Status, Inspection Count, and <b>Operation Gap (Days, approx.)</b> — roughly how long this operation has been sitting between the one before it and now." },
+			{ name: "Weight and quantity columns", note: "Customer Weight (Kg), Planned Weight (Kg), Planned Sec Nos, Transferred Weight (Kg), Transferred Sec Nos, Excess Weight (Kg), Consumed (Kg), Completed (Nos) — the planned-versus-actual comparison, in both weight and pieces." },
+		],
+		notes: [
+			"Operation Gap is the column to sort by when looking for stalled work: a large gap on an operation that is still Open is a job nobody has picked up.",
+		],
+	},
+	{
+		id: "rpt-inventory",
+		title: "Inventory Report",
+		kicker: "Ordered, received, issued and left — per item",
+		purpose:
+			"An order-to-issue summary per item, tied to the Sales Order or Project it belongs to. " +
+			"Where the Stock Balance report answers “what is on the rack”, this one answers “how " +
+			"much of what we ordered has actually turned up, and how much has gone out again”.",
+		fields: [
+			{ name: "Filters", note: "Sales Order, Project, Item Code, Company, and a From/To date range." },
+			{ name: "Columns", note: "Item Code, Item Name, Item Group, Sales Order, Customer, Project, Ordered Qty, Received Qty, <b>Pending Receipt</b>, Issued Qty, <b>Closing Stock (Overall)</b>, UOM." },
+		],
+		notes: [
+			"Pending Receipt is the chase-list column for purchasing — ordered but not yet delivered.",
+			"Closing Stock is overall, not filtered to the Sales Order on the row, so it answers “is there any of this item anywhere” rather than “is there any reserved for this job”.",
+		],
+	},
+	{
+		id: "rpt-inspection-status",
+		title: "Inspection Status Report",
+		kicker: "Every inspection round, and how many retries it took",
+		purpose:
+			"One row per inspection round across both kinds of inspection — operations and incoming " +
+			"goods. This is where rework shows up as a number rather than as an impression.",
+		fields: [
+			{ name: "Filters", note: "Source (which kind of document the inspection belongs to), Operation, Inspection Status, Production Plan, Sales Order." },
+			{ name: "Traceability columns", note: "Production Plan, Project, Sales Order, Customer, Supplier, Reference Type, Reference, Active Doctype, Active Document, Operation." },
+			{ name: "Round columns", note: "<b>Round No</b>, <b>Rework Attempts</b>, Inspection Call Date, Inspection Status, Round Status." },
+			{ name: "Quantity columns", note: "Total Checked Qty, Cleared Qty, Rework Qty, Rework Remarks." },
+		],
+		notes: [
+			"Sort by Rework Attempts to find the drawings or suppliers that keep coming back — the report exists mainly to make that pattern visible.",
+		],
+	},
+	{
+		id: "rpt-fund-usage",
+		title: "Customer Fund Usage",
+		kicker: "Which customer payment is paying which supplier",
+		purpose:
+			"Ties supplier payments back to the customer money that funded them. A customer's " +
+			"Payment Entry is nominated as a <b>Source of Funds</b> on a supplier Payment Request, " +
+			"and this report shows how much of each customer payment has been drawn down and what " +
+			"is left.",
+		fields: [
+			{ name: "Filters", note: "Customer, Sales Order, Source of Funds, Status, and Group by Customer Payment." },
+			{ name: "Source columns", note: "Source Reference No, Source of Funds, Reference Type, Reference Name, Source Customer, Customer Payment Date, Total Customer Payment, <b>Balance Remaining</b>." },
+			{ name: "Draw columns", note: "Supplier, Payment Type, Against, Grand Total, Payment Request, Transaction Date, Outstanding, Status, PE Created." },
+			{ name: "Source of Funds (on the Payment Request)", note: "Searchable by customer name, Payment Entry name or reference number, and restricted to <b>submitted customer receipts</b> — you cannot nominate a supplier payment or an unsubmitted one as a source." },
+			{ name: "Total Customer Payment / Already Used Amount / Balance Amount", note: "Shown read-only on the Payment Request itself. Already Used is the sum across every other <b>Paid</b> supplier Payment Request drawing on the same source, so the balance reflects real commitments rather than drafts." },
+		],
+		notes: [
+			"Requesting more than the remaining balance shows an orange <b>Fund Balance Exceeded</b> warning naming the amount, the balance and the source — but it does not block the save. It is there to make an overdraw a deliberate decision, not to prevent one.",
+			"Only Paid requests count against a source. A draft or unpaid request does not reduce the balance.",
+		],
+	},
 ];
 
 const ERP_MANUAL_GLOSSARY_CHILDREN = [
@@ -1783,15 +1964,233 @@ const ERP_MANUAL_GLOSSARY_CHILDREN = [
 	},
 ];
 
+// ─── Purchase & Procurement — what happens between Material Planning saying
+// "this isn't in stock" and the batch arriving that satisfies it. The same
+// custom dimension fields (Parent Item Group, Length/Width/Thickness, Unit
+// Weight, Sec Qty) ride the entire chain, copied forward at each hop, which is
+// why the qty formula and its missing-field check are identical on all four
+// documents (utils/dimension_formula.py). ──────────────────────────────────────
+const ERP_MANUAL_PROCUREMENT_CHILDREN = [
+	{
+		id: "proc-overview",
+		title: "From Shortfall to Stock",
+		kicker: "Where Material Planning hands over",
+		purpose:
+			"Material Planning decides <i>what is missing</i>; this chain is how it gets bought. " +
+			"Unavailable Items and Consolidate Item both end in a Material Request, and from there " +
+			"the material travels through the normal purchasing documents until a Purchase Receipt " +
+			"creates the batch that Material Planning was waiting for.",
+		steps: [
+			"<b>Material Planning</b> → <b>Create Material Request</b>, from either the Unavailable Items table (one row per shortfall) or the Consolidate Item table (several drawings' needs for the same item combined into one buying line).",
+			"<b>Material Request</b> → optionally <b>Request for Quotation</b> to several suppliers, and their replies come back as <b>Supplier Quotations</b>.",
+			"<b>Purchase Order</b> against the chosen supplier — created from the Material Request, or from the winning Supplier Quotation.",
+			"<b>Purchase Receipt</b> when the material physically arrives. Submitting it creates the batch, carrying the dimensions and piece count down from the receipt line.",
+			"Back on <b>Material Planning</b>, the new batch is offered against the rows that were waiting for it — covered in <b>After Purchase: Automatic Allocation</b> under Material Planning.",
+		],
+		fields: [
+			{ name: "The fields that travel the whole way", note: "<b>Parent Item Group</b> and <b>Item Calculation Type</b> (both read-only, pulled from the Item), <b>Length</b>, <b>Width</b>, <b>Thickness</b>, <b>Unit Weight</b> (read-only), <b>Sec Qty</b> and <b>Sec UOM</b>. Every document in the chain carries the same set, so the piece being bought stays described the same way from request to receipt." },
+			{ name: "The traceability fields", note: "<b>Drawing</b>, <b>DUNO/Mark No</b>, <b>Customer Drawing Number</b> and <b>Sales Order</b> ride along on Material Request, Purchase Order and Purchase Receipt rows, so a delivered bar can always be traced back to the drawing that asked for it." },
+			{ name: "Material Planning (on the Material Request)", note: "Set automatically when the request was raised from a Material Planning's own Create Material Request button. This link is what lets the plan find its own purchases later." },
+		],
+		notes: [
+			"Qty on Structurals and Plates rows is never typed in directly — it is recalculated from the dimensions on every save, on all four documents. Type the dimensions and the piece count; the Kg follows.",
+			"With <b>Auto Purchase from Material Planning</b> ticked in Manufyxinvenza Settings, an Auto Purchase button on Material Planning runs Material Request → Purchase Order → Purchase Receipt in one click for every unavailable item. That is a testing and data-entry shortcut, not a live purchasing process — see <b>Settings</b> under Reference.",
+		],
+	},
+	{
+		id: "proc-mr",
+		title: "Material Request",
+		kicker: "The shortfall, written down",
+		purpose:
+			"The first document in the chain, and normally created for you by Material Planning " +
+			"rather than by hand. Each row describes one piece to buy, in the same dimension " +
+			"language the rest of the app uses.",
+		fields: [
+			{ name: "Material Planning", note: "Header link back to the plan that raised this request. Left blank on a manually-created request." },
+			{ name: "Parent Item Group / Item Calculation Type", note: "Read-only, copied from the Item. Parent Item Group is what decides which formula applies to this row — Structurals, Plates and Nuts and Bolts each behave differently." },
+			{ name: "Length / Width / Thickness", note: "In millimetres. Structurals need Length only; Plates need all three." },
+			{ name: "Unit Weight", note: "Read-only, from the Item. Kg per metre for a Structural, Kg per mm per square metre for a Plate." },
+			{ name: "Sec Qty / Sec UOM", note: "How many pieces are being requested, and in what unit. Sec UOM is read-only." },
+			{ name: "Drawing / DUNO Mark No / Customer Drawing Number / Sales Order", note: "Traceability back to what needs the material." },
+		],
+		calcs: [
+			{
+				title: "Qty for a Structural row",
+				item: "ISMB400", group: "Structurals",
+				length: 6000,
+				sec_qty: "3 Nos", unit_weight: "61.6 kg/m",
+				formula: "(Length ÷ 1000) × Unit Weight × Sec Qty = (6000 ÷ 1000) × 61.6 × 3",
+				result: "1108.80",
+				note: "Length is converted from mm to metres first, which is what the ÷ 1000 is doing.",
+			},
+			{
+				title: "Qty for a Plate row",
+				item: "PLATE10", group: "Plates",
+				length: 6000, width: 1500, thickness: 10,
+				sec_qty: "2 Nos", unit_weight: "7.85",
+				formula: "(Length ÷ 1000) × (Width ÷ 1000) × Thickness × Unit Weight × Sec Qty = (6000 ÷ 1000) × (1500 ÷ 1000) × 10 × 7.85 × 2",
+				result: "1413.00",
+				note: "Both Length and Width convert to metres; Thickness stays in mm, because Unit Weight for a plate is already expressed per mm of thickness.",
+			},
+		],
+		steps: [
+			"Enter the dimensions and Sec Qty on each row. Qty (Kg) recalculates itself on every save — there is no need to work it out.",
+			"<b>Nuts and Bolts run the other way round.</b> Enter Qty in Nos and Sec Qty is calculated as Unit Weight × Qty, because for fasteners the piece count is the real number and the weight is derived.",
+			"Saving with a required dimension missing shows an orange warning naming the row and the missing fields, but still saves — so a part-finished request can be parked.",
+			"Submitting with anything still missing is refused outright with the same message. The warning on save is the reminder; the block on submit is the gate.",
+		],
+		notes: [
+			"The UOM field on a row only offers that item's own UOM conversions plus its stock UOM, rather than every UOM on the system.",
+			"Required for a <b>Structural</b>: Length, Unit Weight, Sec Qty. Required for a <b>Plate</b>: Length, Width, Thickness, Unit Weight, Sec Qty. Any other item group is left alone entirely.",
+		],
+	},
+	{
+		id: "proc-rfq-sq",
+		title: "RFQ and Supplier Quotation",
+		kicker: "Asking several suppliers, and reading their answers",
+		purpose:
+			"Optional middle step. A Request for Quotation takes the Material Request's rows out to " +
+			"several suppliers; each reply comes back as a Supplier Quotation, and the winning one " +
+			"can be turned straight into a Purchase Order.",
+		fields: [
+			{ name: "On RFQ rows", note: "Parent Item Group, Item Calculation Type, Sec Qty, Sec UOM, Unit Weight, Length, Width, Thickness — all copied from the linked Material Request Item, and all read-only here." },
+			{ name: "On Supplier Quotation rows", note: "The same set, but Length, Width, Thickness and Sec Qty are editable — a supplier may quote a slightly different size to what was asked for, and that has to be recordable." },
+		],
+		steps: [
+			"Create the RFQ from the Material Request and add the suppliers to invite.",
+			"Each row's dimensions are copied down from the Material Request Item automatically.",
+			"Supplier replies arrive as Supplier Quotations, which copy the same fields across — but only into fields that are still blank, so anything the supplier actually quoted differently is left as they quoted it.",
+			"Qty on a Supplier Quotation recalculates from its dimensions on save, exactly as on the Material Request, and the same missing-field check runs on submit.",
+		],
+		examples: [
+			{
+				type: "dont",
+				label: "Don't edit dimensions on the RFQ row",
+				text: "RFQ rows re-copy from the Material Request Item on <b>every</b> save, overwriting whatever is there. An edit made on the RFQ will not survive the next save. Change it on the Material Request instead, and let it flow down.",
+			},
+			{
+				type: "do",
+				label: "Do edit them on the Supplier Quotation",
+				text: "Supplier Quotation, Purchase Order and Purchase Receipt only fill fields that are <b>blank</b>. Once a value is there, later saves leave it alone — so a supplier's own quoted size stays put.",
+			},
+		],
+	},
+	{
+		id: "proc-po",
+		title: "Purchase Order",
+		kicker: "Committing to the supplier",
+		purpose:
+			"The order itself. Created from the Material Request or from the winning Supplier " +
+			"Quotation, and carrying the drawing references forward so the delivered material can " +
+			"still be tied back to the job that needs it.",
+		fields: [
+			{ name: "Total Weight (Kg)", note: "Read-only header total, recalculated on every save. It sums the Qty of <b>Structurals and Plates rows only</b> — Nuts and Bolts are counted in pieces, so adding their Qty into a Kg total would be meaningless." },
+			{ name: "Drawing / DUNO Mark No / Customer Drawing Number / Sales Order", note: "Copied from the linked Material Request Item when the order is raised from a request, and only into fields still blank." },
+			{ name: "Length / Width / Thickness / Sec Qty", note: "Editable. Qty recalculates from them on save, the same way as everywhere else in the chain." },
+		],
+		steps: [
+			"Create the order from the Material Request (or the Supplier Quotation) rather than from scratch, so the references come with it.",
+			"Qty recalculates on save; a row missing a required dimension warns in orange but still saves.",
+			"On submit, any row still missing a required dimension blocks the submission.",
+		],
+		notes: [
+			"A Purchase Order raised outside this chain — straight from the supplier, with no Material Request behind it — still works. It just has nothing to copy references from, so Drawing and Sales Order stay blank unless filled in by hand.",
+		],
+	},
+	{
+		id: "proc-pr",
+		title: "Purchase Receipt",
+		kicker: "Material arrives, batches are born",
+		purpose:
+			"The point where a purchase becomes stock. Submitting a Purchase Receipt creates one " +
+			"batch per line, carrying that line's dimensions and piece count onto the batch, which " +
+			"is what makes the material findable by Material Planning's Exact Match.",
+		fields: [
+			{ name: "Supplier Invoice Weight / Weighment Weight", note: "What the supplier's paperwork claims, and what the weighbridge actually read. Recorded side by side so a discrepancy is visible at receipt rather than discovered later." },
+			{ name: "Total Weight (Kg)", note: "Read-only, the received total." },
+			{ name: "Target / Source / Rejected Storage Location", note: "Per-row physical location within the warehouse. Rejected Storage Location is where QC-failed material is put aside." },
+			{ name: "Inspection Status / Inspection Call Log", note: "Present when any item on the receipt has <b>Inspection Required</b> ticked on its Item master. Covered in full under Inspection." },
+			{ name: "Inspection Accepted Qty / Rejected Qty / Remarks", note: "Read-only per row, written back when the Inspection Entry for this receipt is submitted." },
+			{ name: "Length / Width / Thickness / Sec Qty / Sec UOM", note: "Same as everywhere else in the chain — and these are the values that land on the batch, so they need to describe what actually turned up, not what was ordered." },
+		],
+		steps: [
+			"Create the receipt from the Purchase Order so the dimensions and references come with it. Correct anything that arrived different to what was ordered <b>before</b> submitting.",
+			"If any item on the receipt requires inspection, run that first — the receipt will not submit until its Inspection Status is Completed.",
+			"On submit, one batch is created per line, named and dimensioned from that line. See <b>The Batch Record</b> under Item for how the name is built.",
+			"Open the receipt again afterwards to see <b>Material Planning — Batches Allocated</b>, listing which plans the new batches were allocated to and whether each is reserved yet.",
+		],
+		buttons: [
+			{ name: "Create Inspection", note: "Logs an inspection call round against this receipt, then offers to create the Inspection Entry that records the result." },
+			{ name: "Update Inspection Call Date", note: "Changes the call date on the round already logged, for when QC's visit is rescheduled rather than newly arranged." },
+			{ name: "View Inspection Entry", note: "Jumps to the Inspection Entry already created for the current round." },
+		],
+		notes: [
+			"Material received against a Material Planning does not reserve itself. It becomes available stock, and the plan then offers it against the rows that were waiting — see <b>After Purchase: Automatic Allocation</b> under Material Planning.",
+			"Two rows for the same item with identical Length, Width and Thickness cannot be matched to their batches reliably, and the receipt is refused with a message saying so. Give them distinct dimensions, or split them across two receipts.",
+		],
+	},
+];
+
+// ─── Reference — the lookup material that doesn't belong to any one screen:
+// every document's status flow in one place, and the settings that change what
+// the rest of the app shows. Status values here are the actual Select options on
+// each doctype, not a description of them. ─────────────────────────────────────
+const ERP_MANUAL_REFERENCE_CHILDREN = [
+	{
+		id: "ref-statuses",
+		title: "Document Status Reference",
+		kicker: "Every status flow, in one place",
+		purpose:
+			"What each document's status can be, and what moves it along. Useful when a document " +
+			"is sitting in a state you did not expect and the question is simply what is supposed " +
+			"to happen next.",
+		fields: [
+			{ name: "Drawing", note: "<b>Working → Old Revision / Final Revision</b>. A drawing stays Working while it is being edited. Marking it Final Revision is what allows a BOM to be created from it; superseded revisions become Old Revision." },
+			{ name: "Material Planning (Planning Status)", note: "<b>Open → Working → Batch Mapping Completed</b>. Moves to Working as soon as raw materials are fetched and mapping starts, and reaches Batch Mapping Completed only when every row has stock behind it — which is what lets a Production Plan be created." },
+			{ name: "Production Plan", note: "Standard ERPNext plan statuses. What matters here is submission: <b>Job work order &amp; MIP</b> only appears once the plan is submitted." },
+			{ name: "Material Issue Plan", note: "<b>Open → In Progress → Completed</b>. In Progress from the first partial transfer; Completed when every row has been fully issued." },
+			{ name: "Supplier Operation Entry", note: "<b>Open → In Progress → Completed</b>. Logging any quantity in the Consumption Log moves it to In Progress. It must read Completed before the entry can be submitted, and every earlier operation in the sequence must already be submitted." },
+			{ name: "Inspection Entry", note: "<b>Open → Working → Completed</b>, plus <b>Feedback: Ok / Not Ok</b>. Feedback must be set before Status can be set to Completed. Saving as Completed also submits, after a confirmation prompt." },
+			{ name: "Inspection Status (on Supplier Operation Entry and Purchase Receipt)", note: "<b>Open → Working → Completed</b>. Not set by hand — it mirrors the status of the Inspection Entry that answered the latest round when that entry is submitted." },
+			{ name: "Inspection Call Log — Round Status", note: "<b>Pending → Completed</b>, per round. Pending until that round's Inspection Entry is submitted." },
+			{ name: "Cut Sheet", note: "<b>Draft → Active → Fully Allocated → Consumed</b>. Active once the cutting plan is set, Fully Allocated when every piece on the sheet has been claimed by a job, Consumed once the material has actually moved." },
+		],
+		notes: [
+			"Statuses on this app's own documents are driven by what has happened to them, not chosen from a dropdown — the two exceptions are Supplier Operation Entry, where the operator marks Completed before submitting, and Inspection Entry, where the inspector sets the status and the Feedback.",
+		],
+	},
+	{
+		id: "ref-settings",
+		title: "Settings",
+		kicker: "Three switches that change what you see",
+		purpose:
+			"<b>Manufyxinvenza Settings</b> is a single settings document holding the handful of " +
+			"options that change how the app behaves site-wide. Two of them change which buttons " +
+			"appear, so a button described in this manual but missing on your screen is usually " +
+			"explained here.",
+		fields: [
+			{ name: "Auto Purchase from Material Planning", note: "Off by default. When ticked, an <b>Auto Purchase</b> button appears on Material Planning that creates Material Request → Purchase Order → Purchase Receipt in one click for every unavailable item — and the same switch reveals the <b>Add All Drawing</b> testing button on Supplier Operation Entry. Both are data-entry shortcuts for setting up test data. On a live site this stays off, and neither button exists." },
+			{ name: "Cut Sheet Tolerance (%)", note: "Default <b>2</b>. How far To Use (W1) plus Balance (W2) may differ from the sheet actually being cut before a warning appears. Cutting always loses a little to the saw, so a small gap is normal — the warning exists to catch a mis-typed dimension, not to police the kerf. Set 0 to warn on any difference at all. It never blocks a save." },
+			{ name: "Create New Batch for Cut Sheet Stock Entry", note: "Default <b>off</b>. Off: once the cut has been transferred, the sheet's own batch is rewritten to the Balance (W2) dimensions — same batch, same name, new size. On: the batch is never rewritten; a Repack Stock Entry empties it and creates a <b>new</b> batch carrying the W2 dimensions, Sec Qty and Kg, so documents already issued against the original still read true." },
+		],
+		notes: [
+			"Turn <b>Create New Batch for Cut Sheet Stock Entry</b> on where paperwork already issued against a batch must stay accurate after the plate is cut. Leave it off where fewer batch records is worth more than that.",
+			"These are site-wide settings, not per-user. Changing one changes the app for everybody.",
+		],
+	},
+];
+
 const ERP_MANUAL_CATEGORIES = [
 	...ERP_MANUAL_STUB_CATEGORIES,
 	{ id: "bom", label: "BOM", children: ERP_MANUAL_BOM_CHILDREN },
 	{ id: "material-planning", label: "Material Planning", children: ERP_MANUAL_MATERIAL_PLANNING_CHILDREN },
+	{ id: "procurement", label: "Purchase & Procurement", children: ERP_MANUAL_PROCUREMENT_CHILDREN },
 	{ id: "production-plan", label: "Production Plan", children: ERP_MANUAL_PRODUCTION_PLAN_CHILDREN },
 	{ id: "job-work-order", label: "Job Work Order", children: ERP_MANUAL_JOB_WORK_ORDER_CHILDREN },
 	{ id: "material-issue-plan", label: "Material Issue Plan", children: ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN },
 	{ id: "supplier-operation-entry", label: "Supplier Operation Entry", children: ERP_MANUAL_SOE_CHILDREN },
 	{ id: "inspection", label: "Inspection", children: ERP_MANUAL_INSPECTION_CHILDREN },
 	{ id: "reports", label: "Reports & Stock Checking", children: ERP_MANUAL_REPORTS_CHILDREN },
+	{ id: "reference", label: "Reference", children: ERP_MANUAL_REFERENCE_CHILDREN },
 	{ id: "glossary", label: "Glossary", children: ERP_MANUAL_GLOSSARY_CHILDREN },
 ];
