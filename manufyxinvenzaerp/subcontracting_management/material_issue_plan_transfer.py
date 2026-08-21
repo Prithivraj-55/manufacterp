@@ -1464,7 +1464,7 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
                 # because that save runs AFTER the Stock Entry is inserted -- by
                 # then a refused edit would already have left a stray draft behind.
                 _throw_claimed_excess_locked(r)
-            if group in _DIMENSION_DRIVEN_GROUPS:
+            if group in _DIMENSION_DRIVEN_GROUPS and not r.get("enter_weight_instead_of_pieces"):
                 if override.get("length") not in (None, ""):
                     r.length = flt(override.get("length"), 3)
                 if override.get("width") not in (None, ""):
@@ -1478,6 +1478,18 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
                 r.qty = flt(override.get("qty"), 3)
             if (override.get("return_reason") or "").strip():
                 r.return_reason = override.get("return_reason").strip()
+
+        # "Enter Weight, Not Pieces": the weight is what somebody typed, so the piece
+        # count is derived from it rather than the other way round. It matters that
+        # this happens BEFORE the Stock Entry is built: for Structurals and Plates the
+        # entry recomputes its own qty from Length x Sec Nos, so a row whose Sec Nos
+        # did not agree with its weight would quietly ship a different amount than the
+        # one on screen. Left fractional on purpose -- 18 Kg of a 4.906 Kg piece is
+        # 3.669 of one, and rounding up would claim a piece that is not coming back.
+        if r.get("enter_weight_instead_of_pieces") and (r.parent_item_group or "") in _DIMENSION_DRIVEN_GROUPS:
+            per_piece = calculate_qty(r.parent_item_group, r.length, r.width, r.thickness, r.unit_weight, 1)
+            if per_piece:
+                r.sec_qty = flt(flt(r.qty) / flt(per_piece), 3)
 
         qty = flt(r.qty, 3)
         if not r.item_code or qty <= 0:

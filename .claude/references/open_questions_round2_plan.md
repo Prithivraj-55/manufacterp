@@ -390,7 +390,7 @@ than a bulk delete. Report only; nothing removed without your word.
 
 ## Also open, from chat rather than the document
 
-## Item J — Cut Sheet: Reserve Without Dimensions, two-way  `[~]`
+## Item J — Reserve Without Dimensions, two-way  `[x]`
 
 > "if i enable, then reqd qty (18) needs to set in Calc Qty (Kg), based on this Sec Nos
 > is calculated on a read-only field, around 1.9. If unchecked, Sec Qty (NOS) is
@@ -437,3 +437,32 @@ Roughly **eight to ten working days**.
 - H7 — closed, verified in the document.
 - The test items, benchmark orders and API key — you asked to keep them.
 - Item A — dropped; new bookings are already correct.
+
+
+---
+
+## Item J — closed 21 August
+
+Both halves answered by the client and built.
+
+**The Update Batch popup.** Untick and you type the pieces, the weight follows (4 of a
+500x250x5 plate = 19.625 Kg). Tick and the weight shows the drawing's own Required Qty
+with the piece count worked back out of it (18 Kg = 3.669 pieces, fractional).
+
+The weight stays **read-only** while ticked, confirmed by the client: 18 is always
+right. Where whole pieces are wanted, the Sec Nos is raised at transfer time --
+3.669 to 4 -- the weight recalculates, and the difference books as excess through the
+round-up flow that already exists. Nothing to change.
+
+**The Excess Material Items table.** The client's flow: details are entered in the
+Excess Material Mapping popup, which creates the row; the row is then edited in the
+table afterwards. So the same choice lives there, as **"Enter Weight, Not Pieces"** --
+offered only for Structurals and Plates, since only they have a shape to measure.
+
+The part that had to be right is what the Stock Entry ships. For those two groups the
+entry recomputes its own qty from Length x Sec Nos, so a typed weight that disagreed
+with the row's Sec Nos would move a different amount from the one on screen. The Sec
+Nos is derived from the weight before the entry is built, so the two agree by
+construction.
+
+`tests/verify_excess_weight_or_pieces.py` -- 17 checks.

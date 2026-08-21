@@ -1590,11 +1590,24 @@ frappe.ui.form.on("SCO Excess Material Item", {
 	width(frm, cdt, cdn)     { if (frm.doctype === "Material Issue Plan" && !locals[cdt][cdn].stock_entry_created) _mip_excess_calc(frm, cdt, cdn); },
 	thickness(frm, cdt, cdn) { if (frm.doctype === "Material Issue Plan" && !locals[cdt][cdn].stock_entry_created) _mip_excess_calc(frm, cdt, cdn); },
 	sec_qty(frm, cdt, cdn)   { if (frm.doctype === "Material Issue Plan" && !locals[cdt][cdn].stock_entry_created) _mip_excess_calc(frm, cdt, cdn); },
+	enter_weight_instead_of_pieces(frm, cdt, cdn) {
+		if (frm.doctype !== "Material Issue Plan") return;
+		if (locals[cdt][cdn].stock_entry_created) return;
+		// Recompute in whichever direction is now the live one, so the row is
+		// consistent the moment the tick changes rather than at the next keystroke.
+		_mip_excess_calc(frm, cdt, cdn);
+		frm.fields_dict.excess_return_items.grid.refresh_row(cdn);
+	},
 	qty(frm, cdt, cdn) {
 		if (frm.doctype !== "Material Issue Plan") return;
 		var row = locals[cdt][cdn];
-		if (!row.stock_entry_created && row.parent_item_group === "Nuts and Bolts" && row.unit_weight) {
-			frappe.model.set_value(cdt, cdn, "sec_qty", flt(row.unit_weight * flt(row.qty), 3));
+		if (!row.stock_entry_created) {
+			if (row.enter_weight_instead_of_pieces) {
+				// The typed weight is the truth now; the piece count follows from it.
+				_mip_excess_sec_from_qty(frm, cdt, cdn);
+			} else if (row.parent_item_group === "Nuts and Bolts" && row.unit_weight) {
+				frappe.model.set_value(cdt, cdn, "sec_qty", flt(row.unit_weight * flt(row.qty), 3));
+			}
 		}
 		_mip_excess_totals(frm);
 	},
@@ -1632,18 +1645,40 @@ frappe.ui.form.on("SCO Excess Material Item", {
 	},
 });
 
-function _mip_excess_calc(frm, cdt, cdn) {
-	var row = locals[cdt][cdn];
+// Weight of ONE piece of this off-cut's shape. Both directions hang off it: pieces
+// times this is the weight, weight divided by this is the pieces.
+function _mip_excess_kg_per_piece(row) {
 	var g = row.parent_item_group;
-	var qty = null;
 	if (g === "Structurals") {
-		if (row.length && row.unit_weight && row.sec_qty) qty = (row.length / 1000) * row.unit_weight * row.sec_qty;
+		if (row.length && row.unit_weight) return (row.length / 1000) * row.unit_weight;
 	} else if (g === "Plates") {
-		if (row.length && row.width && row.thickness && row.unit_weight && row.sec_qty) {
-			qty = (row.length / 1000) * (row.width / 1000) * row.thickness * row.unit_weight * row.sec_qty;
+		if (row.length && row.width && row.thickness && row.unit_weight) {
+			return (row.length / 1000) * (row.width / 1000) * row.thickness * row.unit_weight;
 		}
 	}
-	if (qty !== null) frappe.model.set_value(cdt, cdn, "qty", flt(qty, 3));
+	return 0;
+}
+
+// Pieces -> weight, the usual direction: the shape and the count are known.
+function _mip_excess_calc(frm, cdt, cdn) {
+	var row = locals[cdt][cdn];
+	if (row.enter_weight_instead_of_pieces) {
+		// Ticked, the weight is what was typed, so the count is what follows.
+		_mip_excess_sec_from_qty(frm, cdt, cdn);
+		return;
+	}
+	var per = _mip_excess_kg_per_piece(row);
+	if (per && row.sec_qty) frappe.model.set_value(cdt, cdn, "qty", flt(per * flt(row.sec_qty), 3));
+	_mip_excess_totals(frm);
+}
+
+// Weight -> pieces, the other direction. Left fractional on purpose, the same way a
+// Material Planning row's Sec Nos is: 18 Kg of a 4.90625 Kg piece is 3.669 of one,
+// and rounding it up here would quietly claim a piece that is not being returned.
+function _mip_excess_sec_from_qty(frm, cdt, cdn) {
+	var row = locals[cdt][cdn];
+	var per = _mip_excess_kg_per_piece(row);
+	frappe.model.set_value(cdt, cdn, "sec_qty", per ? flt(flt(row.qty) / per, 3) : 0);
 	_mip_excess_totals(frm);
 }
 

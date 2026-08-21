@@ -13,6 +13,7 @@
   "length",
   "width",
   "thickness",
+  "enter_weight_instead_of_pieces",
   "sec_qty",
   "sec_uom",
   "qty",
@@ -97,12 +98,22 @@
    "label": "Thickness (mm)"
   },
   {
+   "default": "0",
+   "depends_on": "eval:['Structurals','Plates'].includes(doc.parent_item_group)",
+   "description": "Off: type the Length/Width and Sec Nos, and the weight follows. On: type the weight, and the Sec Nos follows. The same choice as \"Reserve stock without dimensions\" on a Material Planning row -- which of the two figures you know, and which one should be worked out for you. Only offered where a piece has dimensions to measure.",
+   "fieldname": "enter_weight_instead_of_pieces",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enter Weight, Not Pieces"
+  },
+  {
    "allow_on_submit": 1,
-   "description": "For Nuts and Bolts: auto-calculated as Unit Weight \u00d7 Weight(Nos qty)",
+   "description": "How many pieces the off-cut is. Worked out from the weight when \"Enter Weight, Not Pieces\" is ticked.",
    "fieldname": "sec_qty",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Sec Nos"
+   "label": "Sec Nos",
+   "read_only_depends_on": "eval:doc.enter_weight_instead_of_pieces || doc.stock_entry_created"
   },
   {
    "allow_on_submit": 1,
@@ -115,11 +126,12 @@
   },
   {
    "allow_on_submit": 1,
-   "description": "Auto-calculated from dimensions for Structurals / Plates; entered directly (Nos qty) for Nuts and Bolts",
+   "description": "Worked out from the dimensions and Sec Nos, unless \"Enter Weight, Not Pieces\" is ticked -- then this is what you type.",
    "fieldname": "qty",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Weight (Kg)"
+   "label": "Weight (Kg)",
+   "read_only_depends_on": "eval:doc.stock_entry_created || (!doc.enter_weight_instead_of_pieces && ['Structurals','Plates'].includes(doc.parent_item_group))"
   },
   {
    "allow_on_submit": 1,

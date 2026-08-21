@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-21 14:48:43_
+_Generated: 2026-08-21 15:00:42_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-08-21 14:48:43_
 
 ## Python files
 
-_Total: 242_
+_Total: 243_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -228,6 +228,7 @@ _Total: 242_
 - tests/verify_excess_material_mapping.py
 - tests/verify_excess_material_mapping_row_btn.py
 - tests/verify_excess_partial_and_flags.py
+- tests/verify_excess_weight_or_pieces.py
 - tests/verify_internal_job_sco.py
 - tests/verify_manual_mr_multi_supplier.py
 - tests/verify_mip_consolidated_allocation.py
@@ -1469,6 +1470,12 @@ Functions:
 Functions:
   - 34:check:
   - 39:_throws:
+  - 47:run:
+
+### tests/verify_excess_weight_or_pieces.py
+Functions:
+  - 35:check:
+  - 41:_js:
   - 47:run:
 
 ### tests/verify_internal_job_sco.py
