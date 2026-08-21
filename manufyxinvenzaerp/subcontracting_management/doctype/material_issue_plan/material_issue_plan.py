@@ -914,7 +914,7 @@ def _maybe_mark_completed(mip):
       2. Every excess_return_items row is resolved: either physically returned
          (stock_entry_created), claimed straight off this table into another
          Material Planning (mapped_material_planning), or flagged to never
-         physically leave the supplier (Retain at Supplier (Virtual)). An empty
+         physically leave the supplier (Billed to Consume). An empty
          table trivially satisfies this -- nothing to return.
 
     Only ever moves Open/In Progress -> Completed, never the reverse -- once set,
@@ -935,7 +935,9 @@ def _maybe_mark_completed(mip):
     for row in (mip.excess_return_items or []):
         if row.stock_entry_created or row.mapped_material_planning:
             continue
-        if row.return_type == "Retain at Supplier (Virtual)":
+        if row.billed_to_consume:
+            # Charged to this job and consumed at the supplier rather than returned,
+            # so it is never waiting on a return entry and never holds the plan open.
             continue
         return
     mip.status = "Completed"

@@ -651,7 +651,6 @@ def _log_round_up_excess(mip, items, excess_plan=None):
                 "uom": item.get("uom") or "Kg",
                 "qty": excess_kg,
                 "return_warehouse": return_warehouse,
-                "return_type": "Return to Own Warehouse",
                 "return_reason": _(
                     "Rounding surplus from \"Round Up Sec Qty for Transfer\" -- placeholder "
                     "dimensions (standard piece size); confirm the exact leftover once "
@@ -757,7 +756,6 @@ def _log_consolidated_excess(mip, items, excess_plan):
                 "uom": item.get("uom") or "Kg",
                 "qty": entered_kg,
                 "return_warehouse": entry.get("return_warehouse") or mip.source_warehouse or "",
-                "return_type": "Return to Own Warehouse",
                 "return_reason": reason,
             })
             by_key[code] = target
@@ -1444,10 +1442,11 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
     for r in (mip.excess_return_items or []):
         if r.get("stock_entry_created"):
             continue
-        if r.get("return_type") == "Retain at Supplier (Virtual)":
-            # Never physically returns to any warehouse -- no Stock Entry/Batch
-            # for this row at all; it's claimed directly from this table via
-            # Excess Material Mapping's virtual-excess picker instead.
+        if r.get("billed_to_consume"):
+            # Never comes back, so there is nothing to receive: it stays in the
+            # supplier's warehouse and the job's final Stock Entry consumes it from
+            # there, which is what puts its cost on the job rather than in the free
+            # pool. No return entry, no batch, and no other plan can claim it.
             continue
         # A claimed row is deliberately NOT skipped: bringing the off-cut back is
         # exactly how a virtual claim stops being a paper promise. The batch this

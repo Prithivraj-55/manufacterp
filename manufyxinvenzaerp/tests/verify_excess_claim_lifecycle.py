@@ -192,6 +192,12 @@ def run():
     other_item = ensure_item(ctx, "ZZTEST-EXCLIFE-B", "Excess Claim Lifecycle Other Item", uom="Kg")
     frappe.db.set_value("Item", other_item, {
         "custom_parent_item_group": "Structurals", "custom_unit_weight": 10,
+        # It is returned for real further down -- Return Type used to let a row opt
+        # out of that, and does not exist any more -- so it has to behave like any
+        # other steel: worth something, and able to make itself a batch on receipt.
+        "valuation_rate": 50,
+        "create_new_batch": 1,
+        "custom_batch_prefix": "ZZEXB",
     })
     d = frappe.get_doc("Material Issue Plan", mip.name)
     d.append("excess_return_items", {
@@ -202,10 +208,6 @@ def run():
         # probe row is not touched by _sync_excess_return_from_raw_materials.
         "source_table": "Round Up Sec Qty for Transfer", "source_row": "ZZ-MISMATCH-PROBE",
         "return_reason": "Second off-cut, different item",
-        # Retain-at-Supplier so the Return Excess Entry later in this test skips it:
-        # it exists only to be offered to the claim picker, and returning it for real
-        # would need batch/valuation setup that has nothing to do with what is tested.
-        "return_type": "Retain at Supplier (Virtual)",
     })
     d.save(ignore_permissions=True)
     frappe.db.commit()

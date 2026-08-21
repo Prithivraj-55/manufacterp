@@ -25,7 +25,7 @@
   "available_sec_qty",
   "available_qty",
   "return_reason",
-  "return_type",
+  "billed_to_consume",
   "return_warehouse",
   "stock_entry_created",
   "source_table",
@@ -79,7 +79,8 @@
    "fieldname": "length",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Length (mm)"
+   "label": "Length (mm)",
+   "read_only_depends_on": "eval:doc.stock_entry_created"
   },
   {
    "allow_on_submit": 1,
@@ -87,7 +88,8 @@
    "fieldname": "width",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Width (mm)"
+   "label": "Width (mm)",
+   "read_only_depends_on": "eval:doc.stock_entry_created"
   },
   {
    "allow_on_submit": 1,
@@ -95,7 +97,8 @@
    "fieldname": "thickness",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Thickness (mm)"
+   "label": "Thickness (mm)",
+   "read_only_depends_on": "eval:doc.stock_entry_created"
   },
   {
    "default": "0",
@@ -104,7 +107,8 @@
    "fieldname": "enter_weight_instead_of_pieces",
    "fieldtype": "Check",
    "in_list_view": 1,
-   "label": "Enter Weight, Not Pieces"
+   "label": "Enter Weight, Not Pieces",
+   "read_only_depends_on": "eval:doc.stock_entry_created"
   },
   {
    "allow_on_submit": 1,
@@ -187,20 +191,20 @@
   },
   {
    "allow_on_submit": 1,
-   "default": "Return to Own Warehouse",
-   "description": "'Return to Own Warehouse' is the standard flow -- create a Return Excess Entry (Stock Entry) so the material becomes a real, reservable batch in stock. 'Retain at Supplier (Virtual)' is for material that never physically comes back -- it stays at the supplier's location, is never a Stock Entry / Batch, and is claimed directly from this row via the Excess Material Mapping picker.",
-   "fieldname": "return_type",
-   "fieldtype": "Select",
+   "default": "0",
+   "description": "The off-cut is never coming back: it stays where it is, is charged to this job, and is consumed by the final Stock Entry out of the supplier's warehouse so the job carries its cost. No return entry is made for it and no other plan can claim it -- treat it as scrapped.",
+   "fieldname": "billed_to_consume",
+   "fieldtype": "Check",
    "in_list_view": 1,
-   "label": "Return Type",
-   "options": "Return to Own Warehouse\nRetain at Supplier (Virtual)"
+   "label": "Billed to Consume"
   },
   {
    "description": "Where this off-cut comes back to. Defaults to the plan's raw-material warehouse; change it to a scrap warehouse when the piece is not reusable.",
    "fieldname": "return_warehouse",
    "fieldtype": "Link",
    "label": "Return Warehouse",
-   "options": "Warehouse"
+   "options": "Warehouse",
+   "depends_on": "eval:!doc.billed_to_consume"
   },
   {
    "allow_on_submit": 1,
