@@ -4290,7 +4290,22 @@ def auto_purchase_from_mp(material_planning_name):
     for the "Create Material Request" button (client change request Phase 2.4):
     Consolidate Item is the purchasing-facing table, deduped by item_code across
     every drawing/sales order that needed it.
+
+    Refused outright unless Manufyxinvenza Settings switches Auto Purchase on. It is a
+    testing aid rather than a production feature -- it chains MR -> PO -> PR with no
+    rollback, so a failure part-way leaves a half-built chain behind. The Settings
+    switch hides the button on the form, but this method stays whitelisted and any API
+    key can reach it, so the refusal belongs here rather than in the client script.
     """
+    if not frappe.db.get_single_value(
+        "Manufyxinvenza Settings", "auto_purchase_from_material_planning"
+    ):
+        frappe.throw(
+            _("Auto Purchase is switched off. Enable 'Auto Purchase from Material Planning' "
+              "in Manufyxinvenza Settings first."),
+            frappe.PermissionError,
+        )
+
     from frappe.utils import today
     from erpnext.stock.doctype.material_request.material_request import (
         make_purchase_order as _mr_to_po,
