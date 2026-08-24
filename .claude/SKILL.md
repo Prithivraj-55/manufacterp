@@ -125,9 +125,13 @@ manufyxinvenzaerp/
 │   │                         #   item.js, bom.js, production_plan.js,
 │   │                         #   purchase_order.js, purchase_receipt.js
 ├── patches/                  # Data migration patches
-└── tests/                    # 86 files, two kinds:
-    ├── test_*.py             #   unittest, run by `bench run-tests` and by CI
-    └── verify_*.py           #   71 standalone checks, each with a run() called
+└── tests/                    # 90 files, two kinds:
+    ├── test_*.py             #   8 unittest modules, run by `bench run-tests`
+                              #   and by CI. test_whitelist_coverage is the one to
+                              #   keep green: it checks every dotted path the front
+                              #   end calls is actually whitelisted, after a lost
+                              #   decorator shipped a broken Reserve button to live.
+    └── verify_*.py           #   74 standalone checks, each with a run() called
                               #   directly: `bench --site manufact execute
                               #   manufyxinvenzaerp.tests.<name>.run`
                               #   They print OK/FAIL per assertion and finish with
@@ -178,6 +182,29 @@ manufyxinvenzaerp/
   flag them as unreferenced because nothing in THIS app calls them. Removing them breaks the
   BOM form.
 - **No scheduler_events** are registered (all commented out in hooks.py).
+
+## This bench does not hot-reload
+
+`bench start` runs the web server with Werkzeug's auto-reloader enabled, and it does
+not work here -- touching a file leaves the serving child process untouched. Verified,
+not assumed: `touch` on a controller, then watch the child PID stay put.
+
+So **a code change has no effect on the local site until `bench start` is restarted**
+(Ctrl+C in that terminal, then `bench start`). `bench restart` is a no-op on this bench
+-- it is for supervisor/systemd, and this runs under honcho.
+
+This costs real time when it is forgotten: a fix lands, the screen keeps showing the old
+behaviour, and the obvious conclusion is that the fix was wrong. Two separate bugs were
+re-reported that way. Check the serving process's start time against the file's mtime
+before doubting the code:
+
+```bash
+ps -eo pid,lstart,cmd | grep "frappe serve" | grep -v grep
+stat -c '%y' <the file you changed>
+```
+
+A fresh interpreter -- `bench console`, `bench execute`, `bench run-tests` -- always has
+the current code, which is why a verify script can pass while the browser still fails.
 
 ## Quick bench commands
 
