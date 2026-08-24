@@ -34,8 +34,12 @@ class Drawing(Document):
     def before_submit(self):
         self._check_missing_fields(throw=True)
 
+    def on_submit(self):
+        _link_to_sales_order_row(self)
+
     def on_cancel(self):
         self.db_set("status", "Old Revision")
+        _release_sales_order_row(self)
 
     def _recalculate_all(self):
         no_of_qty = flt(self.no_of_qty_to_manufacture)
@@ -57,6 +61,61 @@ class Drawing(Document):
             elif sec_uom in ("kg", "kgs"):
                 total_weight += flt(row.sec_qty)
         self.total_weight = flt(total_weight, 3)
+
+
+
+def _sales_order_row(doc):
+    """The Sales Order DUNO Item row this drawing belongs to, if it still exists."""
+    if not (doc.sales_order and doc.duno_mark_no):
+        return None
+    filters = {"parent": doc.sales_order, "duno_mark_no": doc.duno_mark_no}
+    if doc.customer_drawing_number:
+        filters["drawing_number"] = doc.customer_drawing_number
+    return frappe.db.get_value("Sales Order DUNO Item", filters, ["name", "drawing"], as_dict=True)
+
+
+def _release_sales_order_row(doc):
+    """Cancelling a drawing lets go of the Sales Order row it was made for.
+
+    Two things went wrong while the link stayed behind. The Sales Order could no
+    longer be submitted at all -- Frappe refuses to link a cancelled document, and
+    says so as a row number with no hint of which drawing or DUNO it means. And the
+    row still looked answered, so "Create Drawings" never offered it again: the one
+    obvious way to put it right was closed off by the very thing that broke it.
+
+    Letting go puts the row back to how it looked before the drawing existed, which
+    is what it now describes: a DUNO with no drawing against it. Amending the
+    cancelled drawing re-attaches it on submit (see _link_to_sales_order_row), and
+    re-importing it works too."""
+    row = _sales_order_row(doc)
+    if not row or row.drawing != doc.name:
+        return
+    frappe.db.set_value("Sales Order DUNO Item", row.name, "drawing", "", update_modified=False)
+
+
+def _link_to_sales_order_row(doc):
+    """Submitting a drawing attaches it to its Sales Order row, where that row is
+    waiting for one.
+
+    Normally the import has already done this. It matters for an AMENDED drawing:
+    the cancelled original let the row go, and this is what fills it back in with
+    the revision that replaced it, so the Sales Order can be submitted again without
+    anybody having to know a link was ever broken.
+
+    It also takes over a row still holding the very document this one amends. That is
+    the state every order cancelled before this existed is in: nothing let the row go
+    at the time, so it is still naming a cancelled drawing and the order cannot be
+    submitted. Replacing it is safe precisely because the match is exact -- this
+    drawing IS the revision of the one the row names.
+
+    A row naming any OTHER drawing is left alone. It is answered, and quietly
+    repointing it would be a worse surprise than doing nothing."""
+    row = _sales_order_row(doc)
+    if not row:
+        return
+    if row.drawing and row.drawing != doc.amended_from:
+        return
+    frappe.db.set_value("Sales Order DUNO Item", row.name, "drawing", doc.name, update_modified=False)
 
 
 def _recalculate_row_qty(row):

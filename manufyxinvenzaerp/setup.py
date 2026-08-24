@@ -551,11 +551,43 @@ frappe.ui.form.on("Sales Order", {
 		_so_render_drawing_buttons(frm);
 		_so_render_duno_view_all_btn(frm);
 		_so_render_bom_summary(frm);
+		_so_warn_cancelled_drawings(frm);
 	},
 	custom_bom_excel_file(frm) {
 		_so_render_file_buttons(frm);
 	}
 });
+
+// A drawing that was cancelled leaves its DUNO row pointing at a dead document, and
+// Frappe then refuses to save OR submit the order -- reporting it as a row number
+// with no hint of which DUNO it means. Cancelling now releases the row by itself, so
+// this is for orders that were already in that state: say which DUNO it is, and what
+// puts it right, on the form where somebody can act on it.
+//
+// It has to be said here. Frappe checks links in _validate_links(), which runs before
+// every server-side hook, so the same message raised from validate() is never reached.
+function _so_warn_cancelled_drawings(frm) {
+	if (frm.is_new()) return;
+	frappe.call({
+		method: "manufyxinvenzaerp.drawing_management.so_drawing_import.get_cancelled_drawing_links",
+		args: { sales_order: frm.doc.name },
+		callback(r) {
+			let rows = (r.message || []);
+			if (!rows.length) return;
+			let lines = rows.map(function(d) {
+				return __("Row {0} — DUNO {1} — {2}", [d.idx, d.duno_mark_no || "?", d.drawing]);
+			}).join("<br>");
+			frm.dashboard.clear_comment();
+			frm.dashboard.add_comment(
+				"<b>" + __("Cancelled drawing linked") + "</b><br>"
+				+ __("This order cannot be saved or submitted while these rows point at a cancelled drawing:")
+				+ "<br>" + lines + "<br>"
+				+ __("Open each drawing and <b>Amend</b> it, then submit the amendment — the row re-attaches itself to the new revision."),
+				"orange", true
+			);
+		},
+	});
+}
 
 // ── Qty calculation in Raw Materials child table ───────────────────────────
 

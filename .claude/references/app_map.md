@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-21 15:10:38_
+_Generated: 2026-08-24 22:08:04_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-08-21 15:10:38_
 
 ## Python files
 
-_Total: 244_
+_Total: 245_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -208,6 +208,7 @@ _Total: 244_
 - tests/verify_bom_routing_new_bom.py
 - tests/verify_bom_routing_trim.py
 - tests/verify_bulk_permissions.py
+- tests/verify_cancelled_drawing_link.py
 - tests/verify_cnc_consumption_and_kg_chain.py
 - tests/verify_consolidate_alternate_item.py
 - tests/verify_consolidate_finalize.py
@@ -479,10 +480,14 @@ _Total: 163_
   - before_insert:
   - validate:
   - before_submit:
+  - on_submit:
   - on_cancel:
   - _recalculate_all:
   - _check_missing_fields:
   - _calculate_totals:
+  - _sales_order_row:
+  - _release_sales_order_row:
+  - _link_to_sales_order_row:
   - _recalculate_row_qty:
   - _recalculate_row_totals:
   - _check_row_missing_fields:
@@ -883,8 +888,8 @@ Functions:
 
 ### drawing_management/sales_order.py
 Functions:
-  - 6:drawing_calculated_weight:
-  - 22:recalculate_raw_material_qty:
+  - 7:drawing_calculated_weight:
+  - 23:recalculate_raw_material_qty:
 
 ### drawing_management/so_drawing_import.py
 Functions:
@@ -902,6 +907,7 @@ Functions:
   - 820:verify_raw_materials:
   - 931:download_bom_template:
   - 986:clear_drawing_import:
+  - 1021:get_cancelled_drawing_links:
 
 ### hooks.py
 
@@ -1077,43 +1083,43 @@ Functions:
 
 ### setup.py
 Functions:
-  - 1381:create_default_warehouse_types:
-  - 1395:after_install:
-  - 1439:after_migrate:
-  - 1487:setup_storage_location:
-  - 1509:create_item_client_script:
-  - 1525:create_item_custom_fields:
-  - 1610:create_purchase_order_custom_fields:
-  - 1716:hide_purchase_order_weight_fields:
-  - 1730:create_purchase_order_client_script:
-  - 1746:create_purchase_receipt_custom_fields:
-  - 1925:create_batch_custom_fields:
-  - 2010:create_purchase_receipt_client_script:
-  - 2026:create_material_request_custom_fields:
-  - 2151:create_material_request_client_script:
-  - 2167:create_rfq_custom_fields:
-  - 2243:create_rfq_client_script:
-  - 2259:create_sq_custom_fields:
-  - 2338:create_sq_client_script:
-  - 2354:create_bom_custom_fields:
-  - 2461:create_so_custom_fields:
-  - 2552:create_so_client_script:
-  - 2568:create_bom_client_script:
-  - 2588:create_production_plan_custom_fields:
-  - 2830:create_production_plan_client_script:
-  - 2975:create_stock_entry_custom_fields:
-  - 3167:create_stock_entry_client_script:
-  - 3204:create_doctype_label_translations:
-  - 3227:remove_sco_purchase_order_mandatory:
-  - 3238:hide_sco_job_worker_warehouse:
-  - 3267:make_sco_job_worker_conditional:
-  - 3302:create_sco_custom_fields:
-  - 3774:create_sco_client_script:
-  - 3790:create_sco_ops_client_script:
-  - 3806:create_soe_client_script:
-  - 3822:create_manufacturing_settings_custom_fields:
-  - 3861:create_material_planning_auto_purchase_fields:
-  - 3924:create_payment_request_custom_fields:
+  - 1413:create_default_warehouse_types:
+  - 1427:after_install:
+  - 1471:after_migrate:
+  - 1519:setup_storage_location:
+  - 1541:create_item_client_script:
+  - 1557:create_item_custom_fields:
+  - 1642:create_purchase_order_custom_fields:
+  - 1748:hide_purchase_order_weight_fields:
+  - 1762:create_purchase_order_client_script:
+  - 1778:create_purchase_receipt_custom_fields:
+  - 1957:create_batch_custom_fields:
+  - 2042:create_purchase_receipt_client_script:
+  - 2058:create_material_request_custom_fields:
+  - 2183:create_material_request_client_script:
+  - 2199:create_rfq_custom_fields:
+  - 2275:create_rfq_client_script:
+  - 2291:create_sq_custom_fields:
+  - 2370:create_sq_client_script:
+  - 2386:create_bom_custom_fields:
+  - 2493:create_so_custom_fields:
+  - 2584:create_so_client_script:
+  - 2600:create_bom_client_script:
+  - 2620:create_production_plan_custom_fields:
+  - 2862:create_production_plan_client_script:
+  - 3007:create_stock_entry_custom_fields:
+  - 3199:create_stock_entry_client_script:
+  - 3236:create_doctype_label_translations:
+  - 3259:remove_sco_purchase_order_mandatory:
+  - 3270:hide_sco_job_worker_warehouse:
+  - 3299:make_sco_job_worker_conditional:
+  - 3334:create_sco_custom_fields:
+  - 3806:create_sco_client_script:
+  - 3822:create_sco_ops_client_script:
+  - 3838:create_soe_client_script:
+  - 3854:create_manufacturing_settings_custom_fields:
+  - 3893:create_material_planning_auto_purchase_fields:
+  - 3956:create_payment_request_custom_fields:
 
 ### sq_management/supplier_quotation.py
 Functions:
@@ -1362,6 +1368,12 @@ Functions:
 Functions:
   - 24:check:
   - 30:run:
+
+### tests/verify_cancelled_drawing_link.py
+Functions:
+  - 35:check:
+  - 41:_src:
+  - 45:run:
 
 ### tests/verify_cnc_consumption_and_kg_chain.py
 Functions:
@@ -1708,7 +1720,8 @@ Functions:
 - `drawing_management/so_drawing_import.py:820` — `verify_raw_materials`
 - `drawing_management/so_drawing_import.py:931` — `download_bom_template`
 - `drawing_management/so_drawing_import.py:986` — `clear_drawing_import`
-- `drawing_management/doctype/drawing/drawing.py:109` — `check_existing_bom`
+- `drawing_management/so_drawing_import.py:1021` — `get_cancelled_drawing_links`
+- `drawing_management/doctype/drawing/drawing.py:168` — `check_existing_bom`
 - `production_plan_management/production_plan.py:284` — `get_items_for_material_requests`
 - `production_plan_management/production_plan.py:661` — `get_mp_planned_weights`
 - `production_plan_management/production_plan.py:713` — `get_pp_drawings_for_picker`
