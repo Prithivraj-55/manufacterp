@@ -907,41 +907,52 @@ function _so_render_drawing_buttons(frm) {
 			}, __("Drawing"));
 		}
 
-		// Create BOM options — only if final revision drawings with checkbox on
-		var bom_candidates = items.filter(function(r) { return r.create_bom && final.has(r.drawing); });
-		var bom_count = bom_candidates.length;
-		if (bom_count) {
-			var bom_drawing_names = bom_candidates.map(function(r) { return r.drawing; });
+		// BOM — one button, and only while there is a BOM left to make.
+		//
+		// A drawing only reaches this stage once it is a Final Revision, so the group
+		// reads as a sequence: submit the drawing, mark it final, then make its BOM.
+		// Creating a BOM without submitting it was a second way to do the same job that
+		// left drafts nobody chased, so there is one button now, not two.
+		//
+		// Once every final drawing has a submitted BOM there is nothing left to create,
+		// and the button used to stay put and answer a click with "already created".
+		// It is replaced by View Drawing instead, so the group says what is left to do
+		// rather than offering work that is finished.
+		// Not while there is still a drawing waiting to be marked final. The two are
+		// consecutive steps, not alternatives, and offering both at once invites the
+		// BOM to be made for the drawings that happen to be ready while the rest are
+		// quietly left behind -- which reads as "the BOMs are done" when they are not.
+		var final_names = items.filter(function(r) { return final.has(r.drawing); })
+			.map(function(r) { return r.drawing; });
+		if (final_names.length && !final_count) {
+			var bom_candidates = items.filter(function(r) { return r.create_bom && final.has(r.drawing); });
+			frappe.db.get_list("BOM", {
+				filters: [["custom_drawing", "in", final_names], ["docstatus", "=", 1]],
+				fields: ["custom_drawing"],
+				limit: final_names.length,
+			}).then(function(existing) {
+				var done = new Set(existing.map(function(b) { return b.custom_drawing; }));
+				var pending = bom_candidates.filter(function(r) { return !done.has(r.drawing); });
 
-			// Check upfront if all candidate drawings already have a submitted BOM.
-			// If so, show an info message instead of running the step.
-			function _run_if_not_all_done(step, title, freeze_msg) {
-				frappe.db.get_list("BOM", {
-					filters: [["custom_drawing", "in", bom_drawing_names], ["docstatus", "=", 1]],
-					fields: ["name"],
-					limit: bom_drawing_names.length + 1,
-				}).then(function(existing) {
-					if (existing.length >= bom_drawing_names.length) {
+				if (pending.length) {
+					frm.add_custom_button(__("Create and Submit BOM"), function() {
+						_so_run_step(frm, "create_and_submit_bom", __("Create and Submit BOM"),
+							__("Creating and Submitting BOMs…"), pending.length, __("Create BOM"));
+					}, __("Drawing"));
+				} else if (final_names.every(function(n) { return done.has(n); })) {
+					frm.add_custom_button(__("View Drawing"), function() {
+						// Says the drawing stage is finished, and where the work goes next.
+						// Reaching this button at all means every drawing is final and every
+						// one has a submitted BOM, so there is nothing left to do here.
 						frappe.msgprint({
-							title: __("BOMs Already Created"),
-							message: __("All BOMs are already created and submitted — nothing to create.")
-								+ "<br><br>"
-								+ __("You can now proceed to <b>Material Planning</b> to start production planning."),
-							indicator: "blue",
+							title: __("Drawings and BOMs Ready"),
+							message: __("Drawings and BOMs are created — ready to proceed to <b>Material Planning</b>."),
+							indicator: "green",
 						});
-						return;
-					}
-					_so_run_step(frm, step, title, freeze_msg, bom_count, __("Create BOM"));
-				});
-			}
-
-			frm.add_custom_button(__("Create and Submit BOM"), function() {
-				_run_if_not_all_done("create_and_submit_bom", __("Create and Submit BOM"), __("Creating and Submitting BOMs…"));
-			}, __("Drawing"));
-
-			frm.add_custom_button(__("Create BOM"), function() {
-				_run_if_not_all_done("create_bom", __("Create BOM"), __("Creating BOMs…"));
-			}, __("Drawing"));
+						frappe.set_route("List", "Drawing", { sales_order: frm.doc.name });
+					}, __("Drawing"));
+				}
+			});
 		}
 
 		// Submit BOM — only if draft BOMs already exist

@@ -63,8 +63,11 @@ def _held(row_name):
 
 
 def run():
-    company = frappe.get_all("Company", pluck="name")[0]
     warehouse = _warehouse()
+    # The company that owns the warehouse, not whichever Company sorts first: a
+    # site restored from a backup carries test companies, and the first of those
+    # owns none of these warehouses.
+    company = frappe.db.get_value("Warehouse", warehouse, "company")
     receipt = move1 = move2 = None
 
     try:

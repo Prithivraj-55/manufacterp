@@ -53,17 +53,28 @@ def check(label, got, want):
     print("  %-4s %-56s got=%r want=%r" % ("OK" if ok else "FAIL", label, got, want))
 
 
-def _company():
+def _company(warehouse=None):
+    """The company that owns the warehouse in use.
+
+    Not whichever Company sorts first: a site restored from a backup carries test
+    companies, and the first of those owns none of these warehouses -- which fails
+    much later, as "Warehouse X does not belong to company Y".
+    """
+    if warehouse:
+        owner = frappe.db.get_value("Warehouse", warehouse, "company")
+        if owner:
+            return owner
     return frappe.get_all("Company", pluck="name")[0]
 
 
-def _warehouse(company):
+def _warehouse(company=None):
     for name in ("Stores - MIPL", "Work In Progress - MIPL"):
         if frappe.db.exists("Warehouse", name):
             return name
-    return frappe.get_all(
-        "Warehouse", filters={"is_group": 0, "company": company}, pluck="name"
-    )[0]
+    filters = {"is_group": 0}
+    if company:
+        filters["company"] = company
+    return frappe.get_all("Warehouse", filters=filters, pluck="name")[0]
 
 
 def _ensure_item():
@@ -113,8 +124,8 @@ def _make_entry(se_type, company, rows):
 
 
 def run():
-    company = _company()
-    warehouse = _warehouse(company)
+    warehouse = _warehouse()
+    company = _company(warehouse)
     original_setting = frappe.db.get_single_value("Manufyxinvenza Settings", SETTING)
     receipt = issue = mp_name = None
 

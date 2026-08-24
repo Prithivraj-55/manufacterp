@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-08-24 22:16:05_
+_Generated: 2026-08-25 00:02:28_
 
 ## drawing
 
@@ -349,6 +349,7 @@ _Generated: 2026-08-24 22:16:05_
 | ` _cut_sheet_thickness` | no |
 | ` excess_aware_mapped_status` | no |
 | ` validate` | no |
+| ` _consolidate_rows_touched` | no |
 | ` _warn_undersized_purchase_dimensions` | no |
 | ` _sync_cut_sheet_flag` | no |
 | ` _sync_cut_sheet_calc` | no |
