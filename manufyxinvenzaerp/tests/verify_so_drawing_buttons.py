@@ -56,6 +56,16 @@ def run():
     check("and only rows ticked for a BOM", "r.create_bom && final.has(r.drawing)" in js, True)
 
     print()
+    print("=== and not while a drawing is still waiting to be marked final ===")
+    # The two are consecutive steps, not alternatives. Offering both at once invites
+    # the BOM to be made for whichever drawings happen to be ready while the rest are
+    # quietly left behind -- which then reads as "the BOMs are done" when they are not.
+    check("the BOM step waits for the final-revision step",
+          "if (final_names.length && !final_count) {" in js, True)
+    check("using the same count that draws that button",
+          "var final_count = items.filter" in js, True)
+
+    print()
     print("=== when the work is done, the button changes ===")
     check("View Drawing takes its place", '__("View Drawing")' in js, True)
     check("it opens this order's drawings",

@@ -918,9 +918,13 @@ function _so_render_drawing_buttons(frm) {
 		// and the button used to stay put and answer a click with "already created".
 		// It is replaced by View Drawing instead, so the group says what is left to do
 		// rather than offering work that is finished.
+		// Not while there is still a drawing waiting to be marked final. The two are
+		// consecutive steps, not alternatives, and offering both at once invites the
+		// BOM to be made for the drawings that happen to be ready while the rest are
+		// quietly left behind -- which reads as "the BOMs are done" when they are not.
 		var final_names = items.filter(function(r) { return final.has(r.drawing); })
 			.map(function(r) { return r.drawing; });
-		if (final_names.length) {
+		if (final_names.length && !final_count) {
 			var bom_candidates = items.filter(function(r) { return r.create_bom && final.has(r.drawing); });
 			frappe.db.get_list("BOM", {
 				filters: [["custom_drawing", "in", final_names], ["docstatus", "=", 1]],
