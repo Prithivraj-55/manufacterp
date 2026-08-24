@@ -62,9 +62,11 @@ Ask first, every time, going forward.)
 manufyxinvenzaerp/
 ├── drawing_management/       # Drawing → BOM creation; BOM class override
 │   ├── bom_class_override.py # Overrides ERPNext BOM with custom logic
-│   ├── drawing_utils.py      # Whitelisted helpers: create_drawings_from_so,
-│   │                         #   mark_as_final_revision, create_bom_from_drawing,
+│   ├── drawing_utils.py      # Whitelisted helpers: mark_as_final_revision,
+│   │                         #   create_bom_from_drawing,
 │   │                         #   create_production_plan_from_bom, parse_drawing_items_csv
+│   ├── so_drawing_import.py  # The Sales Order BOM-sheet import: load, verify,
+│   │                         #   create/submit drawings, create BOMs
 │   └── doctype/
 │       ├── drawing/          # Drawing doctype (controller + client JS)
 │       ├── drawing_item/     # Child table for drawing line items
@@ -84,7 +86,10 @@ manufyxinvenzaerp/
 │   ├── production_utils.py   # routing/workstation helpers; whitelisted: get_routing_operations_for_bom,
 │   │                         #   get_raw_materials_for_job_card
 │   └── doctype/
-│       ├── material_planning/          # Core planning doctype — largest controller (950+ lines)
+│       ├── material_planning/          # Core planning doctype — largest controller
+│       ├── cut_sheet/                  # One plate's nesting plan, shared across jobs
+│       ├── manufyx_decision_log/       # Append-only: who reserved/reassigned/rounded up
+│       ├── inspection_entry/           # QC result; also covers incoming goods
 │       ├── process_planning/           # Process routing doctype
 │       ├── job_card_raw_material/      # Child table
 │       ├── material_planning_*         # Child tables: available_raw_material, bom_item,
@@ -93,17 +98,20 @@ manufyxinvenzaerp/
 │       ├── storage_location/           # Master
 │       └── store_location/             # Master
 │
-├── production_plan_management/   # Production Plan hooks; overrides get_items_for_material_requests
-│   └── production_plan.py        # after_save_production_plan, make_material_request
+├── production_plan_management/   # Production Plan hooks
+│   └── production_plan.py        # after_save_production_plan, make_material_request.
+│                                 #   Also holds a dimension-aware rewrite of ERPNext's
+│                                 #   get_items_for_material_requests that NOTHING CALLS —
+│                                 #   never wired up via override_whitelisted_methods.
+│                                 #   Left in place pending a decision.
 │
 ├── subcontracting_management/    # Subcontracting Order override; Supplier Operation Entry
 │   ├── overrides.py              # CustomSubcontractingOrder class
 │   ├── subcontracting.py         # Whitelisted: create_sco_from_production_plan,
-│   │                             #   create_supplier_operation_entries,
-│   │                             #   create_send_to_subcontractor_entry,
-│   │                             #   create_return_stock_entry
-│   │                             #   (the Work Order / Job Card functions were
-│   │                             #    removed 2026-08-20 — see below)
+│   │                             #   create_supplier_operation_entries
+│   │                             #   (Work Order / Job Card removed 2026-08-20; the
+│   │                             #    SCO-keyed transfer functions removed 2026-08-24,
+│   │                             #    superseded by material_issue_plan_transfer.py)
 │   └── doctype/
 │       ├── supplier_operation_entry/   # Custom doctype for subcontracting ops
 │       └── supplier_operation_item/    # Child table
@@ -117,9 +125,9 @@ manufyxinvenzaerp/
 │   │                         #   item.js, bom.js, production_plan.js,
 │   │                         #   purchase_order.js, purchase_receipt.js
 ├── patches/                  # Data migration patches
-└── tests/                    # 79 files, two kinds:
+└── tests/                    # 86 files, two kinds:
     ├── test_*.py             #   unittest, run by `bench run-tests` and by CI
-    └── verify_*.py           #   64 standalone checks, each with a run() called
+    └── verify_*.py           #   71 standalone checks, each with a run() called
                               #   directly: `bench --site manufact execute
                               #   manufyxinvenzaerp.tests.<name>.run`
                               #   They print OK/FAIL per assertion and finish with

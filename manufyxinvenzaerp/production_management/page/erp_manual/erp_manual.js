@@ -260,6 +260,7 @@ const ERP_MANUAL_SALES_ORDER_CHILDREN = [
 			"<b>Submit Drawing</b> — locks each drawing. The Sales Order itself must be submitted before the next step.",
 			"<b>Mark as Final Revision</b> — marks the drawings as the version production will be built from. A BOM can only be created from a submitted, Final Revision drawing.",
 			"<b>Create and Submit BOM</b> — one BOM per drawing, from that drawing's raw materials. These are what Material Planning pulls requirements from.",
+			"<b>View Drawing</b> — what the group offers once the BOMs are done. Each step appears only while there is work left at it, and never two at once, so the menu is a to-do list rather than a list of everything the button could ever do.",
 		],
 		notes: [
 			"<b>The progress dialog is live.</b> It shows how many are done, how many are pending, elapsed time, an estimate of what is left and the current rate — refreshed every second. The estimate is measured from the run itself, so it is rough at first and tightens as it goes.",
@@ -270,8 +271,10 @@ const ERP_MANUAL_SALES_ORDER_CHILDREN = [
 			{ name: "Create Drawing", note: "Creates the Drawing documents. Skips any drawing number that already has one." },
 			{ name: "Submit Drawing", note: "Submits the created drawings." },
 			{ name: "Mark as Final Revision", note: "Requires the Sales Order to be submitted first." },
-			{ name: "Create and Submit BOM", note: "Creates and submits one BOM per drawing. The longest step on a large order." },
-			{ name: "Submit BOM", note: "Submits BOMs that were created but left in draft." },
+			{ name: "(cancelling a drawing)", note: "Cancel a Drawing and its DUNO row lets go of it, so the row goes back to being a DUNO with no drawing against it — which is what it now describes. <b>Amend</b> that drawing and submit the amendment and the row picks up the new revision by itself. Nothing has to be re-pointed by hand, and the order can be saved and submitted again." },
+			{ name: "Create and Submit BOM", note: "Creates and submits one BOM per drawing. The longest step on a large order. It appears only once <b>every</b> drawing waiting to be marked final has been marked — the two are consecutive steps, not a choice, and making BOMs for whichever drawings happened to be ready leaves the rest behind while the toolbar reads as though the job is done." },
+			{ name: "View Drawing", note: "Takes the place of Create and Submit BOM once every Final Revision drawing has a submitted BOM, and opens this order's drawings. There is nothing left to create at that point, so the group stops offering it." },
+			{ name: "Submit BOM", note: "Submits BOMs that were created but left in draft. Nothing in this app creates a draft BOM any more — the old <b>Create BOM</b> button did, and it was removed for exactly that reason — so this is only for drafts made by hand or left over from before." },
 		],
 	},
 ];
@@ -980,10 +983,11 @@ const ERP_MANUAL_MATERIAL_PLANNING_CHILDREN = [
 			"Where rounding now happens: NOWHERE automatically. Material Planning always reserves the exact Required Kg and reports Sec Nos as a plain fraction of the assigned batch. The only place a fraction becomes whole pieces is the Material Issue Plan transfer popup, where you type the number yourself — the system re-checks free stock for the new figure and books the extra weight as excess to return.",
 			"Partial transfers are why fractions matter. A Material Planning covering 10 drawings feeds a separate Material Issue Plan per drawing, and each plan only pulls its own drawings' reserved rows. So a batch planned across 5 rows (8 Nos in total) may well present as 4.5 Nos when only 3 of those drawings are being issued — that is expected. Raise it to 5 in the transfer popup if you must hand over whole bars, and the 0.5 piece of surplus is recorded for return.",
 			"Case 1 vs Case 2. Case 1 — leave “Reserve stock without dimensions” OFF, pick a batch and type Sec Qty yourself; the system reserves exactly that and never overwrites your number. Case 2 — tick it when one large bar or sheet serves several rows; the system derives the fractional Sec Nos for you from each row's required Kg.",
-			"Status legend — “Mapped” (green): an ordinary purchased batch is assigned. “Excess Mapped” (blue): a real batch is assigned and it came back from another job as an off-cut. “Excess Mapped (At Supplier)” (blue): fulfilled from another job's excess that's staying at the supplier and will never reach your warehouse — no batch, nothing to transfer. “Excess Mapped (Pending Return)” (blue): fulfilled from another job's excess that HASN'T physically returned to stock yet, but is already promised to this row; the batch attaches itself automatically the day it does return. “Cut Sheet Mapped” (blue): fulfilled from a Cut Sheet's nesting plan, sized to the piece (W1), not the plate. “Not Mapped” (red): nothing assigned yet. Every blue status counts as mapped — it is material you already have a claim on, so it is included in the Difference in Kg figure and never sent back through purchasing.",
+			"Status legend — “Mapped” (green): an ordinary purchased batch is assigned. “Excess Mapped” (blue): a real batch is assigned and it came back from another job as an off-cut. “Excess Mapped (At Supplier)” (blue): a historical status only. It came from Return Type, which no longer exists — an off-cut that is never coming back is now marked <b>Billed to Consume</b> on its own job's Excess Material Items row and cannot be claimed by another plan at all. Rows saved before that change keep this status and still count as mapped. “Excess Mapped (Pending Return)” (blue): fulfilled from another job's excess that HASN'T physically returned to stock yet, but is already promised to this row; the batch attaches itself automatically the day it does return. “Cut Sheet Mapped” (blue): fulfilled from a Cut Sheet's nesting plan, sized to the piece (W1), not the plate. “Not Mapped” (red): nothing assigned yet. Every blue status counts as mapped — it is material you already have a claim on, so it is included in the Difference in Kg figure and never sent back through purchasing.",
 		],
 		buttons: [
 			{ name: "Reserve / Unreserve", note: "Same soft-claim mechanism as Available Raw Materials — works whether the row has a real batch, a Cut Sheet allocation, or an Excess Mapped claim." },
+			{ name: "(what a transfer does to a reservation)", note: "A row gives up only what actually left the warehouse. Transfer 30 Kg of a 120 Kg reservation and the row keeps the other 90 — it is released outright only when the remainder reaches zero. Where several rows share one batch they give it up one at a time in document order, so whole reservations are left behind rather than every row being left holding a fraction it can never transfer cleanly. Cancelling a transfer puts back exactly what it took." },
 			{
 				name: "Excess Material  (tick on the row)",
 				note: "Only appears on a row with NO batch — excess is a promise against a specific off-cut, not stock in your warehouse. Ticking it reveals <b>Select Item</b>, which opens the picker described in the Excess Material Mapping section.",
@@ -1136,18 +1140,19 @@ const ERP_MANUAL_MATERIAL_PLANNING_CHILDREN = [
 			{
 				type: "dont",
 				label: "Don't try to change the size of an off-cut someone has claimed",
-				text: "Once Job B has claimed it, the off-cut's Length/Width/Sec Qty/Kg are frozen — in the Excess Material Items grid, on the raw-material row's Excess fields, and in the Return Excess Entry dialog alike. All three refuse with the same message naming Job B's Material Planning. This is deliberate: Job B reserved a 2000mm piece, and quietly shrinking it to 1800mm would leave Job B planning around material that no longer exists in that shape.",
+				text: "Once Job B has claimed it, the off-cut's Length/Width/Sec Qty/Kg are frozen — in the Excess Material Items grid and in the Return Excess Entry dialog alike. Both refuse with the same message naming Job B's Material Planning. This is deliberate: Job B reserved a 2000mm piece, and quietly shrinking it to 1800mm would leave Job B planning around material that no longer exists in that shape.",
 			},
 			{
 				type: "do",
 				label: "The measurement was wrong — use Unlink Claim",
-				text: "Continuing the example: the off-cut actually measures 1800mm, not 2000mm. Press <b>Unlink Claim</b> on that Excess Material Items row. Job B's reservation is dropped, the off-cut returns to this picker, and the dimensions unlock. Correct them on the raw-material row's Excess Length (the Excess Material Items row recomputes from it — 1.8m × 10 kg/m = 18 Kg), then claim it again. Note the risk the confirmation warns you about: while unlinked, any other job can claim it first.",
+				text: "Continuing the example: the off-cut actually measures 1800mm, not 2000mm. Press <b>Unlink Claim</b> on that Excess Material Items row. Job B's reservation is dropped, the off-cut returns to this picker, and the dimensions unlock. Correct them in the Excess Material Items grid itself (1.8m × 10 kg/m = 18 Kg), then claim it again. Note the risk the confirmation warns you about: while unlinked, any other job can claim it first.",
 			},
 		],
 		notes: [
 			"“Pending Return” material is excess that hasn't been walked back to stock yet, but eventually will be — claiming it now doesn't stop that from happening later; it just reserves the outcome in advance. Material marked “Billed to Consume” never appears here at all: it is charged to its own job and consumed at the supplier, so there is nothing left for another job to take.",
 			"Where these rows go at transfer time. A claimed off-cut still at the supplier has no batch in your source warehouse, so it can never appear in the transfer popup's list — there is physically nothing to move, and it is already sitting where the transfer would have sent it. Rather than leaving a silent gap, the popup shows a blue panel: “N item(s) are already at <supplier warehouse> — no transfer needed”, listing each one. It is information, not a problem: it never blocks the rest of the transfer.",
-			"Edit dimensions on the raw-material row, not in the Excess Material Items grid. For any excess row created from a raw-material row, the Excess Length/Width/Sec Qty fields on that raw-material row are the source of truth — the Excess Material Items row is recalculated from them on every save, so typing directly into the grid gets overwritten. The exception is a rounding-surplus row (Return Reason mentions “Round Up Sec Qty for Transfer”), which has no raw-material row behind it and is edited in the grid directly.",
+			"<b>Edit dimensions in the Excess Material Items grid.</b> It is the one place an off-cut is described. Raw-material rows used to carry their own Excess Length/Width/Sec Qty that this table was recalculated from on every save — two places for one measurement, where typing in the grid got silently overwritten. Those fields are gone, and the grid is now the only end there is.",
+			"<b>Enter Weight, Not Pieces.</b> A tick on the row for when the weight is the figure you have rather than the shape and the count. Off, you type the Length/Width and Sec Nos and the weight follows. On, you type the weight and the Sec Nos is worked back out of it — left fractional on purpose, since 18 Kg of a 4.906 Kg piece is 3.669 of one, and rounding up would claim a piece that is not coming back. Offered only for Structurals and Plates, because only they have a shape to measure.",
 		],
 	},
 	{
@@ -1570,7 +1575,7 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 			{
 				type: "dont",
 				label: "Don't type into these rows expecting it to stick",
-				text: "Everything except the Excess Return and Cut Sheet fields is rebuilt from Material Planning on the next refresh. To change what a row draws from, change it there.",
+				text: "Every row here is rebuilt from Material Planning on the next refresh, so nothing typed on one survives. To change what a row draws from, change it there. The rows used to carry their own editable Excess Return and Cut Sheet fields, which did survive a refresh — both are gone: an off-cut is described once in the Excess Material Items table, and a cut once on its Cut Sheet.",
 			},
 			{
 				type: "do",
@@ -1580,6 +1585,7 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 		],
 		notes: [
 			"Only this plan's own drawings appear. One Material Planning can cover ten drawings and feed ten separate Material Issue Plans; each pulls only the rows belonging to the drawings in its own Production Plan.",
+			"<b>The Cut Sheet panel on a row is reference only.</b> Where the chosen batch has a Cut Sheet, the row shows its To Use and Balance sizes read-only, taken from that sheet — they are what the transfer's Stock Entry carries, so they are worth having in front of you. The cut itself is decided on the Cut Sheet, and on the Material Planning row that claims pieces from it; nothing on this row changes it.",
 			"Rows fulfilled from a Cut Sheet arrive already sized to the PIECE, not the plate — a 2000 × 1000 sheet cut into 500 × 250 pieces shows 500 × 250 here. That is what physically goes out.",
 		],
 	},
@@ -1835,7 +1841,7 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 		kicker: "Quick reference",
 		purpose: "What each action does, in one place.",
 		fields: [
-			{ name: "Refresh Raw Materials", note: "Rebuilds the list from Material Planning. Warns first, because Cut Sheet and Excess Return values you entered on rows are re-applied by matching — but anything else typed on a row is lost." },
+			{ name: "Refresh Raw Materials", note: "Rebuilds the list from Material Planning. Anything typed on a row is lost." },
 			{ name: "Validate Stock", note: "Read-only preview of exactly what this plan will hand over: Kg and Sec Nos per item and batch, fractional totals in amber, shortfalls in red. Changes nothing — use it before transferring." },
 			{ name: "Select Materials to Transfer", note: "The main transfer popup. Source → Supplier/WIP." },
 			{ name: "To CNC Warehouse", note: "First leg for CNC-flagged rows. Only appears when a CNC Warehouse is set." },
@@ -2157,6 +2163,31 @@ const ERP_MANUAL_REFERENCE_CHILDREN = [
 		],
 		notes: [
 			"Statuses on this app's own documents are driven by what has happened to them, not chosen from a dropdown — the two exceptions are Supplier Operation Entry, where the operator marks Completed before submitting, and Inspection Entry, where the inspector sets the status and the Feedback.",
+		],
+	},
+	{
+		id: "ref-decision-log",
+		title: "Decision Log",
+		kicker: "Who decided what, and why",
+		purpose:
+			"<b>Manufyx Decision Log</b> records the handful of decisions people argue about " +
+			"weeks later: who reserved a batch, who released it, who moved one job's material to " +
+			"another batch, who rounded a quantity up, and what they said at the time. Open it " +
+			"from the awesome bar; it is a list, not a screen anybody has to fill in.",
+		fields: [
+			{ name: "Decision", note: "Reserve, Unreserve, Reassign Batch, Round Up at Transfer, or Cut Sheet Balance." },
+			{ name: "Reference / Row", note: "The document it was made on, and the specific row where the decision was about one row rather than a whole document." },
+			{ name: "Item / Batch / New Batch", note: "What was affected. New Batch is filled in on a reassignment and on a cut sheet balance that became its own batch." },
+			{ name: "Rows Affected", note: "How many rows one decision covered. Reserving a plan is one decision, not one per row." },
+			{ name: "Previous Sec Qty / Sec Qty / Previous Qty / Qty", note: "The figures before and after, where the decision changed a number." },
+			{ name: "Reason / Details", note: "The reason given at the time, where the screen asked for one, and a one-line account of what happened so the entry reads on its own." },
+			{ name: "Created By / Created On", note: "Standard Frappe fields, and the answer to “who” and “when”. Nothing else has to record them." },
+		],
+		notes: [
+			"<b>One entry per decision, not per field.</b> Logging every field change on every document was considered and rejected: on a 500-drawing order it would be large, slow to write and unreadable. What is here is the short list of things people actually ask about.",
+			"<b>Nothing writes to it from a screen, and nothing can remove an entry.</b> No role has create, write or delete on it — the entries are made by the app at the moment the decision is taken, and that is the whole point of them.",
+			"<b>It never blocks anything.</b> If an entry cannot be written, the reservation or transfer still goes through and the failure goes to the error log. A reservation that succeeded and then failed because its log entry could not be saved would be worse than having no log.",
+			"Deleting the document an entry describes is still allowed — the log holds the name of what was deleted, which is often the useful part.",
 		],
 	},
 	{
