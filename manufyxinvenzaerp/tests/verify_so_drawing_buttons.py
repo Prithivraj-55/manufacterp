@@ -70,6 +70,10 @@ def run():
     check("View Drawing takes its place", '__("View Drawing")' in js, True)
     check("it opens this order's drawings",
           'frappe.set_route("List", "Drawing", { sales_order: frm.doc.name })' in js, True)
+    check("and says the stage is finished",
+          '__("Drawings and BOMs Ready")' in js, True)
+    check("naming where the work goes next",
+          "ready to proceed to <b>Material Planning</b>" in js, True)
     check("the click-time 'already created' message is gone",
           "BOMs Already Created" in js, False)
     check("what is left is decided before the button is drawn",

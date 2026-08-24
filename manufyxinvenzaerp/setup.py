@@ -941,6 +941,14 @@ function _so_render_drawing_buttons(frm) {
 					}, __("Drawing"));
 				} else if (final_names.every(function(n) { return done.has(n); })) {
 					frm.add_custom_button(__("View Drawing"), function() {
+						// Says the drawing stage is finished, and where the work goes next.
+						// Reaching this button at all means every drawing is final and every
+						// one has a submitted BOM, so there is nothing left to do here.
+						frappe.msgprint({
+							title: __("Drawings and BOMs Ready"),
+							message: __("Drawings and BOMs are created — ready to proceed to <b>Material Planning</b>."),
+							indicator: "green",
+						});
 						frappe.set_route("List", "Drawing", { sales_order: frm.doc.name });
 					}, __("Drawing"));
 				}
