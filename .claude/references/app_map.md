@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-24 22:16:05_
+_Generated: 2026-08-24 22:32:30_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-08-24 22:16:05_
 
 ## Python files
 
-_Total: 245_
+_Total: 246_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -258,6 +258,7 @@ _Total: 245_
 - tests/verify_rwd_two_way.py
 - tests/verify_se_duno_propagation.py
 - tests/verify_so_calculated_weight.py
+- tests/verify_so_drawing_buttons.py
 - tests/verify_soe_consumption_weight_kg.py
 - tests/verify_so_raw_material_checks.py
 - tests/verify_status_mirror.py
@@ -1084,43 +1085,43 @@ Functions:
 
 ### setup.py
 Functions:
-  - 1413:create_default_warehouse_types:
-  - 1427:after_install:
-  - 1471:after_migrate:
-  - 1519:setup_storage_location:
-  - 1541:create_item_client_script:
-  - 1557:create_item_custom_fields:
-  - 1642:create_purchase_order_custom_fields:
-  - 1748:hide_purchase_order_weight_fields:
-  - 1762:create_purchase_order_client_script:
-  - 1778:create_purchase_receipt_custom_fields:
-  - 1957:create_batch_custom_fields:
-  - 2042:create_purchase_receipt_client_script:
-  - 2058:create_material_request_custom_fields:
-  - 2183:create_material_request_client_script:
-  - 2199:create_rfq_custom_fields:
-  - 2275:create_rfq_client_script:
-  - 2291:create_sq_custom_fields:
-  - 2370:create_sq_client_script:
-  - 2386:create_bom_custom_fields:
-  - 2493:create_so_custom_fields:
-  - 2584:create_so_client_script:
-  - 2600:create_bom_client_script:
-  - 2620:create_production_plan_custom_fields:
-  - 2862:create_production_plan_client_script:
-  - 3007:create_stock_entry_custom_fields:
-  - 3199:create_stock_entry_client_script:
-  - 3236:create_doctype_label_translations:
-  - 3259:remove_sco_purchase_order_mandatory:
-  - 3270:hide_sco_job_worker_warehouse:
-  - 3299:make_sco_job_worker_conditional:
-  - 3334:create_sco_custom_fields:
-  - 3806:create_sco_client_script:
-  - 3822:create_sco_ops_client_script:
-  - 3838:create_soe_client_script:
-  - 3854:create_manufacturing_settings_custom_fields:
-  - 3893:create_material_planning_auto_purchase_fields:
-  - 3956:create_payment_request_custom_fields:
+  - 1412:create_default_warehouse_types:
+  - 1426:after_install:
+  - 1470:after_migrate:
+  - 1518:setup_storage_location:
+  - 1540:create_item_client_script:
+  - 1556:create_item_custom_fields:
+  - 1641:create_purchase_order_custom_fields:
+  - 1747:hide_purchase_order_weight_fields:
+  - 1761:create_purchase_order_client_script:
+  - 1777:create_purchase_receipt_custom_fields:
+  - 1956:create_batch_custom_fields:
+  - 2041:create_purchase_receipt_client_script:
+  - 2057:create_material_request_custom_fields:
+  - 2182:create_material_request_client_script:
+  - 2198:create_rfq_custom_fields:
+  - 2274:create_rfq_client_script:
+  - 2290:create_sq_custom_fields:
+  - 2369:create_sq_client_script:
+  - 2385:create_bom_custom_fields:
+  - 2492:create_so_custom_fields:
+  - 2583:create_so_client_script:
+  - 2599:create_bom_client_script:
+  - 2619:create_production_plan_custom_fields:
+  - 2861:create_production_plan_client_script:
+  - 3006:create_stock_entry_custom_fields:
+  - 3198:create_stock_entry_client_script:
+  - 3235:create_doctype_label_translations:
+  - 3258:remove_sco_purchase_order_mandatory:
+  - 3269:hide_sco_job_worker_warehouse:
+  - 3298:make_sco_job_worker_conditional:
+  - 3333:create_sco_custom_fields:
+  - 3805:create_sco_client_script:
+  - 3821:create_sco_ops_client_script:
+  - 3837:create_soe_client_script:
+  - 3853:create_manufacturing_settings_custom_fields:
+  - 3892:create_material_planning_auto_purchase_fields:
+  - 3955:create_payment_request_custom_fields:
 
 ### sq_management/supplier_quotation.py
 Functions:
@@ -1630,6 +1631,12 @@ Functions:
 Functions:
   - 23:check:
   - 29:run:
+
+### tests/verify_so_drawing_buttons.py
+Functions:
+  - 26:check:
+  - 32:_script_from_source:
+  - 38:run:
 
 ### tests/verify_soe_consumption_weight_kg.py
 Functions:
