@@ -441,6 +441,12 @@ def _repack_remnant_to_new_batch(batch_no, w2, source_label):
 	se = frappe.get_doc({
 		"doctype": "Stock Entry",
 		"stock_entry_type": "Repack",
+		# Named from the warehouse rather than left to the site's default company.
+		# They are the same thing on a single-company site and not on any other, and
+		# when they differ ERPNext refuses the entry -- "Warehouse X does not belong
+		# to company Y" -- which this would have answered by quietly resizing the
+		# batch in place instead, the very thing the switch was turned on to avoid.
+		"company": frappe.db.get_value("Warehouse", warehouse, "company"),
 		"remarks": _("Cut Sheet balance ({0}): batch {1} repacked into its off-cut")
 			.format(source_label, batch_no),
 		"items": [

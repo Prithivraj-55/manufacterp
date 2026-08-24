@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-24 22:48:04_
+_Generated: 2026-08-24 23:04:48_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-08-24 22:48:04_
 
 ## Python files
 
-_Total: 246_
+_Total: 247_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -198,6 +198,7 @@ _Total: 246_
 - tests/test_po_edge_cases.py
 - tests/test_purchase_order_creation.py
 - tests/test_unavailable_actions.py
+- tests/test_whitelist_coverage.py
 - tests/verify_auto_purchase_gated.py
 - tests/verify_batch_receipt_line_match.py
 - tests/verify_batch_remark_isolation.py
@@ -983,26 +984,26 @@ Functions:
   - 343:_cut_sheet_creates_new_batch:
   - 356:_batch_stock_by_warehouse:
   - 376:_repack_remnant_to_new_batch:
-  - 487:_repoint_reservations:
-  - 504:_cancel_cut_sheet_repack:
-  - 543:_batch_total_kg_all_wh:
-  - 556:_populate_manufacture_sec_qty:
-  - 593:_linked_material_plannings:
-  - 639:_consumed_qty_by_batch:
-  - 677:_reservation_rows:
-  - 692:_release_rows_by_qty:
-  - 730:_restore_rows_by_qty:
-  - 771:_release_material_planning_reservations:
-  - 838:_refresh_linked_mip_weight:
-  - 869:on_cancel_stock_entry:
-  - 897:_cancelled_row_batch_no:
-  - 936:_restore_batch_sec_qty:
-  - 956:_restore_material_planning_reservations:
-  - 989:_update_sco_transferred_weight:
-  - 1100:_update_sco_cnc_weight:
-  - 1148:_update_wo_transferred_weight:
-  - 1191:_update_wo_cnc_weight:
-  - 1238:_calc_qty:
+  - 493:_repoint_reservations:
+  - 510:_cancel_cut_sheet_repack:
+  - 549:_batch_total_kg_all_wh:
+  - 562:_populate_manufacture_sec_qty:
+  - 599:_linked_material_plannings:
+  - 645:_consumed_qty_by_batch:
+  - 683:_reservation_rows:
+  - 698:_release_rows_by_qty:
+  - 736:_restore_rows_by_qty:
+  - 777:_release_material_planning_reservations:
+  - 844:_refresh_linked_mip_weight:
+  - 875:on_cancel_stock_entry:
+  - 903:_cancelled_row_batch_no:
+  - 942:_restore_batch_sec_qty:
+  - 962:_restore_material_planning_reservations:
+  - 995:_update_sco_transferred_weight:
+  - 1106:_update_sco_cnc_weight:
+  - 1154:_update_wo_transferred_weight:
+  - 1197:_update_wo_cnc_weight:
+  - 1244:_calc_qty:
 
 ### production_plan_management/production_plan.py
 Functions:
@@ -1313,6 +1314,12 @@ Functions:
   - 29:_mock_sbb:
   - 38:_ensure_batch_items:
 
+### tests/test_whitelist_coverage.py
+Functions:
+  - 34:_app_root:
+  - 38:_whitelisted_methods:
+  - 67:_front_end_calls:
+
 ### tests/verify_auto_purchase_gated.py
 Functions:
   - 30:check:
@@ -1440,12 +1447,12 @@ Functions:
 Functions:
   - 50:check:
   - 56:_company:
-  - 60:_warehouse:
-  - 69:_ensure_item:
-  - 94:_stock:
-  - 98:_dims:
-  - 105:_make_entry:
-  - 115:run:
+  - 70:_warehouse:
+  - 80:_ensure_item:
+  - 105:_stock:
+  - 109:_dims:
+  - 116:_make_entry:
+  - 126:run:
 
 ### tests/verify_cut_sheet_w2_derived.py
 Functions:
@@ -1706,6 +1713,9 @@ Functions:
 - `item_management/item.py:125` — `has_item_transactions`
 - `accounts_management/payment_request.py:28` — `@frappe.validate_and_sanitize_search_inputs`
 - `accounts_management/payment_request.py:56` — `get_fund_usage`
+- `tests/test_whitelist_coverage.py:4` — ``reserve_batches` was swallowed when a helper was inserted directly above it, and`
+- `tests/test_whitelist_coverage.py:40` — `    found = set`
+- `tests/test_whitelist_coverage.py:111` — `            "so pressing the button that calls them answers 'Method Not Allowed':\n    "`
 - `purchase_order_management/purchase_order.py:10` — `get_po_item_uom`
 - `sq_management/supplier_quotation.py:19` — `get_sq_item_uom`
 - `drawing_management/drawing_utils.py:10` — `mark_as_final_revision`
@@ -1794,7 +1804,7 @@ Functions:
 - `production_management/doctype/material_planning/material_planning.py:2023` — `get_batch_stock_summary`
 - `production_management/doctype/material_planning/material_planning.py:2261` — `get_batch_cross_table_usage`
 - `production_management/doctype/material_planning/material_planning.py:2393` — `validate_planned_stock`
-- `production_management/doctype/material_planning/material_planning.py:2504` — `_require_write`
+- `production_management/doctype/material_planning/material_planning.py:2520` — `reserve_batches`
 - `production_management/doctype/material_planning/material_planning.py:2692` — `get_available_excess_batches`
 - `production_management/doctype/material_planning/material_planning.py:2758` — `add_excess_material_mapping`
 - `production_management/doctype/material_planning/material_planning.py:2853` — `get_available_virtual_excess_items`

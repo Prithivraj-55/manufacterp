@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-08-24 22:48:04_
+_Generated: 2026-08-24 23:04:48_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -87,7 +87,7 @@ All `@frappe.whitelist()` methods. Call from JS:
 | `get_batch_stock_summary` | 2023 |
 | `get_batch_cross_table_usage` | 2261 |
 | `validate_planned_stock` | 2393 |
-| `_require_write` | 2504 |
+| `reserve_batches` | 2520 |
 | `get_available_excess_batches` | 2692 |
 | `add_excess_material_mapping` | 2758 |
 | `get_available_virtual_excess_items` | 2853 |
@@ -197,7 +197,14 @@ All `@frappe.whitelist()` methods. Call from JS:
 | `create_supplier_operation_entries` | 297 |
 | `get_soe_summary` | 319 |
 | `create_finished_goods_entry` | 367 |
+## tests/test_whitelist_coverage.py
+
+| Method | Line |
+|--------|------|
+| `            "so pressing the button that calls them answers 'Method Not Allowed':\n    "` | 111 |
+| `    found = set` | 40 |
+| ``reserve_batches` was swallowed when a helper was inserted directly above it, and` | 4 |
 
 ## Total
 
-_116 whitelisted methods_
+_119 whitelisted methods_

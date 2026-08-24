@@ -2500,7 +2500,6 @@ def _refresh_touched_cut_sheets(mp):
         refresh_cut_sheet_allocations(name)
 
 
-@frappe.whitelist()
 def _require_write(mp):
     """Refuse a reservation action to anyone who cannot write the plan.
 
@@ -2517,6 +2516,7 @@ def _require_write(mp):
         )
 
 
+@frappe.whitelist()
 def reserve_batches(material_planning_name):
     """
     Reserve batches in material_mapping with partial-stock awareness.
