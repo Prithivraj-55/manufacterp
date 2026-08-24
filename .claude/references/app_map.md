@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-24 22:08:04_
+_Generated: 2026-08-24 22:16:05_
 
 ## Modules
 
@@ -486,6 +486,7 @@ _Total: 163_
   - _check_missing_fields:
   - _calculate_totals:
   - _sales_order_row:
+  - _touch_sales_order:
   - _release_sales_order_row:
   - _link_to_sales_order_row:
   - _recalculate_row_qty:
@@ -1721,7 +1722,7 @@ Functions:
 - `drawing_management/so_drawing_import.py:931` — `download_bom_template`
 - `drawing_management/so_drawing_import.py:986` — `clear_drawing_import`
 - `drawing_management/so_drawing_import.py:1021` — `get_cancelled_drawing_links`
-- `drawing_management/doctype/drawing/drawing.py:168` — `check_existing_bom`
+- `drawing_management/doctype/drawing/drawing.py:189` — `check_existing_bom`
 - `production_plan_management/production_plan.py:284` — `get_items_for_material_requests`
 - `production_plan_management/production_plan.py:661` — `get_mp_planned_weights`
 - `production_plan_management/production_plan.py:713` — `get_pp_drawings_for_picker`

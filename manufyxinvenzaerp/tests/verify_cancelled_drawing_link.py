@@ -62,6 +62,17 @@ def run():
           '"parent": doc.sales_order, "duno_mark_no": doc.duno_mark_no' in drawing, True)
 
     print()
+    print("=== a stale form is made to reload, not allowed to overwrite ===")
+    # The row is re-pointed with frappe.db.set_value, which does not reach an order
+    # already open in somebody's browser. Leaving the order's own timestamp alone
+    # meant that form kept the cancelled link AND passed Frappe's "modified since you
+    # opened it" guard -- so pressing Submit put the dead link straight back and the
+    # original error returned on an order the database had already fixed.
+    check("re-pointing moves the order's timestamp",
+          "def _touch_sales_order(sales_order):" in drawing, True)
+    check("on release", drawing.count("_touch_sales_order(doc.sales_order)"), 2)
+
+    print()
     print("=== the form is where the problem gets named ===")
     imp = _src("drawing_management", "so_drawing_import.py")
     setup = _src("setup.py")
