@@ -1,7 +1,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt
+from frappe.utils import flt, now
 from manufyxinvenzaerp.utils.dimension_formula import calculate_qty
 
 STRUCTURALS_REQUIRED = ["length", "unit_weight", "sec_qty"]
@@ -74,6 +74,25 @@ def _sales_order_row(doc):
     return frappe.db.get_value("Sales Order DUNO Item", filters, ["name", "drawing"], as_dict=True)
 
 
+
+def _touch_sales_order(sales_order):
+    """Move the Sales Order's own timestamp after re-pointing one of its rows.
+
+    The row is written with frappe.db.set_value, which does not go near an order
+    somebody already has open in a browser. Without this the form keeps the link it
+    was loaded with -- the cancelled one -- and, because its timestamp still matched,
+    Frappe's "this document has been modified" guard stayed quiet and let it submit
+    that dead link straight back. The symptom is the original error reappearing on an
+    order the database has already fixed.
+
+    Moving the timestamp turns that silent overwrite into a reload prompt, which is
+    what should have happened."""
+    if sales_order:
+        frappe.db.set_value(
+            "Sales Order", sales_order, "modified", now(), update_modified=False
+        )
+
+
 def _release_sales_order_row(doc):
     """Cancelling a drawing lets go of the Sales Order row it was made for.
 
@@ -91,6 +110,7 @@ def _release_sales_order_row(doc):
     if not row or row.drawing != doc.name:
         return
     frappe.db.set_value("Sales Order DUNO Item", row.name, "drawing", "", update_modified=False)
+    _touch_sales_order(doc.sales_order)
 
 
 def _link_to_sales_order_row(doc):
@@ -116,6 +136,7 @@ def _link_to_sales_order_row(doc):
     if row.drawing and row.drawing != doc.amended_from:
         return
     frappe.db.set_value("Sales Order DUNO Item", row.name, "drawing", doc.name, update_modified=False)
+    _touch_sales_order(doc.sales_order)
 
 
 def _recalculate_row_qty(row):
