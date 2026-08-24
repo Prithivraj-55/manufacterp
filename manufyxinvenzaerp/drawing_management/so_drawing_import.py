@@ -1015,3 +1015,34 @@ def clear_drawing_import(so_name):
     frappe.db.commit()
 
     return {"deleted_drawings": int(t1_del), "deleted_items": int(t2_del)}
+
+
+@frappe.whitelist()
+def get_cancelled_drawing_links(sales_order):
+    """DUNO rows on this order still pointing at a cancelled drawing.
+
+    Read by the Sales Order form so the problem is named on screen -- which DUNO, and
+    what to do -- rather than discovered as "Cannot link cancelled document: Row #22"
+    when somebody tries to save or submit.
+
+    It has to be the form that says it. Frappe checks links in _validate_links(),
+    which runs before every server-side hook this app could use, so a message raised
+    from validate() or before_submit() is never reached.
+
+    Cancelling a drawing now releases its row by itself, so this is for orders that
+    were already in that state when the release was added."""
+    rows = frappe.get_all(
+        "Sales Order DUNO Item",
+        filters={"parent": sales_order, "drawing": ["!=", ""]},
+        fields=["idx", "duno_mark_no", "drawing_number", "drawing"],
+        order_by="idx asc",
+    )
+    if not rows:
+        return []
+
+    cancelled = set(frappe.get_all(
+        "Drawing",
+        filters={"name": ["in", [r.drawing for r in rows]], "docstatus": 2},
+        pluck="name",
+    ))
+    return [r for r in rows if r.drawing in cancelled]
