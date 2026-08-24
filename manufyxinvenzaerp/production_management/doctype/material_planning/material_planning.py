@@ -13,6 +13,14 @@ from manufyxinvenzaerp.utils.decision_log import log_decision
 #  another job's leftovers read "Excess Mapped ..." so the screen says where the
 #  material came from -- a claim can sit for weeks with no batch against it, and
 #  "Not Mapped" made that look like nothing had been done at all.
+# A batch counts as having free stock only above this. Splitting one batch across
+# several requirements leaves an arithmetic residue -- 1061.609 Kg shared between two
+# 530.804 Kg rows leaves 0.001, and the next split leaves a millionth of that. Treating
+# any positive number as free stock turned those crumbs into Exact Match rows of 0.000
+# Kg: nothing to reserve, nothing to transfer, and a "matched to Available Raw
+# Materials" count that said stock had been found when none had.
+BATCH_FREE_EPSILON = 0.001
+
 BATCH_MAPPED = "Mapped"
 BATCH_NOT_MAPPED = "Not Mapped"
 BATCH_EXCESS_MAPPED = "Excess Mapped"
@@ -1186,7 +1194,7 @@ def check_stock_availability(doc):
                 [
                     {**b, "qty": batch_remaining[b["batch_no"]]}
                     for b in raw_matched_batches
-                    if batch_remaining.get(b["batch_no"], 0) > 0
+                    if batch_remaining.get(b["batch_no"], 0) > BATCH_FREE_EPSILON
                 ],
                 key=lambda b: b["qty"],
                 reverse=True,
@@ -1473,7 +1481,7 @@ def move_to_exact_match(doc, item_codes):
                 [
                     {**b, "qty": batch_remaining[b["batch_no"]]}
                     for b in raw_batches
-                    if batch_remaining.get(b["batch_no"], 0) > 0
+                    if batch_remaining.get(b["batch_no"], 0) > BATCH_FREE_EPSILON
                 ],
                 key=lambda b: b["qty"],
                 reverse=True,
@@ -1670,7 +1678,8 @@ def update_exact_match_from_consolidate(mp_name):
                     batch_remaining[b["batch_no"]] = max(0.0, flt(b["qty"]) - reserved_by_others - already_allocated)
 
             free_batches = sorted(
-                [{**b, "qty": batch_remaining[b["batch_no"]]} for b in raw_batches if batch_remaining.get(b["batch_no"], 0) > 0],
+                [{**b, "qty": batch_remaining[b["batch_no"]]} for b in raw_batches
+                 if batch_remaining.get(b["batch_no"], 0) > BATCH_FREE_EPSILON],
                 key=lambda b: b["qty"], reverse=True,
             )
 
@@ -1686,6 +1695,8 @@ def update_exact_match_from_consolidate(mp_name):
                     consumed_batches.append((b, consumed))
 
                 for b, consumed_qty in consumed_batches:
+                    if flt(consumed_qty, 3) <= 0:
+                        continue
                     bn = b["batch_no"]
                     row_sec = _alloc_sec_qty(consumed_qty, batch_total_kg.get(bn), batch_total_sec.get(bn))
                     mp.append("available_raw_materials", {
