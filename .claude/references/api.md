@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-08-24 23:04:48_
+_Generated: 2026-08-24 23:25:26_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -78,37 +78,37 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `move_to_exact_match` | 1352 |
-| `update_exact_match_from_consolidate` | 1515 |
-| `finalize_mapping` | 1736 |
-| `verify_raw_materials` | 1963 |
-| `get_batch_reservation_summary` | 1979 |
-| `get_batch_item` | 2015 |
-| `get_batch_stock_summary` | 2023 |
-| `get_batch_cross_table_usage` | 2261 |
-| `validate_planned_stock` | 2393 |
-| `reserve_batches` | 2520 |
-| `get_available_excess_batches` | 2692 |
-| `add_excess_material_mapping` | 2758 |
-| `get_available_virtual_excess_items` | 2853 |
-| `claim_virtual_excess_mapping` | 2967 |
-| `reserve_exact_match_batches` | 3185 |
-| `unreserve_exact_match_batches` | 3332 |
-| `check_mapping_batch_availability` | 3383 |
-| `unreserve_batches` | 3444 |
-| `reassign_batch` | 3609 |
-| `make_production_plan` | 3871 |
-| `make_material_request` | 3942 |
-| `make_material_request_from_consolidate` | 4096 |
-| `update_so_difference_kg` | 4234 |
-| `auto_suggest_consolidate_dimensions` | 4264 |
-| `auto_purchase_from_mp` | 4352 |
-| `complete_batch_mapping` | 4541 |
-| `@frappe.validate_and_sanitize_search_inputs` | 711 |
-| `get_bom_info` | 737 |
-| `get_so_drawings_for_bom_picker` | 789 |
-| `get_raw_materials` | 896 |
-| `check_stock_availability` | 999 |
+| `check_stock_availability` | 1043 |
+| `move_to_exact_match` | 1396 |
+| `update_exact_match_from_consolidate` | 1559 |
+| `finalize_mapping` | 1780 |
+| `verify_raw_materials` | 2007 |
+| `get_batch_reservation_summary` | 2023 |
+| `get_batch_item` | 2059 |
+| `get_batch_stock_summary` | 2067 |
+| `get_batch_cross_table_usage` | 2305 |
+| `validate_planned_stock` | 2437 |
+| `reserve_batches` | 2564 |
+| `get_available_excess_batches` | 2736 |
+| `add_excess_material_mapping` | 2802 |
+| `get_available_virtual_excess_items` | 2897 |
+| `claim_virtual_excess_mapping` | 3011 |
+| `reserve_exact_match_batches` | 3229 |
+| `unreserve_exact_match_batches` | 3376 |
+| `check_mapping_batch_availability` | 3427 |
+| `unreserve_batches` | 3488 |
+| `reassign_batch` | 3653 |
+| `make_production_plan` | 3915 |
+| `make_material_request` | 3986 |
+| `make_material_request_from_consolidate` | 4140 |
+| `update_so_difference_kg` | 4278 |
+| `auto_suggest_consolidate_dimensions` | 4308 |
+| `auto_purchase_from_mp` | 4396 |
+| `complete_batch_mapping` | 4585 |
+| `@frappe.validate_and_sanitize_search_inputs` | 755 |
+| `get_bom_info` | 781 |
+| `get_so_drawings_for_bom_picker` | 833 |
+| `get_raw_materials` | 940 |
 ## production_management/inspection.py
 
 | Method | Line |

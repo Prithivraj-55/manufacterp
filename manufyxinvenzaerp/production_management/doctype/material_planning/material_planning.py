@@ -145,6 +145,36 @@ class MaterialPlanning(Document):
         self._sync_cut_sheet_calc()
         self._warn_undersized_purchase_dimensions()
 
+    # Fields that decide whether a purchase line is big enough. A change to any of
+    # them is a reason to look again; a change to anything else is not.
+    _PURCHASE_SIZE_FIELDS = ("item_code", "alternate_item", "length", "width", "thickness")
+
+    def _consolidate_rows_touched(self):
+        """Names of the Consolidate Item rows this save changed, or None on a new
+        document -- where nothing has been seen before, so everything is worth
+        stating once."""
+        before = self.get_doc_before_save()
+        if not before:
+            return None
+
+        previous = {r.name: r for r in (before.get("consolidate_items") or [])}
+        touched = set()
+        for row in (self.consolidate_items or []):
+            old = previous.get(row.name)
+            if old is None:
+                touched.add(row.name)
+                continue
+            for fieldname in self._PURCHASE_SIZE_FIELDS:
+                new_value, old_value = row.get(fieldname), old.get(fieldname)
+                if fieldname in ("item_code", "alternate_item"):
+                    same = (new_value or "") == (old_value or "")
+                else:
+                    same = flt(new_value, 3) == flt(old_value, 3)
+                if not same:
+                    touched.add(row.name)
+                    break
+        return touched
+
     def _warn_undersized_purchase_dimensions(self):
         """Point out, on save, any Consolidate Item bought in a size smaller than
         the largest piece it has to produce — a 4000 mm bar can never yield the
@@ -160,8 +190,20 @@ class MaterialPlanning(Document):
         original item, so measuring them against the original's longest piece
         compares two different things -- a different profile legitimately carries
         different dimensions, and the warning was firing on correct data.
+
+        Only rows this save actually touched are reported. It used to re-state
+        every undersized line on every save of the document, so editing a batch in
+        Material Mapping raised a popup about a purchase size in a different table
+        that nobody had gone near -- and a line left with no purchase thickness yet
+        raised it on every save from then on. A warning that appears when nothing
+        relevant changed is one people learn to dismiss without reading, which
+        costs the times it matters.
         """
         if not self.consolidate_items or not self.unavailable_items:
+            return
+
+        touched = self._consolidate_rows_touched()
+        if touched is not None and not touched:
             return
 
         needed = {}
@@ -184,6 +226,8 @@ class MaterialPlanning(Document):
 
         messages = []
         for c in self.consolidate_items:
+            if touched is not None and c.name not in touched:
+                continue
             if c.get("alternate_item"):
                 continue
             agg = needed.get(c.item_code)
