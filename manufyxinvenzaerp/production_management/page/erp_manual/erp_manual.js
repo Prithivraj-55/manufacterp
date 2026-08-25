@@ -1873,19 +1873,28 @@ const ERP_MANUAL_REPORTS_CHILDREN = [
 	{
 		id: "rpt-production",
 		title: "Production Report",
-		kicker: "Every operation, every job, one row each",
+		kicker: "One row per drawing, every operation across the columns",
 		purpose:
-			"The operation-level view across all live jobs. One row per drawing per operation, so " +
-			"the question “where is this job actually up to” is answered without opening a single " +
-			"Supplier Operation Entry.",
+			"The whole life of a drawing on one line. Read left to right and you walk the job " +
+			"forward in the order it actually runs — what was issued, where each operation " +
+			"stands, how many inspection rounds it took, how long it waited — and finish on " +
+			"the weights, the costs and what has been completed.",
 		fields: [
-			{ name: "Filters", note: "Production Plan (Team), Job Type, Subcontracting Order, Supplier, Sales Order, Operation, Status, and a From/To date range." },
-			{ name: "Traceability columns", note: "Production Plan, Project, Job Type, Subcontracting Order, Supplier, Sales Order, Customer, Drawing, DUNO/Mark No, Cust Drawing No." },
-			{ name: "Operation columns", note: "Operation, Seq, Status, Inspection Mandatory, Inspection Status, Inspection Count, and <b>Operation Gap (Days, approx.)</b> — roughly how long this operation has been sitting between the one before it and now." },
-			{ name: "Weight and quantity columns", note: "Customer Weight (Kg), Planned Weight (Kg), Planned Sec Nos, Transferred Weight (Kg), Transferred Sec Nos, Excess Weight (Kg), Consumed (Kg), Completed (Nos) — the planned-versus-actual comparison, in both weight and pieces." },
+			{ name: "Filters", note: "Production Plan (Team), Job Type, Job Work Order, Supplier, Sales Order, Operation, Status, and a From/To date range. <b>Operation</b> now narrows which operation <i>columns</i> appear, not which rows." },
+			{ name: "Traceability columns", note: "Sales Order, Customer, Project, Production Plan (Team), Job Type, Job Work Order, Supplier, Drawing, DUNO/Mark No, Cust Drawing No, Created On — sales-order-wise, the way the report is read." },
+			{ name: "Operation blocks", note: "One block per operation the job is routed through, in sequence order: <b>quantity</b>, <b>Status</b>, <b>Inspection Rounds</b>, <b>Last Inspection Status</b> and <b>Gap (Days, approx.)</b>. The first operation is measured in Kg — it is where raw material is issued — and every later one in Nos." },
+			{ name: "Weight and quantity columns", note: "Customer Weight (Kg), Planned Weight (Kg), Planned Sec Nos, Transferred Weight (Kg), Transferred Sec Nos — the planned-versus-actual comparison, in both weight and pieces." },
+			{ name: "Cost columns", note: "<b>Consumed RM Cost</b> (what the material issued to this drawing was worth, from the Stock Entries that issued it), <b>Rate Schedule</b> and <b>Rate / Kg</b> off the drawing itself, and <b>Consumables (Nos)</b> / <b>Consumable Cost</b> from the job’s Material Consumption for Manufacture entries." },
+			{ name: "Excess columns", note: "<b>Excess Weight (Kg)</b> booked by the Material Issue Plan transfer popup, <b>Returned Excess Weight (Kg)</b> already brought back in, and <b>Difference (Kg)</b> — what is still out there." },
+			{ name: "Completion columns", note: "<b>Completed Drawing Weight (Kg)</b> — the pieces finished, valued at the drawing’s own weight per piece — and <b>Completed Drawing (Nos)</b>." },
 		],
 		notes: [
-			"Operation Gap is the column to sort by when looking for stalled work: a large gap on an operation that is still Open is a job nobody has picked up.",
+			"<b>It used to be one row per drawing per operation.</b> A four-operation job with six drawings filled twenty-four rows with the same six drawings repeated, and “where is 1B1 up to” meant reading four of them at once. Each drawing now has one row and the operations sit across it.",
+			"<b>The operation columns are not a fixed list.</b> They are whatever the jobs in view are routed through — a job through Welding and Blasting shows those, a job through Fit-up and Painting shows those, and a view holding both shows all four.",
+			"Operation Gap is still the column to sort by when looking for stalled work: a large gap on an operation that is still Open is a job nobody has picked up.",
+			"<b>Created On is the Job Work Order’s own date</b>, not the date each operation entry happened to be raised — so one job reads as one date instead of four.",
+			"<b>The consumable and excess figures are job-level</b> and repeat on every drawing row of the job. An off-cut belongs to a batch and a welding rod to a job; neither can honestly be split between drawings, so they are shown whole rather than apportioned. Read them once per job.",
+			"<b>Difference</b> leaves out material marked Billed to Consume. That is scrapped by decision rather than awaiting collection, which is the same line the Excess Material Return Report draws for its chase-list.",
 		],
 	},
 	{

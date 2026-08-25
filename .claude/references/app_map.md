@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-25 12:19:00_
+_Generated: 2026-08-25 15:38:44_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-08-25 12:19:00_
 
 ## Python files
 
-_Total: 252_
+_Total: 254_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -191,6 +191,7 @@ _Total: 252_
 - tests/_find_mip_excess.py
 - tests/__init__.py
 - tests/move_fixtures_to_custom_json.py
+- tests/_probe_tmp.py
 - tests/revert_wo_jc_cleanup.py
 - tests/test_alternate_item.py
 - tests/test_classification_logic.py
@@ -253,6 +254,7 @@ _Total: 252_
 - tests/verify_pr_allocation_single_table.py
 - tests/verify_pr_inspection.py
 - tests/verify_process_planning_fields.py
+- tests/verify_production_report.py
 - tests/verify_pr_sequential_allocation.py
 - tests/verify_purchase_size_warning.py
 - tests/verify_reassign_batch_exact_match2.py
@@ -1263,6 +1265,10 @@ Functions:
   - 64:_all_target_doctypes:
   - 70:run:
 
+### tests/_probe_tmp.py
+Functions:
+  - 2:run:
+
 ### tests/revert_wo_jc_cleanup.py
 Functions:
   - 106:run:
@@ -1626,6 +1632,15 @@ Functions:
 ### tests/verify_process_planning_fields.py
 Functions:
   - 11:run:
+
+### tests/verify_production_report.py
+Functions:
+  - 32:check:
+  - 38:_labels:
+  - 42:run:
+  - 167:_old_shape:
+  - 175:_excess_rows:
+  - 184:_summary:
 
 ### tests/verify_pr_sequential_allocation.py
 Functions:

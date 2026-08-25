@@ -17,7 +17,7 @@ frappe.query_reports["Production Report"] = {
 		},
 		{
 			fieldname: "subcontracting_order",
-			label: __("Subcontracting Order"),
+			label: __("Job Work Order"),
 			fieldtype: "Link",
 			options: "Subcontracting Order",
 		},
@@ -34,6 +34,9 @@ frappe.query_reports["Production Report"] = {
 			options: "Sales Order",
 		},
 		{
+			// Narrows which operation column blocks appear, rather than which rows do:
+			// the report is one row per drawing now, and an operation is a set of
+			// columns on it.
 			fieldname: "operation",
 			label: __("Operation"),
 			fieldtype: "Link",
