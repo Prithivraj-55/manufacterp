@@ -324,6 +324,7 @@ def _base_row(sco, pp, d, so_map, weights, sec_nos, completed, excess, consumabl
 		"planned_sec_nos": flt(sn.get("planned"), 3),
 		"transferred_weight_kg": flt(w.get("transferred_weight_kg")),
 		"transferred_sec_nos": flt(sn.get("issued"), 3),
+		"waste_pct": _waste_pct(w.get("customer_weight_kg"), w.get("total_weight_kg")),
 		"consumed_rm_cost": flt(rm_cost.get((name, drawing))),
 		"rate_schedule": rate.get("rate_schedule") or "",
 		"rate_per_kg": flt(rate.get("rs_rate_per_kg")),
@@ -335,6 +336,23 @@ def _base_row(sco, pp, d, so_map, weights, sec_nos, completed, excess, consumabl
 		"completed_drawing_weight_kg": flt(per_piece * completed_nos, 3),
 		"completed_nos": completed_nos,
 	}
+
+
+def _waste_pct(customer_kg, planned_kg):
+	"""How much more steel the job plans to buy than the finished part weighs.
+
+	Cutting a member out of a length leaves an off-cut, so a few percent is normal and
+	is what this is read for: a line well outside its neighbours is a cutting plan worth
+	looking at, not a rounding artefact.
+
+	Blank rather than zero when there is no customer weight to measure against --
+	dividing by nothing is not zero waste, and a column of confident 0.00s is worse than
+	an honest gap. Negative means the plan holds LESS material than the finished part
+	weighs, which cannot be cut and is always an error upstream."""
+	customer = flt(customer_kg)
+	if not customer:
+		return None
+	return flt((flt(planned_kg) - customer) / customer * 100, 2)
 
 
 def _operation_columns(op_seq):
@@ -628,6 +646,11 @@ def get_columns(operations):
 		{"label": _("Customer Weight (Kg)"), "fieldname": "customer_weight_kg", "fieldtype": "Float", "width": 130},
 		{"label": _("Planned Weight (Kg)"), "fieldname": "planned_weight_kg", "fieldtype": "Float", "width": 130},
 		{"label": _("Planned Sec Nos"), "fieldname": "planned_sec_nos", "fieldtype": "Float", "precision": 3, "width": 120},
+		# Closes the planned block: the one number that says whether the plan is sane
+		# before anybody looks at what was actually transferred.
+		{"label": _("Waste %"), "fieldname": "waste_pct", "fieldtype": "Float", "precision": 2, "width": 90,
+		 "description": _("Planned Weight over Customer Weight. A few percent is the off-cut; "
+						  "negative means the plan holds less material than the part weighs.")},
 		{"label": _("Transferred Weight (Kg)"), "fieldname": "transferred_weight_kg", "fieldtype": "Float", "width": 145},
 		{"label": _("Transferred Sec Nos"), "fieldname": "transferred_sec_nos", "fieldtype": "Float", "precision": 3, "width": 140},
 		{"label": _("Consumed RM Cost"), "fieldname": "consumed_rm_cost", "fieldtype": "Currency", "width": 140,

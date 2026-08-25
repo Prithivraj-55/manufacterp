@@ -59,4 +59,17 @@ frappe.query_reports["Production Report"] = {
 			fieldtype: "Date",
 		},
 	],
+
+	// Negative waste is not a small number, it is an impossible one: the plan holds
+	// less material than the finished part weighs, so the part cannot be cut from it.
+	// Worth seeing at a glance rather than hunting for in a column of decimals.
+	formatter(value, row, column, data, default_formatter) {
+		var formatted = default_formatter(value, row, column, data);
+		if (column.fieldname === "waste_pct" && value !== null && value !== undefined) {
+			if (value < 0) {
+				formatted = "<span style='color:var(--red-500,#e24c4c);font-weight:600'>" + formatted + "</span>";
+			}
+		}
+		return formatted;
+	},
 };
