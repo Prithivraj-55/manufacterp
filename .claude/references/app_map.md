@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-25 11:54:46_
+_Generated: 2026-08-25 12:06:53_
 
 ## Modules
 
@@ -1119,20 +1119,20 @@ Functions:
   - 2613:create_bom_client_script:
   - 2633:create_production_plan_custom_fields:
   - 2875:create_production_plan_client_script:
-  - 3118:create_stock_entry_custom_fields:
-  - 3342:hide_duplicate_sco_field:
-  - 3369:create_stock_entry_client_script:
-  - 3406:create_doctype_label_translations:
-  - 3429:remove_sco_purchase_order_mandatory:
-  - 3440:hide_sco_job_worker_warehouse:
-  - 3469:make_sco_job_worker_conditional:
-  - 3504:create_sco_custom_fields:
-  - 3976:create_sco_client_script:
-  - 3992:create_sco_ops_client_script:
-  - 4008:create_soe_client_script:
-  - 4024:create_manufacturing_settings_custom_fields:
-  - 4063:create_material_planning_auto_purchase_fields:
-  - 4126:create_payment_request_custom_fields:
+  - 3148:create_stock_entry_custom_fields:
+  - 3372:hide_duplicate_sco_field:
+  - 3399:create_stock_entry_client_script:
+  - 3436:create_doctype_label_translations:
+  - 3459:remove_sco_purchase_order_mandatory:
+  - 3470:hide_sco_job_worker_warehouse:
+  - 3499:make_sco_job_worker_conditional:
+  - 3534:create_sco_custom_fields:
+  - 4006:create_sco_client_script:
+  - 4022:create_sco_ops_client_script:
+  - 4038:create_soe_client_script:
+  - 4054:create_manufacturing_settings_custom_fields:
+  - 4093:create_material_planning_auto_purchase_fields:
+  - 4156:create_payment_request_custom_fields:
 
 ### sq_management/supplier_quotation.py
 Functions:
