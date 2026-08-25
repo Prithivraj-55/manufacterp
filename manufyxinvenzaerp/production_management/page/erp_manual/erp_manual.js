@@ -1880,7 +1880,8 @@ const ERP_MANUAL_REPORTS_CHILDREN = [
 			"stands, how many inspection rounds it took, how long it waited — and finish on " +
 			"the weights, the costs and what has been completed.",
 		fields: [
-			{ name: "Filters", note: "Production Plan (Team), Job Type, Job Work Order, Supplier, Sales Order, Operation, Status, and a From/To date range. <b>Operation</b> now narrows which operation <i>columns</i> appear, not which rows." },
+			{ name: "What appears", note: "Every <b>submitted Job Work Order</b>, one row per drawing on it — from the moment the order is submitted, before a gram of steel has been issued. A draft or cancelled order is not a job yet and does not appear." },
+			{ name: "Filters", note: "Production Plan (Team), Job Type, Job Work Order, Supplier, Sales Order, Operation, Status, and a From/To date range on the Job Work Order's own date. <b>Operation</b> and <b>Status</b> are questions about operations, so they narrow the jobs as well — asking for an Open Fit-up lists the jobs that have one." },
 			{ name: "Traceability columns", note: "Sales Order, Customer, Project, Production Plan (Team), Job Type, Job Work Order, Supplier, Drawing, DUNO/Mark No, Cust Drawing No, Created On — sales-order-wise, the way the report is read." },
 			{ name: "Operation blocks", note: "One block per operation the job is routed through, in sequence order: <b>quantity</b>, <b>Status</b>, <b>Inspection Rounds</b>, <b>Last Inspection Status</b> and <b>Gap (Days, approx.)</b>. The first operation is measured in Kg — it is where raw material is issued — and every later one in Nos." },
 			{ name: "Weight and quantity columns", note: "Customer Weight (Kg), Planned Weight (Kg), Planned Sec Nos, Transferred Weight (Kg), Transferred Sec Nos — the planned-versus-actual comparison, in both weight and pieces." },
@@ -1889,6 +1890,7 @@ const ERP_MANUAL_REPORTS_CHILDREN = [
 			{ name: "Completion columns", note: "<b>Completed Drawing Weight (Kg)</b> — the pieces finished, valued at the drawing’s own weight per piece — and <b>Completed Drawing (Nos)</b>." },
 		],
 		notes: [
+			"<b>A new job is not an empty report.</b> The rows come from the Job Work Order, not from its operation entries, so a job submitted this morning already shows its drawings, its planned weights and an empty row of operations waiting to be worked. It used to be absent altogether until the first operation entry was raised.",
 			"<b>It used to be one row per drawing per operation.</b> A four-operation job with six drawings filled twenty-four rows with the same six drawings repeated, and “where is 1B1 up to” meant reading four of them at once. Each drawing now has one row and the operations sit across it.",
 			"<b>The operation columns are not a fixed list.</b> They are whatever the jobs in view are routed through — a job through Welding and Blasting shows those, a job through Fit-up and Painting shows those, and a view holding both shows all four.",
 			"Operation Gap is still the column to sort by when looking for stalled work: a large gap on an operation that is still Open is a job nobody has picked up.",

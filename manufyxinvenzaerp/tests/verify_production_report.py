@@ -126,6 +126,37 @@ def run():
                   wrong, [])
 
     print()
+    print("=== a job appears the moment its Job Work Order is submitted ===")
+    # Before this, the report was driven by Supplier Operation Entry: a job whose
+    # operation entries had not been raised yet was simply absent, with nothing on
+    # screen to say it existed. The order is what makes a job real, so the order is
+    # what the report is built from now.
+    victim = data[0]["subcontracting_order"]
+    try:
+        frappe.db.delete("Supplier Operation Entry", {"subcontracting_order": victim})
+        after_data = execute({})[1]
+        still = [r for r in after_data if r["subcontracting_order"] == victim]
+        check("its drawings are still listed with no operations at all",
+              len(still), len([r for r in data if r["subcontracting_order"] == victim]))
+        check("and the weights are still on them",
+              flt(still[0]["planned_weight_kg"], 3) if still else None,
+              flt([r for r in data if r["subcontracting_order"] == victim][0]["planned_weight_kg"], 3))
+    finally:
+        frappe.db.rollback()
+
+    print()
+    print("=== a draft or cancelled Job Work Order is not a job yet ===")
+    drafts = frappe.get_all("Subcontracting Order", filters={"docstatus": ["!=", 1]}, pluck="name")
+    check("none of them reach the report",
+          [r["subcontracting_order"] for r in data if r["subcontracting_order"] in drafts], [])
+    submitted = set(frappe.get_all("Subcontracting Order", filters={"docstatus": 1}, pluck="name"))
+    check("and every submitted one that has drawings does",
+          sorted(submitted - {r["subcontracting_order"] for r in data}),
+          sorted(n for n in submitted
+                 if not frappe.db.exists("SCO Drawing Item",
+                                         {"parent": n, "parenttype": "Subcontracting Order"})))
+
+    print()
     print("=== the excess trio reconciles ===")
     # Excess, what came back, and what is still out there. Billed-to-Consume comes off
     # the difference rather than sitting in it forever: that material is scrapped by

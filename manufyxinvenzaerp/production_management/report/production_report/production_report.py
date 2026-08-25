@@ -31,35 +31,44 @@ def execute(filters=None):
 
 
 def get_data(filters):
-	soe_filters = {}
-	if filters.get("subcontracting_order"):
-		soe_filters["subcontracting_order"] = filters["subcontracting_order"]
-	if filters.get("production_plan"):
-		soe_filters["production_plan"] = filters["production_plan"]
-	if filters.get("status"):
-		soe_filters["status"] = filters["status"]
-	if filters.get("supplier"):
-		soe_filters["supplier"] = filters["supplier"]
-	if filters.get("operation"):
-		soe_filters["operation"] = filters["operation"]
+	"""Rows are Job Work Orders, not operation entries.
 
-	soes = frappe.get_all(
-		"Supplier Operation Entry",
-		filters=soe_filters,
-		fields=["name", "production_plan", "subcontracting_order", "supplier", "operation",
-				"sequence_id", "status", "custom_inspection_status", "custom_inspection_mandatory",
-				"total_consumed_kg", "total_completed_nos", "creation"],
+	A job belongs in this report the moment its Job Work Order is submitted -- before
+	anybody has issued a gram of steel against it. Driving the query off Supplier
+	Operation Entry meant a submitted job whose operation entries had not been raised
+	yet was simply absent, with nothing on screen to say the job existed at all. It
+	now starts from the submitted orders themselves and fills the operation blocks in
+	from whatever entries exist, so a brand-new job shows its drawings, its weights and
+	an empty row of operations waiting to be worked."""
+	sco_filters = {"docstatus": 1}
+	if filters.get("subcontracting_order"):
+		sco_filters["name"] = filters["subcontracting_order"]
+	if filters.get("supplier"):
+		sco_filters["supplier"] = filters["supplier"]
+	if filters.get("production_plan"):
+		sco_filters["custom_production_plan"] = filters["production_plan"]
+	# The date people mean is the one on screen -- the Job Work Order's own date, which
+	# is what the Created On column shows. Filtering operation-entry timestamps instead
+	# made a job drop out of its own date range depending on when its later operations
+	# happened to be raised.
+	if filters.get("from_date"):
+		sco_filters["transaction_date"] = [">=", filters["from_date"]]
+	if filters.get("to_date"):
+		sco_filters["transaction_date"] = (
+			["between", [filters["from_date"], filters["to_date"]]]
+			if filters.get("from_date") else ["<=", filters["to_date"]]
+		)
+
+	scos = frappe.get_all(
+		"Subcontracting Order",
+		filters=sco_filters,
+		fields=["name", "supplier", "custom_production_plan", "transaction_date", "creation"],
 	)
-	if not soes:
+	if not scos:
 		return [], []
 
-	if filters.get("from_date") or filters.get("to_date"):
-		soes = _filter_by_date(soes, filters)
-		if not soes:
-			return [], []
-
-	pp_names = list({s.production_plan for s in soes if s.production_plan})
 	pp_map = {}
+	pp_names = list({s.custom_production_plan for s in scos if s.custom_production_plan})
 	if pp_names:
 		pp_filters = {"name": ["in", pp_names]}
 		if filters.get("job_type"):
@@ -67,10 +76,35 @@ def get_data(filters):
 		for p in frappe.get_all("Production Plan", filters=pp_filters,
 								fields=["name", "custom_type", "project", "company"]):
 			pp_map[p.name] = p
-		if filters.get("job_type"):
-			soes = [s for s in soes if s.production_plan in pp_map]
-			if not soes:
-				return [], []
+	if filters.get("job_type"):
+		scos = [s for s in scos if s.custom_production_plan in pp_map]
+		if not scos:
+			return [], []
+
+	sco_names = [s.name for s in scos]
+	sco_map = {s.name: s for s in scos}
+	created_on = {s.name: (s.transaction_date or getdate(s.creation)) for s in scos}
+
+	soe_filters = {"subcontracting_order": ["in", sco_names]}
+	if filters.get("status"):
+		soe_filters["status"] = filters["status"]
+	if filters.get("operation"):
+		soe_filters["operation"] = filters["operation"]
+	soes = frappe.get_all(
+		"Supplier Operation Entry",
+		filters=soe_filters,
+		fields=["name", "production_plan", "subcontracting_order", "supplier", "operation",
+				"sequence_id", "status", "custom_inspection_status", "custom_inspection_mandatory",
+				"total_consumed_kg", "total_completed_nos", "creation"],
+	)
+	# An Operation or Status filter is a question about operations, so it narrows the
+	# jobs too: asking for Open Fit-up should not list every job in the yard with the
+	# Fit-up columns blank.
+	if filters.get("status") or filters.get("operation"):
+		matched = {s.subcontracting_order for s in soes}
+		sco_names = [n for n in sco_names if n in matched]
+		if not sco_names:
+			return [], []
 
 	# "Operation gap in days" has no dedicated start/end field anywhere in
 	# this data model (Supplier Operation Entry carries no date fields of its
@@ -96,62 +130,42 @@ def get_data(filters):
 			prev_creation = r.creation
 
 	call_counts = {}
-	for c in frappe.get_all(
-		"Inspection Call Log", filters={"parenttype": "Supplier Operation Entry", "parent": ["in", [s.name for s in soes]]},
-		fields=["parent"],
-	):
-		call_counts[c.parent] = call_counts.get(c.parent, 0) + 1
+	if soes:
+		for c in frappe.get_all(
+			"Inspection Call Log",
+			filters={"parenttype": "Supplier Operation Entry", "parent": ["in", [s.name for s in soes]]},
+			fields=["parent"],
+		):
+			call_counts[c.parent] = call_counts.get(c.parent, 0) + 1
 
-	drawing_rows = frappe.get_all(
+	# Completed pieces per operation, keyed (operation entry, drawing). This is the one
+	# thing only the operation's own drawing table knows.
+	completed_by_soe = {}
+	for d in frappe.get_all(
 		"SOE Drawing Detail",
-		filters={"parent": ["in", [s.name for s in soes]]},
-		fields=["parent", "drawing", "customer_drawing_number", "duno_mark_no", "sales_order",
-				"qty_to_manufacture", "planned_weight_kg", "transferred_weight_kg", "completed_qty_nos"],
-	)
-	# Fall back to the Drawing master for Sales Order. The copy held on the drawing rows
-	# is blank in practice -- it is only populated when the Production Plan item carried
-	# one -- which left the Sales Order column empty, the Customer column empty (it is
-	# looked up FROM the sales order) and the Sales Order filter matching nothing at all,
-	# on a report whose whole point is to be readable sales-order-wise.
-	missing_so = {d.drawing for d in drawing_rows if d.drawing and not d.sales_order}
-	if missing_so:
-		so_by_drawing = {
-			dr.name: dr.sales_order
-			for dr in frappe.get_all(
-				"Drawing",
-				filters={"name": ["in", list(missing_so)]},
-				fields=["name", "sales_order"],
-			)
-			if dr.sales_order
-		}
-		for d in drawing_rows:
-			if not d.sales_order:
-				d.sales_order = so_by_drawing.get(d.drawing) or ""
+		filters={"parent": ["in", [s.name for s in soes]]} if soes else {"parent": ["in", []]},
+		fields=["parent", "drawing", "completed_qty_nos"],
+	):
+		completed_by_soe[(d.parent, d.drawing)] = flt(d.completed_qty_nos)
 
-	drawings_by_soe = {}
-	for d in drawing_rows:
-		drawings_by_soe.setdefault(d.parent, []).append(d)
+	drawing_rows = _job_drawings(sco_names, soes)
+	if not drawing_rows:
+		return [], []
 
-	sco_names = list({s.subcontracting_order for s in soes if s.subcontracting_order})
 	weights, sec_nos, completed = _drawing_figures(sco_names)
 	mip_by_sco = _mip_by_sco(sco_names)
 	excess = _excess_by_sco(mip_by_sco)
-	consumables = _consumables_by_sco(sco_names, {s.production_plan for s in soes})
+	consumables = _consumables_by_sco(sco_names, {s.custom_production_plan for s in scos})
 	rm_cost = _rm_cost_by_drawing(sco_names)
-	created_on = {
-		s.name: (s.transaction_date or getdate(s.creation))
-		for s in frappe.get_all("Subcontracting Order",
-								filters={"name": ["in", sco_names]} if sco_names else {"name": ["in", []]},
-								fields=["name", "transaction_date", "creation"])
-	}
 
-	so_names = list({d.sales_order for d in drawing_rows if d.sales_order})
+	so_names = list({d["sales_order"] for d in drawing_rows if d["sales_order"]})
 	so_map = {}
 	if so_names:
-		for so in frappe.get_all("Sales Order", filters={"name": ["in", so_names]}, fields=["name", "customer", "project"]):
+		for so in frappe.get_all("Sales Order", filters={"name": ["in", so_names]},
+								 fields=["name", "customer", "project"]):
 			so_map[so.name] = so
 
-	drawing_names = list({d.drawing for d in drawing_rows if d.drawing})
+	drawing_names = list({d["drawing"] for d in drawing_rows if d["drawing"]})
 	rate_map = {}
 	if drawing_names:
 		for dr in frappe.get_all("Drawing", filters={"name": ["in", drawing_names]},
@@ -159,9 +173,8 @@ def get_data(filters):
 			rate_map[dr.name] = dr
 
 	if filters.get("sales_order"):
-		wanted = filters["sales_order"]
-		soes = [s for s in soes if any(d.sales_order == wanted for d in drawings_by_soe.get(s.name, []))]
-		if not soes:
+		drawing_rows = [d for d in drawing_rows if d["sales_order"] == filters["sales_order"]]
+		if not drawing_rows:
 			return [], []
 
 	# The operation columns are whatever the jobs in view are actually routed through,
@@ -170,7 +183,7 @@ def get_data(filters):
 	# turns pieces out and is read in Nos.
 	op_seq = {}
 	for s in soes:
-		if not s.operation:
+		if not s.operation or s.subcontracting_order not in sco_names:
 			continue
 		seq = s.sequence_id or 0
 		if s.operation not in op_seq or seq < op_seq[s.operation]:
@@ -180,53 +193,111 @@ def get_data(filters):
 
 	# One row per drawing per Job Work Order. Each operation writes into its own block
 	# of that row rather than adding a row of its own.
+	data = []
 	rows_by_key = {}
-	order = []
-	for s in soes:
-		pp = pp_map.get(s.production_plan, frappe._dict())
-		for d in (drawings_by_soe.get(s.name) or [frappe._dict()]):
-			if filters.get("sales_order") and d.get("sales_order") != filters["sales_order"]:
-				continue
-			key = (s.subcontracting_order, d.get("drawing") or "")
-			row = rows_by_key.get(key)
-			if row is None:
-				row = _base_row(s, d, pp, so_map, weights, sec_nos, completed, excess,
-								consumables, rm_cost, rate_map, created_on)
-				rows_by_key[key] = row
-				order.append(key)
+	for d in drawing_rows:
+		sco = sco_map[d["subcontracting_order"]]
+		pp = pp_map.get(sco.custom_production_plan, frappe._dict())
+		row = _base_row(sco, pp, d, so_map, weights, sec_nos, completed, excess,
+						consumables, rm_cost, rate_map, created_on)
+		rows_by_key[(d["subcontracting_order"], d["drawing"])] = row
+		data.append(row)
 
-			slug = slug_by_operation.get(s.operation)
-			if not slug:
+	for s in soes:
+		slug = slug_by_operation.get(s.operation)
+		if not slug:
+			continue
+		is_first = op_seq.get(s.operation, 0) <= 1
+		for (sco_name, drawing), row in rows_by_key.items():
+			if sco_name != s.subcontracting_order:
 				continue
 			# The issuing operation reports the drawing's transferred weight -- the same
 			# figure the Transferred Weight column carries, deliberately, so the two do
-			# not disagree. The SOE's own copy of it is the pre-transfer plan and would.
-			is_first = op_seq.get(s.operation, 0) <= 1
+			# not disagree. The operation's own copy of it is the pre-transfer plan and
+			# would.
 			row["op_%s_qty" % slug] = (
 				flt(row["transferred_weight_kg"], 3) if is_first
-				else flt(d.get("completed_qty_nos"), 3)
+				else flt(completed_by_soe.get((s.name, drawing)), 3)
 			)
 			row["op_%s_status" % slug] = s.status or ""
 			row["op_%s_rounds" % slug] = call_counts.get(s.name, 0)
 			row["op_%s_inspection" % slug] = s.custom_inspection_status or ""
 			row["op_%s_gap" % slug] = gap_days.get(s.name, 0)
 
-	data = [rows_by_key[k] for k in order]
 	data.sort(key=lambda r: (r["sales_order"] or "", r["production_plan"] or "",
 							 r["subcontracting_order"] or "", r["drawing"] or ""))
 	return data, operations
 
 
-def _base_row(s, d, pp, so_map, weights, sec_nos, completed, excess, consumables,
+def _job_drawings(sco_names, soes):
+	"""The drawings on each job, from the Job Work Order's own drawing table.
+
+	Read from the order rather than from the operation entries so a job with no
+	operation entries yet still has rows -- and so a drawing that is on the order but
+	missing from some operation's copy of the table cannot go unreported.
+
+	The operation entries are still used as a fallback for an order whose own table is
+	empty, which is how jobs raised before that table was populated still show up."""
+	rows = []
+	seen = set()
+	for w in frappe.get_all(
+		"SCO Drawing Item",
+		filters={"parent": ["in", sco_names], "parenttype": "Subcontracting Order"},
+		fields=["parent", "drawing", "duno_mark_no", "customer_drawing_number", "sales_order"],
+	):
+		if not w.drawing or (w.parent, w.drawing) in seen:
+			continue
+		seen.add((w.parent, w.drawing))
+		rows.append({"subcontracting_order": w.parent, "drawing": w.drawing,
+					 "duno_mark_no": w.duno_mark_no or "", "sales_order": w.sales_order or "",
+					 "customer_drawing_number": w.customer_drawing_number or ""})
+
+	covered = {r["subcontracting_order"] for r in rows}
+	uncovered = [s.name for s in soes if s.subcontracting_order not in covered]
+	if uncovered:
+		sco_by_soe = {s.name: s.subcontracting_order for s in soes}
+		for d in frappe.get_all(
+			"SOE Drawing Detail",
+			filters={"parent": ["in", uncovered]},
+			fields=["parent", "drawing", "duno_mark_no", "customer_drawing_number", "sales_order"],
+		):
+			key = (sco_by_soe[d.parent], d.drawing)
+			if not d.drawing or key in seen:
+				continue
+			seen.add(key)
+			rows.append({"subcontracting_order": key[0], "drawing": d.drawing,
+						 "duno_mark_no": d.duno_mark_no or "", "sales_order": d.sales_order or "",
+						 "customer_drawing_number": d.customer_drawing_number or ""})
+
+	# Fall back to the Drawing master for Sales Order. The copy held on the drawing rows
+	# is blank in practice -- it is only populated when the Production Plan item carried
+	# one -- which left the Sales Order column empty, the Customer column empty (it is
+	# looked up FROM the sales order) and the Sales Order filter matching nothing at all,
+	# on a report whose whole point is to be readable sales-order-wise.
+	missing_so = {r["drawing"] for r in rows if not r["sales_order"]}
+	if missing_so:
+		so_by_drawing = {
+			dr.name: dr.sales_order
+			for dr in frappe.get_all("Drawing", filters={"name": ["in", list(missing_so)]},
+									 fields=["name", "sales_order"])
+			if dr.sales_order
+		}
+		for r in rows:
+			if not r["sales_order"]:
+				r["sales_order"] = so_by_drawing.get(r["drawing"]) or ""
+	return rows
+
+
+def _base_row(sco, pp, d, so_map, weights, sec_nos, completed, excess, consumables,
 			  rm_cost, rate_map, created_on):
-	so = so_map.get(d.get("sales_order"), frappe._dict())
-	sco = s.subcontracting_order
-	drawing = d.get("drawing") or ""
-	w = weights.get((sco, drawing), frappe._dict())
-	sn = sec_nos.get((sco, d.get("duno_mark_no") or ""), {})
-	done = completed.get((sco, drawing), frappe._dict())
-	ex = excess.get(sco, {})
-	cons = consumables.get(sco, {})
+	so = so_map.get(d["sales_order"], frappe._dict())
+	name = sco.name
+	drawing = d["drawing"]
+	w = weights.get((name, drawing), frappe._dict())
+	sn = sec_nos.get((name, d["duno_mark_no"]), {})
+	done = completed.get((name, drawing), frappe._dict())
+	ex = excess.get(name, {})
+	cons = consumables.get(name, {})
 	rate = rate_map.get(drawing, frappe._dict())
 
 	# Weight of the pieces actually finished, rather than the count on its own: a
@@ -236,23 +307,23 @@ def _base_row(s, d, pp, so_map, weights, sec_nos, completed, excess, consumables
 	completed_nos = flt(done.get("completed_qty_nos"))
 
 	return {
-		"sales_order": d.get("sales_order") or "",
+		"sales_order": d["sales_order"],
 		"customer": so.get("customer") or "",
 		"project": pp.get("project") or so.get("project") or "",
-		"production_plan": s.production_plan,
+		"production_plan": sco.custom_production_plan or "",
 		"job_type": pp.get("custom_type") or "",
-		"subcontracting_order": sco,
-		"supplier": s.supplier,
+		"subcontracting_order": name,
+		"supplier": sco.supplier,
 		"drawing": drawing,
-		"duno_mark_no": d.get("duno_mark_no") or "",
-		"customer_drawing_number": d.get("customer_drawing_number") or "",
-		"created_on": created_on.get(sco),
+		"duno_mark_no": d["duno_mark_no"],
+		"customer_drawing_number": d["customer_drawing_number"],
+		"created_on": created_on.get(name),
 		"customer_weight_kg": flt(w.get("customer_weight_kg")),
 		"planned_weight_kg": flt(w.get("total_weight_kg")),
 		"planned_sec_nos": flt(sn.get("planned"), 3),
 		"transferred_weight_kg": flt(w.get("transferred_weight_kg")),
 		"transferred_sec_nos": flt(sn.get("issued"), 3),
-		"consumed_rm_cost": flt(rm_cost.get((sco, drawing))),
+		"consumed_rm_cost": flt(rm_cost.get((name, drawing))),
 		"rate_schedule": rate.get("rate_schedule") or "",
 		"rate_per_kg": flt(rate.get("rs_rate_per_kg")),
 		"consumables_nos": flt(cons.get("nos"), 3),
@@ -494,22 +565,6 @@ def _rm_cost_by_drawing(sco_names):
 	):
 		key = (sco_by_entry[row.parent], row.custom_drawing)
 		out[key] = flt(out.get(key, 0)) + flt(row.amount)
-	return out
-
-
-def _filter_by_date(soes, filters):
-	from_date = getdate(filters["from_date"]) if filters.get("from_date") else None
-	to_date = getdate(filters["to_date"]) if filters.get("to_date") else None
-	out = []
-	for s in soes:
-		d = getdate(s.creation) if s.creation else None
-		if not d:
-			continue
-		if from_date and d < from_date:
-			continue
-		if to_date and d > to_date:
-			continue
-		out.append(s)
 	return out
 
 
