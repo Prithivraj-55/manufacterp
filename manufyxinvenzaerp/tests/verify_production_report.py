@@ -50,9 +50,9 @@ def run():
         "Job Work Order", "Supplier", "Drawing", "DUNO/Mark No", "Cust Drawing No",
         "Created On",
     ])
-    tail = labels[-15:]
+    tail = labels[-16:]
     check("weights, costs and completion last", tail, [
-        "Customer Weight (Kg)", "Planned Weight (Kg)", "Planned Sec Nos",
+        "Customer Weight (Kg)", "Planned Weight (Kg)", "Planned Sec Nos", "Waste %",
         "Transferred Weight (Kg)", "Transferred Sec Nos", "Consumed RM Cost",
         "Rate Schedule", "Rate / Kg", "Consumables (Nos)", "Consumable Cost",
         "Excess Weight (Kg)", "Returned Excess Weight (Kg)", "Difference (Kg)",
@@ -195,6 +195,63 @@ def run():
           sorted(n for n in submitted
                  if not frappe.db.exists("SCO Drawing Item",
                                          {"parent": n, "parenttype": "Subcontracting Order"})))
+
+    print()
+    print("=== Waste % closes the planned block ===")
+    # The column that would have caught the per-piece customer weight on sight: 1B1 read
+    # 104% while the single-piece drawing beside it read 1.6%, on the same cuts.
+    from manufyxinvenzaerp.production_management.report.production_report.production_report import (
+        _waste_pct,
+    )
+    check("it sits between the planned figures and the transferred ones",
+          (labels[labels.index("Waste %") - 1], labels[labels.index("Waste %") + 1]),
+          ("Planned Sec Nos", "Transferred Weight (Kg)"))
+    check("no customer weight leaves it blank, not zero", _waste_pct(0, 1814.089), None)
+    check("and it is planned over customer", _waste_pct(1780.16, 1814.089), 1.91)
+    check("negative when the plan holds less than the part weighs",
+          _waste_pct(100, 90) < 0, True)
+    for r in data:
+        if not flt(r["customer_weight_kg"]):
+            continue
+        check("%s: %s%%" % (r["duno_mark_no"], r["waste_pct"]),
+              r["waste_pct"],
+              _waste_pct(r["customer_weight_kg"], r["planned_weight_kg"]))
+        break
+
+    print()
+    print("=== raw-material cost follows the requirement, not the stamp ===")
+    # A transfer consolidates every requirement for one item and batch into a single
+    # line, and that line carries one drawing. On SC-ORD-2026-00003 the whole 285.484 Kg
+    # of ISA100 is stamped 1B6, while 1B1 and 1B2 take 81.056 Kg of it each -- costing by
+    # that stamp hands one drawing the entire bill and the other four nothing.
+    #
+    # Sites often run with no rates at all, which hides this behind a column of zeroes,
+    # so the transfer is priced here and rolled back.
+    transfers = frappe.get_all(
+        "Stock Entry Detail",
+        filters={"parent": ["in", frappe.get_all(
+            "Stock Entry", filters={"docstatus": 1, "custom_sco_ref": ["!=", ""]}, pluck="name") or [""]]},
+        fields=["name", "qty"])
+    if not transfers:
+        print("   No transfer against a Job Work Order on this site.")
+    else:
+        try:
+            for t in transfers:
+                frappe.db.set_value("Stock Entry Detail", t.name,
+                                    {"basic_rate": 50, "amount": flt(t.qty) * 50},
+                                    update_modified=False)
+            priced = execute({})[1]
+            # Every drawing should come out at the rate that was paid -- that is what
+            # "spread in proportion to what each took" means, checked as a rate rather
+            # than as an amount so it does not depend on this site's quantities.
+            rates = sorted({round(flt(r["consumed_rm_cost"]) / flt(r["transferred_weight_kg"]), 2)
+                            for r in priced if flt(r["transferred_weight_kg"])})
+            check("every drawing is costed at the rate paid", rates, [50.0])
+            check("and the parts add up to the whole transfer",
+                  round(sum(flt(r["consumed_rm_cost"]) for r in priced), 2),
+                  round(sum(flt(t.qty) for t in transfers) * 50, 2))
+        finally:
+            frappe.db.rollback()
 
     print()
     print("=== the excess trio reconciles ===")
