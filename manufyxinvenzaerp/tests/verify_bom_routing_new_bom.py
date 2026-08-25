@@ -1,6 +1,9 @@
-"""Verify Phase 1.4: a freshly created draft BOM referencing the Standard
-Manufacturing Routing pulls exactly the 6 trimmed operations. Draft is left
-in place (not submitted, not deleted) for manual inspection if desired.
+"""A freshly created draft BOM referencing the Standard Manufacturing Routing pulls
+exactly the operations that routing carries -- no more, and in its order.
+
+This is the check that matters when the routing changes: a BOM created after Material
+Issue was dropped must not carry it, while BOMs created before are left exactly as they
+were. Draft is left in place (not submitted, not deleted) for manual inspection.
 
 Run via: bench --site manufact execute manufyxinvenzaerp.tests.verify_bom_routing_new_bom.run
 """
@@ -8,7 +11,7 @@ Run via: bench --site manufact execute manufyxinvenzaerp.tests.verify_bom_routin
 import frappe
 from manufyxinvenzaerp.tests.create_full_test_entry import get_ctx, ensure_item, ensure_fg_item
 
-KEPT = ["Material Issue", "Fit-up", "Welding", "Final", "Blasting", "Painting"]
+KEPT = ["Fit-up", "Welding", "Final", "Blasting", "Painting"]
 
 
 def run():
@@ -36,5 +39,7 @@ def run():
     assert ops == KEPT, f"Expected {KEPT}, got {ops}"
 
     frappe.db.commit()
-    print("\nALL CHECKS DONE — new BOM correctly pulls only the 6 trimmed operations.")
+    assert "Material Issue" not in ops, "A new BOM must not pull the dropped Material Issue operation"
+
+    print("\nALL CHECKS DONE — new BOM correctly pulls only the trimmed operations.")
     print("Draft BOM left in place (not submitted):", bom.name)

@@ -103,15 +103,22 @@ def run():
 
     print()
     print("=== each operation writes into its own block, on the right row ===")
+    # Kg only where the operation is first on EVERY job that has it -- see
+    # _operation_columns. Anywhere else the column would carry two different meanings.
+    highest = {}
+    for s in soes:
+        if s.operation:
+            highest[s.operation] = max(highest.get(s.operation, 0), s.sequence_id or 0)
     ops = sorted({(s.sequence_id or 0, s.operation) for s in soes if s.operation})
     for seq, operation in ops:
         slug = frappe.scrub(operation)
+        unit = "Kg" if highest[operation] <= 1 else "Nos"
         check("%s has its own columns" % operation,
               all("%s %s" % (operation, suffix) in labels
                   for suffix in ("Status", "Inspection Rounds", "Last Inspection Status")),
               True)
-        check("  and a quantity in %s" % ("Kg" if seq <= 1 else "Nos"),
-              "%s (%s)" % (operation, "Kg" if seq <= 1 else "Nos") in labels, True)
+        check("  and a quantity in %s" % unit,
+              "%s (%s)" % (operation, unit) in labels, True)
         check("  and a gap of its own", "%s Gap (Days, approx.)" % operation in labels, True)
         # The status a row shows for an operation must be that operation's status on
         # that job -- the check that the pivot put the values where the labels say.
@@ -143,6 +150,39 @@ def run():
               flt([r for r in data if r["subcontracting_order"] == victim][0]["planned_weight_kg"], 3))
     finally:
         frappe.db.rollback()
+
+    print()
+    print("=== an operation that is first on one job and second on another reads in Nos ===")
+    # The routing dropped Material Issue on 2026-08-25, so jobs raised since start at
+    # Fit-up while older jobs have Fit-up at sequence 2. A column carries one unit for
+    # every row in it, so it cannot be Kg on half of them: it reads in Nos, and the Kg
+    # is still on Transferred Weight where it always was.
+    # It has to be an operation more than one job runs -- moving one that only ever
+    # appears once just moves it, and proves nothing about a mixed column.
+    jobs_per_op = {}
+    for s in soes:
+        if s.operation:
+            jobs_per_op.setdefault(s.operation, set()).add(s.subcontracting_order)
+    mixed = next(((s.subcontracting_order, s.operation) for s in soes
+                  if (s.sequence_id or 0) > 1 and len(jobs_per_op[s.operation]) > 1), None)
+    if not mixed:
+        print("   No operation on this site is shared by two jobs at sequence 2 or later.")
+    else:
+        sco_name, operation = mixed
+        was_kg = "%s (Kg)" % operation in labels
+        try:
+            frappe.db.set_value("Supplier Operation Entry",
+                                {"subcontracting_order": sco_name, "operation": operation},
+                                "sequence_id", 1, update_modified=False)
+            after_labels = _labels(execute({})[0])
+            check("%s at sequence 1 here and 2 elsewhere" % operation,
+                  ("%s (Kg)" % operation in after_labels,
+                   "%s (Nos)" % operation in after_labels),
+                  (False, True))
+        finally:
+            frappe.db.rollback()
+        check("and the unit is unchanged once that is rolled back",
+              "%s (Kg)" % operation in _labels(execute({})[0]), was_kg)
 
     print()
     print("=== a draft or cancelled Job Work Order is not a job yet ===")

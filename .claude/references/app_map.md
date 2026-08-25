@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-25 15:49:27_
+_Generated: 2026-08-25 16:12:43_
 
 ## Modules
 
@@ -971,14 +971,14 @@ Functions:
 
 ### production_management/production_utils.py
 Functions:
-  - 23:create_operations_workstations_routing:
-  - 31:_create_operations:
-  - 41:_create_workstations:
-  - 56:_create_routing:
-  - 89:get_routing_operations_for_bom:
-  - 118:_get_previous_operation_consumed:
-  - 163:_get_prev_soe_consumed_for_jc:
-  - 207:validate_final_operation_consumption:
+  - 37:create_operations_workstations_routing:
+  - 45:_create_operations:
+  - 55:_create_workstations:
+  - 70:_create_routing:
+  - 103:get_routing_operations_for_bom:
+  - 132:_get_previous_operation_consumed:
+  - 177:_get_prev_soe_consumed_for_jc:
+  - 221:validate_final_operation_consumption:
 
 ### production_management/stock_entry.py
 Functions:
@@ -1267,7 +1267,7 @@ Functions:
 
 ### tests/_probe_tmp.py
 Functions:
-  - 3:run:
+  - 2:run:
 
 ### tests/revert_wo_jc_cleanup.py
 Functions:
@@ -1388,11 +1388,11 @@ Functions:
 
 ### tests/verify_bom_routing_new_bom.py
 Functions:
-  - 14:run:
+  - 17:run:
 
 ### tests/verify_bom_routing_trim.py
 Functions:
-  - 15:run:
+  - 23:run:
 
 ### tests/verify_bulk_permissions.py
 Functions:
@@ -1638,9 +1638,9 @@ Functions:
   - 32:check:
   - 38:_labels:
   - 42:run:
-  - 198:_old_shape:
-  - 206:_excess_rows:
-  - 215:_summary:
+  - 238:_old_shape:
+  - 246:_excess_rows:
+  - 255:_summary:
 
 ### tests/verify_pr_sequential_allocation.py
 Functions:
@@ -1853,8 +1853,8 @@ Functions:
 - `production_management/stock_entry.py:1268` — `get_production_plans_for_sales_order`
 - `production_management/stock_entry.py:1293` — `@frappe.validate_and_sanitize_search_inputs`
 - `production_management/stock_entry.py:1327` — `get_job_work_order_for_production_plan`
-- `production_management/production_utils.py:89` — `get_routing_operations_for_bom`
-- `production_management/production_utils.py:114` — ``
+- `production_management/production_utils.py:103` — `get_routing_operations_for_bom`
+- `production_management/production_utils.py:128` — ``
 - `production_management/doctype/material_planning/material_planning.py:781` — `@frappe.validate_and_sanitize_search_inputs`
 - `production_management/doctype/material_planning/material_planning.py:807` — `get_bom_info`
 - `production_management/doctype/material_planning/material_planning.py:859` — `get_so_drawings_for_bom_picker`

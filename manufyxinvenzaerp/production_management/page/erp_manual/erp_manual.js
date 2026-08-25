@@ -427,11 +427,12 @@ const ERP_MANUAL_BOM_CHILDREN = [
 			"afterwards, not because anything asks you to plan it here.",
 		steps: [
 			"<b>With Operations</b> is ticked and <b>Routing</b> is set to <b>Standard Manufacturing Routing</b> on every BOM, without being asked for.",
-			"That routing carries six operations, in order: <b>Material Issue, Fit-up, Welding, Final, Blasting, Painting</b>.",
+			"That routing carries five operations, in order: <b>Fit-up, Welding, Final, Blasting, Painting</b>.",
 			"Each operation has a workstation of the same name, created alongside it.",
 			"The real sequence for a job is decided later, on the Production Plan's Process Planning table — which operations actually run, who performs each one, and which are skipped.",
 		],
 		notes: [
+			"<b>Material Issue is no longer one of them.</b> Issuing material is what the Material Issue Plan does, and carrying it as an operation as well made every job start on a step nobody worked. Jobs raised before this are untouched and still show it; only new BOMs and new jobs are built without it.",
 			"<b>Informational only.</b> The operations on a BOM do not drive anything. Production is driven by the Production Plan's Process Planning rows, which create one Operation Entry each. The BOM's copy is there so the standard route is visible on the document and can be looked back at.",
 			"<b>Operating cost is not used.</b> The times on the routing are placeholders and the BOM's Operating Cost stays at zero — labour is not costed here.",
 		],
@@ -1357,9 +1358,9 @@ const ERP_MANUAL_PRODUCTION_PLAN_CHILDREN = [
 		title: "Operation Table (Process Planning)",
 		kicker: "The sequence of operations, and who performs each one",
 		purpose:
-			"The ordered list of operations this job goes through — e.g. Material Issue, Fit-up, " +
-			"Welding, Final, Blasting, Painting. One Supplier Operation Entry gets created per " +
-			"row, in this exact order, once the Job work order is created.",
+			"The ordered list of operations this job goes through — e.g. Fit-up, Welding, Final, " +
+			"Blasting, Painting. One Supplier Operation Entry gets created per row, in this exact " +
+			"order, once the Job work order is created.",
 		fields: [
 			{ name: "Operation Name", note: "The step itself." },
 			{ name: "Work Type (Internal Jobcard / Subcontractor)", note: "Who performs THIS operation. Can vary row by row in the same plan — e.g. Welding done in-house, Blasting sent to a supplier — but every Subcontractor row must come before every Internal Jobcard row, no interleaving." },

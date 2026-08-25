@@ -186,10 +186,11 @@ def get_data(filters):
 		if not s.operation or s.subcontracting_order not in sco_names:
 			continue
 		seq = s.sequence_id or 0
-		if s.operation not in op_seq or seq < op_seq[s.operation]:
-			op_seq[s.operation] = seq
+		lo, hi = op_seq.get(s.operation, (seq, seq))
+		op_seq[s.operation] = (min(lo, seq), max(hi, seq))
 	operations = _operation_columns(op_seq)
 	slug_by_operation = {op["operation"]: op["slug"] for op in operations}
+	kg_operations = {op["operation"] for op in operations if op["unit"] == _("Kg")}
 
 	# One row per drawing per Job Work Order. Each operation writes into its own block
 	# of that row rather than adding a row of its own.
@@ -207,7 +208,7 @@ def get_data(filters):
 		slug = slug_by_operation.get(s.operation)
 		if not slug:
 			continue
-		is_first = op_seq.get(s.operation, 0) <= 1
+		is_first = s.operation in kg_operations
 		for (sco_name, drawing), row in rows_by_key.items():
 			if sco_name != s.subcontracting_order:
 				continue
@@ -339,18 +340,29 @@ def _base_row(sco, pp, d, so_map, weights, sec_nos, completed, excess, consumabl
 def _operation_columns(op_seq):
 	"""The operation blocks, in the order the operations run.
 
+	`op_seq` maps an operation to the (lowest, highest) sequence it is found at across
+	the jobs in view. Both ends matter, because a column carries one unit for every row
+	in it: the material issued to a job is reported in Kg against that job's FIRST
+	operation, and pieces completed in Nos against the rest.
+
+	An operation that is first on one job and second on another therefore cannot be a Kg
+	column -- half its rows would mean something else. That is not hypothetical: the
+	routing dropped Material Issue on 2026-08-25, so jobs raised since start at Fit-up
+	while older jobs have Fit-up at sequence 2. Such a column reads in Nos, and the Kg
+	is still on the Transferred Weight column where it always was.
+
 	Slugs are what the column fieldnames are built from, so two operations that scrub
 	to the same slug ("Fit-up" and "Fit Up", say) are separated rather than silently
 	writing into each other's columns."""
 	seen = set()
 	out = []
-	for operation, seq in sorted(op_seq.items(), key=lambda kv: (kv[1], kv[0])):
+	for operation, (lo, hi) in sorted(op_seq.items(), key=lambda kv: (kv[1][0], kv[0])):
 		slug = frappe.scrub(operation)
 		if slug in seen:
 			slug = "%s_%s" % (slug, len(out))
 		seen.add(slug)
-		out.append({"operation": operation, "slug": slug, "sequence_id": seq,
-					"unit": _("Kg") if seq <= 1 else _("Nos")})
+		out.append({"operation": operation, "slug": slug, "sequence_id": lo,
+					"unit": _("Kg") if hi <= 1 else _("Nos")})
 	return out
 
 
