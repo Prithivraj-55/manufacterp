@@ -21,6 +21,62 @@ def mark_as_final_revision(drawing_name):
 
 
 @frappe.whitelist()
+def create_revision(drawing_name):
+    """Cancel a submitted drawing and open its next revision as a draft.
+
+    Revising a drawing is cancel-then-amend, and doing it by hand is where it comes
+    apart. Frappe sees the Sales Order pointing at the drawing, walks on to everything
+    else that order points at, and offers to "Cancel All Documents" -- which on an order
+    with twenty-one drawings means cancelling twenty-one drawings to revise one. Anybody
+    who reads that dialog quickly has just lost the whole order.
+
+    So the cancel is done here with the link check turned off, which is safe for the one
+    reason that matters: the link the check is objecting to is the Sales Order DUNO row,
+    and this drawing's own on_cancel releases that row itself (_release_sales_order_row).
+    Nothing is left pointing at a cancelled drawing.
+
+    The draft that comes back carries amended_from, so before_insert gives it the next
+    rev_no and Working status. Its Sales Order row stays empty until it is submitted --
+    a draft should not stand in for a submitted drawing -- and submitting it re-attaches
+    the row (_link_to_sales_order_row takes over a row whose drawing is the one it was
+    amended from).
+
+    A BOM already built against the old revision is left alone. It belongs to that
+    revision, and the new one starts without one -- so Create BOM offers itself again
+    once the revision is marked Final."""
+    doc = frappe.get_doc("Drawing", drawing_name)
+    doc.check_permission("cancel")
+
+    if doc.docstatus == 2:
+        # Almost always because somebody pressed the button twice. Say where the
+        # revision went rather than just refusing -- the second press is a person
+        # looking for the draft the first press made.
+        existing = frappe.db.get_value(
+            "Drawing", {"amended_from": drawing_name, "docstatus": ["<", 2]}, "name"
+        )
+        if existing:
+            frappe.throw(
+                _("Drawing {0} has already been revised. Its revision is {1}.").format(
+                    drawing_name, frappe.utils.get_link_to_form("Drawing", existing)),
+                title=_("Already Revised"),
+            )
+        frappe.throw(
+            _("Drawing {0} is cancelled. Amend it to carry on.").format(drawing_name))
+    if doc.docstatus != 1:
+        frappe.throw(_("Only a submitted drawing can be revised. This one is still a draft."))
+
+    doc.flags.ignore_links = True
+    doc.cancel()
+
+    revision = frappe.copy_doc(doc)
+    revision.amended_from = doc.name
+    revision.docstatus = 0
+    revision.insert(ignore_permissions=True)
+
+    return revision.name
+
+
+@frappe.whitelist()
 def get_batches_for_drawing_item(doctype, txt, searchfield, start, page_len, filters):
     """Return batches with available stock qty for a given item_code."""
     item_code = (
@@ -395,12 +451,22 @@ def update_customer_provided_weight(drawing_name, new_weight):
 def _cascade_customer_weight(drawing_name, new_weight):
     """Push the updated customer-provided weight into every already-created downstream
     document that carries its own copy of it. Work Order is intentionally not included --
-    its customizations are being reverted to standard separately."""
+    its customizations are being reverted to standard separately.
+
+    The weight arrives here PER PIECE -- that is how the Drawing and the Sales Order
+    DUNO row both hold it -- and is scaled on the way out, because every downstream copy
+    sits beside a planned and a transferred weight for the whole row. Sending the
+    per-piece figure down made a two-piece drawing report 890 Kg of customer weight
+    against 1,814 Kg planned, which reads as 100% waste and is really 1.9%."""
+    row_weight = flt(new_weight) * (flt(frappe.db.get_value(
+        "Drawing", drawing_name, "no_of_qty_to_manufacture")) or 1)
+    row_weight = flt(row_weight, 3)
+
     pp_item_rows = frappe.get_all(
         "Production Plan Item", filters={"custom_drawing": drawing_name}, fields=["name"]
     )
     for row in pp_item_rows:
-        frappe.db.set_value("Production Plan Item", row.name, "custom_customer_weight_kg", new_weight)
+        frappe.db.set_value("Production Plan Item", row.name, "custom_customer_weight_kg", row_weight)
 
     drawing_item_rows = frappe.get_all(
         "SCO Drawing Item",
@@ -408,7 +474,7 @@ def _cascade_customer_weight(drawing_name, new_weight):
         fields=["name", "parent", "parenttype"],
     )
     for row in drawing_item_rows:
-        frappe.db.set_value("SCO Drawing Item", row.name, "customer_weight_kg", new_weight)
+        frappe.db.set_value("SCO Drawing Item", row.name, "customer_weight_kg", row_weight)
 
     touched = {(r.parenttype, r.parent) for r in drawing_item_rows}
     mip_names = []

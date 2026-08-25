@@ -4,8 +4,22 @@ from frappe.utils import flt
 
 FORMULA_GROUPS = {"Structurals", "Plates"}
 
+# The standard routing, in the order the shop runs it. Rebuilt on every migrate, so
+# this list is the single source of truth for what a new BOM pulls in and therefore
+# what operations a new job is raised with.
+#
+# Material Issue was removed at the client's request on 2026-08-25: issuing material is
+# what the Material Issue Plan does, and carrying it as an operation as well made every
+# job start on a step nobody worked. Kept here, commented, rather than deleted -- the
+# client asked for it back as a one-line change if they change their mind. Put the line
+# back and migrate; the routing renumbers itself.
+#
+#	"Material Issue",
+#
+# Jobs already raised are untouched: the Operation master still exists and their
+# existing Supplier Operation Entries keep referring to it. This only decides what NEW
+# BOMs and NEW jobs are built from.
 OPERATIONS = [
-	"Material Issue",
 	"Fit-up",
 	"Welding",
 	"Final",

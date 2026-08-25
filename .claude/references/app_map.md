@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-25 12:06:53_
+_Generated: 2026-08-25 23:15:43_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-08-25 12:06:53_
 
 ## Python files
 
-_Total: 251_
+_Total: 260_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -81,6 +81,7 @@ _Total: 251_
 - patches/v1/remove_sco_transfer_fields.py
 - patches/v1/remove_wo_transfer_fields.py
 - patches/v1/rename_excess_batch_mapped_statuses.py
+- patches/v1/scale_customer_weight_by_qty.py
 - permissions_bulk.py
 - production_management/doctype/cut_sheet_allocation/cut_sheet_allocation.py
 - production_management/doctype/cut_sheet_allocation/__init__.py
@@ -183,6 +184,7 @@ _Total: 251_
 - subcontracting_management/subcontracting.py
 - templates/__init__.py
 - templates/pages/__init__.py
+- tests/_chk_tmp.py
 - tests/create_full_test_entry.py
 - tests/create_test_data.py
 - tests/find_cascade_fixture.py
@@ -190,6 +192,8 @@ _Total: 251_
 - tests/_find_mip_excess.py
 - tests/__init__.py
 - tests/move_fixtures_to_custom_json.py
+- tests/_probe_tmp.py
+- tests/reset_transactions.py
 - tests/revert_wo_jc_cleanup.py
 - tests/test_alternate_item.py
 - tests/test_classification_logic.py
@@ -219,12 +223,14 @@ _Total: 251_
 - tests/verify_consumable_entry.py
 - tests/verify_consumption_log_hard_cap.py
 - tests/verify_create_operation_and_inspection_gate.py
+- tests/verify_customer_weight_scaled.py
 - tests/verify_cut_sheet_delete_guards.py
 - tests/verify_cut_sheet_doctype.py
 - tests/verify_cut_sheet_fields_consistent.py
 - tests/verify_cut_sheet_new_batch.py
 - tests/verify_cut_sheet_w2_derived.py
 - tests/verify_decision_log.py
+- tests/verify_drawing_create_revision.py
 - tests/verify_drawing_import_savepoint.py
 - tests/verify_drawing_weight_cascade2.py
 - tests/verify_drawing_weight_cascade.py
@@ -245,6 +251,7 @@ _Total: 251_
 - tests/verify_mp_inspection_gate.py
 - tests/verify_mp_multi_mr_guard_message.py
 - tests/verify_mp_view_all_filters.py
+- tests/verify_no_item_default_bom.py
 - tests/verify_no_zero_qty_exact_match.py
 - tests/verify_partial_transfer_reservation.py
 - tests/verify_per_row_unreserve.py
@@ -252,6 +259,7 @@ _Total: 251_
 - tests/verify_pr_allocation_single_table.py
 - tests/verify_pr_inspection.py
 - tests/verify_process_planning_fields.py
+- tests/verify_production_report.py
 - tests/verify_pr_sequential_allocation.py
 - tests/verify_purchase_size_warning.py
 - tests/verify_reassign_batch_exact_match2.py
@@ -265,6 +273,7 @@ _Total: 251_
 - tests/verify_so_calculated_weight.py
 - tests/verify_so_drawing_buttons.py
 - tests/verify_soe_consumption_weight_kg.py
+- tests/verify_soe_summary_available.py
 - tests/verify_so_raw_material_checks.py
 - tests/verify_status_mirror.py
 - tests/verify_testing_button_gated.py
@@ -866,33 +875,34 @@ Functions:
 
 ### drawing_management/bom_class_override.py
 Functions:
-  - 1060:get_bom_item_rate:
-  - 1095:get_valuation_rate:
-  - 1151:get_list_context:
-  - 1156:get_bom_items_as_dict:
-  - 1255:get_bom_items:
-  - 1262:validate_bom_no:
-  - 1288:get_children:
-  - 1329:add_additional_cost:
-  - 1346:add_non_stock_items_cost:
-  - 1379:add_operations_cost:
-  - 1467:get_bom_diff:
-  - 1523:item_query:
-  - 1574:make_variant_bom:
-  - 1612:get_op_cost_from_sub_assemblies:
-  - 1630:get_scrap_items_from_sub_assemblies:
+  - 1061:get_bom_item_rate:
+  - 1096:get_valuation_rate:
+  - 1152:get_list_context:
+  - 1157:get_bom_items_as_dict:
+  - 1256:get_bom_items:
+  - 1263:validate_bom_no:
+  - 1289:get_children:
+  - 1330:add_additional_cost:
+  - 1347:add_non_stock_items_cost:
+  - 1380:add_operations_cost:
+  - 1468:get_bom_diff:
+  - 1524:item_query:
+  - 1575:make_variant_bom:
+  - 1613:get_op_cost_from_sub_assemblies:
+  - 1631:get_scrap_items_from_sub_assemblies:
 
 ### drawing_management/drawing_utils.py
 Functions:
   - 10:mark_as_final_revision:
-  - 24:get_batches_for_drawing_item:
-  - 56:create_bom_from_drawing:
-  - 113:validate_bom_from_drawing:
-  - 168:create_production_plan_from_bom:
-  - 222:parse_drawing_items_csv:
-  - 334:get_so_dashboard_data:
-  - 343:update_customer_provided_weight:
-  - 395:_cascade_customer_weight:
+  - 24:create_revision:
+  - 80:get_batches_for_drawing_item:
+  - 112:create_bom_from_drawing:
+  - 169:validate_bom_from_drawing:
+  - 224:create_production_plan_from_bom:
+  - 278:parse_drawing_items_csv:
+  - 390:get_so_dashboard_data:
+  - 399:update_customer_provided_weight:
+  - 451:_cascade_customer_weight:
 
 ### drawing_management/sales_order.py
 Functions:
@@ -968,14 +978,14 @@ Functions:
 
 ### production_management/production_utils.py
 Functions:
-  - 23:create_operations_workstations_routing:
-  - 31:_create_operations:
-  - 41:_create_workstations:
-  - 56:_create_routing:
-  - 89:get_routing_operations_for_bom:
-  - 118:_get_previous_operation_consumed:
-  - 163:_get_prev_soe_consumed_for_jc:
-  - 207:validate_final_operation_consumption:
+  - 37:create_operations_workstations_routing:
+  - 45:_create_operations:
+  - 55:_create_workstations:
+  - 70:_create_routing:
+  - 103:get_routing_operations_for_bom:
+  - 132:_get_previous_operation_consumed:
+  - 177:_get_prev_soe_consumed_for_jc:
+  - 221:validate_final_operation_consumption:
 
 ### production_management/stock_entry.py
 Functions:
@@ -1098,41 +1108,42 @@ Functions:
   - 1424:create_default_warehouse_types:
   - 1438:after_install:
   - 1483:after_migrate:
-  - 1532:setup_storage_location:
-  - 1554:create_item_client_script:
-  - 1570:create_item_custom_fields:
-  - 1655:create_purchase_order_custom_fields:
-  - 1761:hide_purchase_order_weight_fields:
-  - 1775:create_purchase_order_client_script:
-  - 1791:create_purchase_receipt_custom_fields:
-  - 1970:create_batch_custom_fields:
-  - 2055:create_purchase_receipt_client_script:
-  - 2071:create_material_request_custom_fields:
-  - 2196:create_material_request_client_script:
-  - 2212:create_rfq_custom_fields:
-  - 2288:create_rfq_client_script:
-  - 2304:create_sq_custom_fields:
-  - 2383:create_sq_client_script:
-  - 2399:create_bom_custom_fields:
-  - 2506:create_so_custom_fields:
-  - 2597:create_so_client_script:
-  - 2613:create_bom_client_script:
-  - 2633:create_production_plan_custom_fields:
-  - 2875:create_production_plan_client_script:
-  - 3148:create_stock_entry_custom_fields:
-  - 3372:hide_duplicate_sco_field:
-  - 3399:create_stock_entry_client_script:
-  - 3436:create_doctype_label_translations:
-  - 3459:remove_sco_purchase_order_mandatory:
-  - 3470:hide_sco_job_worker_warehouse:
-  - 3499:make_sco_job_worker_conditional:
-  - 3534:create_sco_custom_fields:
-  - 4006:create_sco_client_script:
-  - 4022:create_sco_ops_client_script:
-  - 4038:create_soe_client_script:
-  - 4054:create_manufacturing_settings_custom_fields:
-  - 4093:create_material_planning_auto_purchase_fields:
-  - 4156:create_payment_request_custom_fields:
+  - 1533:clear_item_default_boms:
+  - 1559:setup_storage_location:
+  - 1581:create_item_client_script:
+  - 1597:create_item_custom_fields:
+  - 1682:create_purchase_order_custom_fields:
+  - 1788:hide_purchase_order_weight_fields:
+  - 1802:create_purchase_order_client_script:
+  - 1818:create_purchase_receipt_custom_fields:
+  - 1997:create_batch_custom_fields:
+  - 2082:create_purchase_receipt_client_script:
+  - 2098:create_material_request_custom_fields:
+  - 2223:create_material_request_client_script:
+  - 2239:create_rfq_custom_fields:
+  - 2315:create_rfq_client_script:
+  - 2331:create_sq_custom_fields:
+  - 2410:create_sq_client_script:
+  - 2426:create_bom_custom_fields:
+  - 2533:create_so_custom_fields:
+  - 2624:create_so_client_script:
+  - 2640:create_bom_client_script:
+  - 2660:create_production_plan_custom_fields:
+  - 2902:create_production_plan_client_script:
+  - 3175:create_stock_entry_custom_fields:
+  - 3401:hide_duplicate_sco_field:
+  - 3428:create_stock_entry_client_script:
+  - 3465:create_doctype_label_translations:
+  - 3488:remove_sco_purchase_order_mandatory:
+  - 3499:hide_sco_job_worker_warehouse:
+  - 3528:make_sco_job_worker_conditional:
+  - 3563:create_sco_custom_fields:
+  - 4047:create_sco_client_script:
+  - 4063:create_sco_ops_client_script:
+  - 4079:create_soe_client_script:
+  - 4095:create_manufacturing_settings_custom_fields:
+  - 4134:create_material_planning_auto_purchase_fields:
+  - 4197:create_payment_request_custom_fields:
 
 ### sq_management/supplier_quotation.py
 Functions:
@@ -1187,38 +1198,42 @@ Functions:
   - 214:delete_sco_and_mip_for_production_plan:
   - 297:create_supplier_operation_entries:
   - 319:get_soe_summary:
-  - 367:create_finished_goods_entry:
-  - 484:_soe_consumed_kg:
-  - 527:validate_supplier_operation_entry:
-  - 686:_sync_soe_inspection_items:
-  - 724:before_submit_supplier_operation_entry:
-  - 758:_propagate_available_to_next:
-  - 780:_propagate_drawing_nos_to_next:
-  - 820:_update_sco_drawing_item_completion:
-  - 844:on_update_supplier_operation_entry:
-  - 851:_push_sco_completion_to_wo:
-  - 891:on_submit_supplier_operation_entry:
-  - 919:before_delete_supplier_operation_entry:
-  - 941:on_cancel_subcontracting_order:
-  - 962:_build_soe_drawing_rows:
-  - 1009:_create_soes_for_sco:
-  - 1085:_get_mp_total_weight:
-  - 1113:_get_mp_actual_transferred_weight:
-  - 1159:_refresh_wo_drawing_transferred_weights:
-  - 1202:_get_sco_transfer_warehouses:
-  - 1214:_get_sco_supplier_warehouse:
-  - 1231:_get_wo_transfer_warehouses:
-  - 1245:_refresh_sco_drawing_transferred_weights:
-  - 1287:_get_mp_drawing_weight:
-  - 1304:_get_mp_drawing_weights_by_duno:
-  - 1330:_get_mp_mapped_weight_by_duno:
-  - 1412:_get_mp_excess_by_duno:
-  - 1435:_sec_qty_for_reserved:
-  - 1449:_get_mp_reserved_batches:
-  - 1559:_get_pp_planned_qty:
-  - 1575:_get_supplier_wh_consumption_items:
-  - 1656:_build_jc_drawing_rows:
-  - 1689:_populate_jcs_for_wo:
+  - 386:create_finished_goods_entry:
+  - 503:_soe_consumed_kg:
+  - 546:validate_supplier_operation_entry:
+  - 705:_sync_soe_inspection_items:
+  - 743:before_submit_supplier_operation_entry:
+  - 777:_propagate_available_to_next:
+  - 799:_propagate_drawing_nos_to_next:
+  - 839:_update_sco_drawing_item_completion:
+  - 863:on_update_supplier_operation_entry:
+  - 870:_push_sco_completion_to_wo:
+  - 910:on_submit_supplier_operation_entry:
+  - 938:before_delete_supplier_operation_entry:
+  - 960:on_cancel_subcontracting_order:
+  - 981:_build_soe_drawing_rows:
+  - 1028:_create_soes_for_sco:
+  - 1104:_get_mp_total_weight:
+  - 1132:_get_mp_actual_transferred_weight:
+  - 1178:_refresh_wo_drawing_transferred_weights:
+  - 1221:_get_sco_transfer_warehouses:
+  - 1233:_get_sco_supplier_warehouse:
+  - 1250:_get_wo_transfer_warehouses:
+  - 1264:_refresh_sco_drawing_transferred_weights:
+  - 1306:_get_mp_drawing_weight:
+  - 1323:_get_mp_drawing_weights_by_duno:
+  - 1349:_get_mp_mapped_weight_by_duno:
+  - 1431:_get_mp_excess_by_duno:
+  - 1454:_sec_qty_for_reserved:
+  - 1468:_get_mp_reserved_batches:
+  - 1578:_get_pp_planned_qty:
+  - 1594:_get_supplier_wh_consumption_items:
+  - 1675:_build_jc_drawing_rows:
+  - 1708:_populate_jcs_for_wo:
+
+### tests/_chk_tmp.py
+Functions:
+  - 2:run:
 
 ### tests/create_full_test_entry.py
 Functions:
@@ -1257,6 +1272,25 @@ Functions:
 Functions:
   - 64:_all_target_doctypes:
   - 70:run:
+
+### tests/_probe_tmp.py
+Functions:
+  - 5:run:
+
+### tests/reset_transactions.py
+Functions:
+  - 68:run:
+  - 116:_things_to_keep:
+  - 145:_delete_all:
+  - 170:_sql_delete:
+  - 179:_orphans:
+  - 195:_report_orphans:
+  - 200:_delete_orphans:
+  - 209:_batch_quantities:
+  - 226:_delete_empty_batches:
+  - 236:_rebuild_bins:
+  - 258:_test_companies:
+  - 263:_delete_test_companies:
 
 ### tests/revert_wo_jc_cleanup.py
 Functions:
@@ -1377,11 +1411,11 @@ Functions:
 
 ### tests/verify_bom_routing_new_bom.py
 Functions:
-  - 14:run:
+  - 17:run:
 
 ### tests/verify_bom_routing_trim.py
 Functions:
-  - 15:run:
+  - 23:run:
 
 ### tests/verify_bulk_permissions.py
 Functions:
@@ -1422,9 +1456,10 @@ Functions:
 
 ### tests/verify_consumable_entry.py
 Functions:
-  - 41:check:
-  - 47:_client_script:
-  - 53:run:
+  - 42:check:
+  - 48:_refusal:
+  - 61:_client_script:
+  - 67:run:
 
 ### tests/verify_consumption_log_hard_cap.py
 Functions:
@@ -1437,6 +1472,11 @@ Functions:
 ### tests/verify_create_operation_and_inspection_gate.py
 Functions:
   - 20:run:
+
+### tests/verify_customer_weight_scaled.py
+Functions:
+  - 31:check:
+  - 37:run:
 
 ### tests/verify_cut_sheet_delete_guards.py
 Functions:
@@ -1480,6 +1520,13 @@ Functions:
   - 33:check:
   - 39:_source:
   - 43:run:
+
+### tests/verify_drawing_create_revision.py
+Functions:
+  - 31:check:
+  - 37:run:
+  - 112:_check_the_wiring:
+  - 138:_summary:
 
 ### tests/verify_drawing_import_savepoint.py
 Functions:
@@ -1584,6 +1631,12 @@ Functions:
   - 42:_js:
   - 51:run:
 
+### tests/verify_no_item_default_bom.py
+Functions:
+  - 30:check:
+  - 36:run:
+  - 105:_item_with_a_bom:
+
 ### tests/verify_no_zero_qty_exact_match.py
 Functions:
   - 26:check:
@@ -1620,6 +1673,15 @@ Functions:
 ### tests/verify_process_planning_fields.py
 Functions:
   - 11:run:
+
+### tests/verify_production_report.py
+Functions:
+  - 32:check:
+  - 38:_labels:
+  - 42:run:
+  - 295:_old_shape:
+  - 303:_excess_rows:
+  - 312:_summary:
 
 ### tests/verify_pr_sequential_allocation.py
 Functions:
@@ -1690,6 +1752,13 @@ Functions:
 Functions:
   - 13:run:
 
+### tests/verify_soe_summary_available.py
+Functions:
+  - 33:check:
+  - 39:run:
+  - 97:_check_the_wiring:
+  - 115:_summary:
+
 ### tests/verify_so_raw_material_checks.py
 Functions:
   - 29:check:
@@ -1757,22 +1826,24 @@ Functions:
 - `tests/test_whitelist_coverage.py:4` — ``reserve_batches` was swallowed when a helper was inserted directly above it, and`
 - `tests/test_whitelist_coverage.py:40` — `    found = set`
 - `tests/test_whitelist_coverage.py:111` — `            "so pressing the button that calls them answers 'Method Not Allowed':\n    "`
+- `tests/verify_drawing_create_revision.py:126` — `    # The link check is skipped for one reason only: the link it objects to is the`
 - `purchase_order_management/purchase_order.py:10` — `get_po_item_uom`
 - `sq_management/supplier_quotation.py:19` — `get_sq_item_uom`
 - `drawing_management/drawing_utils.py:10` — `mark_as_final_revision`
-- `drawing_management/drawing_utils.py:24` — `get_batches_for_drawing_item`
-- `drawing_management/drawing_utils.py:56` — `create_bom_from_drawing`
-- `drawing_management/drawing_utils.py:168` — `create_production_plan_from_bom`
-- `drawing_management/drawing_utils.py:222` — `parse_drawing_items_csv`
-- `drawing_management/drawing_utils.py:343` — `update_customer_provided_weight`
+- `drawing_management/drawing_utils.py:24` — `create_revision`
+- `drawing_management/drawing_utils.py:80` — `get_batches_for_drawing_item`
+- `drawing_management/drawing_utils.py:112` — `create_bom_from_drawing`
+- `drawing_management/drawing_utils.py:224` — `create_production_plan_from_bom`
+- `drawing_management/drawing_utils.py:278` — `parse_drawing_items_csv`
+- `drawing_management/drawing_utils.py:399` — `update_customer_provided_weight`
 - `drawing_management/bom_class_override.py:353` — `get_routing`
 - `drawing_management/bom_class_override.py:424` — `get_bom_material_detail`
 - `drawing_management/bom_class_override.py:509` — `update_cost`
-- `drawing_management/bom_class_override.py:1255` — `get_bom_items`
-- `drawing_management/bom_class_override.py:1288` — `get_children`
-- `drawing_management/bom_class_override.py:1467` — `get_bom_diff`
-- `drawing_management/bom_class_override.py:1522` — `@frappe.validate_and_sanitize_search_inputs`
-- `drawing_management/bom_class_override.py:1574` — `make_variant_bom`
+- `drawing_management/bom_class_override.py:1256` — `get_bom_items`
+- `drawing_management/bom_class_override.py:1289` — `get_children`
+- `drawing_management/bom_class_override.py:1468` — `get_bom_diff`
+- `drawing_management/bom_class_override.py:1523` — `@frappe.validate_and_sanitize_search_inputs`
+- `drawing_management/bom_class_override.py:1575` — `make_variant_bom`
 - `drawing_management/so_drawing_import.py:127` — `parse_bom_excel`
 - `drawing_management/so_drawing_import.py:371` — `create_drawings_from_import`
 - `drawing_management/so_drawing_import.py:552` — `process_drawings`
@@ -1805,12 +1876,12 @@ Functions:
 - `subcontracting_management/subcontracting.py:294` — ``
 - `subcontracting_management/subcontracting.py:297` — `create_supplier_operation_entries`
 - `subcontracting_management/subcontracting.py:319` — `get_soe_summary`
-- `subcontracting_management/subcontracting.py:367` — `create_finished_goods_entry`
-- `subcontracting_management/subcontracting.py:1640` — ``
-- `subcontracting_management/subcontracting.py:1643` — ``
-- `subcontracting_management/subcontracting.py:1646` — ``
-- `subcontracting_management/subcontracting.py:1649` — ``
-- `subcontracting_management/subcontracting.py:1652` — ``
+- `subcontracting_management/subcontracting.py:386` — `create_finished_goods_entry`
+- `subcontracting_management/subcontracting.py:1659` — ``
+- `subcontracting_management/subcontracting.py:1662` — ``
+- `subcontracting_management/subcontracting.py:1665` — ``
+- `subcontracting_management/subcontracting.py:1668` — ``
+- `subcontracting_management/subcontracting.py:1671` — ``
 - `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:50` — `create_from_subcontracting_order`
 - `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:69` — ``
 - `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:72` — `populate_from_production_plan`
@@ -1832,8 +1903,8 @@ Functions:
 - `production_management/stock_entry.py:1268` — `get_production_plans_for_sales_order`
 - `production_management/stock_entry.py:1293` — `@frappe.validate_and_sanitize_search_inputs`
 - `production_management/stock_entry.py:1327` — `get_job_work_order_for_production_plan`
-- `production_management/production_utils.py:89` — `get_routing_operations_for_bom`
-- `production_management/production_utils.py:114` — ``
+- `production_management/production_utils.py:103` — `get_routing_operations_for_bom`
+- `production_management/production_utils.py:128` — ``
 - `production_management/doctype/material_planning/material_planning.py:781` — `@frappe.validate_and_sanitize_search_inputs`
 - `production_management/doctype/material_planning/material_planning.py:807` — `get_bom_info`
 - `production_management/doctype/material_planning/material_planning.py:859` — `get_so_drawings_for_bom_picker`

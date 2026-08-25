@@ -265,12 +265,14 @@ const ERP_MANUAL_SALES_ORDER_CHILDREN = [
 		notes: [
 			"<b>The progress dialog is live.</b> It shows how many are done, how many are pending, elapsed time, an estimate of what is left and the current rate — refreshed every second. The estimate is measured from the run itself, so it is rough at first and tightens as it goes.",
 			"<b>BOM creation is the slow step</b>, at roughly a tenth of a second per drawing — a few seconds for a small order, around a minute for 500 drawings. That is ERPNext's own BOM validation and costing, not something the upload is doing badly. Leave the dialog open; it is working.",
+			"<b>To revise one drawing, use its own Create Revision button</b> — not the standard Cancel button on the toolbar. Cancelling by hand makes Frappe follow the link into the Sales Order and out again to every other drawing on it, and offer to <i>Cancel All Documents</i>: on an order with twenty-two drawings that is twenty-two cancelled to revise one, behind a dialog that looks routine. Create Revision cancels the one drawing, opens revision n+1 as a draft and leaves every sibling submitted. The Sales Order row is released while the revision is a draft and re-attaches when you submit it, so the order never shows a drawing nobody has signed off.",
 			"<b>Drawings are created in batches</b> and can be run again safely: a drawing that already exists is skipped, not duplicated. If a batch fails, fix the cause and re-run — the ones already created stay.",
 		],
 		buttons: [
 			{ name: "Create Drawing", note: "Creates the Drawing documents. Skips any drawing number that already has one." },
 			{ name: "Submit Drawing", note: "Submits the created drawings." },
 			{ name: "Mark as Final Revision", note: "Requires the Sales Order to be submitted first." },
+			{ name: "Create Revision", note: "On the Drawing itself, on any submitted drawing. It cancels the drawing and opens its next revision as a draft in one step, and takes you straight to it. Use this rather than the standard <b>Cancel</b> button — see the note below." },
 			{ name: "(cancelling a drawing)", note: "Cancel a Drawing and its DUNO row lets go of it, so the row goes back to being a DUNO with no drawing against it — which is what it now describes. <b>Amend</b> that drawing and submit the amendment and the row picks up the new revision by itself. Nothing has to be re-pointed by hand, and the order can be saved and submitted again." },
 			{ name: "Create and Submit BOM", note: "Creates and submits one BOM per drawing. The longest step on a large order. It appears only once <b>every</b> drawing waiting to be marked final has been marked — the two are consecutive steps, not a choice, and making BOMs for whichever drawings happened to be ready leaves the rest behind while the toolbar reads as though the job is done." },
 			{ name: "View Drawing", note: "Takes the place of Create and Submit BOM once every Final Revision drawing has a submitted BOM. It confirms that the drawing stage is finished — <i>“Drawings and BOMs are created — ready to proceed to Material Planning”</i> — and opens this order's drawings. There is nothing left to create at that point, so the group stops offering it." },
@@ -427,11 +429,13 @@ const ERP_MANUAL_BOM_CHILDREN = [
 			"afterwards, not because anything asks you to plan it here.",
 		steps: [
 			"<b>With Operations</b> is ticked and <b>Routing</b> is set to <b>Standard Manufacturing Routing</b> on every BOM, without being asked for.",
-			"That routing carries six operations, in order: <b>Material Issue, Fit-up, Welding, Final, Blasting, Painting</b>.",
+			"That routing carries five operations, in order: <b>Fit-up, Welding, Final, Blasting, Painting</b>.",
 			"Each operation has a workstation of the same name, created alongside it.",
 			"The real sequence for a job is decided later, on the Production Plan's Process Planning table — which operations actually run, who performs each one, and which are skipped.",
 		],
 		notes: [
+			"<b>Material Issue is no longer one of them.</b> Issuing material is what the Material Issue Plan does, and carrying it as an operation as well made every job start on a step nobody worked. Jobs raised before this are untouched and still show it; only new BOMs and new jobs are built without it.",
+			"<b>No item has a default BOM.</b> Standard ERPNext nominates one BOM per item and stamps it on the Item master, so every Sales Order line for that item arrives carrying it. Here an item is a shape of steel and one finished-goods item has hundreds of BOMs — one per drawing — so nominating one is meaningless, and a Sales Order will not even open once the nominated BOM is gone. The field is kept empty deliberately; you do not need to set it and should not.",
 			"<b>Informational only.</b> The operations on a BOM do not drive anything. Production is driven by the Production Plan's Process Planning rows, which create one Operation Entry each. The BOM's copy is there so the standard route is visible on the document and can be looked back at.",
 			"<b>Operating cost is not used.</b> The times on the routing are placeholders and the BOM's Operating Cost stays at zero — labour is not costed here.",
 		],
@@ -1357,9 +1361,9 @@ const ERP_MANUAL_PRODUCTION_PLAN_CHILDREN = [
 		title: "Operation Table (Process Planning)",
 		kicker: "The sequence of operations, and who performs each one",
 		purpose:
-			"The ordered list of operations this job goes through — e.g. Material Issue, Fit-up, " +
-			"Welding, Final, Blasting, Painting. One Supplier Operation Entry gets created per " +
-			"row, in this exact order, once the Job work order is created.",
+			"The ordered list of operations this job goes through — e.g. Fit-up, Welding, Final, " +
+			"Blasting, Painting. One Supplier Operation Entry gets created per row, in this exact " +
+			"order, once the Job work order is created.",
 		fields: [
 			{ name: "Operation Name", note: "The step itself." },
 			{ name: "Work Type (Internal Jobcard / Subcontractor)", note: "Who performs THIS operation. Can vary row by row in the same plan — e.g. Welding done in-house, Blasting sent to a supplier — but every Subcontractor row must come before every Internal Jobcard row, no interleaving." },
@@ -1412,7 +1416,7 @@ const ERP_MANUAL_SOE_CHILDREN = [
 		fields: [
 			{ name: "Consumption Log", note: "Log how many Nos (pieces) of each drawing were completed, with a Date. Weight (Kg) is auto-calculated from the drawing's own per-piece weight." },
 			{ name: "Drawing Details", note: "Per-drawing Qty to Manufacture, Available to Consume (Nos), Completed Qty (Nos), Customer Weight (Kg) and Planned Weight (Kg)." },
-			{ name: "Available to Consume (Nos)", note: "The first operation gets this from what's actually been transferred; every later one gets it from the PREVIOUS operation's own Completed Qty, once that operation is saved (while still draft) or submitted." },
+			{ name: "Available to Consume (Nos)", note: "The first operation gets this from what's actually been transferred; every later one gets it from the PREVIOUS operation's own Completed Qty, once that operation is saved (while still draft) or submitted. On the Job Work Order's <b>Operations</b> tab this reads as what is <i>still left</i> to consume, with what arrived shown beside it — <i>0.000 of 8.000</i> — so a finished operation stops offering its full quantity. A red figure means the operation completed more pieces than it was handed." },
 		],
 		steps: [
 			"Logging Nos against a drawing in Consumption Log auto-advances Status from Open to In Progress, and — when Inspection Mandatory is off — immediately updates that drawing's Completed Qty.",
@@ -1873,19 +1877,32 @@ const ERP_MANUAL_REPORTS_CHILDREN = [
 	{
 		id: "rpt-production",
 		title: "Production Report",
-		kicker: "Every operation, every job, one row each",
+		kicker: "One row per drawing, every operation across the columns",
 		purpose:
-			"The operation-level view across all live jobs. One row per drawing per operation, so " +
-			"the question “where is this job actually up to” is answered without opening a single " +
-			"Supplier Operation Entry.",
+			"The whole life of a drawing on one line. Read left to right and you walk the job " +
+			"forward in the order it actually runs — what was issued, where each operation " +
+			"stands, how many inspection rounds it took, how long it waited — and finish on " +
+			"the weights, the costs and what has been completed.",
 		fields: [
-			{ name: "Filters", note: "Production Plan (Team), Job Type, Subcontracting Order, Supplier, Sales Order, Operation, Status, and a From/To date range." },
-			{ name: "Traceability columns", note: "Production Plan, Project, Job Type, Subcontracting Order, Supplier, Sales Order, Customer, Drawing, DUNO/Mark No, Cust Drawing No." },
-			{ name: "Operation columns", note: "Operation, Seq, Status, Inspection Mandatory, Inspection Status, Inspection Count, and <b>Operation Gap (Days, approx.)</b> — roughly how long this operation has been sitting between the one before it and now." },
-			{ name: "Weight and quantity columns", note: "Customer Weight (Kg), Planned Weight (Kg), Planned Sec Nos, Transferred Weight (Kg), Transferred Sec Nos, Excess Weight (Kg), Consumed (Kg), Completed (Nos) — the planned-versus-actual comparison, in both weight and pieces." },
+			{ name: "What appears", note: "Every <b>submitted Job Work Order</b>, one row per drawing on it — from the moment the order is submitted, before a gram of steel has been issued. A draft or cancelled order is not a job yet and does not appear." },
+			{ name: "Filters", note: "Production Plan (Team), Job Type, Job Work Order, Supplier, Sales Order, Operation, Status, and a From/To date range on the Job Work Order's own date. <b>Operation</b> and <b>Status</b> are questions about operations, so they narrow the jobs as well — asking for an Open Fit-up lists the jobs that have one." },
+			{ name: "Traceability columns", note: "Sales Order, Customer, Project, Production Plan (Team), Job Type, Job Work Order, Supplier, Drawing, DUNO/Mark No, Cust Drawing No, Created On — sales-order-wise, the way the report is read." },
+			{ name: "Operation blocks", note: "One block per operation the job is routed through, in sequence order: <b>quantity</b>, <b>Status</b>, <b>Inspection Rounds</b>, <b>Last Inspection Status</b> and <b>Gap (Days, approx.)</b>. The first operation is measured in Kg — it is where raw material is issued — and every later one in Nos." },
+			{ name: "Weight and quantity columns", note: "Customer Weight (Kg), Planned Weight (Kg), Planned Sec Nos, <b>Waste %</b>, Transferred Weight (Kg), Transferred Sec Nos — the planned-versus-actual comparison, in both weight and pieces. All the weights are for the whole drawing row." },
+			{ name: "Waste %", note: "Planned Weight measured against Customer Weight — how much more steel the job buys than the finished part weighs. Cutting a member out of a length leaves an off-cut, so a few percent is normal; a line well outside its neighbours is a cutting plan worth looking at. Blank when there is no customer weight to measure against, and <b>red when negative</b>, which means the plan holds less material than the part weighs and cannot be cut." },
+			{ name: "Cost columns", note: "<b>Consumed RM Cost</b> (what the material issued to this drawing was worth, from the Stock Entries that issued it — priced per Kg and spread over the Material Issue Plan's rows in proportion to what each drawing actually took, since a transfer consolidates several drawings' requirements into one line), <b>Rate Schedule</b> and <b>Rate / Kg</b> off the drawing itself, and <b>Consumables (Nos)</b> / <b>Consumable Cost</b> from the job’s Material Consumption for Manufacture entries." },
+			{ name: "Excess columns", note: "<b>Excess Weight (Kg)</b> booked by the Material Issue Plan transfer popup, <b>Returned Excess Weight (Kg)</b> already brought back in, and <b>Difference (Kg)</b> — what is still out there." },
+			{ name: "Completion columns", note: "<b>Completed Drawing Weight (Kg)</b> — the pieces finished, valued at the drawing’s own weight per piece — and <b>Completed Drawing (Nos)</b>." },
 		],
 		notes: [
-			"Operation Gap is the column to sort by when looking for stalled work: a large gap on an operation that is still Open is a job nobody has picked up.",
+			"<b>A new job is not an empty report.</b> The rows come from the Job Work Order, not from its operation entries, so a job submitted this morning already shows its drawings, its planned weights and an empty row of operations waiting to be worked. It used to be absent altogether until the first operation entry was raised.",
+			"<b>It used to be one row per drawing per operation.</b> A four-operation job with six drawings filled twenty-four rows with the same six drawings repeated, and “where is 1B1 up to” meant reading four of them at once. Each drawing now has one row and the operations sit across it.",
+			"<b>The operation columns are not a fixed list.</b> They are whatever the jobs in view are routed through — a job through Welding and Blasting shows those, a job through Fit-up and Painting shows those, and a view holding both shows all four.",
+			"Operation Gap is still the column to sort by when looking for stalled work: a large gap on an operation that is still Open is a job nobody has picked up.",
+			"<b>Created On is the Job Work Order’s own date</b>, not the date each operation entry happened to be raised — so one job reads as one date instead of four.",
+			"<b>Waste % is the quickest read on the whole report.</b> Every drawing on a job is cut the same way, so the figures should sit close together. When they do not — one drawing at 104% beside another at 1.6% — it is rarely the cutting: it is two columns being compared on different bases, which is exactly the fault it was added after.",
+			"<b>The consumable and excess figures are job-level</b> and repeat on every drawing row of the job. An off-cut belongs to a batch and a welding rod to a job; neither can honestly be split between drawings, so they are shown whole rather than apportioned. Read them once per job.",
+			"<b>Difference</b> leaves out material marked Billed to Consume. That is scrapped by decision rather than awaiting collection, which is the same line the Excess Material Return Report draws for its chase-list.",
 		],
 	},
 	{
@@ -2176,8 +2193,8 @@ const ERP_MANUAL_REFERENCE_CHILDREN = [
 			"one question that decides whose cost they land on: which job.",
 		fields: [
 			{ name: "Consumable Entry", note: "Sits next to Inspection Required. Ticking it marks every item row as a consumable and reveals the two questions below." },
-			{ name: "Sales Order", note: "Which order the consumables are being issued against. The only one of the three chosen freely." },
-			{ name: "Production Plan", note: "Only the plans raised against that order are offered. Choosing one fills in its Job Work Order." },
+			{ name: "Sales Order", note: "Which order the consumables are being issued against. The only one of the three chosen freely. Required once the box is ticked." },
+			{ name: "Production Plan", note: "Only the plans raised against that order are offered. Choosing one fills in its Job Work Order. Required once the order is chosen." },
 			{ name: "Job work order", note: "Filled in for you from the plan. Where a plan has more than one, the earliest is used and you are told, so you can change it." },
 		],
 		steps: [
@@ -2187,6 +2204,7 @@ const ERP_MANUAL_REFERENCE_CHILDREN = [
 			"The <b>Job work order</b> fills itself in. Add the consumable items and submit as normal.",
 		],
 		notes: [
+			"<b>Both questions must be answered.</b> Sales Order and Production Plan are mandatory while Consumable Entry is ticked — the two of them are what the Job Work Order is looked up from, and the Job Work Order is what every weight rollup downstream keys on. A ticked entry with neither filled in issues stock against nothing, so it is refused on save, naming what is missing.",
 			"<b>Each step clears what is below it.</b> Change the Sales Order after picking a plan and the plan and Job Work Order are cleared, because a plan belonging to a different order is a mismatch nobody would see — and this document decides whose cost the consumables land on. Saving one anyway is refused, naming both.",
 			"<b>Material Consumption for Manufacture ticks it for you.</b> That type <i>is</i> a consumable entry, so the box is set and locked rather than left as a question with one right answer — and Work Order is hidden, because this flow reaches its job through Sales Order and Production Plan instead.",
 			"<b>Rows added afterwards arrive ticked</b>, while Consumable Entry is on.",

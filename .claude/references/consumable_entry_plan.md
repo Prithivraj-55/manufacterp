@@ -48,11 +48,13 @@ documents — worth doing one day, not in the middle of a feature.
 
 **Fields on Stock Entry** (custom fields, exported to `custom/stock_entry.json`):
 
-| Field | Type | Shown when |
-|---|---|---|
-| `custom_consumable_entry` | Check | always, right after Inspection Required |
-| `custom_consumable_sales_order` | Link → Sales Order | Consumable Entry is ticked |
-| `custom_consumable_production_plan` | Link → Production Plan | a Sales Order is chosen |
+| Field | Type | Shown when | Required when |
+|---|---|---|---|
+| `custom_consumable_entry` | Check | always, right after Inspection Required | never |
+| `custom_consumable_sales_order` | Link → Sales Order | Consumable Entry is ticked | same |
+| `custom_consumable_production_plan` | Link → Production Plan | a Sales Order is chosen | same |
+
+Each field is required exactly when it is visible, so nothing hidden is ever demanded.
 
 **Property Setter**: `custom_sco_ref` hidden.
 
@@ -70,9 +72,16 @@ documents — worth doing one day, not in the middle of a feature.
 - Rows added afterwards arrive ticked, while the box is on.
 
 **Server side**: one whitelisted method, `get_production_plans_for_sales_order`, and a
-`validate` guard so the three fields cannot hold a combination that does not exist —
-a Production Plan that is not against the chosen Sales Order is refused rather than
-silently accepted.
+`validate` guard, `validate_consumable_entry`, refusing two things:
+
+- **Nothing named.** A ticked entry missing the Sales Order or the Production Plan is
+  refused, naming what is missing. The form marks both mandatory through
+  `mandatory_depends_on`, but Frappe evaluates that in the browser only
+  (`frappe/public/js/frappe/form/save.js`; no Python reads the property), so an import
+  or an API call would otherwise walk past it. The pair is what the Job Work Order is
+  looked up from, and the Job Work Order is what every weight rollup keys on.
+- **A combination that does not exist.** A Production Plan that is not against the
+  chosen Sales Order is refused rather than silently accepted.
 
 ## What is deliberately not touched
 

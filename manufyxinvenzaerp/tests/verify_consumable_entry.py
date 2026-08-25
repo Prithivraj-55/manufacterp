@@ -31,6 +31,7 @@ import frappe
 
 from manufyxinvenzaerp.production_management.stock_entry import (
     get_job_work_order_for_production_plan,
+    validate_consumable_entry,
     get_production_plans_for_sales_order,
     production_plan_query,
 )
@@ -42,6 +43,19 @@ def check(label, got, want):
     ok = got == want
     checks.append(ok)
     print("  %-4s %-54s got=%r want=%r" % ("OK" if ok else "FAIL", label, got, want))
+
+
+def _refusal(fields):
+    """Run the server guard over a made-up header and report what it objected to.
+
+    Returns the names it said were missing, or None if it let the entry through."""
+    try:
+        validate_consumable_entry(frappe._dict(fields))
+    except frappe.ValidationError as e:
+        text = frappe.utils.strip_html(str(e))
+        found = [n for n in ("Sales Order", "Production Plan") if n in text]
+        return " and ".join(found) if found else text
+    return None
 
 
 def _client_script():
@@ -115,6 +129,34 @@ def run():
     check("and runs on every save", "validate_consumable_entry(doc)" in src, True)
     check("checking the plan really is against that order",
           '"Production Plan Item", {"parent": plan, "sales_order": sales_order}' in src, True)
+
+    print()
+    print("=== a ticked box has to name the job ===")
+    # Frappe evaluates mandatory_depends_on in the browser only, so the form marks
+    # both fields required and the server refuses one that arrives empty anyway --
+    # by import, by API, or by a field cleared after the fact.
+    check("the order is required once the box is ticked",
+          meta.get_field("custom_consumable_sales_order").mandatory_depends_on,
+          "eval:doc.custom_consumable_entry")
+    check("and the plan once the order is chosen",
+          meta.get_field("custom_consumable_production_plan").mandatory_depends_on,
+          "eval:doc.custom_consumable_entry && doc.custom_consumable_sales_order")
+    check("neither is required while the box is clear",
+          bool(meta.get_field("custom_consumable_sales_order").reqd
+               or meta.get_field("custom_consumable_production_plan").reqd), False)
+
+    check("an unticked entry needs nothing", _refusal({}), None)
+    check("both missing is refused",
+          _refusal({"custom_consumable_entry": 1}),
+          "Sales Order and Production Plan")
+    check("the order alone is refused",
+          _refusal({"custom_consumable_entry": 1, "custom_consumable_sales_order": "SO"}),
+          "Production Plan")
+    if pair:
+        check("and a complete, matching one passes",
+              _refusal({"custom_consumable_entry": 1,
+                        "custom_consumable_sales_order": pair[0].sales_order,
+                        "custom_consumable_production_plan": pair[0].plan}), None)
 
     print()
     print("=== the item rows ===")

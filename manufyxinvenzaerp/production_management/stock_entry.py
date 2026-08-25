@@ -1343,20 +1343,39 @@ def get_job_work_order_for_production_plan(production_plan):
 
 
 def validate_consumable_entry(doc):
-    """Refuse a combination that does not exist.
+    """A consumable entry has to say which job it is for, and mean it.
 
-    The form fills these in order and clears what sits below when something above
-    changes, so a mismatched pair should not arise from normal use. It can still
-    arrive from an import, an API call, or a field edited after the fact -- and a
-    Stock Entry naming a plan that belongs to a different order would put its
-    consumables on the wrong job's cost."""
+    Two refusals, both about the same thing -- consumables landing on the wrong
+    job's cost, or on no job at all.
+
+    Missing: the order and the plan are what the job work order is looked up from,
+    and the job work order is what every weight rollup downstream keys on. An entry
+    ticked as consumable with neither filled in issues stock against nothing. The
+    form marks both mandatory as soon as the box is ticked, but Frappe enforces
+    mandatory_depends_on in the browser only, so an import or an API call would
+    otherwise walk straight past it.
+
+    Mismatched: the form fills these in order and clears what sits below when
+    something above changes, so a plan belonging to a different order should not
+    arise from normal use -- but it survives a field edited after the fact."""
     if not doc.get("custom_consumable_entry"):
         return
 
     sales_order = doc.get("custom_consumable_sales_order")
     plan = doc.get("custom_consumable_production_plan")
-    if not (sales_order and plan):
-        return
+
+    missing = []
+    if not sales_order:
+        missing.append(_("Sales Order"))
+    if not plan:
+        missing.append(_("Production Plan"))
+    if missing:
+        frappe.throw(
+            _("A Consumable Entry needs {0}. It names the job the consumables are "
+              "issued against; without it the stock is issued against nothing.")
+            .format(_(" and ").join(missing)),
+            title=_("Job Not Named"),
+        )
 
     belongs = frappe.db.exists(
         "Production Plan Item", {"parent": plan, "sales_order": sales_order}

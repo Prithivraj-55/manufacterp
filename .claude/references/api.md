@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-08-25 12:06:53_
+_Generated: 2026-08-25 23:15:43_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -15,11 +15,11 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `get_bom_items` | 1255 |
-| `get_children` | 1288 |
-| `get_bom_diff` | 1467 |
-| `@frappe.validate_and_sanitize_search_inputs` | 1522 |
-| `make_variant_bom` | 1574 |
+| `get_bom_items` | 1256 |
+| `get_children` | 1289 |
+| `get_bom_diff` | 1468 |
+| `@frappe.validate_and_sanitize_search_inputs` | 1523 |
+| `make_variant_bom` | 1575 |
 | `get_routing` | 353 |
 | `get_bom_material_detail` | 424 |
 | `update_cost` | 509 |
@@ -32,11 +32,12 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `create_production_plan_from_bom` | 168 |
-| `parse_drawing_items_csv` | 222 |
-| `get_batches_for_drawing_item` | 24 |
-| `update_customer_provided_weight` | 343 |
-| `create_bom_from_drawing` | 56 |
+| `create_bom_from_drawing` | 112 |
+| `create_production_plan_from_bom` | 224 |
+| `create_revision` | 24 |
+| `parse_drawing_items_csv` | 278 |
+| `update_customer_provided_weight` | 399 |
+| `get_batches_for_drawing_item` | 80 |
 | `mark_as_final_revision` | 10 |
 ## drawing_management/so_drawing_import.py
 
@@ -120,8 +121,8 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `` | 114 |
-| `get_routing_operations_for_bom` | 89 |
+| `get_routing_operations_for_bom` | 103 |
+| `` | 128 |
 ## production_management/stock_entry.py
 
 | Method | Line |
@@ -192,18 +193,18 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `` | 1640 |
-| `` | 1643 |
-| `` | 1646 |
-| `` | 1649 |
-| `` | 1652 |
+| `` | 1659 |
+| `` | 1662 |
+| `` | 1665 |
+| `` | 1668 |
+| `` | 1671 |
 | `create_sco_and_mip_from_production_plan` | 189 |
 | `delete_sco_and_mip_for_production_plan` | 214 |
 | `create_sco_from_production_plan` | 26 |
 | `` | 294 |
 | `create_supplier_operation_entries` | 297 |
 | `get_soe_summary` | 319 |
-| `create_finished_goods_entry` | 367 |
+| `create_finished_goods_entry` | 386 |
 ## tests/test_whitelist_coverage.py
 
 | Method | Line |
@@ -211,7 +212,12 @@ All `@frappe.whitelist()` methods. Call from JS:
 | `            "so pressing the button that calls them answers 'Method Not Allowed':\n    "` | 111 |
 | `    found = set` | 40 |
 | ``reserve_batches` was swallowed when a helper was inserted directly above it, and` | 4 |
+## tests/verify_drawing_create_revision.py
+
+| Method | Line |
+|--------|------|
+| `    # The link check is skipped for one reason only: the link it objects to is the` | 126 |
 
 ## Total
 
-_122 whitelisted methods_
+_124 whitelisted methods_

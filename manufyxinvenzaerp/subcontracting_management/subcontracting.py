@@ -345,6 +345,22 @@ def get_soe_summary(sco_name):
     for dr in drawing_rows:
         details_map.setdefault(dr.parent, []).append(dr)
 
+    # Available is what is LEFT to consume, not what arrived. An operation that has
+    # consumed all eight of its pieces read "Available 8, Consumed 8" -- the same 8 in
+    # two columns, one of which had already been used up. Read down the Available column
+    # of a finished job and every row still offered its full quantity.
+    #
+    # The figure the drawing rows hold (available_to_consume_nos) is what the previous
+    # operation handed over and does not move as this one works, so the consumption is
+    # taken off here. The gross is kept alongside it -- "0.000 of 8.000" -- because
+    # "nothing left" and "nothing ever arrived" are different problems.
+    #
+    # Difference is measured from Overall Qty on every row, including Op-1. It used to
+    # be measured from Available on Op-2+, which is now the Available column itself; a
+    # column that agrees with its neighbour by construction tells you nothing. Against
+    # Overall Qty it answers the question the row is really asked -- how many of this
+    # job's pieces does this operation still owe -- and answers it the same way on every
+    # row.
     for soe in soes:
         details = details_map.get(soe.name, [])
         soe["drawing_details"] = details
@@ -352,11 +368,14 @@ def get_soe_summary(sco_name):
         soe["total_completed_nos"] = sum(flt(d.completed_qty_nos) for d in details)
         seq = soe.get("sequence_id") or 1
         if seq == 1:
-            soe["avail_nos"] = sum(flt(d.transferred_weight_kg) for d in details)
-            soe["diff_nos"] = flt(soe["total_qty_to_mfg"]) - flt(soe["total_completed_nos"])
+            # Op-1 is measured in Kg -- it consumes weight off the rack, not pieces --
+            # so there is nothing in Nos to take off it.
+            soe["avail_gross_nos"] = sum(flt(d.transferred_weight_kg) for d in details)
+            soe["avail_nos"] = soe["avail_gross_nos"]
         else:
-            soe["avail_nos"] = sum(flt(d.available_to_consume_nos) for d in details)
-            soe["diff_nos"] = flt(soe["avail_nos"]) - flt(soe["total_completed_nos"])
+            soe["avail_gross_nos"] = sum(flt(d.available_to_consume_nos) for d in details)
+            soe["avail_nos"] = flt(soe["avail_gross_nos"]) - flt(soe["total_completed_nos"])
+        soe["diff_nos"] = flt(soe["total_qty_to_mfg"]) - flt(soe["total_completed_nos"])
 
     return soes
 

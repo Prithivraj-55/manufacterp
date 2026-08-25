@@ -17,7 +17,7 @@ frappe.query_reports["Production Report"] = {
 		},
 		{
 			fieldname: "subcontracting_order",
-			label: __("Subcontracting Order"),
+			label: __("Job Work Order"),
 			fieldtype: "Link",
 			options: "Subcontracting Order",
 		},
@@ -34,6 +34,9 @@ frappe.query_reports["Production Report"] = {
 			options: "Sales Order",
 		},
 		{
+			// Narrows which operation column blocks appear, rather than which rows do:
+			// the report is one row per drawing now, and an operation is a set of
+			// columns on it.
 			fieldname: "operation",
 			label: __("Operation"),
 			fieldtype: "Link",
@@ -56,4 +59,17 @@ frappe.query_reports["Production Report"] = {
 			fieldtype: "Date",
 		},
 	],
+
+	// Negative waste is not a small number, it is an impossible one: the plan holds
+	// less material than the finished part weighs, so the part cannot be cut from it.
+	// Worth seeing at a glance rather than hunting for in a column of decimals.
+	formatter(value, row, column, data, default_formatter) {
+		var formatted = default_formatter(value, row, column, data);
+		if (column.fieldname === "waste_pct" && value !== null && value !== undefined) {
+			if (value < 0) {
+				formatted = "<span style='color:var(--red-500,#e24c4c);font-weight:600'>" + formatted + "</span>";
+			}
+		}
+		return formatted;
+	},
 };
