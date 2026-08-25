@@ -1527,6 +1527,33 @@ def after_migrate():
     )
     create_operations_workstations_routing()
     setup_storage_location()
+    clear_item_default_boms()
+
+
+def clear_item_default_boms():
+    """No Item carries a default BOM on this app, and none should.
+
+    An item here is a shape of steel, not a product: one finished-goods item has
+    hundreds of BOMs, one per drawing, and which one applies is decided by the drawing.
+    Stock ERPNext nominates one of them as the item's default and stamps it on the Item
+    master, and every Sales Order line for that item then arrives with that arbitrary
+    BOM attached -- or refuses to open at all, with "Could not find Row #1: BOM No: ...",
+    once the BOM it points at is gone.
+
+    BOM.manage_default_bom is overridden to stop writing the field. This sweeps up
+    anything already there, and anything a route outside that override sets later: an
+    import, a manual edit on the Item form, or a site restored from a database that
+    predates the override."""
+    stale = frappe.get_all("Item", filters={"default_bom": ["!=", ""]}, pluck="name")
+    if stale:
+        frappe.db.set_value("Item", {"name": ["in", stale]}, "default_bom", None,
+                            update_modified=False)
+        print("Cleared default BOM on %d item(s): %s" % (len(stale), ", ".join(stale[:5])))
+    flagged = frappe.get_all("BOM", filters={"is_default": 1}, pluck="name")
+    if flagged:
+        frappe.db.set_value("BOM", {"name": ["in", flagged]}, "is_default", 0,
+                            update_modified=False)
+        print("Cleared is_default on %d BOM(s)" % len(flagged))
 
 
 def setup_storage_location():

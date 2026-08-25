@@ -559,28 +559,29 @@ class BOM(ERPNextBOM):
 		return bom and bom[0]["unit_cost"] or 0
 
 	def manage_default_bom(self):
-		"""Uncheck others if current one is selected as default or
-		check the current one as default if it the only bom for the selected item,
-		update default bom in item master
-		"""
-		if self.is_default and self.is_active:
-			from frappe.model.utils import set_default
+		"""No item here has a default BOM, and none ever gets one.
 
-			set_default(self, "item")
-			item = frappe.get_doc("Item", self.item)
-			if item.default_bom != self.name:
-				frappe.db.set_value("Item", self.item, "default_bom", self.name)
-		elif (
-			not frappe.db.exists(dict(doctype="BOM", docstatus=1, item=self.item, is_default=1))
-			and self.is_active
-		):
-			self.db_set("is_default", 1)
-			frappe.db.set_value("Item", self.item, "default_bom", self.name)
-		else:
+		Stock ERPNext assumes one BOM per item, so it nominates a default and writes it
+		onto the Item -- and every Sales Order line for that item then arrives carrying
+		that BOM. In this app an item is a shape of steel, not a product: FINGOODS001
+		alone has hundreds of BOMs, one per drawing, and which one applies is decided by
+		the drawing, never by the item. Nominating one of them means every Sales Order
+		line starts with an arbitrary drawing's BOM attached.
+
+		It also breaks outright the moment that BOM goes: a Sales Order refuses to open
+		with "Could not find Row #1: BOM No: BOM-FINGOODS001-245" when the Item still
+		points at a BOM that has been deleted.
+
+		So the flag is kept clear on the BOM and the field kept empty on the Item. The
+		method still runs everywhere it used to -- on submit, on cancel, on update after
+		submit -- because leaving it out would let a value set by some other route
+		survive. Restoring stock behaviour means putting ERPNext's version back; it is
+		the whole of what this replaced, and it lives in
+		erpnext/manufacturing/doctype/bom/bom.py."""
+		if self.is_default:
 			self.db_set("is_default", 0)
-			item = frappe.get_doc("Item", self.item)
-			if item.default_bom == self.name:
-				frappe.db.set_value("Item", self.item, "default_bom", None)
+		if frappe.db.get_value("Item", self.item, "default_bom"):
+			frappe.db.set_value("Item", self.item, "default_bom", None)
 
 	def clear_operations(self):
 		if not self.with_operations:

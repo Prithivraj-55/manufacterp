@@ -433,6 +433,7 @@ const ERP_MANUAL_BOM_CHILDREN = [
 		],
 		notes: [
 			"<b>Material Issue is no longer one of them.</b> Issuing material is what the Material Issue Plan does, and carrying it as an operation as well made every job start on a step nobody worked. Jobs raised before this are untouched and still show it; only new BOMs and new jobs are built without it.",
+			"<b>No item has a default BOM.</b> Standard ERPNext nominates one BOM per item and stamps it on the Item master, so every Sales Order line for that item arrives carrying it. Here an item is a shape of steel and one finished-goods item has hundreds of BOMs — one per drawing — so nominating one is meaningless, and a Sales Order will not even open once the nominated BOM is gone. The field is kept empty deliberately; you do not need to set it and should not.",
 			"<b>Informational only.</b> The operations on a BOM do not drive anything. Production is driven by the Production Plan's Process Planning rows, which create one Operation Entry each. The BOM's copy is there so the standard route is visible on the document and can be looked back at.",
 			"<b>Operating cost is not used.</b> The times on the routing are placeholders and the BOM's Operating Cost stays at zero — labour is not costed here.",
 		],

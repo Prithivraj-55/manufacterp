@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-25 16:12:43_
+_Generated: 2026-08-25 21:45:26_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-08-25 16:12:43_
 
 ## Python files
 
-_Total: 254_
+_Total: 256_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -192,6 +192,7 @@ _Total: 254_
 - tests/__init__.py
 - tests/move_fixtures_to_custom_json.py
 - tests/_probe_tmp.py
+- tests/reset_transactions.py
 - tests/revert_wo_jc_cleanup.py
 - tests/test_alternate_item.py
 - tests/test_classification_logic.py
@@ -247,6 +248,7 @@ _Total: 254_
 - tests/verify_mp_inspection_gate.py
 - tests/verify_mp_multi_mr_guard_message.py
 - tests/verify_mp_view_all_filters.py
+- tests/verify_no_item_default_bom.py
 - tests/verify_no_zero_qty_exact_match.py
 - tests/verify_partial_transfer_reservation.py
 - tests/verify_per_row_unreserve.py
@@ -869,21 +871,21 @@ Functions:
 
 ### drawing_management/bom_class_override.py
 Functions:
-  - 1060:get_bom_item_rate:
-  - 1095:get_valuation_rate:
-  - 1151:get_list_context:
-  - 1156:get_bom_items_as_dict:
-  - 1255:get_bom_items:
-  - 1262:validate_bom_no:
-  - 1288:get_children:
-  - 1329:add_additional_cost:
-  - 1346:add_non_stock_items_cost:
-  - 1379:add_operations_cost:
-  - 1467:get_bom_diff:
-  - 1523:item_query:
-  - 1574:make_variant_bom:
-  - 1612:get_op_cost_from_sub_assemblies:
-  - 1630:get_scrap_items_from_sub_assemblies:
+  - 1061:get_bom_item_rate:
+  - 1096:get_valuation_rate:
+  - 1152:get_list_context:
+  - 1157:get_bom_items_as_dict:
+  - 1256:get_bom_items:
+  - 1263:validate_bom_no:
+  - 1289:get_children:
+  - 1330:add_additional_cost:
+  - 1347:add_non_stock_items_cost:
+  - 1380:add_operations_cost:
+  - 1468:get_bom_diff:
+  - 1524:item_query:
+  - 1575:make_variant_bom:
+  - 1613:get_op_cost_from_sub_assemblies:
+  - 1631:get_scrap_items_from_sub_assemblies:
 
 ### drawing_management/drawing_utils.py
 Functions:
@@ -1101,41 +1103,42 @@ Functions:
   - 1424:create_default_warehouse_types:
   - 1438:after_install:
   - 1483:after_migrate:
-  - 1532:setup_storage_location:
-  - 1554:create_item_client_script:
-  - 1570:create_item_custom_fields:
-  - 1655:create_purchase_order_custom_fields:
-  - 1761:hide_purchase_order_weight_fields:
-  - 1775:create_purchase_order_client_script:
-  - 1791:create_purchase_receipt_custom_fields:
-  - 1970:create_batch_custom_fields:
-  - 2055:create_purchase_receipt_client_script:
-  - 2071:create_material_request_custom_fields:
-  - 2196:create_material_request_client_script:
-  - 2212:create_rfq_custom_fields:
-  - 2288:create_rfq_client_script:
-  - 2304:create_sq_custom_fields:
-  - 2383:create_sq_client_script:
-  - 2399:create_bom_custom_fields:
-  - 2506:create_so_custom_fields:
-  - 2597:create_so_client_script:
-  - 2613:create_bom_client_script:
-  - 2633:create_production_plan_custom_fields:
-  - 2875:create_production_plan_client_script:
-  - 3148:create_stock_entry_custom_fields:
-  - 3374:hide_duplicate_sco_field:
-  - 3401:create_stock_entry_client_script:
-  - 3438:create_doctype_label_translations:
-  - 3461:remove_sco_purchase_order_mandatory:
-  - 3472:hide_sco_job_worker_warehouse:
-  - 3501:make_sco_job_worker_conditional:
-  - 3536:create_sco_custom_fields:
-  - 4008:create_sco_client_script:
-  - 4024:create_sco_ops_client_script:
-  - 4040:create_soe_client_script:
-  - 4056:create_manufacturing_settings_custom_fields:
-  - 4095:create_material_planning_auto_purchase_fields:
-  - 4158:create_payment_request_custom_fields:
+  - 1533:clear_item_default_boms:
+  - 1559:setup_storage_location:
+  - 1581:create_item_client_script:
+  - 1597:create_item_custom_fields:
+  - 1682:create_purchase_order_custom_fields:
+  - 1788:hide_purchase_order_weight_fields:
+  - 1802:create_purchase_order_client_script:
+  - 1818:create_purchase_receipt_custom_fields:
+  - 1997:create_batch_custom_fields:
+  - 2082:create_purchase_receipt_client_script:
+  - 2098:create_material_request_custom_fields:
+  - 2223:create_material_request_client_script:
+  - 2239:create_rfq_custom_fields:
+  - 2315:create_rfq_client_script:
+  - 2331:create_sq_custom_fields:
+  - 2410:create_sq_client_script:
+  - 2426:create_bom_custom_fields:
+  - 2533:create_so_custom_fields:
+  - 2624:create_so_client_script:
+  - 2640:create_bom_client_script:
+  - 2660:create_production_plan_custom_fields:
+  - 2902:create_production_plan_client_script:
+  - 3175:create_stock_entry_custom_fields:
+  - 3401:hide_duplicate_sco_field:
+  - 3428:create_stock_entry_client_script:
+  - 3465:create_doctype_label_translations:
+  - 3488:remove_sco_purchase_order_mandatory:
+  - 3499:hide_sco_job_worker_warehouse:
+  - 3528:make_sco_job_worker_conditional:
+  - 3563:create_sco_custom_fields:
+  - 4035:create_sco_client_script:
+  - 4051:create_sco_ops_client_script:
+  - 4067:create_soe_client_script:
+  - 4083:create_manufacturing_settings_custom_fields:
+  - 4122:create_material_planning_auto_purchase_fields:
+  - 4185:create_payment_request_custom_fields:
 
 ### sq_management/supplier_quotation.py
 Functions:
@@ -1268,6 +1271,21 @@ Functions:
 ### tests/_probe_tmp.py
 Functions:
   - 2:run:
+
+### tests/reset_transactions.py
+Functions:
+  - 68:run:
+  - 116:_things_to_keep:
+  - 145:_delete_all:
+  - 170:_sql_delete:
+  - 179:_orphans:
+  - 195:_report_orphans:
+  - 200:_delete_orphans:
+  - 209:_batch_quantities:
+  - 226:_delete_empty_batches:
+  - 236:_rebuild_bins:
+  - 258:_test_companies:
+  - 263:_delete_test_companies:
 
 ### tests/revert_wo_jc_cleanup.py
 Functions:
@@ -1596,6 +1614,12 @@ Functions:
   - 42:_js:
   - 51:run:
 
+### tests/verify_no_item_default_bom.py
+Functions:
+  - 30:check:
+  - 36:run:
+  - 105:_item_with_a_bom:
+
 ### tests/verify_no_zero_qty_exact_match.py
 Functions:
   - 26:check:
@@ -1789,11 +1813,11 @@ Functions:
 - `drawing_management/bom_class_override.py:353` — `get_routing`
 - `drawing_management/bom_class_override.py:424` — `get_bom_material_detail`
 - `drawing_management/bom_class_override.py:509` — `update_cost`
-- `drawing_management/bom_class_override.py:1255` — `get_bom_items`
-- `drawing_management/bom_class_override.py:1288` — `get_children`
-- `drawing_management/bom_class_override.py:1467` — `get_bom_diff`
-- `drawing_management/bom_class_override.py:1522` — `@frappe.validate_and_sanitize_search_inputs`
-- `drawing_management/bom_class_override.py:1574` — `make_variant_bom`
+- `drawing_management/bom_class_override.py:1256` — `get_bom_items`
+- `drawing_management/bom_class_override.py:1289` — `get_children`
+- `drawing_management/bom_class_override.py:1468` — `get_bom_diff`
+- `drawing_management/bom_class_override.py:1523` — `@frappe.validate_and_sanitize_search_inputs`
+- `drawing_management/bom_class_override.py:1575` — `make_variant_bom`
 - `drawing_management/so_drawing_import.py:127` — `parse_bom_excel`
 - `drawing_management/so_drawing_import.py:371` — `create_drawings_from_import`
 - `drawing_management/so_drawing_import.py:552` — `process_drawings`
