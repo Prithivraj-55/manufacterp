@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-25 22:17:08_
+_Generated: 2026-08-25 22:38:14_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-08-25 22:17:08_
 
 ## Python files
 
-_Total: 257_
+_Total: 258_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -271,6 +271,7 @@ _Total: 257_
 - tests/verify_so_calculated_weight.py
 - tests/verify_so_drawing_buttons.py
 - tests/verify_soe_consumption_weight_kg.py
+- tests/verify_soe_summary_available.py
 - tests/verify_so_raw_material_checks.py
 - tests/verify_status_mirror.py
 - tests/verify_testing_button_gated.py
@@ -1135,12 +1136,12 @@ Functions:
   - 3499:hide_sco_job_worker_warehouse:
   - 3528:make_sco_job_worker_conditional:
   - 3563:create_sco_custom_fields:
-  - 4035:create_sco_client_script:
-  - 4051:create_sco_ops_client_script:
-  - 4067:create_soe_client_script:
-  - 4083:create_manufacturing_settings_custom_fields:
-  - 4122:create_material_planning_auto_purchase_fields:
-  - 4185:create_payment_request_custom_fields:
+  - 4047:create_sco_client_script:
+  - 4063:create_sco_ops_client_script:
+  - 4079:create_soe_client_script:
+  - 4095:create_manufacturing_settings_custom_fields:
+  - 4134:create_material_planning_auto_purchase_fields:
+  - 4197:create_payment_request_custom_fields:
 
 ### sq_management/supplier_quotation.py
 Functions:
@@ -1195,38 +1196,38 @@ Functions:
   - 214:delete_sco_and_mip_for_production_plan:
   - 297:create_supplier_operation_entries:
   - 319:get_soe_summary:
-  - 367:create_finished_goods_entry:
-  - 484:_soe_consumed_kg:
-  - 527:validate_supplier_operation_entry:
-  - 686:_sync_soe_inspection_items:
-  - 724:before_submit_supplier_operation_entry:
-  - 758:_propagate_available_to_next:
-  - 780:_propagate_drawing_nos_to_next:
-  - 820:_update_sco_drawing_item_completion:
-  - 844:on_update_supplier_operation_entry:
-  - 851:_push_sco_completion_to_wo:
-  - 891:on_submit_supplier_operation_entry:
-  - 919:before_delete_supplier_operation_entry:
-  - 941:on_cancel_subcontracting_order:
-  - 962:_build_soe_drawing_rows:
-  - 1009:_create_soes_for_sco:
-  - 1085:_get_mp_total_weight:
-  - 1113:_get_mp_actual_transferred_weight:
-  - 1159:_refresh_wo_drawing_transferred_weights:
-  - 1202:_get_sco_transfer_warehouses:
-  - 1214:_get_sco_supplier_warehouse:
-  - 1231:_get_wo_transfer_warehouses:
-  - 1245:_refresh_sco_drawing_transferred_weights:
-  - 1287:_get_mp_drawing_weight:
-  - 1304:_get_mp_drawing_weights_by_duno:
-  - 1330:_get_mp_mapped_weight_by_duno:
-  - 1412:_get_mp_excess_by_duno:
-  - 1435:_sec_qty_for_reserved:
-  - 1449:_get_mp_reserved_batches:
-  - 1559:_get_pp_planned_qty:
-  - 1575:_get_supplier_wh_consumption_items:
-  - 1656:_build_jc_drawing_rows:
-  - 1689:_populate_jcs_for_wo:
+  - 386:create_finished_goods_entry:
+  - 503:_soe_consumed_kg:
+  - 546:validate_supplier_operation_entry:
+  - 705:_sync_soe_inspection_items:
+  - 743:before_submit_supplier_operation_entry:
+  - 777:_propagate_available_to_next:
+  - 799:_propagate_drawing_nos_to_next:
+  - 839:_update_sco_drawing_item_completion:
+  - 863:on_update_supplier_operation_entry:
+  - 870:_push_sco_completion_to_wo:
+  - 910:on_submit_supplier_operation_entry:
+  - 938:before_delete_supplier_operation_entry:
+  - 960:on_cancel_subcontracting_order:
+  - 981:_build_soe_drawing_rows:
+  - 1028:_create_soes_for_sco:
+  - 1104:_get_mp_total_weight:
+  - 1132:_get_mp_actual_transferred_weight:
+  - 1178:_refresh_wo_drawing_transferred_weights:
+  - 1221:_get_sco_transfer_warehouses:
+  - 1233:_get_sco_supplier_warehouse:
+  - 1250:_get_wo_transfer_warehouses:
+  - 1264:_refresh_sco_drawing_transferred_weights:
+  - 1306:_get_mp_drawing_weight:
+  - 1323:_get_mp_drawing_weights_by_duno:
+  - 1349:_get_mp_mapped_weight_by_duno:
+  - 1431:_get_mp_excess_by_duno:
+  - 1454:_sec_qty_for_reserved:
+  - 1468:_get_mp_reserved_batches:
+  - 1578:_get_pp_planned_qty:
+  - 1594:_get_supplier_wh_consumption_items:
+  - 1675:_build_jc_drawing_rows:
+  - 1708:_populate_jcs_for_wo:
 
 ### tests/_chk_tmp.py
 Functions:
@@ -1272,7 +1273,7 @@ Functions:
 
 ### tests/_probe_tmp.py
 Functions:
-  - 4:run:
+  - 3:run:
 
 ### tests/reset_transactions.py
 Functions:
@@ -1744,6 +1745,13 @@ Functions:
 Functions:
   - 13:run:
 
+### tests/verify_soe_summary_available.py
+Functions:
+  - 33:check:
+  - 39:run:
+  - 97:_check_the_wiring:
+  - 115:_summary:
+
 ### tests/verify_so_raw_material_checks.py
 Functions:
   - 29:check:
@@ -1861,12 +1869,12 @@ Functions:
 - `subcontracting_management/subcontracting.py:294` — ``
 - `subcontracting_management/subcontracting.py:297` — `create_supplier_operation_entries`
 - `subcontracting_management/subcontracting.py:319` — `get_soe_summary`
-- `subcontracting_management/subcontracting.py:367` — `create_finished_goods_entry`
-- `subcontracting_management/subcontracting.py:1640` — ``
-- `subcontracting_management/subcontracting.py:1643` — ``
-- `subcontracting_management/subcontracting.py:1646` — ``
-- `subcontracting_management/subcontracting.py:1649` — ``
-- `subcontracting_management/subcontracting.py:1652` — ``
+- `subcontracting_management/subcontracting.py:386` — `create_finished_goods_entry`
+- `subcontracting_management/subcontracting.py:1659` — ``
+- `subcontracting_management/subcontracting.py:1662` — ``
+- `subcontracting_management/subcontracting.py:1665` — ``
+- `subcontracting_management/subcontracting.py:1668` — ``
+- `subcontracting_management/subcontracting.py:1671` — ``
 - `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:50` — `create_from_subcontracting_order`
 - `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:69` — ``
 - `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:72` — `populate_from_production_plan`

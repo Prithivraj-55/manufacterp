@@ -3809,16 +3809,26 @@ function render_soe_summary(frm) {
                     : "<span class='indicator gray'>Draft</span>";
                 var mfg     = flt(d.total_qty_to_mfg || 0);
                 var avail   = flt(d.avail_nos || 0);
+                var gross   = flt(d.avail_gross_nos || 0);
                 var consumed = flt(d.total_completed_nos || 0);
                 var diff    = flt(d.diff_nos || 0);
                 var diff_color = diff < 0 ? "color:red" : (diff > 0 ? "color:orange" : "");
+                var is_op1  = (d.sequence_id || 1) == 1;
+                // What is left, with what arrived beside it: "nothing left" and
+                // "nothing ever arrived" look identical otherwise. Negative means this
+                // operation completed more pieces than it was handed.
+                var avail_cell = is_op1
+                    ? format_number(avail, null, 3) + " <small class='text-muted'>Kg</small>"
+                    : "<span" + (avail < 0 ? " style='color:red'" : "") + ">"
+                        + format_number(avail, null, 3) + "</span>"
+                        + (consumed ? " <small class='text-muted'>of " + format_number(gross, null, 3) + "</small>" : "");
                 return "<tr>"
                     + "<td class='text-center'>" + (d.sequence_id || "") + "</td>"
                     + "<td><a href='/app/supplier-operation-entry/" + encodeURIComponent(d.name) + "' style='color:#0ea5e9;text-decoration:underline;'>"
                         + frappe.utils.escape_html(d.operation || "") + "</a></td>"
                     + "<td><span class='indicator " + color + "'>" + (d.status || "") + "</span></td>"
                     + "<td class='text-right'>" + format_number(mfg, null, 3) + "</td>"
-                    + "<td class='text-right'>" + format_number(avail, null, 3) + ((d.sequence_id || 1) == 1 ? " <small class='text-muted'>Kg</small>" : "") + "</td>"
+                    + "<td class='text-right'>" + avail_cell + "</td>"
                     + "<td class='text-right'>" + format_number(consumed, null, 3) + "</td>"
                     + "<td class='text-right' style='" + diff_color + "'>" + format_number(diff, null, 3) + "</td>"
                     + "<td class='text-center'>" + submitted + "</td>"
@@ -3839,7 +3849,9 @@ function render_soe_summary(frm) {
                 + "<th class='text-center' style='width:70px'>Drawings</th>"
                 + "</tr></thead><tbody>" + body + "</tbody></table>"
                 + "<div class='text-muted' style='margin-top:6px;font-size:11px'>"
-                + "Op-1 Available = Transferred (Kg); Op-2+ Available = sum of Available (Nos) from drawing details.</div>";
+                + "Op-1 Available = Transferred (Kg). Op-2+ Available = what is still left to consume, "
+                + "with what arrived shown beside it. Difference = Overall Qty less Total Consumed &mdash; "
+                + "what this operation still owes.</div>";
             $w.html(html);
             $w.find(".sco-ops-refresh").on("click", function() { render_soe_summary(frm); });
             $w.find(".sco-drw-btn").on("click", function() {
