@@ -728,6 +728,9 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
         mp.unavailable_items = kept
 
     if added_exact or added_mapping or fulfilled_row_names or remaining_qty_by_row:
+        # The receipt is saving the plan, not a person editing it -- see
+        # _warn_undersized_purchase_dimensions.
+        mp.flags.mfx_saved_by_another_document = True
         mp.save(ignore_permissions=True)
 
     return {
@@ -798,6 +801,7 @@ def _archive_consolidate_items(mp_name, pr_name):
     mp.consolidate_items = []
     for row in (mp.unavailable_items or []):
         row.consolidated_into = ""
+    mp.flags.mfx_saved_by_another_document = True
     mp.save(ignore_permissions=True)
     return archived
 

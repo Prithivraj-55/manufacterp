@@ -78,8 +78,13 @@ def _touch_other_table(doc):
 def run():
     plan = _find_plan()
     if not plan:
-        print("   No Material Planning on this site has an undersized purchase line.")
-        print("   Nothing to measure — the check needs one to be meaningful.")
+        print("=== no plan on this site has an undersized purchase line ===")
+        print("   The behaviour cannot be measured against real data right now, so only")
+        print("   the rules themselves are checked below. A Purchase Receipt clears the")
+        print("   Consolidate Item table as it allocates, so the site can legitimately")
+        print("   have none at all.")
+        _check_the_rules()
+        _summary()
         return
 
     print("=== using %s ===" % plan)
@@ -104,20 +109,49 @@ def run():
         frappe.db.rollback()
 
     print()
-    print("=== and the rule is in the code, not just in this run ===")
-    src = open(frappe.get_app_path(
-        "manufyxinvenzaerp", "production_management", "doctype",
-        "material_planning", "material_planning.py")).read()
-    check("touched rows are worked out from the saved version",
-          "def _consolidate_rows_touched(self):" in src, True)
-    check("a new document still reports everything",
-          "return None" in src.split("def _consolidate_rows_touched(self):")[1][:600], True)
-    check("and untouched rows are skipped",
-          "if touched is not None and c.name not in touched:" in src, True)
+    print("=== nor when another document saves the plan behind the scenes ===")
+    # A Purchase Receipt allocating its stock saves the plan. The popup then landed on
+    # the receipt's own submit screen, which is where this was actually reported.
+    def _as_side_effect(doc):
+        _touch_purchase_line(doc)
+        doc.flags.mfx_saved_by_another_document = True
+    check("a receipt's own save is quiet", _warned(plan, _as_side_effect), False)
+    frappe.db.rollback()
 
+    _check_the_rules()
+    _summary()
+
+
+def _summary():
     print()
     print("=== SUMMARY ===")
     if all(checks):
         print("ALL %d CHECKS PASSED" % len(checks))
     else:
         print("%d of %d CHECKS FAILED" % (checks.count(False), len(checks)))
+
+
+def _check_the_rules():
+    print()
+    print("=== and the rule is in the code, not just in this run ===")
+    src = open(frappe.get_app_path(
+        "manufyxinvenzaerp", "production_management", "doctype",
+        "material_planning", "material_planning.py")).read()
+    check("touched rows are worked out from the saved version",
+          "def _consolidate_rows_touched(self):" in src, True)
+    check("matched on item_code, which survives the table being rebuilt",
+          "previous[r.item_code] = r" in src, True)
+    check("and a side-effect save is skipped outright",
+          'if self.flags.get("mfx_saved_by_another_document"):' in src, True)
+    # Matched on the two lines themselves rather than a slice of the function: the
+    # first version of this check searched the opening 600 characters, and started
+    # failing the moment the docstring above them grew.
+    check("a new document still reports everything",
+          "        before = self.get_doc_before_save()\n        if not before:\n"
+          "            return None" in src, True)
+    check("and untouched rows are skipped",
+          "if touched is not None and c.name not in touched:" in src, True)
+    check("the receipt sets that flag when it saves a plan",
+          "mp.flags.mfx_saved_by_another_document = True"
+          in open(frappe.get_app_path("manufyxinvenzaerp", "purchase_receipt_management",
+                                      "purchase_receipt.py")).read(), True)

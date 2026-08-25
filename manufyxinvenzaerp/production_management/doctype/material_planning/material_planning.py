@@ -158,17 +158,28 @@ class MaterialPlanning(Document):
     _PURCHASE_SIZE_FIELDS = ("item_code", "alternate_item", "length", "width", "thickness")
 
     def _consolidate_rows_touched(self):
-        """Names of the Consolidate Item rows this save changed, or None on a new
-        document -- where nothing has been seen before, so everything is worth
-        stating once."""
+        """Names of the Consolidate Item rows whose purchase size changed in this
+        save, or None on a new document -- where nothing has been seen before, so
+        everything is worth stating once.
+
+        Matched on **item_code**, not on the row's name. The table is re-derived from
+        Unavailable Items on every save, so its rows get fresh names each time and a
+        name-keyed comparison calls every one of them new -- which is how a Purchase
+        Receipt submit, which saves the plan behind the scenes, ended up raising a
+        purchase-size popup on the receipt's own screen. Consolidate Item is deduped
+        by item_code, so that is the identity that actually survives a rebuild."""
         before = self.get_doc_before_save()
         if not before:
             return None
 
-        previous = {r.name: r for r in (before.get("consolidate_items") or [])}
+        previous = {}
+        for r in (before.get("consolidate_items") or []):
+            if r.item_code:
+                previous[r.item_code] = r
+
         touched = set()
         for row in (self.consolidate_items or []):
-            old = previous.get(row.name)
+            old = previous.get(row.item_code)
             if old is None:
                 touched.add(row.name)
                 continue
@@ -208,6 +219,13 @@ class MaterialPlanning(Document):
         costs the times it matters.
         """
         if not self.consolidate_items or not self.unavailable_items:
+            return
+
+        # Not while another document is saving this plan as a side effect. A
+        # Purchase Receipt allocating its stock, or a Material Issue Plan refreshing
+        # itself, both save the plan -- and a popup about a purchase size on somebody
+        # else's submit screen is noise wherever it is technically true.
+        if self.flags.get("mfx_saved_by_another_document"):
             return
 
         touched = self._consolidate_rows_touched()
