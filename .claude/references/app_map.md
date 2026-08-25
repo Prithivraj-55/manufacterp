@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-25 11:30:32_
+_Generated: 2026-08-25 11:54:46_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-08-25 11:30:32_
 
 ## Python files
 
-_Total: 250_
+_Total: 251_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -216,6 +216,7 @@ _Total: 250_
 - tests/verify_consolidate_item2.py
 - tests/verify_consolidate_item.py
 - tests/verify_consolidate_sec_qty_editable.py
+- tests/verify_consumable_entry.py
 - tests/verify_consumption_log_hard_cap.py
 - tests/verify_create_operation_and_inspection_gate.py
 - tests/verify_cut_sheet_delete_guards.py
@@ -979,35 +980,39 @@ Functions:
 ### production_management/stock_entry.py
 Functions:
   - 12:validate_stock_entry:
-  - 50:_sync_batch_remarks:
-  - 68:_copy_from_material_request_item:
-  - 80:on_submit_stock_entry:
-  - 191:_reduce_batch_sec_qty:
-  - 220:_apply_cut_sheet_w2:
-  - 269:_apply_cut_sheet_w2_as_new_batch:
-  - 343:_cut_sheet_creates_new_batch:
-  - 356:_batch_stock_by_warehouse:
-  - 376:_repack_remnant_to_new_batch:
-  - 493:_repoint_reservations:
-  - 510:_cancel_cut_sheet_repack:
-  - 549:_batch_total_kg_all_wh:
-  - 562:_populate_manufacture_sec_qty:
-  - 599:_linked_material_plannings:
-  - 645:_consumed_qty_by_batch:
-  - 683:_reservation_rows:
-  - 698:_release_rows_by_qty:
-  - 736:_restore_rows_by_qty:
-  - 777:_release_material_planning_reservations:
-  - 844:_refresh_linked_mip_weight:
-  - 875:on_cancel_stock_entry:
-  - 903:_cancelled_row_batch_no:
-  - 942:_restore_batch_sec_qty:
-  - 962:_restore_material_planning_reservations:
-  - 995:_update_sco_transferred_weight:
-  - 1106:_update_sco_cnc_weight:
-  - 1154:_update_wo_transferred_weight:
-  - 1197:_update_wo_cnc_weight:
-  - 1244:_calc_qty:
+  - 51:_sync_batch_remarks:
+  - 69:_copy_from_material_request_item:
+  - 81:on_submit_stock_entry:
+  - 192:_reduce_batch_sec_qty:
+  - 221:_apply_cut_sheet_w2:
+  - 270:_apply_cut_sheet_w2_as_new_batch:
+  - 344:_cut_sheet_creates_new_batch:
+  - 357:_batch_stock_by_warehouse:
+  - 377:_repack_remnant_to_new_batch:
+  - 494:_repoint_reservations:
+  - 511:_cancel_cut_sheet_repack:
+  - 550:_batch_total_kg_all_wh:
+  - 563:_populate_manufacture_sec_qty:
+  - 600:_linked_material_plannings:
+  - 646:_consumed_qty_by_batch:
+  - 684:_reservation_rows:
+  - 699:_release_rows_by_qty:
+  - 737:_restore_rows_by_qty:
+  - 778:_release_material_planning_reservations:
+  - 845:_refresh_linked_mip_weight:
+  - 876:on_cancel_stock_entry:
+  - 904:_cancelled_row_batch_no:
+  - 943:_restore_batch_sec_qty:
+  - 963:_restore_material_planning_reservations:
+  - 996:_update_sco_transferred_weight:
+  - 1107:_update_sco_cnc_weight:
+  - 1155:_update_wo_transferred_weight:
+  - 1198:_update_wo_cnc_weight:
+  - 1245:_calc_qty:
+  - 1268:get_production_plans_for_sales_order:
+  - 1294:production_plan_query:
+  - 1327:get_job_work_order_for_production_plan:
+  - 1345:validate_consumable_entry:
 
 ### production_plan_management/production_plan.py
 Functions:
@@ -1092,41 +1097,42 @@ Functions:
 Functions:
   - 1424:create_default_warehouse_types:
   - 1438:after_install:
-  - 1482:after_migrate:
-  - 1530:setup_storage_location:
-  - 1552:create_item_client_script:
-  - 1568:create_item_custom_fields:
-  - 1653:create_purchase_order_custom_fields:
-  - 1759:hide_purchase_order_weight_fields:
-  - 1773:create_purchase_order_client_script:
-  - 1789:create_purchase_receipt_custom_fields:
-  - 1968:create_batch_custom_fields:
-  - 2053:create_purchase_receipt_client_script:
-  - 2069:create_material_request_custom_fields:
-  - 2194:create_material_request_client_script:
-  - 2210:create_rfq_custom_fields:
-  - 2286:create_rfq_client_script:
-  - 2302:create_sq_custom_fields:
-  - 2381:create_sq_client_script:
-  - 2397:create_bom_custom_fields:
-  - 2504:create_so_custom_fields:
-  - 2595:create_so_client_script:
-  - 2611:create_bom_client_script:
-  - 2631:create_production_plan_custom_fields:
-  - 2873:create_production_plan_client_script:
-  - 3018:create_stock_entry_custom_fields:
-  - 3210:create_stock_entry_client_script:
-  - 3247:create_doctype_label_translations:
-  - 3270:remove_sco_purchase_order_mandatory:
-  - 3281:hide_sco_job_worker_warehouse:
-  - 3310:make_sco_job_worker_conditional:
-  - 3345:create_sco_custom_fields:
-  - 3817:create_sco_client_script:
-  - 3833:create_sco_ops_client_script:
-  - 3849:create_soe_client_script:
-  - 3865:create_manufacturing_settings_custom_fields:
-  - 3904:create_material_planning_auto_purchase_fields:
-  - 3967:create_payment_request_custom_fields:
+  - 1483:after_migrate:
+  - 1532:setup_storage_location:
+  - 1554:create_item_client_script:
+  - 1570:create_item_custom_fields:
+  - 1655:create_purchase_order_custom_fields:
+  - 1761:hide_purchase_order_weight_fields:
+  - 1775:create_purchase_order_client_script:
+  - 1791:create_purchase_receipt_custom_fields:
+  - 1970:create_batch_custom_fields:
+  - 2055:create_purchase_receipt_client_script:
+  - 2071:create_material_request_custom_fields:
+  - 2196:create_material_request_client_script:
+  - 2212:create_rfq_custom_fields:
+  - 2288:create_rfq_client_script:
+  - 2304:create_sq_custom_fields:
+  - 2383:create_sq_client_script:
+  - 2399:create_bom_custom_fields:
+  - 2506:create_so_custom_fields:
+  - 2597:create_so_client_script:
+  - 2613:create_bom_client_script:
+  - 2633:create_production_plan_custom_fields:
+  - 2875:create_production_plan_client_script:
+  - 3118:create_stock_entry_custom_fields:
+  - 3342:hide_duplicate_sco_field:
+  - 3369:create_stock_entry_client_script:
+  - 3406:create_doctype_label_translations:
+  - 3429:remove_sco_purchase_order_mandatory:
+  - 3440:hide_sco_job_worker_warehouse:
+  - 3469:make_sco_job_worker_conditional:
+  - 3504:create_sco_custom_fields:
+  - 3976:create_sco_client_script:
+  - 3992:create_sco_ops_client_script:
+  - 4008:create_soe_client_script:
+  - 4024:create_manufacturing_settings_custom_fields:
+  - 4063:create_material_planning_auto_purchase_fields:
+  - 4126:create_payment_request_custom_fields:
 
 ### sq_management/supplier_quotation.py
 Functions:
@@ -1413,6 +1419,12 @@ Functions:
 ### tests/verify_consolidate_sec_qty_editable.py
 Functions:
   - 16:run:
+
+### tests/verify_consumable_entry.py
+Functions:
+  - 41:check:
+  - 47:_client_script:
+  - 53:run:
 
 ### tests/verify_consumption_log_hard_cap.py
 Functions:
@@ -1817,6 +1829,9 @@ Functions:
 - `production_management/inspection.py:96` — `add_inspection_call`
 - `production_management/inspection.py:143` — `update_inspection_call_date`
 - `production_management/inspection.py:163` — `create_inspection_entry`
+- `production_management/stock_entry.py:1268` — `get_production_plans_for_sales_order`
+- `production_management/stock_entry.py:1293` — `@frappe.validate_and_sanitize_search_inputs`
+- `production_management/stock_entry.py:1327` — `get_job_work_order_for_production_plan`
 - `production_management/production_utils.py:89` — `get_routing_operations_for_bom`
 - `production_management/production_utils.py:114` — ``
 - `production_management/doctype/material_planning/material_planning.py:781` — `@frappe.validate_and_sanitize_search_inputs`
