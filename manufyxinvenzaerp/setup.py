@@ -1461,6 +1461,7 @@ def after_install():
     # this app once added to them was removed under the client's Phase 0.4 change
     # request, and Subcontracting Order / Operation Entry carry that work instead.
     create_stock_entry_custom_fields()
+    hide_duplicate_sco_field()
     create_stock_entry_client_script()
     create_doctype_label_translations()
     remove_sco_purchase_order_mandatory()
@@ -1508,6 +1509,7 @@ def after_migrate():
     # this app once added to them was removed under the client's Phase 0.4 change
     # request, and Subcontracting Order / Operation Entry carry that work instead.
     create_stock_entry_custom_fields()
+    hide_duplicate_sco_field()
     create_stock_entry_client_script()
     create_doctype_label_translations()
     remove_sco_purchase_order_mandatory()
@@ -2889,6 +2891,104 @@ def create_production_plan_client_script():
 
 
 STOCK_ENTRY_CLIENT_SCRIPT = """
+// M-bM-^TM-^@M-bM-^TM-^@ Consumable Entry M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@
+//
+// Issuing consumables against a job -- welding rods, paint, gas -- rather than moving
+// the job's own steel. The three fields are a chain: the Sales Order narrows which
+// Production Plans can be picked, the plan names the Job Work Order, and that is what
+// every weight rollup downstream already keys on.
+//
+// Each step clears what sits below it. Changing the order after picking a plan would
+// otherwise leave a plan belonging to a different order, and a Job Work Order fetched
+// from it -- a mismatch nobody would see, on a document that decides whose cost the
+// consumables land on.
+
+frappe.ui.form.on("Stock Entry", {
+  custom_consumable_entry(frm) {
+    if (frm.doc.custom_consumable_entry) {
+      _se_mark_rows_consumable(frm);
+    } else {
+      // Only the questions are cleared, never the rows. A row may have been ticked
+      // deliberately before any of this was switched on, and unticking somebody's
+      // rows because a header field changed is not a decision this should make.
+      frm.set_value("custom_consumable_sales_order", null);
+      frm.set_value("custom_consumable_production_plan", null);
+    }
+  },
+
+  custom_consumable_sales_order(frm) {
+    frm.set_value("custom_consumable_production_plan", null);
+  },
+
+  custom_consumable_production_plan(frm) {
+    if (!frm.doc.custom_consumable_production_plan) return;
+    frappe.call({
+      method: "manufyxinvenzaerp.production_management.stock_entry.get_job_work_order_for_production_plan",
+      args: { production_plan: frm.doc.custom_consumable_production_plan },
+      callback(r) {
+        var found = r.message || {};
+        if (!found.job_work_order) {
+          frappe.msgprint({
+            title: __("No Job Work Order"),
+            message: __("No Job Work Order has been raised from {0} yet.",
+                        [frm.doc.custom_consumable_production_plan]),
+            indicator: "orange",
+          });
+          return;
+        }
+        // Both fields are written: custom_sco_ref is hidden on the form but is still
+        // what 33 places in the app read, so leaving it behind would quietly break
+        // the weight rollups this entry feeds.
+        frm.set_value("subcontracting_order", found.job_work_order);
+        frm.set_value("custom_sco_ref", found.job_work_order);
+        if (found.count > 1) {
+          frappe.msgprint({
+            title: __("More Than One Job Work Order"),
+            message: __("{0} has {1} Job Work Orders against it. The earliest, {2}, has been filled in — change it if that is not the one.",
+                        [frm.doc.custom_consumable_production_plan, found.count, found.job_work_order]),
+            indicator: "orange",
+          });
+        }
+      },
+    });
+  },
+
+  refresh(frm) {
+    // The plan list cannot be a link filter: a plan's Sales Order lives on its child
+    // rows, not on the plan, so the options are fetched and matched by name.
+    frm.set_query("custom_consumable_production_plan", function() {
+      return { query: "manufyxinvenzaerp.production_management.stock_entry.production_plan_query",
+               filters: { sales_order: frm.doc.custom_consumable_sales_order || "" } };
+    });
+  },
+});
+
+frappe.ui.form.on("Stock Entry Detail", {
+  items_add(frm, cdt, cdn) {
+    // A row added while the box is ticked arrives ticked.
+    if (frm.doc.custom_consumable_entry) {
+      frappe.model.set_value(cdt, cdn, "custom_is_consumable", 1);
+    }
+  },
+});
+
+function _se_mark_rows_consumable(frm) {
+  var changed = 0;
+  (frm.doc.items || []).forEach(function(row) {
+    if (!row.custom_is_consumable) {
+      frappe.model.set_value(row.doctype, row.name, "custom_is_consumable", 1);
+      changed++;
+    }
+  });
+  if (changed) {
+    frm.refresh_field("items");
+    frappe.show_alert({
+      message: __("Marked {0} row(s) as consumable.", [changed]),
+      indicator: "blue",
+    }, 5);
+  }
+}
+
 // Debounce helper
 var _se_timers = {};
 function se_debounce(key, fn, delay) {
@@ -3201,9 +3301,68 @@ def create_stock_entry_custom_fields():
                     "insert_after": "custom_mip_ref",
                     "depends_on": "eval:doc.subcontracting_order",
                 },
+                # Consumable Entry -- an entry issuing consumables (welding rods,
+                # paint, gas) against a job rather than moving the job's own steel.
+                # The three fields are a chain: the order narrows the plans, the plan
+                # names the job work order, and the job work order is what every
+                # weight rollup downstream already keys on.
+                {
+                    "fieldname": "custom_consumable_entry",
+                    "fieldtype": "Check",
+                    "label": "Consumable Entry",
+                    "insert_after": "inspection_required",
+                    "description": "Issuing consumables against a job. Ticking it marks every "
+                                   "item row as a consumable and asks which job they are for.",
+                },
+                {
+                    "fieldname": "custom_consumable_sales_order",
+                    "fieldtype": "Link",
+                    "label": "Sales Order",
+                    "options": "Sales Order",
+                    "insert_after": "custom_consumable_entry",
+                    "depends_on": "eval:doc.custom_consumable_entry",
+                    "description": "Which order the consumables are being issued against.",
+                },
+                {
+                    "fieldname": "custom_consumable_production_plan",
+                    "fieldtype": "Link",
+                    "label": "Production Plan",
+                    "options": "Production Plan",
+                    "insert_after": "custom_consumable_sales_order",
+                    "depends_on": "eval:doc.custom_consumable_entry && doc.custom_consumable_sales_order",
+                    "description": "Only plans made against the order above. Choosing one fills "
+                                   "in its Job Work Order.",
+                },
             ],
         },
         update=True,
+    )
+
+
+def hide_duplicate_sco_field():
+    """Only one Job Work Order field on a Stock Entry, not two.
+
+    `subcontracting_order` and `custom_sco_ref` hold the same value and sit next to
+    each other, which is confusing on a form and worse in a report.
+
+    The custom one goes. It exists for a reason that has since gone away: ERPNext's
+    validate_subcontract_order used to throw when supplied_items was empty, so the
+    flow avoided the core field. CustomStockEntry.validate_subcontract_order now
+    returns early for a PP-flow order, which solves that properly. The core field
+    also already reads as "Job work order" through the Translation, and is what
+    ERPNext's own code keys on.
+
+    Hidden, not deleted. Every Stock Entry this app makes writes both, and 33 places
+    still read custom_sco_ref -- rewriting those and migrating submitted documents is
+    its own piece of work, and would buy nothing a hidden field does not."""
+    frappe.make_property_setter(
+        {
+            "doctype": "Stock Entry",
+            "fieldname": "custom_sco_ref",
+            "property": "hidden",
+            "value": 1,
+            "property_type": "Check",
+        }
     )
 
 

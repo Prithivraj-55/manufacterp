@@ -15,6 +15,7 @@ def validate_stock_entry(doc, method):
 		_copy_from_material_request_item(row)
 
 	_sync_batch_remarks(doc)
+	validate_consumable_entry(doc)
 
 	# For Manufacture, fill Sec Qty (Nos) on consumed rows proportional to the Kg consumed,
 	# so the batch piece count is correctly reduced on submit. Done before totals + stock move.
@@ -1253,3 +1254,115 @@ def _calc_qty(row, group):
 	if group == "Plates" and l and w and t and uw and sq:
 		return (l / 1000) * (w / 1000) * t * uw * sq
 	return 0.0
+
+
+# ── Consumable Entry ──────────────────────────────────────────────────────────
+#
+# An entry issuing consumables against a job -- welding rods, paint, gas -- rather
+# than moving the job's own steel. The three fields on the form are a chain: the
+# Sales Order narrows which Production Plans can be picked, the plan names the Job
+# Work Order, and that is what every weight rollup downstream already keys on.
+
+
+@frappe.whitelist()
+def get_production_plans_for_sales_order(sales_order):
+    """Production Plans raised against one Sales Order, newest first.
+
+    A plain link filter cannot express this: a plan's order lives on its child rows
+    (Production Plan Item.sales_order), not on the plan itself, so the list has to be
+    fetched rather than filtered."""
+    if not sales_order:
+        return []
+    names = frappe.get_all(
+        "Production Plan Item",
+        filters={"sales_order": sales_order, "docstatus": ["<", 2]},
+        pluck="parent",
+        distinct=True,
+    )
+    if not names:
+        return []
+    return frappe.get_all(
+        "Production Plan",
+        filters={"name": ["in", names], "docstatus": ["<", 2]},
+        fields=["name", "status"],
+        order_by="creation desc",
+    )
+
+
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
+def production_plan_query(doctype, txt, searchfield, start, page_len, filters):
+    """Link-field search for Production Plan, restricted to one Sales Order.
+
+    Frappe's own link search cannot do it: a plan's Sales Order sits on its child
+    rows, so this joins through Production Plan Item. With no Sales Order given it
+    returns nothing rather than everything -- the field is only ever shown once one
+    has been chosen, and offering every plan on the site would invite exactly the
+    mismatch validate_consumable_entry then refuses."""
+    sales_order = (filters or {}).get("sales_order")
+    if not sales_order:
+        return []
+
+    return frappe.db.sql(
+        """
+        SELECT DISTINCT pp.name, pp.status
+        FROM `tabProduction Plan` pp
+        JOIN `tabProduction Plan Item` ppi ON ppi.parent = pp.name
+        WHERE ppi.sales_order = %(sales_order)s
+          AND pp.docstatus < 2
+          AND pp.name LIKE %(txt)s
+        ORDER BY pp.creation DESC
+        LIMIT %(start)s, %(page_len)s
+        """,
+        {
+            "sales_order": sales_order,
+            "txt": "%%%s%%" % (txt or ""),
+            "start": start or 0,
+            "page_len": page_len or 20,
+        },
+    )
+
+
+@frappe.whitelist()
+def get_job_work_order_for_production_plan(production_plan):
+    """The Job Work Order raised from a Production Plan, if there is one.
+
+    Where a plan somehow has more than one, the earliest is returned along with how
+    many there were, so the form can say so rather than pick one silently."""
+    if not production_plan:
+        return {}
+    orders = frappe.get_all(
+        "Subcontracting Order",
+        filters={"custom_production_plan": production_plan, "docstatus": ["<", 2]},
+        pluck="name",
+        order_by="creation asc",
+    )
+    if not orders:
+        return {}
+    return {"job_work_order": orders[0], "count": len(orders)}
+
+
+def validate_consumable_entry(doc):
+    """Refuse a combination that does not exist.
+
+    The form fills these in order and clears what sits below when something above
+    changes, so a mismatched pair should not arise from normal use. It can still
+    arrive from an import, an API call, or a field edited after the fact -- and a
+    Stock Entry naming a plan that belongs to a different order would put its
+    consumables on the wrong job's cost."""
+    if not doc.get("custom_consumable_entry"):
+        return
+
+    sales_order = doc.get("custom_consumable_sales_order")
+    plan = doc.get("custom_consumable_production_plan")
+    if not (sales_order and plan):
+        return
+
+    belongs = frappe.db.exists(
+        "Production Plan Item", {"parent": plan, "sales_order": sales_order}
+    )
+    if not belongs:
+        frappe.throw(
+            _("Production Plan {0} is not against Sales Order {1}.").format(plan, sales_order),
+            title=_("Plan and Order Do Not Match"),
+        )

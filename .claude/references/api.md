@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-08-25 11:30:32_
+_Generated: 2026-08-25 11:54:46_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -122,6 +122,13 @@ All `@frappe.whitelist()` methods. Call from JS:
 |--------|------|
 | `` | 114 |
 | `get_routing_operations_for_bom` | 89 |
+## production_management/stock_entry.py
+
+| Method | Line |
+|--------|------|
+| `get_production_plans_for_sales_order` | 1268 |
+| `@frappe.validate_and_sanitize_search_inputs` | 1293 |
+| `get_job_work_order_for_production_plan` | 1327 |
 ## production_plan_management/production_plan.py
 
 | Method | Line |
@@ -207,4 +214,4 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 ## Total
 
-_119 whitelisted methods_
+_122 whitelisted methods_

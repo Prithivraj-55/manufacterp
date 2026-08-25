@@ -2167,6 +2167,33 @@ const ERP_MANUAL_REFERENCE_CHILDREN = [
 		],
 	},
 	{
+		id: "ref-consumable-entry",
+		title: "Consumable Entry",
+		kicker: "Issuing consumables against a job",
+		purpose:
+			"Welding rods, paint and gas are consumed by a job but are not the job's own " +
+			"material. Ticking <b>Consumable Entry</b> on a Stock Entry says so, and asks the " +
+			"one question that decides whose cost they land on: which job.",
+		fields: [
+			{ name: "Consumable Entry", note: "Sits next to Inspection Required. Ticking it marks every item row as a consumable and reveals the two questions below." },
+			{ name: "Sales Order", note: "Which order the consumables are being issued against. The only one of the three chosen freely." },
+			{ name: "Production Plan", note: "Only the plans raised against that order are offered. Choosing one fills in its Job Work Order." },
+			{ name: "Job work order", note: "Filled in for you from the plan. Where a plan has more than one, the earliest is used and you are told, so you can change it." },
+		],
+		steps: [
+			"Tick <b>Consumable Entry</b>. Every row already on the entry is marked as a consumable, and you are told how many.",
+			"Pick the <b>Sales Order</b>.",
+			"Pick the <b>Production Plan</b> — the list is already narrowed to that order.",
+			"The <b>Job work order</b> fills itself in. Add the consumable items and submit as normal.",
+		],
+		notes: [
+			"<b>Each step clears what is below it.</b> Change the Sales Order after picking a plan and the plan and Job Work Order are cleared, because a plan belonging to a different order is a mismatch nobody would see — and this document decides whose cost the consumables land on. Saving one anyway is refused, naming both.",
+			"<b>Rows added afterwards arrive ticked</b>, while Consumable Entry is on.",
+			"<b>Unticking does not clear the rows.</b> A row may have been marked a consumable deliberately, and clearing somebody's rows because a header field changed is not a decision this makes for you. Untick the rows yourself if that is what you want.",
+			"There used to be two Job Work Order fields on this form holding the same value — <i>Job work order</i> and <i>Subcontracting Order (PP Flow)</i>. The second is now hidden; it is still filled in behind the scenes, because a good deal of the app reads it.",
+		],
+	},
+	{
 		id: "ref-decision-log",
 		title: "Decision Log",
 		kicker: "Who decided what, and why",
