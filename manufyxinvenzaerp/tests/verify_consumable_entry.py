@@ -72,7 +72,7 @@ def run():
     check("the app's duplicate is hidden", meta.get_field("custom_sco_ref").hidden, 1)
     check("ERPNext's own field stays", meta.get_field("subcontracting_order").hidden, 0)
     check("but the hidden one is still written",
-          'frm.set_value("custom_sco_ref", found.job_work_order)' in js, True)
+          "frm.doc.custom_sco_ref = found.job_work_order;" in js, True)
 
     print()
     print("=== the chain, against real documents ===")
@@ -127,6 +127,29 @@ def run():
     check("each step clears what sits below it",
           'custom_consumable_sales_order(frm) {\n    frm.set_value("custom_consumable_production_plan", null);' in js,
           True)
+
+    print()
+    print("=== picking a plan does not set off ERPNext's own transfer fetch ===")
+    # ERPNext's subcontracting_order handler calls make_rm_stock_entry, which throws
+    # "No item available for transfer." for an order with no supplied_items -- which
+    # is every PP-flow order. Writing the field with set_value fired it on every pick.
+    check("the Job Work Order is assigned, not set_value'd",
+          'frm.set_value("subcontracting_order", found.job_work_order)' in js, False)
+    check("written straight to the document instead",
+          "frm.doc.subcontracting_order = found.job_work_order;" in js, True)
+    check("and the form still knows it changed", "frm.dirty();" in js, True)
+
+    print()
+    print("=== Material Consumption for Manufacture answers its own question ===")
+    check("one place decides it", "function _se_apply_consumption_type(frm)" in js, True)
+    check("applied when the type changes", "stock_entry_type(frm) {" in js, True)
+    check("and when the form is reopened", "_se_apply_consumption_type(frm);\n  },\n\n  stock_entry_type" in js, True)
+    check("Work Order is hidden for it",
+          'frm.set_df_property("work_order", "hidden", is_consumption ? 1 : 0)' in js, True)
+    check("Consumable Entry is ticked",
+          'frm.set_value("custom_consumable_entry", 1)' in js, True)
+    check("and locked, since there is only one right answer",
+          'frm.set_df_property("custom_consumable_entry", "read_only", is_consumption ? 1 : 0)' in js, True)
 
     print()
     print("=== SUMMARY ===")

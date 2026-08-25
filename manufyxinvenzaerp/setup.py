@@ -2936,11 +2936,20 @@ frappe.ui.form.on("Stock Entry", {
           });
           return;
         }
-        // Both fields are written: custom_sco_ref is hidden on the form but is still
-        // what 33 places in the app read, so leaving it behind would quietly break
-        // the weight rollups this entry feeds.
-        frm.set_value("subcontracting_order", found.job_work_order);
-        frm.set_value("custom_sco_ref", found.job_work_order);
+        // Assigned, not set_value'd. ERPNext's own subcontracting_order handler
+        // fetches the order's raw materials for transfer, and a PP-flow order has no
+        // supplied_items -- so setting the field the normal way answered with
+        // "No item available for transfer." every time a plan was picked. Writing to
+        // frm.doc and refreshing puts the value on the form without firing that.
+        //
+        // Both fields are written: custom_sco_ref is hidden but is still what 33
+        // places in the app read, so leaving it behind would quietly break the weight
+        // rollups this entry feeds.
+        frm.doc.subcontracting_order = found.job_work_order;
+        frm.doc.custom_sco_ref = found.job_work_order;
+        frm.refresh_field("subcontracting_order");
+        frm.refresh_field("custom_sco_ref");
+        frm.dirty();
         if (found.count > 1) {
           frappe.msgprint({
             title: __("More Than One Job Work Order"),
@@ -2960,8 +2969,29 @@ frappe.ui.form.on("Stock Entry", {
       return { query: "manufyxinvenzaerp.production_management.stock_entry.production_plan_query",
                filters: { sales_order: frm.doc.custom_consumable_sales_order || "" } };
     });
+    _se_apply_consumption_type(frm);
+  },
+
+  stock_entry_type(frm) {
+    _se_apply_consumption_type(frm);
   },
 });
+
+// "Material Consumption for Manufacture" IS a consumable entry -- that is the whole
+// purpose of the type -- so the tick is set and locked rather than left as a question
+// with only one right answer. Work Order goes with it: this flow reaches its job
+// through Sales Order and Production Plan, and an empty Work Order field beside them
+// only invites the wrong one to be filled in.
+function _se_apply_consumption_type(frm) {
+  var is_consumption = frm.doc.stock_entry_type === "Material Consumption for Manufacture";
+
+  frm.set_df_property("work_order", "hidden", is_consumption ? 1 : 0);
+  frm.set_df_property("custom_consumable_entry", "read_only", is_consumption ? 1 : 0);
+
+  if (is_consumption && !frm.doc.custom_consumable_entry) {
+    frm.set_value("custom_consumable_entry", 1);
+  }
+}
 
 frappe.ui.form.on("Stock Entry Detail", {
   items_add(frm, cdt, cdn) {

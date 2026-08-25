@@ -2188,6 +2188,7 @@ const ERP_MANUAL_REFERENCE_CHILDREN = [
 		],
 		notes: [
 			"<b>Each step clears what is below it.</b> Change the Sales Order after picking a plan and the plan and Job Work Order are cleared, because a plan belonging to a different order is a mismatch nobody would see — and this document decides whose cost the consumables land on. Saving one anyway is refused, naming both.",
+			"<b>Material Consumption for Manufacture ticks it for you.</b> That type <i>is</i> a consumable entry, so the box is set and locked rather than left as a question with one right answer — and Work Order is hidden, because this flow reaches its job through Sales Order and Production Plan instead.",
 			"<b>Rows added afterwards arrive ticked</b>, while Consumable Entry is on.",
 			"<b>Unticking does not clear the rows.</b> A row may have been marked a consumable deliberately, and clearing somebody's rows because a header field changed is not a decision this makes for you. Untick the rows yourself if that is what you want.",
 			"There used to be two Job Work Order fields on this form holding the same value — <i>Job work order</i> and <i>Subcontracting Order (PP Flow)</i>. The second is now hidden; it is still filled in behind the scenes, because a good deal of the app reads it.",
