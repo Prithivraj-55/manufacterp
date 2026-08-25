@@ -451,12 +451,22 @@ def update_customer_provided_weight(drawing_name, new_weight):
 def _cascade_customer_weight(drawing_name, new_weight):
     """Push the updated customer-provided weight into every already-created downstream
     document that carries its own copy of it. Work Order is intentionally not included --
-    its customizations are being reverted to standard separately."""
+    its customizations are being reverted to standard separately.
+
+    The weight arrives here PER PIECE -- that is how the Drawing and the Sales Order
+    DUNO row both hold it -- and is scaled on the way out, because every downstream copy
+    sits beside a planned and a transferred weight for the whole row. Sending the
+    per-piece figure down made a two-piece drawing report 890 Kg of customer weight
+    against 1,814 Kg planned, which reads as 100% waste and is really 1.9%."""
+    row_weight = flt(new_weight) * (flt(frappe.db.get_value(
+        "Drawing", drawing_name, "no_of_qty_to_manufacture")) or 1)
+    row_weight = flt(row_weight, 3)
+
     pp_item_rows = frappe.get_all(
         "Production Plan Item", filters={"custom_drawing": drawing_name}, fields=["name"]
     )
     for row in pp_item_rows:
-        frappe.db.set_value("Production Plan Item", row.name, "custom_customer_weight_kg", new_weight)
+        frappe.db.set_value("Production Plan Item", row.name, "custom_customer_weight_kg", row_weight)
 
     drawing_item_rows = frappe.get_all(
         "SCO Drawing Item",
@@ -464,7 +474,7 @@ def _cascade_customer_weight(drawing_name, new_weight):
         fields=["name", "parent", "parenttype"],
     )
     for row in drawing_item_rows:
-        frappe.db.set_value("SCO Drawing Item", row.name, "customer_weight_kg", new_weight)
+        frappe.db.set_value("SCO Drawing Item", row.name, "customer_weight_kg", row_weight)
 
     touched = {(r.parenttype, r.parent) for r in drawing_item_rows}
     mip_names = []

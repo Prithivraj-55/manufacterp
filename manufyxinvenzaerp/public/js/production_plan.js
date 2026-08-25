@@ -744,7 +744,13 @@ function _ppd_do_insert(frm, d, all_rows) {
 			child.custom_duno_mark_no            = s.duno_mark_no || "";
 			child.custom_customer_drawing_number = s.customer_drawing_number || "";
 			child.custom_material_planning       = s.material_planning || "";
-			child.custom_customer_weight_kg      = flt(s.customer_weight || 0, 3);
+			// Customer weight is held PER PIECE on the Sales Order DUNO row, next to a
+			// Total Quantity of its own -- while every planned and transferred weight
+			// downstream is for the whole row. Scaling it here is what makes the three
+			// comparable: without it a drawing making two pieces reported 890 Kg of
+			// customer weight against 1,814 Kg planned and read as 100% waste, while
+			// the single-piece drawing beside it read 1.6%.
+			child.custom_customer_weight_kg      = flt(flt(s.customer_weight || 0) * flt(child.planned_qty), 3);
 			child.custom_planned_rm_weight_kg    = flt(weights[wt_key] || 0, 3);
 		});
 		frm.refresh_field("po_items");

@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-25 22:38:14_
+_Generated: 2026-08-25 22:55:12_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-08-25 22:38:14_
 
 ## Python files
 
-_Total: 258_
+_Total: 260_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -81,6 +81,7 @@ _Total: 258_
 - patches/v1/remove_sco_transfer_fields.py
 - patches/v1/remove_wo_transfer_fields.py
 - patches/v1/rename_excess_batch_mapped_statuses.py
+- patches/v1/scale_customer_weight_by_qty.py
 - permissions_bulk.py
 - production_management/doctype/cut_sheet_allocation/cut_sheet_allocation.py
 - production_management/doctype/cut_sheet_allocation/__init__.py
@@ -222,6 +223,7 @@ _Total: 258_
 - tests/verify_consumable_entry.py
 - tests/verify_consumption_log_hard_cap.py
 - tests/verify_create_operation_and_inspection_gate.py
+- tests/verify_customer_weight_scaled.py
 - tests/verify_cut_sheet_delete_guards.py
 - tests/verify_cut_sheet_doctype.py
 - tests/verify_cut_sheet_fields_consistent.py
@@ -1273,7 +1275,7 @@ Functions:
 
 ### tests/_probe_tmp.py
 Functions:
-  - 3:run:
+  - 4:run:
 
 ### tests/reset_transactions.py
 Functions:
@@ -1470,6 +1472,11 @@ Functions:
 ### tests/verify_create_operation_and_inspection_gate.py
 Functions:
   - 20:run:
+
+### tests/verify_customer_weight_scaled.py
+Functions:
+  - 31:check:
+  - 37:run:
 
 ### tests/verify_cut_sheet_delete_guards.py
 Functions:
