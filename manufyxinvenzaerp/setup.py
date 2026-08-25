@@ -3351,6 +3351,7 @@ def create_stock_entry_custom_fields():
                     "options": "Sales Order",
                     "insert_after": "custom_consumable_entry",
                     "depends_on": "eval:doc.custom_consumable_entry",
+                    "mandatory_depends_on": "eval:doc.custom_consumable_entry",
                     "description": "Which order the consumables are being issued against.",
                 },
                 {
@@ -3360,6 +3361,7 @@ def create_stock_entry_custom_fields():
                     "options": "Production Plan",
                     "insert_after": "custom_consumable_sales_order",
                     "depends_on": "eval:doc.custom_consumable_entry && doc.custom_consumable_sales_order",
+                    "mandatory_depends_on": "eval:doc.custom_consumable_entry && doc.custom_consumable_sales_order",
                     "description": "Only plans made against the order above. Choosing one fills "
                                    "in its Job Work Order.",
                 },

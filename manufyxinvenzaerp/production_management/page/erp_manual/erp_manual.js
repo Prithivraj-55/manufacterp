@@ -2176,8 +2176,8 @@ const ERP_MANUAL_REFERENCE_CHILDREN = [
 			"one question that decides whose cost they land on: which job.",
 		fields: [
 			{ name: "Consumable Entry", note: "Sits next to Inspection Required. Ticking it marks every item row as a consumable and reveals the two questions below." },
-			{ name: "Sales Order", note: "Which order the consumables are being issued against. The only one of the three chosen freely." },
-			{ name: "Production Plan", note: "Only the plans raised against that order are offered. Choosing one fills in its Job Work Order." },
+			{ name: "Sales Order", note: "Which order the consumables are being issued against. The only one of the three chosen freely. Required once the box is ticked." },
+			{ name: "Production Plan", note: "Only the plans raised against that order are offered. Choosing one fills in its Job Work Order. Required once the order is chosen." },
 			{ name: "Job work order", note: "Filled in for you from the plan. Where a plan has more than one, the earliest is used and you are told, so you can change it." },
 		],
 		steps: [
@@ -2187,6 +2187,7 @@ const ERP_MANUAL_REFERENCE_CHILDREN = [
 			"The <b>Job work order</b> fills itself in. Add the consumable items and submit as normal.",
 		],
 		notes: [
+			"<b>Both questions must be answered.</b> Sales Order and Production Plan are mandatory while Consumable Entry is ticked — the two of them are what the Job Work Order is looked up from, and the Job Work Order is what every weight rollup downstream keys on. A ticked entry with neither filled in issues stock against nothing, so it is refused on save, naming what is missing.",
 			"<b>Each step clears what is below it.</b> Change the Sales Order after picking a plan and the plan and Job Work Order are cleared, because a plan belonging to a different order is a mismatch nobody would see — and this document decides whose cost the consumables land on. Saving one anyway is refused, naming both.",
 			"<b>Material Consumption for Manufacture ticks it for you.</b> That type <i>is</i> a consumable entry, so the box is set and locked rather than left as a question with one right answer — and Work Order is hidden, because this flow reaches its job through Sales Order and Production Plan instead.",
 			"<b>Rows added afterwards arrive ticked</b>, while Consumable Entry is on.",

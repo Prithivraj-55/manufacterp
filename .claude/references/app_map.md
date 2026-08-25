@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-25 12:06:53_
+_Generated: 2026-08-25 12:19:00_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-08-25 12:06:53_
 
 ## Python files
 
-_Total: 251_
+_Total: 252_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -183,6 +183,7 @@ _Total: 251_
 - subcontracting_management/subcontracting.py
 - templates/__init__.py
 - templates/pages/__init__.py
+- tests/_chk_tmp.py
 - tests/create_full_test_entry.py
 - tests/create_test_data.py
 - tests/find_cascade_fixture.py
@@ -1120,19 +1121,19 @@ Functions:
   - 2633:create_production_plan_custom_fields:
   - 2875:create_production_plan_client_script:
   - 3148:create_stock_entry_custom_fields:
-  - 3372:hide_duplicate_sco_field:
-  - 3399:create_stock_entry_client_script:
-  - 3436:create_doctype_label_translations:
-  - 3459:remove_sco_purchase_order_mandatory:
-  - 3470:hide_sco_job_worker_warehouse:
-  - 3499:make_sco_job_worker_conditional:
-  - 3534:create_sco_custom_fields:
-  - 4006:create_sco_client_script:
-  - 4022:create_sco_ops_client_script:
-  - 4038:create_soe_client_script:
-  - 4054:create_manufacturing_settings_custom_fields:
-  - 4093:create_material_planning_auto_purchase_fields:
-  - 4156:create_payment_request_custom_fields:
+  - 3374:hide_duplicate_sco_field:
+  - 3401:create_stock_entry_client_script:
+  - 3438:create_doctype_label_translations:
+  - 3461:remove_sco_purchase_order_mandatory:
+  - 3472:hide_sco_job_worker_warehouse:
+  - 3501:make_sco_job_worker_conditional:
+  - 3536:create_sco_custom_fields:
+  - 4008:create_sco_client_script:
+  - 4024:create_sco_ops_client_script:
+  - 4040:create_soe_client_script:
+  - 4056:create_manufacturing_settings_custom_fields:
+  - 4095:create_material_planning_auto_purchase_fields:
+  - 4158:create_payment_request_custom_fields:
 
 ### sq_management/supplier_quotation.py
 Functions:
@@ -1219,6 +1220,10 @@ Functions:
   - 1575:_get_supplier_wh_consumption_items:
   - 1656:_build_jc_drawing_rows:
   - 1689:_populate_jcs_for_wo:
+
+### tests/_chk_tmp.py
+Functions:
+  - 2:run:
 
 ### tests/create_full_test_entry.py
 Functions:
@@ -1422,9 +1427,10 @@ Functions:
 
 ### tests/verify_consumable_entry.py
 Functions:
-  - 41:check:
-  - 47:_client_script:
-  - 53:run:
+  - 42:check:
+  - 48:_refusal:
+  - 61:_client_script:
+  - 67:run:
 
 ### tests/verify_consumption_log_hard_cap.py
 Functions:
