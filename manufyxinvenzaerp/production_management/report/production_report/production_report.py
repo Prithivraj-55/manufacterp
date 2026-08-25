@@ -156,7 +156,7 @@ def get_data(filters):
 	mip_by_sco = _mip_by_sco(sco_names)
 	excess = _excess_by_sco(mip_by_sco)
 	consumables = _consumables_by_sco(sco_names, {s.custom_production_plan for s in scos})
-	rm_cost = _rm_cost_by_drawing(sco_names)
+	rm_cost = _rm_cost_by_drawing(sco_names, mip_by_sco)
 
 	so_names = list({d["sales_order"] for d in drawing_rows if d["sales_order"]})
 	so_map = {}
@@ -567,14 +567,23 @@ def _consumables_by_sco(sco_names, production_plans):
 	return out
 
 
-def _rm_cost_by_drawing(sco_names):
+def _rm_cost_by_drawing(sco_names, mip_by_sco):
 	"""What the raw material issued to each drawing was worth, from the Stock Entries
 	that issued it -- the valuation the stock ledger itself used, not a recalculation.
 
-	Attributed by the drawing stamped on the Stock Entry row (custom_drawing), which the
-	transfer flows copy forward; a row carrying no drawing is left out rather than
-	spread across the job's drawings, since guessing whose material it was is worse than
-	reporting nothing."""
+	Not attributed by the drawing stamped on the Stock Entry row. A transfer consolidates
+	every requirement for one item and batch into a single line, and that line can only
+	carry one drawing: on SC-ORD-2026-00003 the whole 285.484 Kg of ISA100 is stamped
+	1B6, when 1B1 and 1B2 take 81.056 Kg of it each. Costing by that stamp would hand
+	one drawing the entire bill and the other four nothing.
+
+	So the line's value is priced per Kg and spread back over the Material Issue Plan's
+	own raw-material rows, in proportion to what each actually took -- the same rows, and
+	the same weighting, that _apply_transfer_excess_to_raw_materials uses to split a
+	transfer's rounding surplus.
+
+	The stamp is still the fallback, for a Stock Entry raised outside the plan: there is
+	nothing else to go on there, and one named drawing beats none."""
 	if not sco_names:
 		return {}
 	entries = frappe.get_all(
@@ -587,15 +596,66 @@ def _rm_cost_by_drawing(sco_names):
 		return {}
 	sco_by_entry = {e.name: (e.custom_sco_ref or e.subcontracting_order) for e in entries}
 
-	out = {}
-	for row in frappe.get_all(
+	rows = frappe.get_all(
 		"Stock Entry Detail",
-		filters={"parent": ["in", list(sco_by_entry)], "custom_drawing": ["!=", ""]},
-		fields=["parent", "custom_drawing", "amount"],
-	):
-		key = (sco_by_entry[row.parent], row.custom_drawing)
-		out[key] = flt(out.get(key, 0)) + flt(row.amount)
-	return out
+		filters={"parent": ["in", list(sco_by_entry)]},
+		fields=["parent", "item_code", "batch_no", "qty", "amount", "basic_rate",
+				"valuation_rate", "custom_drawing"],
+	)
+	if not rows:
+		return {}
+
+	# Price per Kg for each item and batch the job moved, so the cost can follow the
+	# requirement rather than the consolidated line.
+	rate = {}
+	stamped = {}
+	for r in rows:
+		sco = sco_by_entry[r.parent]
+		if flt(r.qty):
+			key = (sco, r.item_code, r.batch_no or "")
+			per_kg = flt(r.amount) / flt(r.qty) if flt(r.amount) else flt(r.basic_rate) or flt(r.valuation_rate)
+			if per_kg:
+				rate[key] = per_kg
+		if r.custom_drawing:
+			k = (sco, r.custom_drawing)
+			stamped[k] = flt(stamped.get(k, 0)) + flt(r.amount)
+
+	drawing_by_duno = {}
+	for w in frappe.get_all("SCO Drawing Item",
+							filters={"parent": ["in", sco_names], "parenttype": "Subcontracting Order"},
+							fields=["parent", "drawing", "duno_mark_no"]):
+		if w.drawing:
+			drawing_by_duno[(w.parent, w.duno_mark_no or "")] = w.drawing
+
+	mip_to_sco = {m: sco for sco, mips in (mip_by_sco or {}).items() for m in mips}
+	out = {}
+	priced = set()
+	if mip_to_sco:
+		for r in frappe.get_all(
+			"Material Issue Plan Raw Material",
+			filters={"parent": ["in", list(mip_to_sco)]},
+			fields=["parent", "item_code", "planned_item", "batch_no", "duno_mark_no", "transferred_qty"],
+		):
+			sco = mip_to_sco[r.parent]
+			# The batch's own item is what the transfer line carries, which is not the
+			# requirement's item wherever an alternate was issued against it.
+			item = r.planned_item or r.item_code
+			per_kg = rate.get((sco, item, r.batch_no or ""))
+			if not per_kg or not flt(r.transferred_qty):
+				continue
+			drawing = drawing_by_duno.get((sco, r.duno_mark_no or ""))
+			if not drawing:
+				continue
+			out[(sco, drawing)] = flt(out.get((sco, drawing), 0)) + flt(r.transferred_qty) * per_kg
+			priced.add((sco, item, r.batch_no or ""))
+
+	# Anything the plan did not account for keeps the stamp it was given.
+	for (sco, drawing), amount in stamped.items():
+		if (sco, drawing) in out:
+			continue
+		out[(sco, drawing)] = flt(out.get((sco, drawing), 0)) + amount
+
+	return {k: flt(v, 2) for k, v in out.items()}
 
 
 def get_columns(operations):

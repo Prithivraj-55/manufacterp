@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-25 23:09:51_
+_Generated: 2026-08-25 23:15:43_
 
 ## Modules
 
@@ -1275,7 +1275,7 @@ Functions:
 
 ### tests/_probe_tmp.py
 Functions:
-  - 4:run:
+  - 5:run:
 
 ### tests/reset_transactions.py
 Functions:
@@ -1679,9 +1679,9 @@ Functions:
   - 32:check:
   - 38:_labels:
   - 42:run:
-  - 260:_old_shape:
-  - 268:_excess_rows:
-  - 277:_summary:
+  - 295:_old_shape:
+  - 303:_excess_rows:
+  - 312:_summary:
 
 ### tests/verify_pr_sequential_allocation.py
 Functions:
