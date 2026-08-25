@@ -59,6 +59,32 @@ frappe.ui.form.on("Drawing", {
             });
         }
 
+		// Revising a drawing is cancel-then-amend. Doing it with the standard Cancel
+		// button walks Frappe into the Sales Order and out again to every other drawing
+		// on it -- "Cancel All Documents", twenty-one of them, to revise one. This does
+		// the pair in a single step and lands you on the draft.
+		if (frm.doc.docstatus === 1) {
+			frm.add_custom_button(__("Create Revision"), function () {
+				frappe.confirm(
+					__("Cancel <b>{0}</b> and open revision {1} as a draft?<br><br>Its Sales Order row is released now and re-attached to the new revision when you submit it.",
+					   [frm.doc.name, (frm.doc.rev_no || 0) + 1]),
+					function () {
+						frappe.call({
+							method: "manufyxinvenzaerp.drawing_management.drawing_utils.create_revision",
+							args: { drawing_name: frm.doc.name },
+							freeze: true,
+							freeze_message: __("Creating revision..."),
+							callback: function (r) {
+								if (r.message) {
+									frappe.set_route("Form", "Drawing", r.message);
+								}
+							},
+						});
+					}
+				);
+			});
+		}
+
 		if (!frm.is_new()) {
 			frm.add_custom_button(__("Update Customer Weight"), function () {
 				frappe.prompt(

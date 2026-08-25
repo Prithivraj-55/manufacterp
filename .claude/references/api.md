@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-08-25 21:45:26_
+_Generated: 2026-08-25 22:17:08_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -32,11 +32,12 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `create_production_plan_from_bom` | 168 |
-| `parse_drawing_items_csv` | 222 |
-| `get_batches_for_drawing_item` | 24 |
-| `update_customer_provided_weight` | 343 |
-| `create_bom_from_drawing` | 56 |
+| `create_bom_from_drawing` | 112 |
+| `create_production_plan_from_bom` | 224 |
+| `create_revision` | 24 |
+| `parse_drawing_items_csv` | 278 |
+| `update_customer_provided_weight` | 399 |
+| `get_batches_for_drawing_item` | 80 |
 | `mark_as_final_revision` | 10 |
 ## drawing_management/so_drawing_import.py
 
@@ -211,7 +212,12 @@ All `@frappe.whitelist()` methods. Call from JS:
 | `            "so pressing the button that calls them answers 'Method Not Allowed':\n    "` | 111 |
 | `    found = set` | 40 |
 | ``reserve_batches` was swallowed when a helper was inserted directly above it, and` | 4 |
+## tests/verify_drawing_create_revision.py
+
+| Method | Line |
+|--------|------|
+| `    # The link check is skipped for one reason only: the link it objects to is the` | 126 |
 
 ## Total
 
-_122 whitelisted methods_
+_124 whitelisted methods_

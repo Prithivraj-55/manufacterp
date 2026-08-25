@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-25 21:45:26_
+_Generated: 2026-08-25 22:17:08_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-08-25 21:45:26_
 
 ## Python files
 
-_Total: 256_
+_Total: 257_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -228,6 +228,7 @@ _Total: 256_
 - tests/verify_cut_sheet_new_batch.py
 - tests/verify_cut_sheet_w2_derived.py
 - tests/verify_decision_log.py
+- tests/verify_drawing_create_revision.py
 - tests/verify_drawing_import_savepoint.py
 - tests/verify_drawing_weight_cascade2.py
 - tests/verify_drawing_weight_cascade.py
@@ -890,14 +891,15 @@ Functions:
 ### drawing_management/drawing_utils.py
 Functions:
   - 10:mark_as_final_revision:
-  - 24:get_batches_for_drawing_item:
-  - 56:create_bom_from_drawing:
-  - 113:validate_bom_from_drawing:
-  - 168:create_production_plan_from_bom:
-  - 222:parse_drawing_items_csv:
-  - 334:get_so_dashboard_data:
-  - 343:update_customer_provided_weight:
-  - 395:_cascade_customer_weight:
+  - 24:create_revision:
+  - 80:get_batches_for_drawing_item:
+  - 112:create_bom_from_drawing:
+  - 169:validate_bom_from_drawing:
+  - 224:create_production_plan_from_bom:
+  - 278:parse_drawing_items_csv:
+  - 390:get_so_dashboard_data:
+  - 399:update_customer_provided_weight:
+  - 451:_cascade_customer_weight:
 
 ### drawing_management/sales_order.py
 Functions:
@@ -1270,7 +1272,7 @@ Functions:
 
 ### tests/_probe_tmp.py
 Functions:
-  - 2:run:
+  - 4:run:
 
 ### tests/reset_transactions.py
 Functions:
@@ -1510,6 +1512,13 @@ Functions:
   - 33:check:
   - 39:_source:
   - 43:run:
+
+### tests/verify_drawing_create_revision.py
+Functions:
+  - 31:check:
+  - 37:run:
+  - 112:_check_the_wiring:
+  - 138:_summary:
 
 ### tests/verify_drawing_import_savepoint.py
 Functions:
@@ -1802,14 +1811,16 @@ Functions:
 - `tests/test_whitelist_coverage.py:4` — ``reserve_batches` was swallowed when a helper was inserted directly above it, and`
 - `tests/test_whitelist_coverage.py:40` — `    found = set`
 - `tests/test_whitelist_coverage.py:111` — `            "so pressing the button that calls them answers 'Method Not Allowed':\n    "`
+- `tests/verify_drawing_create_revision.py:126` — `    # The link check is skipped for one reason only: the link it objects to is the`
 - `purchase_order_management/purchase_order.py:10` — `get_po_item_uom`
 - `sq_management/supplier_quotation.py:19` — `get_sq_item_uom`
 - `drawing_management/drawing_utils.py:10` — `mark_as_final_revision`
-- `drawing_management/drawing_utils.py:24` — `get_batches_for_drawing_item`
-- `drawing_management/drawing_utils.py:56` — `create_bom_from_drawing`
-- `drawing_management/drawing_utils.py:168` — `create_production_plan_from_bom`
-- `drawing_management/drawing_utils.py:222` — `parse_drawing_items_csv`
-- `drawing_management/drawing_utils.py:343` — `update_customer_provided_weight`
+- `drawing_management/drawing_utils.py:24` — `create_revision`
+- `drawing_management/drawing_utils.py:80` — `get_batches_for_drawing_item`
+- `drawing_management/drawing_utils.py:112` — `create_bom_from_drawing`
+- `drawing_management/drawing_utils.py:224` — `create_production_plan_from_bom`
+- `drawing_management/drawing_utils.py:278` — `parse_drawing_items_csv`
+- `drawing_management/drawing_utils.py:399` — `update_customer_provided_weight`
 - `drawing_management/bom_class_override.py:353` — `get_routing`
 - `drawing_management/bom_class_override.py:424` — `get_bom_material_detail`
 - `drawing_management/bom_class_override.py:509` — `update_cost`
