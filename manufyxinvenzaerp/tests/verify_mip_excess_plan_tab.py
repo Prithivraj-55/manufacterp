@@ -46,6 +46,7 @@ def _js():
 def run():
     from manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer import (
         create_mip_partial_transfer, get_mip_pending_items, _log_round_up_excess,
+        _log_consolidated_excess,
     )
     from manufyxinvenzaerp.utils.dimension_formula import calculate_qty
 
@@ -215,6 +216,55 @@ def run():
           "excess_plan_json" in inspect.signature(save_transfer_draft).parameters, True)
     check("the popup sends it with the draft too", js.count("excess_plan_json") >= 2, True)
     check("and restores it on reopen", "dlg._excess_plan[d.item_code]" in js, True)
+
+    print()
+    print("=== no excess, nothing to describe ===")
+    # An item transferred at exactly its drawing weight left no off-cut. The boxes used
+    # to stay open and accept one: 162.112 mm and 4 pieces typed against 0.000 system
+    # excess reported "+9.662" -- an off-cut nobody cut, booked onto the plan and left
+    # waiting to be collected. A negative system figure is a shortfall, not an off-cut,
+    # so it closes the boxes too.
+    check("the row knows it has none", "var no_excess = sys <= 0;" in js, True)
+    check("and the boxes are closed", '((no_excess || also_disabled) ? " disabled" : "")' in js, True)
+    check("Width stays closed for Structurals whatever the excess",
+          'box("mip-xs-width", 100, flt(saved.width), e.group === "Structurals")' in js, True)
+    check("a row that stops having excess drops what was typed while it did",
+          "if (no_excess && dlg._excess_plan) delete dlg._excess_plan[code];" in js, True)
+    check("and never recalculates from it",
+          'if ($row.hasClass("mfx-no-excess"))' in js, True)
+
+    print()
+    print("=== and the server keeps the same rule ===")
+    # The popup closing a box is a courtesy; an import or an API call walks past it.
+    cons_src = inspect.getsource(_log_consolidated_excess)
+    check("it refuses to book against a system figure of zero",
+          "if system_kg <= 0:" in cons_src, True)
+
+    mip = frappe.get_doc("Material Issue Plan", {"docstatus": ["<", 2]}, "name") \
+        if frappe.db.exists("Material Issue Plan", {"docstatus": ["<", 2]}) else None
+    if not mip:
+        print("   No Material Issue Plan on this site to book against.")
+    else:
+        doc = frappe.get_doc("Material Issue Plan", mip.name)
+        before = len(doc.excess_return_items or [])
+        # Same measurements on both: only the system figure differs, so only the system
+        # figure can decide which one books.
+        items = [
+            {"item_code": "__MFX_NONE", "qty": 100.0, "drawing_planned_weight": 100.0,
+             "custom_parent_item_group": "Structurals", "custom_unit_weight": 1.0,
+             "custom_thickness": 0.0, "uom": "Kg"},
+            {"item_code": "__MFX_OVER", "qty": 150.0, "drawing_planned_weight": 100.0,
+             "custom_parent_item_group": "Structurals", "custom_unit_weight": 1.0,
+             "custom_thickness": 0.0, "uom": "Kg"},
+        ]
+        measured = {"length": 1000, "width": 0, "sec_qty": 4}
+        try:
+            _log_consolidated_excess(doc, items, {"__MFX_NONE": measured, "__MFX_OVER": measured})
+            booked = [r.item_code for r in (doc.excess_return_items or [])][before:]
+            check("an item that left nothing over books no row", "__MFX_NONE" in booked, False)
+            check("while one that did still books", "__MFX_OVER" in booked, True)
+        finally:
+            frappe.db.rollback()
 
     print()
     print("=== SUMMARY ===")

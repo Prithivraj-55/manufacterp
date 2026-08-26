@@ -69,6 +69,7 @@
   },
   {
    "default": "Open",
+   "description": "Set automatically from the reservations: Working while any mapped row is unreserved or anything is still in Unavailable Items, Batch Mapping Completed once every row is reserved.",
    "fieldname": "planning_status",
    "fieldtype": "Select",
    "in_list_view": 1,
@@ -369,6 +370,7 @@
  "search_fields": "company",
  "sort_field": "modified",
  "sort_order": "DESC",
+ "state_fieldname": "planning_status",
  "states": [
   {
    "color": "Gray",
@@ -386,6 +388,5 @@
    "title": "Batch Mapping Completed"
   }
  ],
- "state_fieldname": "planning_status",
  "track_changes": 1
 }

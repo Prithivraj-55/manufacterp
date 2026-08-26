@@ -159,7 +159,7 @@ const ERP_MANUAL_SALES_ORDER_CHILDREN = [
 			"<b>Blank is allowed</b> for Nature of Work and Rate Schedule. Neither is mandatory on a Drawing, and older imports predate both columns.",
 		],
 		buttons: [
-			{ name: "Verify Raw Materials", note: "Runs every check above. Passing sets the order's verified flag; failing lists each problem with the drawing, Material Code and Item No it belongs to." },
+			{ name: "Verify Raw Materials", note: "Runs every check above. Passing sets the order's verified flag; failing lists each problem <b>led by the row it is on</b> — <i>Raw Materials row 100 · …</i> or <i>Drawing List row 22 · …</i> — followed by the drawing, Material Code and Item No. The table is named because both are on this order and row 22 of one is not row 22 of the other." },
 		],
 	},
 	{
@@ -914,7 +914,7 @@ const ERP_MANUAL_MATERIAL_PLANNING_CHILDREN = [
 		fields: [
 			{ name: "Item Code / Required Qty / Required Sec Qty", note: "What's actually needed — unchanged from the original requirement." },
 			{ name: "Length / Width / Thickness / Unit Weight", note: "The REQUIRED dimensions (not the batch's) — shown for reference so you know what you're covering." },
-			{ name: "Assign Batch", note: "Pick any batch of this item (or of a substitute item) by hand — no dimension-matching restriction here, unlike Exact Match." },
+			{ name: "Assign Batch", note: "Pick any batch by hand — of this item or of a substitute — with no dimension-matching restriction, unlike Exact Match. <b>Only batches holding stock in this plan's Raw Materials Warehouse are offered</b>, with the item, the Kg available there and the batch's dimensions shown beside each one. Set the warehouse first: with it blank, nothing is offered." },
 			{ name: "Status (Mapped / Not Mapped / Excess Mapped / Cut Sheet Mapped)", note: "At a glance, what state this row is in — see the Status legend below." },
 			{ name: "Planned Item (from Batch)", note: "The item the assigned batch actually is — will differ from Item Code if you've substituted an alternate item." },
 			{ name: "Batch Length / Width / Thickness / Unit Weight", note: "The ASSIGNED BATCH's own dimensions — this is what the Kg formula actually uses, not the required dimensions." },
@@ -923,6 +923,7 @@ const ERP_MANUAL_MATERIAL_PLANNING_CHILDREN = [
 			{ name: "CNC Process", note: "Same meaning as on Available Raw Materials — see that section for the full example." },
 			{ name: "Reserved / Reserved Qty / Shortfall Qty / Reserved On", note: "Same reservation bookkeeping as Exact Match — and the same rule: only the quantity ON THIS ROW gets reserved, never the whole batch." },
 			{ name: "Batch Total / Reserved / Free Qty", note: "A live snapshot of that batch's stock position across the whole system, not just this row." },
+			{ name: "(a note on warehouses)", note: "The batch list used to be unfiltered, so a plan built for one warehouse could be mapped to a batch sitting in another. The reservation went through — a reservation is paper — and the stock check then reported the whole requirement as a shortfall against a batch holding ten tonnes in the wrong shed. The list is now taken from the plan's own warehouse, so that combination cannot be chosen." },
 		],
 		calcs: [
 			{
@@ -1267,31 +1268,28 @@ const ERP_MANUAL_MATERIAL_PLANNING_CHILDREN = [
 	},
 	{
 		id: "actions",
-		title: "Create, Status and Validate Stock",
-		kicker: "The three top-bar actions",
+		title: "Status and Validate Stock",
+		kicker: "The top-bar actions",
 		purpose:
 			"What the buttons along the top of a Material Planning do, and when each one is the " +
 			"right thing to press.",
 		steps: [
-			"<b>Create → Production Plan</b> — hands this plan on to production. Needs at least one BOM in Selected BOMs and a saved document. The new Production Plan carries the plan's BOMs and drawings, and is the document that later creates the Job Work Order and Material Issue Plan.",
-			"<b>Status → Batch Mapping Completed</b> — declares the mapping finished. It is checked, not just set: anything still unmapped or inconsistent is listed and the status stays where it is until those are dealt with.",
-			"<b>Status → Reopen Mapping</b> — appears once completed, and puts the plan back to <b>Working</b> so changes can be made again.",
+			"<b>Check Mapping</b> — reports everything wrong with the mapping: batches assigned in both tables, more reserved across all plans than the batch holds, allocated Nos beyond what the batch has, anything still in Unavailable Items. It sets nothing; the status looks after itself.",
 			"<b>Validate Stock</b> — a read-only check. For every item and batch the plan has committed, it shows the Kg and Sec Nos claimed against what the batch actually holds. Changes nothing.",
 		],
 		fields: [
-			{ name: "Status — Open", note: "Nothing planned yet." },
-			{ name: "Status — Working", note: "Set automatically as soon as any mapping or exact-match row exists. The normal working state." },
-			{ name: "Status — Batch Mapping Completed", note: "Set only through the Status button, and only when the checks pass. Signals the plan is ready to be acted on." },
+			{ name: "Status — Open", note: "Nothing mapped and nothing outstanding." },
+			{ name: "Status — Working", note: "Something is mapped, but not all of it is reserved — or something is still sitting in Unavailable Items. The normal working state." },
+			{ name: "Status — Batch Mapping Completed", note: "Every mapped row is reserved and nothing is left unavailable. Read-only and recalculated on every save: you never set it, and it cannot be wrong." },
 		],
 		notes: [
 			"<b>Validate Stock before transferring, every time.</b> It is the one place that shows a fractional Sec Nos total — which means several drawings are sharing one bar or sheet, and someone has to decide at transfer time whether to hand over the lower or the higher whole piece count. Better known now than in front of the storeman.",
-			"<b>Status never moves backwards on its own.</b> Working is set automatically, but the plan is only marked complete when you say so, and only Reopen Mapping brings it back.",
-			"<b>Creating a Production Plan does not lock this plan.</b> You can still map and reserve afterwards — but anything you change after the Production Plan exists will not be reflected in it unless it is refreshed.",
+			"<b>The status follows the reservations, in both directions.</b> Reserve the last row and it reads Batch Mapping Completed; unreserve one and it goes back to Working by itself. There is nothing to press and nothing to reopen. It used to be a one-way ratchet — marked complete by hand and never moved again — so a plan could sit reading <i>Batch Mapping Completed</i> with not one row reserved, and a Material Issue Plan only ever offers reserved rows for transfer. It said it was ready and would have moved nothing.",
+			"<b>There is no Create → Production Plan button any more.</b> The Production Plan is raised by hand and picks its own drawings — which is the point: taking every BOM on this plan was rarely what was wanted. This plan is still what the Production Plan's drawing picker reads from, so nothing about the order of work changes.",
+			"<b>A Production Plan does not lock this plan.</b> You can still map and reserve after one exists — but anything you change afterwards will not be reflected in it unless it is refreshed.",
 		],
 		buttons: [
-			{ name: "Create → Production Plan", note: "Creates the Production Plan from this plan's selected BOMs." },
-			{ name: "Status → Batch Mapping Completed", note: "Validates, then marks the plan complete. Lists what is wrong if it cannot." },
-			{ name: "Status → Reopen Mapping", note: "Returns a completed plan to Working so it can be edited." },
+			{ name: "Check Mapping", note: "Lists what is wrong with the mapping. Changes nothing — the status is worked out from the reservations on every save." },
 			{ name: "Validate Stock", note: "Shows planned Kg and Sec Nos per item and batch against what is really in the warehouse. Read-only." },
 		],
 	},
@@ -1386,7 +1384,7 @@ const ERP_MANUAL_JOB_WORK_ORDER_CHILDREN = [
 			"there is no separate Work Order/Job Card involved.",
 		fields: [
 			{ name: "Drawing Items", note: "Every drawing/DUNO this job covers, each with its own Customer Provided Weight, Planned RM Weight, Mapped Weight, Excess Weight, and Transferred Weight — rolled up from Material Planning." },
-			{ name: "All Operations Complete", note: "Ticks itself once every operation in the chain has been submitted." },
+			{ name: "All Operations Complete", note: "Ticks itself once every operation in the chain has been submitted. Informational — it no longer gates anything: <b>Make Final Stock Entry</b> follows the last operation's completed pieces instead, so part of a job can be booked without waiting for the whole of it." },
 		],
 		steps: [
 			"Submitting the Job work order and clicking “Job work order & MIP” back on Production Plan creates one Supplier Operation Entry per Operation table row, in sequence order.",
@@ -1631,7 +1629,7 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 			"Open <b>Transfer → Select Materials to Transfer</b>. A readiness check runs first and tells you about anything that would silently reduce what moves — stock mapped but not reserved, CNC rows with no CNC warehouse, or material already sitting at the supplier.",
 			"Tick the rows to send. Rows short of stock are left unticked for you.",
 			"Adjust <b>Sec Nos</b> where you must hand over whole pieces. The system re-checks free stock for the higher figure and refuses it outright if the batch cannot cover it.",
-			"Switch to <b>Consolidate item for excess return plan</b> and measure the off-cut, one line per item. Optional — leave it blank and only a rounding surplus is booked, as before.",
+			"Switch to <b>Consolidate item for excess return plan</b> and measure the off-cut, one line per item — for the items that have one. A line whose Excess Kg (system) is zero has its boxes closed: nothing was left over, so there is nothing to measure. Optional — leave it blank and only a rounding surplus is booked, as before.",
 			"Submit. The Stock Entry is created, Transferred goes up, and the excess is written to the Excess Material table.",
 			"Come back later for the rest. Partial transfers are expected, and the popup shows exactly how much has gone and how much is left.",
 			"<b>Save and Close</b> at any point parks everything — the ticks, the Sec Nos, and the measured off-cuts — without transferring or validating anything. Reopen the popup and it is all still there.",
@@ -1704,7 +1702,7 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 			{ name: "Planned Drawing Wt", note: "What the drawings actually call for, added up across every selected row of that item. Read-only." },
 			{ name: "Planned Transfer Wt", note: "What is being sent, added up the same way. Follows the ticks and the Sec Nos on the first tab, so it changes as you edit them." },
 			{ name: "Excess Kg (system)", note: "<b>Planned Transfer Wt − Planned Drawing Wt.</b> What the transfer is sending beyond what the job needs. Read-only." },
-			{ name: "Length / Width / Sec Qty", note: "The off-cut you expect back. Entered rather than inferred: the system knows the weight of the surplus, never its shape." },
+			{ name: "Length / Width / Sec Qty", note: "The off-cut you expect back. Entered rather than inferred: the system knows the weight of the surplus, never its shape. <b>Closed when Excess Kg (system) is zero or negative</b> — the transfer sent no more than the drawings called for, so there is no off-cut to describe. Width is closed for Structurals in any case; only the Plates formula uses it, and Thickness is always read-only." },
 			{ name: "Excess Kg (entered)", note: "Calculated live from those dimensions with the same formula as everywhere else — Length ÷ 1000 × Unit Weight × Sec Qty for Structurals, with Width and Thickness for Plates." },
 			{ name: "Difference", note: "<b>Excess Kg (entered) − Excess Kg (system).</b> Green when the two agree, blue when more is coming back than the transfer created, red when part of it is unaccounted for." },
 		],
@@ -1832,7 +1830,8 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 			"Once every operation on the Job work order is complete, the finished goods are " +
 			"received and the plan closes itself.",
 		steps: [
-			"<b>Make Final Stock Entry</b> appears when all operations are done. It creates a draft Manufacture Stock Entry consuming the supplier-warehouse raw material and producing the finished item into the Finished Goods Warehouse — review it and submit from there.",
+			"<b>Make Final Stock Entry</b> appears as soon as the <b>last operation exists</b>, and books whatever that operation has finished — you do not wait for the whole job. It first shows you what it is about to book: one line per drawing, with how many pieces are planned, how many the last operation has completed, how many are already in finished goods, and how many this entry would book. Agree with it and it creates a draft Manufacture Stock Entry to review and submit.",
+			"<b>Four drawings of ten books four drawings.</b> Only the raw material belonging to those four is consumed — the rest stays at the supplier for the next entry — and only those four appear as finished goods. Finish the other six later and press it again; pieces already booked are never booked twice.",
 			"The plan moves to <b>Completed</b> by itself once finished goods have been received AND every Excess Material Items row is resolved: returned, claimed by another job, or marked Billed to Consume.",
 			"Completed is one-way. The document locks; nothing later moves it back.",
 		],
@@ -1852,7 +1851,7 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 			{ name: "To CNC Warehouse", note: "First leg for CNC-flagged rows. Only appears when a CNC Warehouse is set." },
 			{ name: "CNC to Supplier/WIP", note: "Second leg. Only appears once material has physically arrived at CNC." },
 			{ name: "Return Excess Entry", note: "Review quantities and enter a mandatory reason per row, then the return Stock Entry is created into the Finished Goods Warehouse." },
-			{ name: "Make Final Stock Entry", note: "Draft Manufacture entry for the finished goods. Appears once all operations are complete." },
+			{ name: "Make Final Stock Entry", note: "Draft Manufacture entry for the finished goods. Appears once the final operation exists, and needs at least one completed piece on it. Books only the drawings that operation has finished, and consumes only their share of the raw material." },
 			{ name: "PDF", note: "A shareable batch plan — DUNO/Mark No, Customer Drawing No, planned Kg, batch details and Sec Qty — for the production or supplier team." },
 		],
 	},
@@ -2141,7 +2140,9 @@ const ERP_MANUAL_PROCUREMENT_CHILDREN = [
 			"Create the receipt from the Purchase Order so the dimensions and references come with it. Correct anything that arrived different to what was ordered <b>before</b> submitting.",
 			"If any item on the receipt requires inspection, run that first — the receipt will not submit until its Inspection Status is Completed.",
 			"On submit, one batch is created per line, named and dimensioned from that line. See <b>The Batch Record</b> under Item for how the name is built.",
-			"Open the receipt again afterwards to see <b>Material Planning — Batches Allocated</b>, listing which plans the new batches were allocated to and whether each is reserved yet.",
+			"On submit, <b>Batches Allocated — Reserve Them</b> names the Material Planning the new batches went to and opens it from the dialog. <b>Allocated is not reserved</b>: only reserved rows are offered for transfer on a Material Issue Plan, so go and reserve them. Reserve the last one and the plan's status moves to Batch Mapping Completed by itself.",
+			"<b>If nothing was allocated, the receipt now says why.</b> Allocation follows the chain <b>Receipt line → Purchase Order line → Material Request line → that request's Material Planning</b>, and it only takes one missing link — a Purchase Order raised by hand instead of from the request, say — for the batches never to reach the plan. The receipt names the first broken link per item instead of submitting in silence. An ordinary purchase with no plan behind it stays quiet, as it should.",
+			"<b>Material Planning → Allocate to Material Planning</b> runs the allocation again on a submitted receipt, once the chain is repaired — so a receipt that missed its plan does not have to be cancelled and re-entered for stock that has already arrived. Safe to press twice: a requirement already covered has nothing left to match.",
 		],
 		buttons: [
 			{ name: "Create Inspection", note: "Logs an inspection call round against this receipt, then offers to create the Inspection Entry that records the result." },

@@ -721,6 +721,14 @@ def _log_consolidated_excess(mip, items, excess_plan):
             continue
 
         system_kg = flt(planned_kg.get(code, 0) - planned_kg.get("_drawing_" + code, 0), 3)
+        if system_kg <= 0:
+            # The transfer sent no more than the drawings called for, so there is no
+            # off-cut for this item however convincing the measurements look. The popup
+            # closes the boxes on such a row; this is the same rule for an import or an
+            # API call, which would otherwise book an off-cut nobody cut and leave it
+            # sitting on the plan waiting to be collected.
+            continue
+
         difference = flt(entered_kg - system_kg, 3)
         reason = _(
             "Planned on the transfer popup's consolidated excess tab. "

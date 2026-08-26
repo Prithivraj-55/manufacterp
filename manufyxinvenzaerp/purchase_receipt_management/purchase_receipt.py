@@ -292,6 +292,75 @@ def get_mp_for_pr(pr_name):
     return [r[0] for r in rows if r[0]]
 
 
+@frappe.whitelist()
+def diagnose_mp_allocation(pr_name):
+    """Why a receipt did, or did not, reach a Material Planning.
+
+    Allocation runs off a chain of four links -- receipt line to order line to request
+    line to the request's own plan -- and get_mp_for_pr is a single join across all of
+    them. When any link is missing the join returns nothing, allocation never runs, and
+    nothing anywhere says so: the receipt submits, the popup that would list the
+    allocated batches sees an empty list and returns early, and the plan still shows the
+    material as unavailable. That silence is the whole difficulty in diagnosing it after
+    the fact.
+
+    This walks the same chain one line at a time and reports the first link that breaks,
+    so the answer is "the purchase order was not raised from the request" rather than
+    "nothing happened"."""
+    if not frappe.has_permission("Purchase Receipt", "read", doc=pr_name):
+        frappe.throw(_("Not permitted to read this Purchase Receipt"), frappe.PermissionError)
+
+    broken, plans = [], set()
+    for row in frappe.get_all(
+        "Purchase Receipt Item", filters={"parent": pr_name},
+        fields=["item_code", "purchase_order_item"], order_by="idx",
+    ):
+        if not row.purchase_order_item:
+            broken.append((row.item_code, _("this line was not raised from a Purchase Order")))
+            continue
+        mr_item = frappe.db.get_value("Purchase Order Item", row.purchase_order_item,
+                                      "material_request_item")
+        if not mr_item:
+            broken.append((row.item_code, _("its Purchase Order line was not raised from a Material Request")))
+            continue
+        mr = frappe.db.get_value("Material Request Item", mr_item, "parent")
+        plan = frappe.db.get_value("Material Request", mr, "custom_material_planning") if mr else None
+        if not plan:
+            broken.append((row.item_code, _("Material Request {0} is not linked to a Material Planning").format(mr or "?")))
+            continue
+        plans.add(plan)
+
+    return {"plans": sorted(plans), "broken": broken}
+
+
+@frappe.whitelist()
+def retry_mp_allocation(pr_name):
+    """Run the allocation again for a receipt that is already submitted.
+
+    The message shown when allocation fails has always told people to "retry the
+    allocation manually from the Material Planning document", and there was nowhere to
+    do it: the only caller of allocate_pr_stock_to_mp was the submit hook. Recovering
+    meant cancelling and re-receiving stock that had physically arrived.
+
+    Safe to run more than once. allocate_pr_stock_to_mp rebuilds its candidates from
+    unavailable_items as that table currently stands, and a row already covered is gone
+    from it -- so a second run over the same receipt has nothing left to match."""
+    if not frappe.has_permission("Material Planning", "write"):
+        frappe.throw(_("Not permitted to update Material Planning"), frappe.PermissionError)
+    if frappe.db.get_value("Purchase Receipt", pr_name, "docstatus") != 1:
+        frappe.throw(_("Only a submitted Purchase Receipt can be allocated."))
+
+    report = diagnose_mp_allocation(pr_name)
+    results = []
+    for mp_name in report["plans"]:
+        added = allocate_pr_stock_to_mp(pr_name, mp_name)
+        _archive_consolidate_items(mp_name, pr_name)
+        results.append(dict(added, material_planning=mp_name))
+    frappe.db.commit()
+    report["results"] = results
+    return report
+
+
 def _pr_dimensions_match(pr_item, mp_row):
     """True when a purchased line arrived in exactly the size the requirement
     row asks for -- the same strict all-three-dimensions rule

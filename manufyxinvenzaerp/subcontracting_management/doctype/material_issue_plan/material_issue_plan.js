@@ -130,44 +130,125 @@ function _load_mip_drawings(frm) {
 	}
 }
 
-// "Make Final Stock Entry" — moved here from the Subcontracting Order (client
-// change request). Once the linked SCO's operations are all complete, creates a
-// draft Manufacture Stock Entry that consumes the supplier-warehouse raw material
-// and produces the finished good; the stock-return workflow (Return Excess Entry)
-// already lives on this doctype, so the finished-goods entry is created from the
-// same place. custom_all_ops_complete lives on the Subcontracting Order, not the
-// MIP, so it's read via a lookup rather than a stored/fetched field.
+// "Make Final Stock Entry" — moved here from the Job Work Order (client change
+// request). Creates a draft Manufacture Stock Entry that consumes the raw material
+// belonging to the drawings the last operation has finished, and produces those
+// drawings as finished goods. The stock-return workflow (Return Excess Entry)
+// already lives on this doctype, so the finished-goods entry is raised from the
+// same place.
 function _add_final_stock_entry_button(frm) {
 	if (frm.is_new() || !frm.doc.subcontracting_order) return;
 
-	frappe.db.get_value("Subcontracting Order", frm.doc.subcontracting_order, "custom_all_ops_complete")
-		.then((r) => {
-			if (!(r.message && r.message.custom_all_ops_complete)) return;
-
-			frm.add_custom_button(__("Make Final Stock Entry"), function () {
-				frappe.call({
-					method: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_finished_goods_entry",
-					args: { sco_name: frm.doc.subcontracting_order },
-					freeze: true,
-					freeze_message: __("Creating Final Stock Entry…"),
-					callback: function (r) {
-						if (r.message) {
-							let se_name = r.message.name;
-							let already = r.message.already_existed;
-							frappe.msgprint({
-								title: already ? __("Final Stock Entry Already Exists") : __("Final Stock Entry Created"),
-								message: (already
-										? __("A draft Final Stock Entry already exists for this Subcontracting Order. ")
-										: "")
-									+ __("Review and submit the stock entry: ") +
-									'<a href="/app/stock-entry/' + encodeURIComponent(se_name) + '">' + se_name + "</a>",
-								indicator: already ? "orange" : "green"
-							});
-						}
-					},
-				});
+	// Shown as soon as the LAST operation exists, not once every operation on every
+	// drawing is done. A job of ten drawings that has finished four could not book
+	// those four before, so finished steel sat at the supplier with nothing to show
+	// for it until the last piece of the last drawing was painted.
+	frappe.call({
+		method: "manufyxinvenzaerp.subcontracting_management.subcontracting.get_final_stock_entry_preview",
+		args: { sco_name: frm.doc.subcontracting_order },
+		callback(r) {
+			let p = r.message;
+			if (!p || !p.final_operation) return;
+			frm.add_custom_button(__("Make Final Stock Entry"), function() {
+				_show_final_stock_entry_preview(frm);
 			});
-		});
+		},
+	});
+}
+
+// What is about to be booked, before anything is created. "Four of ten" is a fact
+// somebody should see and agree with, not discover in a draft.
+function _show_final_stock_entry_preview(frm) {
+	frappe.call({
+		method: "manufyxinvenzaerp.subcontracting_management.subcontracting.get_final_stock_entry_preview",
+		args: { sco_name: frm.doc.subcontracting_order },
+		freeze: true,
+		freeze_message: __("Checking what is complete…"),
+		callback(r) {
+			let p = r.message || {};
+			if (!p.final_operation) {
+				frappe.msgprint({
+					title: __("No Final Operation"),
+					indicator: "orange",
+					message: __("The final operation has not been created for this Job Work Order yet."),
+				});
+				return;
+			}
+
+			let body = (p.drawings || []).map(function(d) {
+				let ready = flt(d.ready_to_book);
+				return `<tr style="${ready > 0 ? "" : "color:#999"}">
+					<td style="padding:3px 6px">${frappe.utils.escape_html(String(d.duno_mark_no || ""))}</td>
+					<td style="padding:3px 6px">${frappe.utils.escape_html(String(d.customer_drawing_number || d.drawing || ""))}</td>
+					<td style="padding:3px 6px;text-align:right">${flt(d.qty_to_manufacture, 3)}</td>
+					<td style="padding:3px 6px;text-align:right">${flt(d.completed_qty_nos, 3)}</td>
+					<td style="padding:3px 6px;text-align:right">${flt(d.already_booked, 3)}</td>
+					<td style="padding:3px 6px;text-align:right;font-weight:600">${ready > 0 ? flt(ready, 3) : "—"}</td>
+				</tr>`;
+			}).join("");
+
+			let table = `<table class="table table-bordered table-condensed" style="font-size:11px;margin:8px 0">
+				<thead><tr>
+					<th>${__("DUNO")}</th><th>${__("Drawing")}</th>
+					<th style="text-align:right">${__("To Make")}</th>
+					<th style="text-align:right">${__("Completed")}</th>
+					<th style="text-align:right">${__("Already Booked")}</th>
+					<th style="text-align:right">${__("Booking Now")}</th>
+				</tr></thead><tbody>${body}</tbody></table>`;
+
+			let lead = __("Last operation: <b>{0}</b> — {1} of {2} pieces completed across {3} drawing(s).", [
+				p.final_operation.operation, flt(p.total_completed, 3),
+				flt(p.total_planned, 3), (p.drawings || []).length]);
+
+			if (!p.can_create) {
+				frappe.msgprint({
+					title: __("Nothing to Book"),
+					indicator: "orange",
+					message: `<p>${lead}</p>` + table + `<p style="color:#555">${p.reason || ""}</p>`,
+				});
+				return;
+			}
+
+			let d = new frappe.ui.Dialog({
+				title: __("Make Final Stock Entry"),
+				size: "large",
+				fields: [{ fieldtype: "HTML", fieldname: "body" }],
+				primary_action_label: __("Create Stock Entry"),
+				primary_action() {
+					d.hide();
+					_create_final_stock_entry(frm);
+				},
+			});
+			d.fields_dict.body.$wrapper.html(
+				`<p>${lead}</p>` + table +
+				`<p style="color:#555">${__("<b>{0} piece(s)</b> will be booked into finished goods, and only the raw material belonging to those drawings will be consumed. The rest stays at the supplier for a later entry.", [flt(p.total_ready, 3)])}</p>`
+			);
+			d.show();
+		},
+	});
+}
+
+function _create_final_stock_entry(frm) {
+	frappe.call({
+		method: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_finished_goods_entry",
+		args: { sco_name: frm.doc.subcontracting_order },
+		freeze: true,
+		freeze_message: __("Creating Final Stock Entry…"),
+		callback: function (r) {
+			if (!r.message) return;
+			let se_name = r.message.name;
+			let already = r.message.already_existed;
+			frappe.msgprint({
+				title: already ? __("Final Stock Entry Already Exists") : __("Final Stock Entry Created"),
+				message: (already
+						? __("A draft Final Stock Entry already exists for this Job Work Order. ")
+						: "")
+					+ __("Review and submit the stock entry: ") +
+					'<a href="/app/stock-entry/' + encodeURIComponent(se_name) + '">' + se_name + "</a>",
+				indicator: already ? "orange" : "green",
+			});
+		},
+	});
 }
 
 // "View All" — raw_materials can run past 100 rows, well beyond the grid's
@@ -1125,14 +1206,28 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 		codes.forEach(function(code) {
 			var e = by_item[code];
 			var sys = flt(e.transfer_kg - e.drawing_kg, 3);
+			// Nothing was left over, so there is no off-cut to describe. The boxes are
+			// closed rather than left open and ignored: an item transferred at exactly
+			// its drawing weight used to accept a length and a piece count and report
+			// them as a difference of the whole entered weight -- 162.112 mm and 4
+			// pieces against 0.000 system excess reading "+9.662", which is an off-cut
+			// nobody cut. A negative system figure is a shortfall, not an off-cut, so
+			// it closes the boxes too.
+			var no_excess = sys <= 0;
+			// A row that stops having excess must not keep what was typed while it did.
+			if (no_excess && dlg._excess_plan) delete dlg._excess_plan[code];
 			var saved = (dlg._excess_plan || {})[code] || {};
+			var why = no_excess
+				? " title='" + __("No excess on this item — nothing to describe.") + "'"
+				: "";
 			var num = "<input type='number' step='0.001' min='0' class='form-control input-xs text-right ";
-			// Width is only used by the Plates formula -- Structurals rows never
-			// need it, so their Width box is read-only.
-			var w_cell = e.group === "Structurals"
-				? num + "mip-xs-width' style='width:100px' disabled value='" + (flt(saved.width) || "") + "'></td>"
-				: num + "mip-xs-width' style='width:100px' value='" + (flt(saved.width) || "") + "'></td>";
-			html += "<tr data-item='" + frappe.utils.escape_html(code) + "'>" +
+			function box(cls, width, value, also_disabled) {
+				return num + cls + "' style='width:" + width + "px'" +
+					((no_excess || also_disabled) ? " disabled" : "") + why +
+					" value='" + (value || "") + "'>";
+			}
+			html += "<tr data-item='" + frappe.utils.escape_html(code) + "'" +
+					(no_excess ? " class='mfx-no-excess'" : "") + ">" +
 				"<td>" + frappe.utils.escape_html(code) +
 					"<div class='text-muted' style='font-size:11px'>" +
 						__("{0} batch row(s)", [e.batches]) + "</div></td>" +
@@ -1140,10 +1235,12 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 				"<td class='text-right' style='white-space:nowrap'>" + format_number(e.transfer_kg, null, 3) + "</td>" +
 				"<td class='text-right mip-xs-sys' style='white-space:nowrap;font-weight:600'>" +
 					format_number(sys, null, 3) + "</td>" +
-				"<td>" + num + "mip-xs-length' style='width:100px' value='" + (flt(saved.length) || "") + "'></td>" +
-				"<td>" + w_cell +
+				"<td>" + box("mip-xs-length", 100, flt(saved.length)) + "</td>" +
+				// Width is only used by the Plates formula -- Structurals rows never
+				// need it, so their Width box is read-only whatever the excess.
+				"<td>" + box("mip-xs-width", 100, flt(saved.width), e.group === "Structurals") + "</td>" +
 				"<td class='text-right' style='white-space:nowrap'>" + format_number(e.thickness, null, 2) + "</td>" +
-				"<td>" + num + "mip-xs-sec' style='width:90px' value='" + (flt(saved.sec_qty) || "") + "'></td>" +
+				"<td>" + box("mip-xs-sec", 90, flt(saved.sec_qty)) + "</td>" +
 				"<td class='text-right mip-xs-kg' style='white-space:nowrap;font-weight:600'>—</td>" +
 				"<td class='text-right mip-xs-diff' style='white-space:nowrap;font-weight:600'>—</td>" +
 			"</tr>";
@@ -1159,6 +1256,14 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 	function _recalc_excess_row($row, by_item) {
 		var e = by_item[$row.data("item")];
 		if (!e) return;
+		// A closed row has nothing to add up, and must not carry a figure from before
+		// the transfer quantity changed under it.
+		if ($row.hasClass("mfx-no-excess")) {
+			if (dlg._excess_plan) delete dlg._excess_plan[e.item_code];
+			$row.find(".mip-xs-kg").text("—");
+			$row.find(".mip-xs-diff").text("—").css("color", "");
+			return;
+		}
 		var L = flt($row.find(".mip-xs-length").val());
 		var W = flt($row.find(".mip-xs-width").val());
 		var S = flt($row.find(".mip-xs-sec").val());

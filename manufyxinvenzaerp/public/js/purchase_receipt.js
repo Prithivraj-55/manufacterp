@@ -152,7 +152,13 @@ frappe.ui.form.on("Purchase Receipt", {
 			args: { pr_name: frm.doc.name },
 			callback(r) {
 				let allocs = r.message || [];
-				if (!allocs.length) return;
+				// Silence here was the whole difficulty: a receipt whose chain back to a
+				// Material Planning is broken allocated nothing, said nothing, and left
+				// the plan still showing the material as unavailable. Ask why instead.
+				if (!allocs.length) {
+					_mfx_pr_report_no_allocation(frm);
+					return;
+				}
 
 				// Group by Material Planning for a clean display
 				let by_mp = {};
@@ -191,17 +197,105 @@ frappe.ui.form.on("Purchase Receipt", {
 				}).join("");
 
 				let any_unreserved = allocs.some(function(a) { return !a.is_reserved; });
+				let mp_names = Object.keys(by_mp);
 
-				frappe.msgprint({
-					title: __("Material Planning — Batches Allocated"),
+				// Allocated is not reserved, and only reserved rows are ever offered for
+				// transfer -- so the instruction leads rather than trailing the tables in
+				// grey. The plan opens from the dialog itself: being told to go and do
+				// something is not the same as being able to.
+				let lead = any_unreserved
+					? `<p style="font-size:13px"><b>${__("Check and reserve these batches.")}</b> ` +
+					  __("They were allocated against the Material Planning below, but a batch that is allocated is not yet reserved — and only reserved rows are offered for transfer on a Material Issue Plan.") +
+					  `</p><p style="color:#555">${__("Reserve every row and the plan's status moves to <b>Batch Mapping Completed</b> on its own.")}</p>`
+					: `<p style="font-size:13px">${__("Received batches were allocated against the Material Planning below, and are already reserved and ready for transfer.")}</p>`;
+
+				let dialog_msg = frappe.msgprint({
+					title: any_unreserved
+						? __("Batches Allocated — Reserve Them")
+						: __("Material Planning — Batches Allocated"),
 					indicator: any_unreserved ? "orange" : "green",
-					message: `<p>${__("Received batches from this Purchase Receipt have been allocated against the following Material Planning document(s):")}</p>`
-						+ sections
-						+ (any_unreserved
-							? `<p style="margin-top:8px;color:#555">${__("Open the Material Planning and Reserve the batch(es) marked \"Not Reserved Yet\" before they can be used in a Material Issue Plan / transferred — unreserved batches are never offered for transfer.")}</p>`
-							: `<p style="margin-top:8px;color:#555">${__("These batches are already reserved and ready for transfer in the linked Material Issue Plan.")}</p>`),
+					message: lead + sections,
+					primary_action: mp_names.length === 1 ? {
+						label: __("Open {0}", [mp_names[0]]),
+						action() {
+							dialog_msg.hide();
+							frappe.set_route("Form", "Material Planning", mp_names[0]);
+						},
+					} : undefined,
 				});
 			},
 		});
+	},
+});
+
+
+// ── Allocation into Material Planning: why it did not happen, and how to run it again ──
+//
+// allocate_pr_stock_to_mp reaches its plan through receipt line -> order line -> request
+// line -> the request's own plan. Break any link and the join finds nothing, allocation
+// never runs, and until now nothing said so.
+
+function _mfx_pr_report_no_allocation(frm) {
+	frappe.call({
+		method: "manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.diagnose_mp_allocation",
+		args: { pr_name: frm.doc.name },
+		callback(r) {
+			let d = r.message || {};
+			// A receipt with no Material Request behind any line is an ordinary purchase,
+			// not a planning failure. Saying nothing is right there.
+			if (!(d.broken || []).length) return;
+			if ((d.plans || []).length) return;
+
+			let rows = d.broken.map(function(b) {
+				return `<tr><td style="padding:3px 6px">${frappe.utils.escape_html(String(b[0]))}</td>` +
+					`<td style="padding:3px 6px">${frappe.utils.escape_html(String(b[1]))}</td></tr>`;
+			}).join("");
+			frappe.msgprint({
+				title: __("Nothing Allocated to Material Planning"),
+				indicator: "orange",
+				message: __("These lines do not trace back to a Material Planning, so no batch was allocated into one:") +
+					`<table class="table table-bordered table-condensed" style="font-size:11px;margin:8px 0">
+						<thead><tr><th>${__("Item")}</th><th>${__("Why")}</th></tr></thead>
+						<tbody>${rows}</tbody></table>` +
+					__("Allocation follows the chain <b>Receipt line → Purchase Order line → Material Request line → that request's Material Planning</b>. Raise the Purchase Order from the Material Request, and the Material Request from the plan's Unavailable Items, and the batches land in the plan on submit.") +
+					"<br><br>" +
+					__("If the chain is intact and this is a one-off, use <b>Allocate to Material Planning</b> on this receipt to run it again."),
+			});
+		},
+	});
+}
+
+frappe.ui.form.on("Purchase Receipt", {
+	refresh(frm) {
+		if (frm.doc.docstatus !== 1) return;
+		frm.add_custom_button(__("Allocate to Material Planning"), function() {
+			frappe.call({
+				method: "manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.retry_mp_allocation",
+				args: { pr_name: frm.doc.name },
+				freeze: true,
+				freeze_message: __("Allocating…"),
+				callback(r) {
+					let d = r.message || {};
+					if (!(d.plans || []).length) {
+						_mfx_pr_report_no_allocation(frm);
+						return;
+					}
+					let lines = (d.results || []).map(function(x) {
+						return __("{0}: {1} into Exact Match, {2} into Material Mapping", [
+							x.material_planning, x.added_exact, x.added_mapping]);
+					});
+					let none = (d.results || []).every(function(x) {
+						return !x.added_exact && !x.added_mapping;
+					});
+					frappe.msgprint({
+						title: none ? __("Nothing Left to Allocate") : __("Allocated"),
+						indicator: none ? "blue" : "green",
+						message: (none
+							? __("Every requirement these batches cover is already allocated — running it again has nothing left to match.")
+							: __("Batches allocated:")) + "<br><br>" + lines.join("<br>"),
+					});
+				},
+			});
+		}, __("Material Planning"));
 	},
 });

@@ -678,6 +678,26 @@ def process_drawings(so_name, step, batch_start=0, batch_size=30):
 
 # ---------------------------------------------------------------------------
 
+def _at(table, idx, text):
+    """Put the row number in front of the complaint.
+
+    A verification run reports against a sheet of hundreds of rows, and "Drawing
+    BEAM-1B16 -SHT-16 OF 291 / ISMB250 (Item 1w11)" is the drawing's name, not a place
+    to go. The row number is, so it leads.
+
+    The table is named with it because the Sales Order has two the issues can come
+    from -- Drawing List on the Drawing Import tab, and Raw Materials -- and row 16 of
+    one is not row 16 of the other.
+    """
+    return "<b>%s</b> &middot; %s" % (_("{0} row {1}").format(_(table), idx), text)
+
+
+# Plain strings, translated inside _at: calling _() at import time runs outside any
+# request and would pin the message to whatever language the worker started in.
+DRAWING_LIST = "Drawing List"
+RAW_MATERIALS = "Raw Materials"
+
+
 def _check_drawing_masters(so):
     """Nature of Work / Rate Schedule on each imported drawing row must already exist
     in their masters.
@@ -718,11 +738,10 @@ def _check_drawing_masters(so):
                                    ("Rate Schedule", "rate_schedule")):
             value = r.get(fieldname)
             if value and value not in existing[doctype]:
-                issues.append(
+                issues.append(_at(DRAWING_LIST, r.idx,
                     _("Drawing {0}: {1} <b>{2}</b> is not in the {1} master. "
                       "Correct it in the sheet (or create the record) and import again.")
-                    .format(label, doctype, value)
-                )
+                    .format(label, doctype, value)))
     return issues
 
 
@@ -802,17 +821,20 @@ def _check_drawing_headers(so):
     for r in rows:
         label = r.get("drawing_number") or r.get("duno_mark_no") or "?"
         if not r.get("item"):
-            issues.append(_("Drawing {0}: FG Item is missing").format(label))
+            issues.append(_at(DRAWING_LIST, r.idx,
+                              _("Drawing {0}: FG Item is missing").format(label)))
         elif r.item not in existing_fg:
-            issues.append(_("Drawing {0}: FG Item <b>{1}</b> is not in the Item master").format(label, r.item))
+            issues.append(_at(DRAWING_LIST, r.idx,
+                              _("Drawing {0}: FG Item <b>{1}</b> is not in the Item master")
+                              .format(label, r.item)))
         if not r.get("duno_mark_no"):
-            issues.append(_("Drawing {0}: DUNO/Mark No is missing").format(label))
+            issues.append(_at(DRAWING_LIST, r.idx,
+                              _("Drawing {0}: DUNO/Mark No is missing").format(label)))
         if flt(r.get("total_quantity")) <= 0:
-            issues.append(
+            issues.append(_at(DRAWING_LIST, r.idx,
                 _("Drawing {0}: Total Qty is {1} — set how many are being made, "
                   "otherwise every total is calculated for one piece.")
-                .format(label, flt(r.get("total_quantity")))
-            )
+                .format(label, flt(r.get("total_quantity")))))
     return issues
 
 
@@ -866,23 +888,31 @@ def verify_raw_materials(so_name):
     seen_cdns = {r.customer_drawing_number for r in unlocked if r.customer_drawing_number}
     for r in (so.get("custom_duno_items") or []):
         if not r.get("drawing") and r.get("drawing_number") and r.drawing_number not in seen_cdns:
-            issues.append(_("Drawing {0}: no raw material rows were loaded for it").format(r.drawing_number))
+            issues.append(_at(DRAWING_LIST, r.idx,
+                              _("Drawing {0}: no raw material rows were loaded for it")
+                              .format(r.drawing_number)))
 
     for row in unlocked:
         cdn = row.customer_drawing_number or "?"
         mat = row.material_code or ""
         item_no = row.item_no or "?"
 
-        def _issue(text):
-            issues.append(_("Drawing {0} / {1} (Item {2}): {3}").format(cdn, mat or "?", item_no, text))
+        def _issue(text, _row=row):
+            issues.append(_at(RAW_MATERIALS, _row.idx,
+                              _("Drawing {0} / {1} (Item {2}): {3}")
+                              .format(cdn, mat or "?", item_no, text)))
 
         if not mat:
-            issues.append(_("Drawing {0}, Item {1}: Material Code is missing").format(cdn, item_no))
+            issues.append(_at(RAW_MATERIALS, row.idx,
+                              _("Drawing {0}, Item {1}: Material Code is missing")
+                              .format(cdn, item_no)))
             continue
 
         idata = item_master.get(mat)
         if not idata:
-            issues.append(_("Drawing {0} / {1}: Not found in Item master").format(cdn, mat))
+            issues.append(_at(RAW_MATERIALS, row.idx,
+                              _("Drawing {0} / {1}: Not found in Item master")
+                              .format(cdn, mat)))
             continue
 
         group = (idata.custom_parent_item_group or "").strip()
