@@ -2142,6 +2142,8 @@ const ERP_MANUAL_PROCUREMENT_CHILDREN = [
 			"If any item on the receipt requires inspection, run that first — the receipt will not submit until its Inspection Status is Completed.",
 			"On submit, one batch is created per line, named and dimensioned from that line. See <b>The Batch Record</b> under Item for how the name is built.",
 			"Open the receipt again afterwards to see <b>Material Planning — Batches Allocated</b>, listing which plans the new batches were allocated to and whether each is reserved yet.",
+			"<b>If nothing was allocated, the receipt now says why.</b> Allocation follows the chain <b>Receipt line → Purchase Order line → Material Request line → that request's Material Planning</b>, and it only takes one missing link — a Purchase Order raised by hand instead of from the request, say — for the batches never to reach the plan. The receipt names the first broken link per item instead of submitting in silence. An ordinary purchase with no plan behind it stays quiet, as it should.",
+			"<b>Material Planning → Allocate to Material Planning</b> runs the allocation again on a submitted receipt, once the chain is repaired — so a receipt that missed its plan does not have to be cancelled and re-entered for stock that has already arrived. Safe to press twice: a requirement already covered has nothing left to match.",
 		],
 		buttons: [
 			{ name: "Create Inspection", note: "Logs an inspection call round against this receipt, then offers to create the Inspection Entry that records the result." },

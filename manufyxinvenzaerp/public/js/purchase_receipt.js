@@ -152,7 +152,13 @@ frappe.ui.form.on("Purchase Receipt", {
 			args: { pr_name: frm.doc.name },
 			callback(r) {
 				let allocs = r.message || [];
-				if (!allocs.length) return;
+				// Silence here was the whole difficulty: a receipt whose chain back to a
+				// Material Planning is broken allocated nothing, said nothing, and left
+				// the plan still showing the material as unavailable. Ask why instead.
+				if (!allocs.length) {
+					_mfx_pr_report_no_allocation(frm);
+					return;
+				}
 
 				// Group by Material Planning for a clean display
 				let by_mp = {};
@@ -203,5 +209,77 @@ frappe.ui.form.on("Purchase Receipt", {
 				});
 			},
 		});
+	},
+});
+
+
+// ── Allocation into Material Planning: why it did not happen, and how to run it again ──
+//
+// allocate_pr_stock_to_mp reaches its plan through receipt line -> order line -> request
+// line -> the request's own plan. Break any link and the join finds nothing, allocation
+// never runs, and until now nothing said so.
+
+function _mfx_pr_report_no_allocation(frm) {
+	frappe.call({
+		method: "manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.diagnose_mp_allocation",
+		args: { pr_name: frm.doc.name },
+		callback(r) {
+			let d = r.message || {};
+			// A receipt with no Material Request behind any line is an ordinary purchase,
+			// not a planning failure. Saying nothing is right there.
+			if (!(d.broken || []).length) return;
+			if ((d.plans || []).length) return;
+
+			let rows = d.broken.map(function(b) {
+				return `<tr><td style="padding:3px 6px">${frappe.utils.escape_html(String(b[0]))}</td>` +
+					`<td style="padding:3px 6px">${frappe.utils.escape_html(String(b[1]))}</td></tr>`;
+			}).join("");
+			frappe.msgprint({
+				title: __("Nothing Allocated to Material Planning"),
+				indicator: "orange",
+				message: __("These lines do not trace back to a Material Planning, so no batch was allocated into one:") +
+					`<table class="table table-bordered table-condensed" style="font-size:11px;margin:8px 0">
+						<thead><tr><th>${__("Item")}</th><th>${__("Why")}</th></tr></thead>
+						<tbody>${rows}</tbody></table>` +
+					__("Allocation follows the chain <b>Receipt line → Purchase Order line → Material Request line → that request's Material Planning</b>. Raise the Purchase Order from the Material Request, and the Material Request from the plan's Unavailable Items, and the batches land in the plan on submit.") +
+					"<br><br>" +
+					__("If the chain is intact and this is a one-off, use <b>Allocate to Material Planning</b> on this receipt to run it again."),
+			});
+		},
+	});
+}
+
+frappe.ui.form.on("Purchase Receipt", {
+	refresh(frm) {
+		if (frm.doc.docstatus !== 1) return;
+		frm.add_custom_button(__("Allocate to Material Planning"), function() {
+			frappe.call({
+				method: "manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.retry_mp_allocation",
+				args: { pr_name: frm.doc.name },
+				freeze: true,
+				freeze_message: __("Allocating…"),
+				callback(r) {
+					let d = r.message || {};
+					if (!(d.plans || []).length) {
+						_mfx_pr_report_no_allocation(frm);
+						return;
+					}
+					let lines = (d.results || []).map(function(x) {
+						return __("{0}: {1} into Exact Match, {2} into Material Mapping", [
+							x.material_planning, x.added_exact, x.added_mapping]);
+					});
+					let none = (d.results || []).every(function(x) {
+						return !x.added_exact && !x.added_mapping;
+					});
+					frappe.msgprint({
+						title: none ? __("Nothing Left to Allocate") : __("Allocated"),
+						indicator: none ? "blue" : "green",
+						message: (none
+							? __("Every requirement these batches cover is already allocated — running it again has nothing left to match.")
+							: __("Batches allocated:")) + "<br><br>" + lines.join("<br>"),
+					});
+				},
+			});
+		}, __("Material Planning"));
 	},
 });

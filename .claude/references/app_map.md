@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-26 22:30:10_
+_Generated: 2026-08-26 22:43:00_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-08-26 22:30:10_
 
 ## Python files
 
-_Total: 263_
+_Total: 264_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -258,6 +258,7 @@ _Total: 263_
 - tests/verify_partial_transfer_reservation.py
 - tests/verify_per_row_unreserve.py
 - tests/verify_pp_naming.py
+- tests/verify_pr_allocation_recovery.py
 - tests/verify_pr_allocation_single_table.py
 - tests/verify_pr_inspection.py
 - tests/verify_process_planning_fields.py
@@ -1091,13 +1092,15 @@ Functions:
   - 254:_check_missing_fields:
   - 260:_resolve_pr_batch_no:
   - 275:get_mp_for_pr:
-  - 295:_pr_dimensions_match:
-  - 313:_build_mapping_row:
-  - 377:allocate_pr_stock_to_mp:
-  - 744:_archive_consolidate_items:
-  - 809:on_submit_purchase_receipt:
-  - 874:_get_batch_from_bundle:
-  - 886:get_pr_mp_allocations:
+  - 296:diagnose_mp_allocation:
+  - 337:retry_mp_allocation:
+  - 364:_pr_dimensions_match:
+  - 382:_build_mapping_row:
+  - 446:allocate_pr_stock_to_mp:
+  - 813:_archive_consolidate_items:
+  - 878:on_submit_purchase_receipt:
+  - 943:_get_batch_from_bundle:
+  - 955:get_pr_mp_allocations:
 
 ### rfq_management/request_for_quotation.py
 Functions:
@@ -1676,6 +1679,13 @@ Functions:
 Functions:
   - 6:run:
 
+### tests/verify_pr_allocation_recovery.py
+Functions:
+  - 38:check:
+  - 44:run:
+  - 120:_wiring:
+  - 135:_summary:
+
 ### tests/verify_pr_allocation_single_table.py
 Functions:
   - 31:check:
@@ -1968,8 +1978,10 @@ Functions:
 - `production_management/doctype/cut_sheet/cut_sheet.py:359` — `allocate_cut_sheet`
 - `purchase_receipt_management/purchase_receipt.py:16` — `get_pr_item_uom`
 - `purchase_receipt_management/purchase_receipt.py:275` — `get_mp_for_pr`
-- `purchase_receipt_management/purchase_receipt.py:377` — `allocate_pr_stock_to_mp`
-- `purchase_receipt_management/purchase_receipt.py:886` — `get_pr_mp_allocations`
+- `purchase_receipt_management/purchase_receipt.py:296` — `diagnose_mp_allocation`
+- `purchase_receipt_management/purchase_receipt.py:337` — `retry_mp_allocation`
+- `purchase_receipt_management/purchase_receipt.py:446` — `allocate_pr_stock_to_mp`
+- `purchase_receipt_management/purchase_receipt.py:955` — `get_pr_mp_allocations`
 
 ## hooks.py — doc_events
 

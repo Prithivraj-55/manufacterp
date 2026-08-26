@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-08-26 22:30:10_
+_Generated: 2026-08-26 22:43:00_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -152,8 +152,10 @@ All `@frappe.whitelist()` methods. Call from JS:
 |--------|------|
 | `get_pr_item_uom` | 16 |
 | `get_mp_for_pr` | 275 |
-| `allocate_pr_stock_to_mp` | 377 |
-| `get_pr_mp_allocations` | 886 |
+| `diagnose_mp_allocation` | 296 |
+| `retry_mp_allocation` | 337 |
+| `allocate_pr_stock_to_mp` | 446 |
+| `get_pr_mp_allocations` | 955 |
 ## sq_management/supplier_quotation.py
 
 | Method | Line |
@@ -221,4 +223,4 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 ## Total
 
-_125 whitelisted methods_
+_127 whitelisted methods_
