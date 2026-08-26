@@ -197,15 +197,31 @@ frappe.ui.form.on("Purchase Receipt", {
 				}).join("");
 
 				let any_unreserved = allocs.some(function(a) { return !a.is_reserved; });
+				let mp_names = Object.keys(by_mp);
 
-				frappe.msgprint({
-					title: __("Material Planning — Batches Allocated"),
+				// Allocated is not reserved, and only reserved rows are ever offered for
+				// transfer -- so the instruction leads rather than trailing the tables in
+				// grey. The plan opens from the dialog itself: being told to go and do
+				// something is not the same as being able to.
+				let lead = any_unreserved
+					? `<p style="font-size:13px"><b>${__("Check and reserve these batches.")}</b> ` +
+					  __("They were allocated against the Material Planning below, but a batch that is allocated is not yet reserved — and only reserved rows are offered for transfer on a Material Issue Plan.") +
+					  `</p><p style="color:#555">${__("Reserve every row and the plan's status moves to <b>Batch Mapping Completed</b> on its own.")}</p>`
+					: `<p style="font-size:13px">${__("Received batches were allocated against the Material Planning below, and are already reserved and ready for transfer.")}</p>`;
+
+				let dialog_msg = frappe.msgprint({
+					title: any_unreserved
+						? __("Batches Allocated — Reserve Them")
+						: __("Material Planning — Batches Allocated"),
 					indicator: any_unreserved ? "orange" : "green",
-					message: `<p>${__("Received batches from this Purchase Receipt have been allocated against the following Material Planning document(s):")}</p>`
-						+ sections
-						+ (any_unreserved
-							? `<p style="margin-top:8px;color:#555">${__("Open the Material Planning and Reserve the batch(es) marked \"Not Reserved Yet\" before they can be used in a Material Issue Plan / transferred — unreserved batches are never offered for transfer.")}</p>`
-							: `<p style="margin-top:8px;color:#555">${__("These batches are already reserved and ready for transfer in the linked Material Issue Plan.")}</p>`),
+					message: lead + sections,
+					primary_action: mp_names.length === 1 ? {
+						label: __("Open {0}", [mp_names[0]]),
+						action() {
+							dialog_msg.hide();
+							frappe.set_route("Form", "Material Planning", mp_names[0]);
+						},
+					} : undefined,
 				});
 			},
 		});

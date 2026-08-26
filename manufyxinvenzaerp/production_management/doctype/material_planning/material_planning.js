@@ -425,27 +425,20 @@ frappe.ui.form.on("Material Planning", {
 		// place: it is whitelisted, covered by test_e2e_material_planning, and is what
 		// this would be rebuilt on if the button is ever wanted back.
 
-		// ── Batch Mapping Completed button ──────────────────────────────────
+		// ── Check Mapping ───────────────────────────────────────────────────
+		//
+		// Status is no longer set by hand. It follows the reservations on every save
+		// (_auto_update_planning_status), in both directions -- so "Batch Mapping
+		// Completed" cannot outlive the reservations that earned it, which is how
+		// MP-2026-00010 came to read complete with none of its six rows reserved.
+		//
+		// The deeper checks that button used to run are still worth having, so they
+		// live on here under a name that says what they do. Reopen Mapping is gone:
+		// unreserve a row and the status falls on its own.
 		if (!frm.doc.__islocal && frm.doc.docstatus !== 2) {
-			if (frm.doc.planning_status === "Batch Mapping Completed") {
-				// Already completed — show a "Reopen" option to re-enable editing
-				frm.add_custom_button(__("Reopen Mapping"), function () {
-					frappe.confirm(
-						__("Mark this Material Planning as <b>Working</b> again to allow changes?"),
-						function () {
-							frappe.db.set_value("Material Planning", frm.doc.name, "planning_status", "Working")
-								.then(function () {
-									frm.reload_doc();
-									frappe.show_alert({ message: __("Status reset to Working."), indicator: "orange" }, 4);
-								});
-						}
-					);
-				}, __("Status"));
-			} else {
-				frm.add_custom_button(__("Batch Mapping Completed"), function () {
-					_run_batch_mapping_complete(frm);
-				}, __("Status"));
-			}
+			frm.add_custom_button(__("Check Mapping"), function () {
+				_run_batch_mapping_complete(frm);
+			});
 		}
 
 		// ── Validate Stock — planned Kg / Sec Nos per item, for reference ───
@@ -539,7 +532,7 @@ function _show_planned_stock_validation(frm) {
 // ── Batch Mapping Completed — run validation then set status ────────────────
 function _run_batch_mapping_complete(frm) {
 	if (frm.is_dirty()) {
-		frappe.msgprint(__("Please save the document first before marking Batch Mapping as Completed."));
+		frappe.msgprint(__("Save the document first — the check runs against what is stored."));
 		return;
 	}
 	frappe.call({
@@ -551,11 +544,12 @@ function _run_batch_mapping_complete(frm) {
 			if (!r.message) return;
 			let d = r.message;
 			if (d.status === "ok") {
-				frm.reload_doc();
 				frappe.msgprint({
-					title: __("Batch Mapping Completed"),
+					title: __("Mapping Is Sound"),
 					indicator: "green",
-					message: __("No overlapping issue in selected batches. Ready to transfer — you can now start work."),
+					message: __("No overlapping or over-allocated batches, and nothing left unmapped.") +
+						"<br><br>" +
+						__("This plan's status is <b>{0}</b>, which follows the reservations by itself — reserve every row and it reads Batch Mapping Completed; unreserve one and it goes back to Working.", [d.planning_status || ""]),
 				});
 			} else {
 				// Show issues in a formatted dialog
@@ -566,14 +560,14 @@ function _run_batch_mapping_complete(frm) {
 					</tr>`;
 				}).join("");
 				frappe.msgprint({
-					title: __("Batch Mapping Incomplete — {0} Issue(s) Found", [d.issues.length]),
+					title: __("{0} Issue(s) Found", [d.issues.length]),
 					indicator: "red",
 					message: `
-						<p style="margin-bottom:8px">${__("Resolve the following issues before marking Batch Mapping as Completed:")}</p>
+						<p style="margin-bottom:8px">${__("The mapping on this plan has these problems:")}</p>
 						<table style="width:100%;font-size:12px;border-collapse:collapse">
 							<tbody>${issue_html}</tbody>
 						</table>
-						<p style="margin-top:10px;color:#555">${__("After resolving all issues, click <b>Status → Batch Mapping Completed</b> again.")}</p>
+						<p style="margin-top:10px;color:#555">${__("Fix them and run <b>Check Mapping</b> again. The status looks after itself — it reads Batch Mapping Completed once every row is reserved.")}</p>
 					`,
 				});
 			}

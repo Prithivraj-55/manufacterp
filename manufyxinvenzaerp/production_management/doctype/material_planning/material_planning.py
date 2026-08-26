@@ -462,15 +462,39 @@ class MaterialPlanning(Document):
             recalculate(row)
 
     def _auto_update_planning_status(self):
-        """Auto-set status to Working when any mapping/ARM row exists.
-        Never auto-downgrade from Batch Mapping Completed."""
-        if self.planning_status == "Batch Mapping Completed":
-            return
-        has_work = (
-            any(r.item_code for r in (self.material_mapping or []))
-            or any(r.item_code for r in (self.available_raw_materials or []))
-        )
-        self.planning_status = "Working" if has_work else "Open"
+        """The status is what the reservations say it is, in both directions.
+
+        It used to be a one-way ratchet -- "never auto-downgrade from Batch Mapping
+        Completed" -- so a plan marked complete stayed complete after somebody
+        unreserved a row. MP-2026-00010 on the live site reads "Batch Mapping
+        Completed" with not one of its six rows reserved, and a Material Issue Plan
+        only offers reserved rows for transfer: the plan says it is ready and would
+        move nothing.
+
+        So it is recomputed on every save, and it can fall as well as rise:
+
+            Open                     nothing mapped and nothing outstanding
+            Working                  something is mapped, but not all of it is reserved
+            Batch Mapping Completed  every mapped row is reserved, and nothing is
+                                     still sitting in Unavailable Items
+
+        An Unavailable Item counts against completion because it cannot be reserved at
+        all -- material with no batch behind it is the one thing a complete plan must
+        not have.
+
+        The deeper checks (cross-table duplicates, over-allocation across plans, Nos
+        against batch stock) stay where they were, on the Check Mapping button. This
+        decides the status; that tells you whether the mapping is sound."""
+        rows = [r for r in (self.material_mapping or []) if r.item_code]
+        rows += [r for r in (self.available_raw_materials or []) if r.item_code]
+        outstanding = [r for r in (self.unavailable_items or []) if r.item_code]
+
+        if not rows:
+            self.planning_status = "Working" if outstanding else "Open"
+        elif outstanding or not all(r.is_reserved for r in rows):
+            self.planning_status = "Working"
+        else:
+            self.planning_status = "Batch Mapping Completed"
 
     def _validate_no_cross_table_batch_duplicate(self):
         """Block saving when the same batch is assigned in both Material Mapping
@@ -4666,11 +4690,16 @@ def _collect_batch_mapping_issues(mp):
 
 @frappe.whitelist()
 def complete_batch_mapping(mp_name):
-    """Validate all mapping conditions and, if clean, set status to
-    'Batch Mapping Completed'. Returns {status, issues} to the client."""
+    """Report everything wrong with the mapping. Sets nothing.
+
+    It used to set the status when the checks passed, which is now
+    _auto_update_planning_status's job on every save -- and having two writers, one of
+    them a button pressed once, is how MP-2026-00010 came to read "Batch Mapping
+    Completed" with nothing reserved. The status follows the reservations; this says
+    whether the mapping behind them is sound.
+
+    Kept under its original name because it is whitelisted and called from the form."""
     mp = frappe.get_doc("Material Planning", mp_name)
     issues = _collect_batch_mapping_issues(mp)
-    if not issues:
-        frappe.db.set_value("Material Planning", mp_name, "planning_status", "Batch Mapping Completed")
-        return {"status": "ok", "issues": []}
-    return {"status": "issues", "issues": issues}
+    return {"status": "ok" if not issues else "issues", "issues": issues,
+            "planning_status": mp.planning_status}
