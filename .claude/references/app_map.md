@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-26 22:09:06_
+_Generated: 2026-08-26 22:12:14_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-08-26 22:09:06_
 
 ## Python files
 
-_Total: 260_
+_Total: 261_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -251,6 +251,7 @@ _Total: 260_
 - tests/verify_mp_inspection_gate.py
 - tests/verify_mp_multi_mr_guard_message.py
 - tests/verify_mp_view_all_filters.py
+- tests/verify_no_create_production_plan_button.py
 - tests/verify_no_item_default_bom.py
 - tests/verify_no_zero_qty_exact_match.py
 - tests/verify_partial_transfer_reservation.py
@@ -1630,6 +1631,11 @@ Functions:
   - 36:check:
   - 42:_js:
   - 51:run:
+
+### tests/verify_no_create_production_plan_button.py
+Functions:
+  - 24:check:
+  - 30:run:
 
 ### tests/verify_no_item_default_bom.py
 Functions:

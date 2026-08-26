@@ -1267,13 +1267,12 @@ const ERP_MANUAL_MATERIAL_PLANNING_CHILDREN = [
 	},
 	{
 		id: "actions",
-		title: "Create, Status and Validate Stock",
-		kicker: "The three top-bar actions",
+		title: "Status and Validate Stock",
+		kicker: "The top-bar actions",
 		purpose:
 			"What the buttons along the top of a Material Planning do, and when each one is the " +
 			"right thing to press.",
 		steps: [
-			"<b>Create → Production Plan</b> — hands this plan on to production. Needs at least one BOM in Selected BOMs and a saved document. The new Production Plan carries the plan's BOMs and drawings, and is the document that later creates the Job Work Order and Material Issue Plan.",
 			"<b>Status → Batch Mapping Completed</b> — declares the mapping finished. It is checked, not just set: anything still unmapped or inconsistent is listed and the status stays where it is until those are dealt with.",
 			"<b>Status → Reopen Mapping</b> — appears once completed, and puts the plan back to <b>Working</b> so changes can be made again.",
 			"<b>Validate Stock</b> — a read-only check. For every item and batch the plan has committed, it shows the Kg and Sec Nos claimed against what the batch actually holds. Changes nothing.",
@@ -1286,10 +1285,10 @@ const ERP_MANUAL_MATERIAL_PLANNING_CHILDREN = [
 		notes: [
 			"<b>Validate Stock before transferring, every time.</b> It is the one place that shows a fractional Sec Nos total — which means several drawings are sharing one bar or sheet, and someone has to decide at transfer time whether to hand over the lower or the higher whole piece count. Better known now than in front of the storeman.",
 			"<b>Status never moves backwards on its own.</b> Working is set automatically, but the plan is only marked complete when you say so, and only Reopen Mapping brings it back.",
-			"<b>Creating a Production Plan does not lock this plan.</b> You can still map and reserve afterwards — but anything you change after the Production Plan exists will not be reflected in it unless it is refreshed.",
+			"<b>There is no Create → Production Plan button any more.</b> The Production Plan is raised by hand and picks its own drawings — which is the point: taking every BOM on this plan was rarely what was wanted. This plan is still what the Production Plan's drawing picker reads from, so nothing about the order of work changes.",
+			"<b>A Production Plan does not lock this plan.</b> You can still map and reserve after one exists — but anything you change afterwards will not be reflected in it unless it is refreshed.",
 		],
 		buttons: [
-			{ name: "Create → Production Plan", note: "Creates the Production Plan from this plan's selected BOMs." },
 			{ name: "Status → Batch Mapping Completed", note: "Validates, then marks the plan complete. Lists what is wrong if it cannot." },
 			{ name: "Status → Reopen Mapping", note: "Returns a completed plan to Working so it can be edited." },
 			{ name: "Validate Stock", note: "Shows planned Kg and Sec Nos per item and batch against what is really in the warehouse. Read-only." },

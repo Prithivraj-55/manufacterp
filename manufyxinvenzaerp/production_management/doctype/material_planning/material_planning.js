@@ -393,60 +393,15 @@ frappe.ui.form.on("Material Planning", {
 
 		_update_weight_summary(frm);
 
-		// "Create → Production Plan" — available in draft and submitted states
-		if (frm.doc.docstatus !== 2) {
-			frm.add_custom_button(__("Production Plan"), function () {
-				if (!frm.doc.bom_items || !frm.doc.bom_items.length) {
-					frappe.msgprint(__("Add at least one BOM in the 'Selected BOMs' tab first."));
-					return;
-				}
-				if (frm.doc.__islocal) {
-					frappe.msgprint(__("Save the document before creating a Production Plan."));
-					return;
-				}
-
-				function _do_create() {
-					frappe.call({
-						method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.make_production_plan",
-						args: { material_planning_name: frm.doc.name },
-						freeze: true,
-						freeze_message: __("Creating Production Plan…"),
-						callback(r) {
-							if (r.message) {
-								frappe.show_alert({
-									message: __("Production Plan {0} created.", [r.message]),
-									indicator: "green",
-								}, 5);
-								frappe.set_route("Form", "Production Plan", r.message);
-							}
-						},
-					});
-				}
-
-				frappe.confirm(
-					__("Create a Production Plan from this Material Planning?"),
-					function () {
-						if (frm.doc.docstatus === 0 && frm.is_dirty()) {
-							frappe.call({
-								method: "frappe.client.save",
-								args: { doc: frm.doc },
-								freeze: true,
-								freeze_message: __("Saving…"),
-								callback(r) {
-									if (r.message) {
-										frappe.model.sync(r.message);
-										frm.refresh();
-									}
-									_do_create();
-								},
-							});
-						} else {
-							_do_create();
-						}
-					}
-				);
-			}, __("Create"));
-		}
+		// "Create → Production Plan" was here, and was the only button in the Create
+		// group -- withdrawn at the client's request on 2026-08-26: the Production Plan
+		// is raised by hand, and picking its drawings there rather than inheriting every
+		// BOM on the plan is the point. Nothing else changes; the plan is still what the
+		// Production Plan's own drawing picker reads from.
+		//
+		// The server method it called, make_production_plan, is deliberately left in
+		// place: it is whitelisted, covered by test_e2e_material_planning, and is what
+		// this would be rebuilt on if the button is ever wanted back.
 
 		// ── Batch Mapping Completed button ──────────────────────────────────
 		if (!frm.doc.__islocal && frm.doc.docstatus !== 2) {
