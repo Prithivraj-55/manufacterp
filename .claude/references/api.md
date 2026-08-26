@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-08-25 23:15:43_
+_Generated: 2026-08-26 22:09:06_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -178,17 +178,17 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `create_mip_transfer_entry` | 1021 |
-| `create_mip_partial_transfer` | 1071 |
-| `get_mip_cnc_pending_items` | 1149 |
-| `create_mip_cnc_partial_forward` | 1206 |
-| `create_mip_cnc_forward_entry` | 1328 |
-| `create_mip_excess_return_entry` | 1401 |
+| `create_mip_transfer_entry` | 1029 |
+| `create_mip_partial_transfer` | 1079 |
+| `get_mip_cnc_pending_items` | 1157 |
+| `create_mip_cnc_partial_forward` | 1214 |
+| `create_mip_cnc_forward_entry` | 1336 |
+| `create_mip_excess_return_entry` | 1409 |
 | `get_mip_pending_items` | 258 |
 | `update_transfer_sec_qty` | 450 |
-| `has_cnc_stock` | 769 |
-| `get_mip_cnc_button_state` | 789 |
-| `get_mip_readiness_check` | 863 |
+| `has_cnc_stock` | 777 |
+| `get_mip_cnc_button_state` | 797 |
+| `get_mip_readiness_check` | 871 |
 ## subcontracting_management/subcontracting.py
 
 | Method | Line |

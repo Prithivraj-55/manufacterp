@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-25 23:15:43_
+_Generated: 2026-08-26 22:09:06_
 
 ## Modules
 
@@ -1171,19 +1171,19 @@ Functions:
   - 505:_apply_transfer_excess_to_raw_materials:
   - 548:_log_round_up_excess:
   - 669:_log_consolidated_excess:
-  - 769:has_cnc_stock:
-  - 789:get_mip_cnc_button_state:
-  - 830:_get_mip_transfer_stock_entry_names:
-  - 847:_get_already_transferred_batches:
-  - 863:get_mip_readiness_check:
-  - 1021:create_mip_transfer_entry:
-  - 1071:create_mip_partial_transfer:
-  - 1149:get_mip_cnc_pending_items:
-  - 1206:create_mip_cnc_partial_forward:
-  - 1277:_cnc_sent_and_forwarded:
-  - 1328:create_mip_cnc_forward_entry:
-  - 1389:_override_changes_dimensions:
-  - 1401:create_mip_excess_return_entry:
+  - 777:has_cnc_stock:
+  - 797:get_mip_cnc_button_state:
+  - 838:_get_mip_transfer_stock_entry_names:
+  - 855:_get_already_transferred_batches:
+  - 871:get_mip_readiness_check:
+  - 1029:create_mip_transfer_entry:
+  - 1079:create_mip_partial_transfer:
+  - 1157:get_mip_cnc_pending_items:
+  - 1214:create_mip_cnc_partial_forward:
+  - 1285:_cnc_sent_and_forwarded:
+  - 1336:create_mip_cnc_forward_entry:
+  - 1397:_override_changes_dimensions:
+  - 1409:create_mip_excess_return_entry:
 
 ### subcontracting_management/overrides.py
 Functions:
@@ -1861,15 +1861,15 @@ Functions:
 - `material_request_management/material_request.py:11` — `get_mr_item_uom`
 - `subcontracting_management/material_issue_plan_transfer.py:258` — `get_mip_pending_items`
 - `subcontracting_management/material_issue_plan_transfer.py:450` — `update_transfer_sec_qty`
-- `subcontracting_management/material_issue_plan_transfer.py:769` — `has_cnc_stock`
-- `subcontracting_management/material_issue_plan_transfer.py:789` — `get_mip_cnc_button_state`
-- `subcontracting_management/material_issue_plan_transfer.py:863` — `get_mip_readiness_check`
-- `subcontracting_management/material_issue_plan_transfer.py:1021` — `create_mip_transfer_entry`
-- `subcontracting_management/material_issue_plan_transfer.py:1071` — `create_mip_partial_transfer`
-- `subcontracting_management/material_issue_plan_transfer.py:1149` — `get_mip_cnc_pending_items`
-- `subcontracting_management/material_issue_plan_transfer.py:1206` — `create_mip_cnc_partial_forward`
-- `subcontracting_management/material_issue_plan_transfer.py:1328` — `create_mip_cnc_forward_entry`
-- `subcontracting_management/material_issue_plan_transfer.py:1401` — `create_mip_excess_return_entry`
+- `subcontracting_management/material_issue_plan_transfer.py:777` — `has_cnc_stock`
+- `subcontracting_management/material_issue_plan_transfer.py:797` — `get_mip_cnc_button_state`
+- `subcontracting_management/material_issue_plan_transfer.py:871` — `get_mip_readiness_check`
+- `subcontracting_management/material_issue_plan_transfer.py:1029` — `create_mip_transfer_entry`
+- `subcontracting_management/material_issue_plan_transfer.py:1079` — `create_mip_partial_transfer`
+- `subcontracting_management/material_issue_plan_transfer.py:1157` — `get_mip_cnc_pending_items`
+- `subcontracting_management/material_issue_plan_transfer.py:1214` — `create_mip_cnc_partial_forward`
+- `subcontracting_management/material_issue_plan_transfer.py:1336` — `create_mip_cnc_forward_entry`
+- `subcontracting_management/material_issue_plan_transfer.py:1409` — `create_mip_excess_return_entry`
 - `subcontracting_management/subcontracting.py:26` — `create_sco_from_production_plan`
 - `subcontracting_management/subcontracting.py:189` — `create_sco_and_mip_from_production_plan`
 - `subcontracting_management/subcontracting.py:214` — `delete_sco_and_mip_for_production_plan`

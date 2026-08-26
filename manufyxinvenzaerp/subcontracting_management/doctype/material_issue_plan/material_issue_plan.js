@@ -1125,14 +1125,28 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 		codes.forEach(function(code) {
 			var e = by_item[code];
 			var sys = flt(e.transfer_kg - e.drawing_kg, 3);
+			// Nothing was left over, so there is no off-cut to describe. The boxes are
+			// closed rather than left open and ignored: an item transferred at exactly
+			// its drawing weight used to accept a length and a piece count and report
+			// them as a difference of the whole entered weight -- 162.112 mm and 4
+			// pieces against 0.000 system excess reading "+9.662", which is an off-cut
+			// nobody cut. A negative system figure is a shortfall, not an off-cut, so
+			// it closes the boxes too.
+			var no_excess = sys <= 0;
+			// A row that stops having excess must not keep what was typed while it did.
+			if (no_excess && dlg._excess_plan) delete dlg._excess_plan[code];
 			var saved = (dlg._excess_plan || {})[code] || {};
+			var why = no_excess
+				? " title='" + __("No excess on this item — nothing to describe.") + "'"
+				: "";
 			var num = "<input type='number' step='0.001' min='0' class='form-control input-xs text-right ";
-			// Width is only used by the Plates formula -- Structurals rows never
-			// need it, so their Width box is read-only.
-			var w_cell = e.group === "Structurals"
-				? num + "mip-xs-width' style='width:100px' disabled value='" + (flt(saved.width) || "") + "'></td>"
-				: num + "mip-xs-width' style='width:100px' value='" + (flt(saved.width) || "") + "'></td>";
-			html += "<tr data-item='" + frappe.utils.escape_html(code) + "'>" +
+			function box(cls, width, value, also_disabled) {
+				return num + cls + "' style='width:" + width + "px'" +
+					((no_excess || also_disabled) ? " disabled" : "") + why +
+					" value='" + (value || "") + "'>";
+			}
+			html += "<tr data-item='" + frappe.utils.escape_html(code) + "'" +
+					(no_excess ? " class='mfx-no-excess'" : "") + ">" +
 				"<td>" + frappe.utils.escape_html(code) +
 					"<div class='text-muted' style='font-size:11px'>" +
 						__("{0} batch row(s)", [e.batches]) + "</div></td>" +
@@ -1140,10 +1154,12 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 				"<td class='text-right' style='white-space:nowrap'>" + format_number(e.transfer_kg, null, 3) + "</td>" +
 				"<td class='text-right mip-xs-sys' style='white-space:nowrap;font-weight:600'>" +
 					format_number(sys, null, 3) + "</td>" +
-				"<td>" + num + "mip-xs-length' style='width:100px' value='" + (flt(saved.length) || "") + "'></td>" +
-				"<td>" + w_cell +
+				"<td>" + box("mip-xs-length", 100, flt(saved.length)) + "</td>" +
+				// Width is only used by the Plates formula -- Structurals rows never
+				// need it, so their Width box is read-only whatever the excess.
+				"<td>" + box("mip-xs-width", 100, flt(saved.width), e.group === "Structurals") + "</td>" +
 				"<td class='text-right' style='white-space:nowrap'>" + format_number(e.thickness, null, 2) + "</td>" +
-				"<td>" + num + "mip-xs-sec' style='width:90px' value='" + (flt(saved.sec_qty) || "") + "'></td>" +
+				"<td>" + box("mip-xs-sec", 90, flt(saved.sec_qty)) + "</td>" +
 				"<td class='text-right mip-xs-kg' style='white-space:nowrap;font-weight:600'>—</td>" +
 				"<td class='text-right mip-xs-diff' style='white-space:nowrap;font-weight:600'>—</td>" +
 			"</tr>";
@@ -1159,6 +1175,14 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 	function _recalc_excess_row($row, by_item) {
 		var e = by_item[$row.data("item")];
 		if (!e) return;
+		// A closed row has nothing to add up, and must not carry a figure from before
+		// the transfer quantity changed under it.
+		if ($row.hasClass("mfx-no-excess")) {
+			if (dlg._excess_plan) delete dlg._excess_plan[e.item_code];
+			$row.find(".mip-xs-kg").text("—");
+			$row.find(".mip-xs-diff").text("—").css("color", "");
+			return;
+		}
 		var L = flt($row.find(".mip-xs-length").val());
 		var W = flt($row.find(".mip-xs-width").val());
 		var S = flt($row.find(".mip-xs-sec").val());
