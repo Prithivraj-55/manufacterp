@@ -159,7 +159,7 @@ const ERP_MANUAL_SALES_ORDER_CHILDREN = [
 			"<b>Blank is allowed</b> for Nature of Work and Rate Schedule. Neither is mandatory on a Drawing, and older imports predate both columns.",
 		],
 		buttons: [
-			{ name: "Verify Raw Materials", note: "Runs every check above. Passing sets the order's verified flag; failing lists each problem with the drawing, Material Code and Item No it belongs to." },
+			{ name: "Verify Raw Materials", note: "Runs every check above. Passing sets the order's verified flag; failing lists each problem <b>led by the row it is on</b> — <i>Raw Materials row 100 · …</i> or <i>Drawing List row 22 · …</i> — followed by the drawing, Material Code and Item No. The table is named because both are on this order and row 22 of one is not row 22 of the other." },
 		],
 	},
 	{

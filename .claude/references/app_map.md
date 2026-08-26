@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-08-26 22:12:14_
+_Generated: 2026-08-26 22:15:38_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-08-26 22:12:14_
 
 ## Python files
 
-_Total: 261_
+_Total: 262_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -269,6 +269,7 @@ _Total: 261_
 - tests/verify_reservation_permission_guard.py
 - tests/verify_reservation_release_on_transfer.py
 - tests/verify_return_excess_dialog.py
+- tests/verify_rm_issue_row_numbers.py
 - tests/verify_rwd_two_way.py
 - tests/verify_se_duno_propagation.py
 - tests/verify_so_calculated_weight.py
@@ -919,14 +920,15 @@ Functions:
   - 351:_bulk_insert:
   - 371:create_drawings_from_import:
   - 552:process_drawings:
-  - 681:_check_drawing_masters:
-  - 744:_check_row_required:
-  - 764:_check_unused_dimensions:
-  - 785:_check_drawing_headers:
-  - 820:verify_raw_materials:
-  - 931:download_bom_template:
-  - 986:clear_drawing_import:
-  - 1021:get_cancelled_drawing_links:
+  - 681:_at:
+  - 701:_check_drawing_masters:
+  - 763:_check_row_required:
+  - 783:_check_unused_dimensions:
+  - 804:_check_drawing_headers:
+  - 842:verify_raw_materials:
+  - 961:download_bom_template:
+  - 1016:clear_drawing_import:
+  - 1051:get_cancelled_drawing_links:
 
 ### hooks.py
 
@@ -1276,7 +1278,7 @@ Functions:
 
 ### tests/_probe_tmp.py
 Functions:
-  - 5:run:
+  - 3:run:
 
 ### tests/reset_transactions.py
 Functions:
@@ -1733,6 +1735,13 @@ Functions:
   - 35:_dialog_source:
   - 47:run:
 
+### tests/verify_rm_issue_row_numbers.py
+Functions:
+  - 39:check:
+  - 45:_plain:
+  - 49:run:
+  - 108:_summary:
+
 ### tests/verify_rwd_two_way.py
 Functions:
   - 31:check:
@@ -1853,10 +1862,10 @@ Functions:
 - `drawing_management/so_drawing_import.py:127` — `parse_bom_excel`
 - `drawing_management/so_drawing_import.py:371` — `create_drawings_from_import`
 - `drawing_management/so_drawing_import.py:552` — `process_drawings`
-- `drawing_management/so_drawing_import.py:820` — `verify_raw_materials`
-- `drawing_management/so_drawing_import.py:931` — `download_bom_template`
-- `drawing_management/so_drawing_import.py:986` — `clear_drawing_import`
-- `drawing_management/so_drawing_import.py:1021` — `get_cancelled_drawing_links`
+- `drawing_management/so_drawing_import.py:842` — `verify_raw_materials`
+- `drawing_management/so_drawing_import.py:961` — `download_bom_template`
+- `drawing_management/so_drawing_import.py:1016` — `clear_drawing_import`
+- `drawing_management/so_drawing_import.py:1051` — `get_cancelled_drawing_links`
 - `drawing_management/doctype/drawing/drawing.py:189` — `check_existing_bom`
 - `production_plan_management/production_plan.py:284` — `get_items_for_material_requests`
 - `production_plan_management/production_plan.py:661` — `get_mp_planned_weights`

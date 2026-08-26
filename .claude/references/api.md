@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-08-26 22:12:14_
+_Generated: 2026-08-26 22:15:38_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -43,13 +43,13 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `get_cancelled_drawing_links` | 1021 |
+| `clear_drawing_import` | 1016 |
+| `get_cancelled_drawing_links` | 1051 |
 | `parse_bom_excel` | 127 |
 | `create_drawings_from_import` | 371 |
 | `process_drawings` | 552 |
-| `verify_raw_materials` | 820 |
-| `download_bom_template` | 931 |
-| `clear_drawing_import` | 986 |
+| `verify_raw_materials` | 842 |
+| `download_bom_template` | 961 |
 ## item_management/item.py
 
 | Method | Line |
