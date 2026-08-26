@@ -125,13 +125,13 @@ manufyxinvenzaerp/
 │   │                         #   item.js, bom.js, production_plan.js,
 │   │                         #   purchase_order.js, purchase_receipt.js
 ├── patches/                  # Data migration patches
-└── tests/                    # 90 files, two kinds:
+└── tests/                    # 102 files, two kinds:
     ├── test_*.py             #   8 unittest modules, run by `bench run-tests`
                               #   and by CI. test_whitelist_coverage is the one to
                               #   keep green: it checks every dotted path the front
                               #   end calls is actually whitelisted, after a lost
                               #   decorator shipped a broken Reserve button to live.
-    └── verify_*.py           #   74 standalone checks, each with a run() called
+    └── verify_*.py           #   86 standalone checks, each with a run() called
                               #   directly: `bench --site manufact execute
                               #   manufyxinvenzaerp.tests.<name>.run`
                               #   They print OK/FAIL per assertion and finish with
@@ -206,6 +206,40 @@ stat -c '%y' <the file you changed>
 A fresh interpreter -- `bench console`, `bench execute`, `bench run-tests` -- always has
 the current code, which is why a verify script can pass while the browser still fails.
 
+**`public/js/` is bundled, so it needs a build as well as a reload.** Anything under
+`manufyxinvenzaerp/public/js/` is served from `public/dist/`, and editing the source
+changes nothing until:
+
+```bash
+bench build --app manufyxinvenzaerp
+```
+
+Doctype JS (`.../doctype/<name>/<name>.js`) and Client Scripts installed from `setup.py`
+do not need the build -- a `bench migrate` and a browser reload are enough. Getting these
+two the wrong way round costs the same hour as forgetting the reloader.
+
+## Batch quantities do not live in the ledger's batch_no
+
+`Stock Ledger Entry.batch_no` is empty for anything received through a Purchase Receipt:
+Frappe v15 records the batch in a **Serial and Batch Bundle** instead, and only some
+flows (Stock Entry rows written with `use_serial_batch_fields`) fill the column in.
+
+So `SUM(actual_qty) ... GROUP BY batch_no` silently reports **zero for exactly the
+batches most likely to be picked**. It has produced two wrong readings here -- once
+reporting all 227 batches on the site as empty, once nearly costing a batch picker its
+warehouse filter.
+
+Use ERPNext's own helper, which handles both storage models:
+
+```python
+from erpnext.stock.doctype.batch.batch import get_batch_qty
+get_batch_qty(batch_no=b, warehouse=w, item_code=i)   # -> float
+get_batch_qty(batch_no=None, warehouse=w)             # -> [{batch_no, warehouse, qty}]
+```
+
+Note the second form: passing `warehouse=None` returns a LIST, not a number, so
+`flt(get_batch_qty(batch_no=b, warehouse=None))` is 0.0 for every batch on earth.
+
 ## Quick bench commands
 
 ```bash
@@ -243,6 +277,13 @@ bench --site manufact execute manufyxinvenzaerp.sample_data.create_sample_data
 ```
 
 ## Deployment and CI
+
+> **A commit without `[autodeploy]` in its message ships nowhere.** Pushing `devbranch`
+> is not deploying. The tag must be in the message of the commit at the HEAD of the push
+> -- `contains(github.event.head_commit.message, '[autodeploy]')` -- so a tagged commit
+> carries every untagged one before it along with it, and an untagged one at the head
+> leaves the whole branch sitting on the remote doing nothing. Eighteen commits once
+> accumulated that way before anybody noticed.
 
 The pipeline is `.github/workflows/main.yml`, triggered by a push to `main`. A push to
 `devbranch` whose commit message contains `[autodeploy]` is merged to `main` by

@@ -1384,7 +1384,7 @@ const ERP_MANUAL_JOB_WORK_ORDER_CHILDREN = [
 			"there is no separate Work Order/Job Card involved.",
 		fields: [
 			{ name: "Drawing Items", note: "Every drawing/DUNO this job covers, each with its own Customer Provided Weight, Planned RM Weight, Mapped Weight, Excess Weight, and Transferred Weight — rolled up from Material Planning." },
-			{ name: "All Operations Complete", note: "Ticks itself once every operation in the chain has been submitted." },
+			{ name: "All Operations Complete", note: "Ticks itself once every operation in the chain has been submitted. Informational — it no longer gates anything: <b>Make Final Stock Entry</b> follows the last operation's completed pieces instead, so part of a job can be booked without waiting for the whole of it." },
 		],
 		steps: [
 			"Submitting the Job work order and clicking “Job work order & MIP” back on Production Plan creates one Supplier Operation Entry per Operation table row, in sequence order.",
