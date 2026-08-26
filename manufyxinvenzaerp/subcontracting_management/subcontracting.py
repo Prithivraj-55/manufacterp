@@ -382,6 +382,189 @@ def get_soe_summary(sco_name):
 
 
 
+def _final_operation(sco_name):
+    """The last operation in the routing, whether or not anything is finished on it.
+
+    The button used to wait for custom_all_ops_complete -- every operation on every
+    drawing done. A job of ten drawings that had finished four could not book those
+    four, so finished steel sat at the supplier with nothing to show for it until the
+    last piece of the last drawing was painted."""
+    rows = frappe.get_all(
+        "Supplier Operation Entry",
+        filters={"subcontracting_order": sco_name, "docstatus": ["<", 2]},
+        fields=["name", "operation", "sequence_id", "status"],
+        order_by="sequence_id desc", limit=1,
+    )
+    return rows[0] if rows else None
+
+
+def _fg_already_booked(sco_name):
+    """Pieces already turned into finished goods, per drawing.
+
+    Read off the finished-goods rows of submitted Manufacture entries, which carry the
+    drawing they were made for. Without it a second run would re-book pieces the first
+    run had already produced."""
+    booked = {}
+    for r in frappe.db.sql(
+        """
+        SELECT sed.custom_drawing AS drawing, SUM(sed.qty) AS qty
+        FROM `tabStock Entry Detail` sed
+        JOIN `tabStock Entry` se ON se.name = sed.parent
+        WHERE se.subcontracting_order = %(sco)s AND se.stock_entry_type = 'Manufacture'
+          AND se.docstatus = 1 AND sed.is_finished_item = 1
+          AND IFNULL(sed.custom_drawing, '') != ''
+        GROUP BY sed.custom_drawing
+        """,
+        {"sco": sco_name}, as_dict=True,
+    ):
+        booked[r.drawing] = flt(r.qty)
+    return booked
+
+
+def _rm_already_consumed(sco_name, supplier_warehouse):
+    """Raw material already consumed by submitted Manufacture entries, per item and batch."""
+    out = {}
+    for r in frappe.db.sql(
+        """
+        SELECT sed.item_code, sed.batch_no, SUM(sed.qty) AS qty
+        FROM `tabStock Entry Detail` sed
+        JOIN `tabStock Entry` se ON se.name = sed.parent
+        WHERE se.subcontracting_order = %(sco)s AND se.stock_entry_type = 'Manufacture'
+          AND se.docstatus = 1 AND sed.s_warehouse = %(wh)s
+        GROUP BY sed.item_code, sed.batch_no
+        """,
+        {"sco": sco_name, "wh": supplier_warehouse}, as_dict=True,
+    ):
+        out[(r.item_code, r.batch_no or "")] = flt(r.qty)
+    return out
+
+
+def _consumption_for_completed(sco, supplier_warehouse, preview, available):
+    """Narrow the supplier's stock to the share belonging to the finished drawings.
+
+    Booking four drawings out of ten must consume four drawings' worth of steel, not
+    everything sitting at the supplier -- the other six have not been made yet and their
+    material has to stay where it is.
+
+    Each drawing's share comes from the Material Issue Plan's own raw-material rows,
+    which record what was transferred for that DUNO, scaled by how much of the drawing is
+    finished: a drawing of two pieces with one finished consumes half of its rows.
+
+    The figure is worked out CUMULATIVELY -- what the job should have consumed by now for
+    everything finished to date, less what earlier entries already consumed -- rather
+    than incrementally. That is what makes the last entry land exactly on the transferred
+    weight instead of a few grams away from it after several partial runs.
+
+    A drawing whose share cannot be traced (no Material Issue Plan, or rows carrying no
+    DUNO) falls back to the whole of what is available, which is the old behaviour: the
+    alternative is booking finished goods against no material at all."""
+    mip_name = frappe.db.get_value("Material Issue Plan", {"subcontracting_order": sco.name}, "name")
+    if not mip_name:
+        return available
+
+    rows = frappe.get_all(
+        "Material Issue Plan Raw Material", filters={"parent": mip_name},
+        fields=["item_code", "planned_item", "batch_no", "duno_mark_no", "transferred_qty"],
+    )
+    if not rows or not any(r.duno_mark_no for r in rows):
+        return available
+
+    # How much of each drawing is finished, cumulatively, as a fraction of its plan.
+    finished_fraction = {}
+    for d in preview["drawings"]:
+        planned = flt(d["qty_to_manufacture"])
+        if planned:
+            finished_fraction[d["duno_mark_no"] or ""] = min(
+                1.0, flt(d["completed_qty_nos"]) / planned)
+
+    # The batch's own item is what the transfer line carries, not the requirement's --
+    # they differ wherever an alternate was issued against a requirement.
+    share = {}
+    for r in rows:
+        fraction = finished_fraction.get(r.duno_mark_no or "")
+        if not fraction:
+            continue
+        key = (r.planned_item or r.item_code, r.batch_no or "")
+        share[key] = flt(share.get(key, 0)) + flt(r.transferred_qty) * fraction
+
+    if not share:
+        return []
+
+    already = _rm_already_consumed(sco.name, supplier_warehouse)
+    out = []
+    for row in available:
+        key = (row["item_code"], row.get("batch_no") or "")
+        due = flt(share.get(key, 0) - already.get(key, 0), 3)
+        if due <= 0:
+            continue
+        # Never more than is actually there: an off-cut returned to stores, or material
+        # already consumed some other way, has to reduce what this can take.
+        qty = min(due, flt(row["qty"], 3))
+        if qty <= 0:
+            continue
+        out.append(dict(row, qty=flt(qty, 3)))
+    return out
+
+
+@frappe.whitelist()
+def get_final_stock_entry_preview(sco_name):
+    """What the final stock entry would book right now, without booking it.
+
+    One row per drawing: how many pieces the last operation has finished, how many of
+    those are already in finished goods, and how many are left to book. The popup shows
+    this before anything is created, because "four of ten" is a fact somebody should see
+    and agree with rather than discover in a draft."""
+    if not frappe.has_permission("Subcontracting Order", "read", doc=sco_name):
+        frappe.throw(_("Not permitted to read this Job Work Order"), frappe.PermissionError)
+
+    final = _final_operation(sco_name)
+    if not final:
+        return {"final_operation": None, "drawings": [], "can_create": False,
+                "reason": _("No operations have been created for this Job Work Order yet.")}
+
+    booked = _fg_already_booked(sco_name)
+    completed = {
+        d.drawing: d
+        for d in frappe.get_all(
+            "SOE Drawing Detail", filters={"parent": final["name"]},
+            fields=["drawing", "customer_drawing_number", "duno_mark_no",
+                    "qty_to_manufacture", "completed_qty_nos"], order_by="idx",
+        )
+        if d.drawing
+    }
+
+    drawings, total_ready = [], 0.0
+    for drawing, d in completed.items():
+        done = flt(d.completed_qty_nos, 3)
+        already = flt(booked.get(drawing), 3)
+        ready = flt(done - already, 3)
+        total_ready += max(ready, 0.0)
+        drawings.append({
+            "drawing": drawing,
+            "duno_mark_no": d.duno_mark_no or "",
+            "customer_drawing_number": d.customer_drawing_number or "",
+            "qty_to_manufacture": flt(d.qty_to_manufacture, 3),
+            "completed_qty_nos": done,
+            "already_booked": already,
+            "ready_to_book": max(ready, 0.0),
+        })
+
+    total_ready = flt(total_ready, 3)
+    return {
+        "final_operation": final,
+        "drawings": drawings,
+        "total_ready": total_ready,
+        "total_planned": flt(sum(d["qty_to_manufacture"] for d in drawings), 3),
+        "total_completed": flt(sum(d["completed_qty_nos"] for d in drawings), 3),
+        "can_create": total_ready > 0,
+        "reason": "" if total_ready > 0 else _(
+            "Nothing is waiting to be booked. The last operation ({0}) has completed "
+            "{1} of {2} pieces, and all of them are already in finished goods."
+        ).format(final["operation"], flt(sum(d["completed_qty_nos"] for d in drawings), 3),
+                 flt(sum(d["qty_to_manufacture"] for d in drawings), 3)),
+    }
+
+
 @frappe.whitelist()
 def create_finished_goods_entry(sco_name):
     """Create a draft 'Manufacture' Stock Entry that consumes the raw materials currently
@@ -403,14 +586,32 @@ def create_finished_goods_entry(sco_name):
     if sco.docstatus != 1:
         frappe.throw(_("Subcontracting Order must be submitted first."))
 
-    existing_submitted = frappe.db.get_value(
-        "Stock Entry", {"subcontracting_order": sco_name, "stock_entry_type": "Manufacture", "docstatus": 1}, "name"
+    # A submitted entry no longer ends the matter -- booking four drawings now and six
+    # later is the point. What it must not do is double-book, and that is only safe
+    # where the earlier entry says which drawings it was for.
+    #
+    # Entries written before finished-goods rows carried custom_drawing say nothing of
+    # the sort, so their pieces cannot be netted off and a second entry would book them
+    # again. Those still stop here, exactly as they always did.
+    unattributed = frappe.db.sql(
+        """
+        SELECT se.name FROM `tabStock Entry Detail` sed
+        JOIN `tabStock Entry` se ON se.name = sed.parent
+        WHERE se.subcontracting_order = %(sco)s AND se.stock_entry_type = 'Manufacture'
+          AND se.docstatus = 1 AND sed.is_finished_item = 1
+          AND IFNULL(sed.custom_drawing, '') = ''
+        LIMIT 1
+        """,
+        {"sco": sco_name},
     )
-    if existing_submitted:
-        frappe.throw(_(
-            "A Final Stock Entry has already been created and submitted for this "
-            "Subcontracting Order: {0}"
-        ).format(existing_submitted))
+    if unattributed:
+        frappe.throw(
+            _("A Final Stock Entry has already been created and submitted for this "
+              "Job Work Order: {0}. It does not record which drawings it booked, so a "
+              "second entry cannot tell what is left and might book the same pieces "
+              "again.").format(unattributed[0][0]),
+            title=_("Already Booked"),
+        )
 
     existing_draft = frappe.db.get_value(
         "Stock Entry", {"subcontracting_order": sco_name, "stock_entry_type": "Manufacture", "docstatus": 0}, "name"
@@ -443,45 +644,53 @@ def create_finished_goods_entry(sco_name):
                        "Subcontracting Order item (or the Finished Goods Warehouse on the "
                        "linked Material Issue Plan) first."))
 
+    # What the last operation has actually finished decides what this entry books.
+    preview = get_final_stock_entry_preview(sco_name)
+    if not preview["final_operation"]:
+        frappe.throw(_("The final operation has not been created for this Job Work Order yet."))
+    if not preview["can_create"]:
+        frappe.throw(preview["reason"], title=_("Nothing to Book"))
+
     consumed = _get_supplier_wh_consumption_items(sco, supplier_warehouse)
     if not consumed:
         frappe.throw(_("No raw-material stock found in the supplier warehouse to consume. "
                        "Ensure the raw materials have been transferred to the supplier."))
 
-    # Build finished-goods rows from SCO Drawing Items (one row per drawing/DUNO).
-    # qty_to_manufacture comes from the Production Plan Item (planned_qty).
-    drawing_items = sco.get("custom_drawing_items") or []
-    if not drawing_items:
-        # Fallback: single FG row from sco.items when no drawing items exist
-        if not sco.items:
-            frappe.throw(_("No finished-good item found on the Subcontracting Order."))
-        fg = sco.items[0]
-        fg_rows = [{
-            "item_code": fg.item_code,
-            "qty": flt(fg.qty) or 1,
-            "uom": frappe.db.get_value("Item", fg.item_code, "stock_uom") or fg.get("uom") or "Nos",
+    consumed = _consumption_for_completed(sco, supplier_warehouse, preview, consumed)
+    if not consumed:
+        frappe.throw(_("The drawings finished so far have no raw material left to consume "
+                       "against them."), title=_("Nothing to Consume"))
+
+    # One finished-goods row per drawing, for the pieces the last operation has
+    # finished and not yet booked -- not for the whole job. Four drawings out of ten
+    # produce four rows; the other six wait for their own entry.
+    #
+    # Each row carries the drawing it was made for, which is what _fg_already_booked
+    # reads on the next run so the same piece is never booked twice.
+    item_by_drawing = {
+        d.drawing: d for d in (sco.get("custom_drawing_items") or []) if d.get("drawing")
+    }
+    fg_rows = []
+    for row in preview["drawings"]:
+        if flt(row["ready_to_book"]) <= 0:
+            continue
+        d = item_by_drawing.get(row["drawing"])
+        item_code = (d.item_code if d else None) or (sco.items[0].item_code if sco.items else None)
+        if not item_code:
+            continue
+        fg_rows.append({
+            "item_code": item_code,
+            "qty": flt(row["ready_to_book"], 3),
+            "uom": frappe.db.get_value("Item", item_code, "stock_uom") or "Nos",
             "t_warehouse": fg_warehouse,
             "is_finished_item": 1,
-        }]
-    else:
-        fg_rows = []
-        for d in drawing_items:
-            qty = flt(d.get("qty_to_manufacture"))
-            if not qty:
-                # Live-fetch from PP item using customer_drawing_number + duno_mark_no
-                qty = flt(_get_pp_planned_qty(
-                    sco.get("custom_production_plan"),
-                    d.get("customer_drawing_number"),
-                    d.get("duno_mark_no"),
-                ))
-            fg_rows.append({
-                "item_code": d.item_code,
-                "qty": qty or 1,
-                "uom": frappe.db.get_value("Item", d.item_code, "stock_uom") or "Nos",
-                "t_warehouse": fg_warehouse,
-                "is_finished_item": 1,
-                "description": (d.get("duno_mark_no") or d.get("customer_drawing_number") or ""),
-            })
+            "custom_drawing": row["drawing"],
+            "custom_duno_mark_no": row["duno_mark_no"],
+            "custom_customer_drawing_number": row["customer_drawing_number"],
+            "description": row["duno_mark_no"] or row["customer_drawing_number"] or "",
+        })
+    if not fg_rows:
+        frappe.throw(_("No finished-good item found for the drawings that are complete."))
 
     items = list(consumed) + fg_rows
 

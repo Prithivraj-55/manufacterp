@@ -1830,7 +1830,8 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 			"Once every operation on the Job work order is complete, the finished goods are " +
 			"received and the plan closes itself.",
 		steps: [
-			"<b>Make Final Stock Entry</b> appears when all operations are done. It creates a draft Manufacture Stock Entry consuming the supplier-warehouse raw material and producing the finished item into the Finished Goods Warehouse — review it and submit from there.",
+			"<b>Make Final Stock Entry</b> appears as soon as the <b>last operation exists</b>, and books whatever that operation has finished — you do not wait for the whole job. It first shows you what it is about to book: one line per drawing, with how many pieces are planned, how many the last operation has completed, how many are already in finished goods, and how many this entry would book. Agree with it and it creates a draft Manufacture Stock Entry to review and submit.",
+			"<b>Four drawings of ten books four drawings.</b> Only the raw material belonging to those four is consumed — the rest stays at the supplier for the next entry — and only those four appear as finished goods. Finish the other six later and press it again; pieces already booked are never booked twice.",
 			"The plan moves to <b>Completed</b> by itself once finished goods have been received AND every Excess Material Items row is resolved: returned, claimed by another job, or marked Billed to Consume.",
 			"Completed is one-way. The document locks; nothing later moves it back.",
 		],
@@ -1850,7 +1851,7 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 			{ name: "To CNC Warehouse", note: "First leg for CNC-flagged rows. Only appears when a CNC Warehouse is set." },
 			{ name: "CNC to Supplier/WIP", note: "Second leg. Only appears once material has physically arrived at CNC." },
 			{ name: "Return Excess Entry", note: "Review quantities and enter a mandatory reason per row, then the return Stock Entry is created into the Finished Goods Warehouse." },
-			{ name: "Make Final Stock Entry", note: "Draft Manufacture entry for the finished goods. Appears once all operations are complete." },
+			{ name: "Make Final Stock Entry", note: "Draft Manufacture entry for the finished goods. Appears once the final operation exists, and needs at least one completed piece on it. Books only the drawings that operation has finished, and consumes only their share of the raw material." },
 			{ name: "PDF", note: "A shareable batch plan — DUNO/Mark No, Customer Drawing No, planned Kg, batch details and Sec Qty — for the production or supplier team." },
 		],
 	},

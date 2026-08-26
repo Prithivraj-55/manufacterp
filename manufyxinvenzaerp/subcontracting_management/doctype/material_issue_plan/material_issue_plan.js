@@ -130,44 +130,125 @@ function _load_mip_drawings(frm) {
 	}
 }
 
-// "Make Final Stock Entry" — moved here from the Subcontracting Order (client
-// change request). Once the linked SCO's operations are all complete, creates a
-// draft Manufacture Stock Entry that consumes the supplier-warehouse raw material
-// and produces the finished good; the stock-return workflow (Return Excess Entry)
-// already lives on this doctype, so the finished-goods entry is created from the
-// same place. custom_all_ops_complete lives on the Subcontracting Order, not the
-// MIP, so it's read via a lookup rather than a stored/fetched field.
+// "Make Final Stock Entry" — moved here from the Job Work Order (client change
+// request). Creates a draft Manufacture Stock Entry that consumes the raw material
+// belonging to the drawings the last operation has finished, and produces those
+// drawings as finished goods. The stock-return workflow (Return Excess Entry)
+// already lives on this doctype, so the finished-goods entry is raised from the
+// same place.
 function _add_final_stock_entry_button(frm) {
 	if (frm.is_new() || !frm.doc.subcontracting_order) return;
 
-	frappe.db.get_value("Subcontracting Order", frm.doc.subcontracting_order, "custom_all_ops_complete")
-		.then((r) => {
-			if (!(r.message && r.message.custom_all_ops_complete)) return;
-
-			frm.add_custom_button(__("Make Final Stock Entry"), function () {
-				frappe.call({
-					method: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_finished_goods_entry",
-					args: { sco_name: frm.doc.subcontracting_order },
-					freeze: true,
-					freeze_message: __("Creating Final Stock Entry…"),
-					callback: function (r) {
-						if (r.message) {
-							let se_name = r.message.name;
-							let already = r.message.already_existed;
-							frappe.msgprint({
-								title: already ? __("Final Stock Entry Already Exists") : __("Final Stock Entry Created"),
-								message: (already
-										? __("A draft Final Stock Entry already exists for this Subcontracting Order. ")
-										: "")
-									+ __("Review and submit the stock entry: ") +
-									'<a href="/app/stock-entry/' + encodeURIComponent(se_name) + '">' + se_name + "</a>",
-								indicator: already ? "orange" : "green"
-							});
-						}
-					},
-				});
+	// Shown as soon as the LAST operation exists, not once every operation on every
+	// drawing is done. A job of ten drawings that has finished four could not book
+	// those four before, so finished steel sat at the supplier with nothing to show
+	// for it until the last piece of the last drawing was painted.
+	frappe.call({
+		method: "manufyxinvenzaerp.subcontracting_management.subcontracting.get_final_stock_entry_preview",
+		args: { sco_name: frm.doc.subcontracting_order },
+		callback(r) {
+			let p = r.message;
+			if (!p || !p.final_operation) return;
+			frm.add_custom_button(__("Make Final Stock Entry"), function() {
+				_show_final_stock_entry_preview(frm);
 			});
-		});
+		},
+	});
+}
+
+// What is about to be booked, before anything is created. "Four of ten" is a fact
+// somebody should see and agree with, not discover in a draft.
+function _show_final_stock_entry_preview(frm) {
+	frappe.call({
+		method: "manufyxinvenzaerp.subcontracting_management.subcontracting.get_final_stock_entry_preview",
+		args: { sco_name: frm.doc.subcontracting_order },
+		freeze: true,
+		freeze_message: __("Checking what is complete…"),
+		callback(r) {
+			let p = r.message || {};
+			if (!p.final_operation) {
+				frappe.msgprint({
+					title: __("No Final Operation"),
+					indicator: "orange",
+					message: __("The final operation has not been created for this Job Work Order yet."),
+				});
+				return;
+			}
+
+			let body = (p.drawings || []).map(function(d) {
+				let ready = flt(d.ready_to_book);
+				return `<tr style="${ready > 0 ? "" : "color:#999"}">
+					<td style="padding:3px 6px">${frappe.utils.escape_html(String(d.duno_mark_no || ""))}</td>
+					<td style="padding:3px 6px">${frappe.utils.escape_html(String(d.customer_drawing_number || d.drawing || ""))}</td>
+					<td style="padding:3px 6px;text-align:right">${flt(d.qty_to_manufacture, 3)}</td>
+					<td style="padding:3px 6px;text-align:right">${flt(d.completed_qty_nos, 3)}</td>
+					<td style="padding:3px 6px;text-align:right">${flt(d.already_booked, 3)}</td>
+					<td style="padding:3px 6px;text-align:right;font-weight:600">${ready > 0 ? flt(ready, 3) : "—"}</td>
+				</tr>`;
+			}).join("");
+
+			let table = `<table class="table table-bordered table-condensed" style="font-size:11px;margin:8px 0">
+				<thead><tr>
+					<th>${__("DUNO")}</th><th>${__("Drawing")}</th>
+					<th style="text-align:right">${__("To Make")}</th>
+					<th style="text-align:right">${__("Completed")}</th>
+					<th style="text-align:right">${__("Already Booked")}</th>
+					<th style="text-align:right">${__("Booking Now")}</th>
+				</tr></thead><tbody>${body}</tbody></table>`;
+
+			let lead = __("Last operation: <b>{0}</b> — {1} of {2} pieces completed across {3} drawing(s).", [
+				p.final_operation.operation, flt(p.total_completed, 3),
+				flt(p.total_planned, 3), (p.drawings || []).length]);
+
+			if (!p.can_create) {
+				frappe.msgprint({
+					title: __("Nothing to Book"),
+					indicator: "orange",
+					message: `<p>${lead}</p>` + table + `<p style="color:#555">${p.reason || ""}</p>`,
+				});
+				return;
+			}
+
+			let d = new frappe.ui.Dialog({
+				title: __("Make Final Stock Entry"),
+				size: "large",
+				fields: [{ fieldtype: "HTML", fieldname: "body" }],
+				primary_action_label: __("Create Stock Entry"),
+				primary_action() {
+					d.hide();
+					_create_final_stock_entry(frm);
+				},
+			});
+			d.fields_dict.body.$wrapper.html(
+				`<p>${lead}</p>` + table +
+				`<p style="color:#555">${__("<b>{0} piece(s)</b> will be booked into finished goods, and only the raw material belonging to those drawings will be consumed. The rest stays at the supplier for a later entry.", [flt(p.total_ready, 3)])}</p>`
+			);
+			d.show();
+		},
+	});
+}
+
+function _create_final_stock_entry(frm) {
+	frappe.call({
+		method: "manufyxinvenzaerp.subcontracting_management.subcontracting.create_finished_goods_entry",
+		args: { sco_name: frm.doc.subcontracting_order },
+		freeze: true,
+		freeze_message: __("Creating Final Stock Entry…"),
+		callback: function (r) {
+			if (!r.message) return;
+			let se_name = r.message.name;
+			let already = r.message.already_existed;
+			frappe.msgprint({
+				title: already ? __("Final Stock Entry Already Exists") : __("Final Stock Entry Created"),
+				message: (already
+						? __("A draft Final Stock Entry already exists for this Job Work Order. ")
+						: "")
+					+ __("Review and submit the stock entry: ") +
+					'<a href="/app/stock-entry/' + encodeURIComponent(se_name) + '">' + se_name + "</a>",
+				indicator: already ? "orange" : "green",
+			});
+		},
+	});
 }
 
 // "View All" — raw_materials can run past 100 rows, well beyond the grid's
