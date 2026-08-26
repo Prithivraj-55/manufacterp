@@ -779,6 +779,60 @@ class MaterialPlanning(Document):
 
 @frappe.whitelist()
 @frappe.validate_and_sanitize_search_inputs
+def material_mapping_batch_query(doctype, txt, searchfield, start, page_len, filters):
+    """Batches that actually hold stock in this plan's Raw Materials Warehouse.
+
+    The field had no query at all, so it offered every batch on the site. A plan built
+    for CBE could be mapped to a batch sitting in Stores: the reservation went through,
+    because a reservation is paper, and the stock check then reported the whole
+    requirement as a shortfall against a batch holding ten tonnes -- in the wrong shed.
+
+    Deliberately NOT filtered by item. A requirement for ISMB400 satisfied by an ISA100
+    bar is the cross-mapping this table exists for; the batch's own item becomes the
+    row's planned_item. Warehouse is the constraint that always applies, item is not.
+
+    Quantities come from ERPNext's own get_batch_qty rather than a hand-rolled sum over
+    the ledger: a batch received through a Purchase Receipt records its quantity in a
+    Serial and Batch Bundle and leaves the ledger row's batch_no empty, so counting
+    batch_no alone reports zero for exactly the batches most likely to be picked."""
+    warehouse = (filters or {}).get("warehouse")
+    if not warehouse:
+        # Nothing to measure against. Offering the whole site here is what caused this.
+        return []
+
+    from erpnext.stock.doctype.batch.batch import get_batch_qty
+
+    rows = get_batch_qty(batch_no=None, warehouse=warehouse) or []
+    qty_by_batch = {r["batch_no"]: flt(r.get("qty")) for r in rows if flt(r.get("qty")) > 0}
+    if not qty_by_batch:
+        return []
+
+    meta = {
+        b.name: b
+        for b in frappe.get_all(
+            "Batch",
+            filters={"name": ["in", list(qty_by_batch)], "disabled": 0},
+            fields=["name", "item", "custom_length", "custom_width", "custom_thickness"],
+        )
+    }
+
+    needle = (txt or "").lower()
+    out = []
+    for name in sorted(meta):
+        if needle and needle not in name.lower() and needle not in (meta[name].item or "").lower():
+            continue
+        b = meta[name]
+        dims = " x ".join(
+            str(flt(d, 2)) for d in (b.custom_length, b.custom_width, b.custom_thickness) if flt(d)
+        )
+        out.append((name, b.item, "%s Kg" % flt(qty_by_batch[name], 3), dims))
+
+    start, page_len = int(start or 0), int(page_len or 20)
+    return out[start:start + page_len]
+
+
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
 def search_bom(doctype, txt, searchfield, start, page_len, filters):
     """Custom BOM search: matches name, item, item_name, or DUNO/Mark No (substring)."""
     like_txt = f"%{txt}%"

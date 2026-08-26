@@ -221,8 +221,30 @@ frappe.ui.form.on("Material Planning", {
 			};
 		});
 
+		// Only batches holding stock in this plan's own Raw Materials Warehouse. With
+		// no query at all the field offered every batch on the site, so a plan built for
+		// one warehouse could be mapped to a batch sitting in another -- the reservation
+		// went through, because a reservation is paper, and the stock check then
+		// reported the whole requirement as a shortfall against a batch holding ten
+		// tonnes in the wrong shed.
+		//
+		// Not filtered by item on purpose: satisfying an ISMB400 requirement from an
+		// ISA100 bar is the cross-mapping this table is for.
 		frm.set_query("batch", "material_mapping", function() {
-			return {};
+			// Raw Materials Warehouse is not a mandatory field, and without it the list
+			// is empty with nothing on screen to say why. Said once per form, not once
+			// per keystroke.
+			if (!frm.doc.for_warehouse && !frm._mfx_warned_no_wh) {
+				frm._mfx_warned_no_wh = true;
+				frappe.show_alert({
+					message: __("Set the Raw Materials Warehouse first — batches are offered from it."),
+					indicator: "orange",
+				}, 7);
+			}
+			return {
+				query: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.material_mapping_batch_query",
+				filters: { warehouse: frm.doc.for_warehouse || "" },
+			};
 		});
 
 		// Color-code Consolidate Item's "Difference (Required − Purchase)":

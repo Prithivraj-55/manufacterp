@@ -914,7 +914,7 @@ const ERP_MANUAL_MATERIAL_PLANNING_CHILDREN = [
 		fields: [
 			{ name: "Item Code / Required Qty / Required Sec Qty", note: "What's actually needed — unchanged from the original requirement." },
 			{ name: "Length / Width / Thickness / Unit Weight", note: "The REQUIRED dimensions (not the batch's) — shown for reference so you know what you're covering." },
-			{ name: "Assign Batch", note: "Pick any batch of this item (or of a substitute item) by hand — no dimension-matching restriction here, unlike Exact Match." },
+			{ name: "Assign Batch", note: "Pick any batch by hand — of this item or of a substitute — with no dimension-matching restriction, unlike Exact Match. <b>Only batches holding stock in this plan's Raw Materials Warehouse are offered</b>, with the item, the Kg available there and the batch's dimensions shown beside each one. Set the warehouse first: with it blank, nothing is offered." },
 			{ name: "Status (Mapped / Not Mapped / Excess Mapped / Cut Sheet Mapped)", note: "At a glance, what state this row is in — see the Status legend below." },
 			{ name: "Planned Item (from Batch)", note: "The item the assigned batch actually is — will differ from Item Code if you've substituted an alternate item." },
 			{ name: "Batch Length / Width / Thickness / Unit Weight", note: "The ASSIGNED BATCH's own dimensions — this is what the Kg formula actually uses, not the required dimensions." },
@@ -923,6 +923,7 @@ const ERP_MANUAL_MATERIAL_PLANNING_CHILDREN = [
 			{ name: "CNC Process", note: "Same meaning as on Available Raw Materials — see that section for the full example." },
 			{ name: "Reserved / Reserved Qty / Shortfall Qty / Reserved On", note: "Same reservation bookkeeping as Exact Match — and the same rule: only the quantity ON THIS ROW gets reserved, never the whole batch." },
 			{ name: "Batch Total / Reserved / Free Qty", note: "A live snapshot of that batch's stock position across the whole system, not just this row." },
+			{ name: "(a note on warehouses)", note: "The batch list used to be unfiltered, so a plan built for one warehouse could be mapped to a batch sitting in another. The reservation went through — a reservation is paper — and the stock check then reported the whole requirement as a shortfall against a batch holding ten tonnes in the wrong shed. The list is now taken from the plan's own warehouse, so that combination cannot be chosen." },
 		],
 		calcs: [
 			{
