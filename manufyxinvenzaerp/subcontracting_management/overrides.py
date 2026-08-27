@@ -35,6 +35,54 @@ def resolve_supplier_warehouse(supplier, company):
     return warehouse if frappe.db.exists("Warehouse", warehouse) else ""
 
 
+def _any_operation_started(sco_name):
+    """True once any operation entry on this order has quantity against it.
+
+    Reads the Consumption Log rather than the operation's own Status, so the
+    order turns Working the moment the first quantity is entered and saved --
+    not only when somebody remembers to move the operation off Open.
+    """
+    return bool(frappe.db.sql(
+        """
+        SELECT 1
+        FROM `tabSOE Consumption Log` log
+        JOIN `tabSupplier Operation Entry` soe ON soe.name = log.parent
+        WHERE soe.subcontracting_order = %(sco)s
+          AND soe.docstatus != 2
+          AND log.qty_nos > 0
+        LIMIT 1
+        """,
+        {"sco": sco_name},
+    ))
+
+
+def _final_stock_entry_submitted(sco_name):
+    """True when the Material Issue Plan's final ('Manufacture') Stock Entry for
+    this order has been submitted -- the point at which finished goods really
+    exist in stock. Drafts do not count; see CustomSubcontractingOrder.update_status."""
+    return bool(frappe.db.exists(
+        "Stock Entry",
+        {"subcontracting_order": sco_name, "stock_entry_type": "Manufacture", "docstatus": 1},
+    ))
+
+
+def refresh_sco_status(sco_name):
+    """Re-derive a Job Work Order's status from the current state of its
+    operations and its final Stock Entry.
+
+    Called from the events that can change either -- an operation entry saved or
+    submitted, the final Stock Entry submitted or cancelled -- so the status is
+    never left behind by work that happened somewhere else. Silent for standard
+    (non-Production-Plan) SCOs, which keep ERPNext's own receipt-driven status.
+    """
+    if not sco_name:
+        return
+    sco = frappe.get_doc("Subcontracting Order", sco_name)
+    if not sco.get("custom_production_plan") or sco.docstatus != 1:
+        return
+    sco.update_status()
+
+
 class CustomStockEntry(StockEntry):
     """Stock Entry override that relaxes ERPNext's standard subcontracting checks for
     'Send to Subcontractor' entries tied to a Production-Plan-flow Subcontracting Order,
@@ -126,6 +174,55 @@ class CustomSubcontractingOrder(SubcontractingOrder):
         self.update_status()
         self._cancel_and_delete_soes()
 
+    # ── Status ────────────────────────────────────────────────────────────────
+
+    def update_status(self, status=None, update_modified=True, update_bin=True):
+        """Status of a Job Work Order follows its OPERATIONS, not its receipts.
+
+        ERPNext derives an SCO's status from per_received and the Raw Materials
+        Supplied table. A Production-Plan-flow order has neither -- no
+        Subcontracting Receipt is ever made against it and supplied_items is
+        empty -- so every one of them sat on "Open" from submit to the end of
+        the job, however much work had been done.
+
+        Here it follows what the job is actually doing:
+
+            Open      submitted, nothing logged on any operation yet
+            Working   at least one operation has quantity against it
+            Completed every operation is submitted (custom_all_ops_complete)
+                      AND the Material Issue Plan's final Stock Entry is
+                      submitted, i.e. the finished goods are really in stock
+
+        Completed deliberately waits for that Stock Entry to be SUBMITTED
+        rather than merely created: the button hands back a draft, and a draft
+        can still be edited or deleted. Cancelling it drops the order back to
+        Working on its own, because this reads the state each time rather than
+        latching a flag.
+        """
+        if not self._is_pp_flow():
+            super().update_status(status=status, update_modified=update_modified, update_bin=update_bin)
+            return
+
+        if not status:
+            status = self._pp_derive_status()
+
+        if status and self.status != status:
+            self.db_set("status", status, update_modified=update_modified)
+
+    def _pp_derive_status(self):
+        if self.docstatus == 0:
+            return "Draft"
+        if self.docstatus == 2:
+            return "Cancelled"
+        # Closed is a deliberate manual stop; never talk over it.
+        if self.status == "Closed":
+            return "Closed"
+
+        if self.get("custom_all_ops_complete") and _final_stock_entry_submitted(self.name):
+            return "Completed"
+
+        return "Working" if _any_operation_started(self.name) else "Open"
+
     def _cancel_and_delete_soes(self):
         """Cancel submitted SOEs then delete all SOEs linked to this SCO.
         Blocks first if the mixed-plan handoff to a sibling Work Order's first Job
@@ -159,6 +256,10 @@ class CustomSubcontractingOrder(SubcontractingOrder):
         for soe in soes:
             doc = frappe.get_doc("Supplier Operation Entry", soe.name)
             if doc.docstatus == 1:
+                # An operation entry refuses to be cancelled on its own (see
+                # before_cancel_supplier_operation_entry) -- this cascade is the
+                # one supported way, because it takes the whole chain with it.
+                doc.flags.mfx_cancelled_by_sco = True
                 doc.cancel()
             frappe.delete_doc("Supplier Operation Entry", soe.name, ignore_permissions=True, force=True)
 

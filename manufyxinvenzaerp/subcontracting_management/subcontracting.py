@@ -824,6 +824,19 @@ def validate_supplier_operation_entry(doc, method):
     if log_nos_by_drawing and doc.status == "Open":
         doc.status = "In Progress"
 
+    # An amendment starts the operation over. The cancelled document's Completed
+    # status copies across but its finished quantities do not, so leaving it set
+    # would both describe the new draft wrongly and make it unsaveable -- the
+    # check below would refuse an amendment nobody could get past.
+    # __islocal rather than is_new(): same flag is_new() reads, but reached
+    # through get() because this validator is also driven directly with plain
+    # dicts in the tests, which carry no Document methods. (creation is no use
+    # here -- insert() stamps it before validate runs.)
+    if doc.get("amended_from") and doc.get("__islocal") and (doc.status or "") == "Completed":
+        doc.status = "In Progress" if log_nos_by_drawing else "Open"
+
+    _validate_completed_status(doc, seq)
+
     # --- 4. Op-1: check log trigger setting ---
     if seq == 1 and log_nos_by_drawing:
         trigger = (
@@ -909,6 +922,127 @@ def validate_supplier_operation_entry(doc, method):
                 .format(label, flt(nos, 3), flt(ceiling, 3), source),
                 title=_("Exceeds Available Qty"),
             )
+
+
+def _soe_drawing_target_nos(row, seq):
+    """How many Nos this operation is expected to finish for one drawing.
+
+    Op-1 works to the drawing's own quantity; every later operation works to
+    what the previous one handed it. Same pair the Consumption Log ceiling in
+    validate_supplier_operation_entry uses, so "fully done" and "you have
+    entered too much" are measured against one number, not two.
+    """
+    return flt(row.available_to_consume_nos) if (seq or 1) > 1 else flt(row.qty_to_manufacture)
+
+
+def _validate_completed_status(doc, seq):
+    """Status may only reach Completed when the operation really is finished.
+
+    Completed is not a label -- before_submit_supplier_operation_entry requires
+    it, submitting hands this operation's quantity to the next one, and the Job
+    Work Order's Operations tab reports from it. Setting it early passes a
+    quantity forward that was never made.
+
+    Two things must hold, and neither was checked before:
+
+      * every drawing is done -- completed Nos have reached the quantity this
+        operation was given. (On an Inspection-Mandatory operation completed Nos
+        only ever comes from an accepted Inspection Entry, so this is the same
+        check expressed once: logged for ordinary operations, accepted for
+        inspected ones.)
+      * no inspection round is still open. An operation whose last call is
+        Pending has pieces sitting with QC; closing it would submit a quantity
+        inspection has not passed yet.
+    """
+    if (doc.status or "") != "Completed":
+        return
+
+    short, starved = [], []
+    for row in (doc.drawing_details or []):
+        label = row.customer_drawing_number or row.drawing
+        # Nothing to make, or no drawing to make it against. The Consumption Log
+        # requires a drawing and its picker is filtered to these rows, so a row
+        # with no drawing can never be logged against -- gating Completed on one
+        # would be a condition nobody could ever satisfy.
+        if not row.drawing or flt(row.qty_to_manufacture) <= 0:
+            continue
+
+        target = _soe_drawing_target_nos(row, seq)
+        if target <= 0:
+            # Only reachable from Op-2 onwards: the operation before this one
+            # passed nothing across, so there is nothing here to have finished.
+            starved.append(label)
+            continue
+
+        done = flt(row.completed_qty_nos)
+        if done + 0.001 < target:
+            short.append(
+                _("{0} — {1} of {2} Nos").format(label, flt(done, 3), flt(target, 3))
+            )
+
+    if short or starved:
+        parts = []
+        if short:
+            parts.append(
+                _("These drawings are not finished yet:<br>{0}").format("<br>".join(short))
+            )
+        if starved:
+            parts.append(
+                _("These drawings received nothing from the previous operation, so there is "
+                  "nothing to complete:<br>{0}").format("<br>".join(starved))
+            )
+        frappe.throw(
+            _("Status cannot be set to <b>Completed</b>.<br><br>{0}<br><br>"
+              "Enter the remaining quantity in the Consumption Log first.{1}")
+            .format(
+                "<br><br>".join(parts),
+                _(" On this operation the quantity is counted from Accepted Qty on a submitted "
+                  "Inspection Entry, not from the log alone.")
+                if doc.custom_inspection_mandatory else "",
+            ),
+            title=_("Operation Not Finished"),
+        )
+
+    if doc.custom_inspection_mandatory:
+        pending = [
+            r for r in (doc.custom_inspection_call_log or [])
+            if (r.round_status or "") == "Pending"
+        ]
+        if pending:
+            frappe.throw(
+                _("Status cannot be set to <b>Completed</b> — inspection round {0} is still "
+                  "Pending. Complete the inspection before closing this operation.")
+                .format(pending[-1].round_no or len(pending)),
+                title=_("Inspection Still Open"),
+            )
+
+
+def before_cancel_supplier_operation_entry(doc, method):
+    """A Supplier Operation Entry is not cancellable on its own.
+
+    The Job Work Order's Operations tab, the next operation's available
+    quantity and the SCO Drawing Items' completion all read from SUBMITTED
+    operation entries. Cancelling one leaves the order reporting a quantity
+    nothing accounts for any more, and the chain behind it intact but pointing
+    at a document that no longer counts -- which is exactly what happened to
+    SCO-SOE-0005: cancelled, then not even amendable (the doctype had no
+    amended_from field, so Frappe refused the amendment outright).
+
+    Cancelling the Job Work Order itself still cascades through here, which is
+    the supported way to undo a whole chain -- it cancels and removes every
+    operation together, in reverse sequence, so nothing is left half-referenced.
+    """
+    if doc.flags.get("mfx_cancelled_by_sco"):
+        return
+
+    frappe.throw(
+        _("A Supplier Operation Entry cannot be cancelled on its own — the Job Work Order "
+          "reports its quantity, and the operations after it were given work based on it.<br><br>"
+          "To undo this operation, cancel Job Work Order <b>{0}</b>: that removes the whole "
+          "operation chain together and leaves nothing pointing at a cancelled document.")
+        .format(doc.subcontracting_order or "—"),
+        title=_("Cannot Cancel This Operation"),
+    )
 
 
 def _sync_soe_inspection_items(doc, log_nos_by_drawing):
@@ -1071,9 +1205,14 @@ def _update_sco_drawing_item_completion(doc):
 
 def on_update_supplier_operation_entry(doc, method):
     """Live propagation on save: push Kg chain and per-drawing Nos to next operation."""
+    from manufyxinvenzaerp.subcontracting_management.overrides import refresh_sco_status
+
     if doc.docstatus == 0:
         _propagate_available_to_next(doc)
         _propagate_drawing_nos_to_next(doc)
+
+    # First quantity logged anywhere on the order moves it Open -> Working.
+    refresh_sco_status(doc.subcontracting_order)
 
 
 def _push_sco_completion_to_wo(pp_name, last_soe):
@@ -1143,6 +1282,12 @@ def on_submit_supplier_operation_entry(doc, method):
         if pp_name:
             _push_sco_completion_to_wo(pp_name, doc)
 
+    # All operations done is only half of Completed -- the final Stock Entry has
+    # still to be submitted -- so re-derive rather than assume either way.
+    from manufyxinvenzaerp.subcontracting_management.overrides import refresh_sco_status
+
+    refresh_sco_status(doc.subcontracting_order)
+
 
 def before_delete_supplier_operation_entry(doc, method):
     """Block deletion of an SOE if other SOEs exist for the same SCO.
@@ -1179,6 +1324,9 @@ def on_cancel_subcontracting_order(doc, method):
     for soe_info in soes:
         soe_doc = frappe.get_doc("Supplier Operation Entry", soe_info.name)
         if soe_doc.docstatus == 1:
+            # Cascade from the order is the only cancel an operation entry accepts
+            # -- see before_cancel_supplier_operation_entry.
+            soe_doc.flags.mfx_cancelled_by_sco = True
             soe_doc.cancel()
         soe_doc.delete(ignore_permissions=True)
 
