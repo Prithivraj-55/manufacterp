@@ -78,9 +78,23 @@ def _copy_from_material_request_item(row):
 		row.project = frappe.db.get_value("Material Request Item", row.material_request_item, "project")
 
 
+def _refresh_sco_status_for_final_entry(doc):
+	"""The Material Issue Plan's final ('Manufacture') Stock Entry is what finishes a
+	Job Work Order -- submitting it puts the finished goods in stock, cancelling it
+	takes them back out. Re-derive the order's status either way rather than latching
+	it, so a cancelled final entry drops the order back to Working on its own."""
+	if doc.stock_entry_type != "Manufacture" or not doc.get("subcontracting_order"):
+		return
+	from manufyxinvenzaerp.subcontracting_management.overrides import refresh_sco_status
+
+	refresh_sco_status(doc.subcontracting_order)
+
+
 def on_submit_stock_entry(doc, method):
 	"""Reduce custom_sec_qty on batch for consumed items
 	(Material Issue + Repack/Manufacture source rows)."""
+	_refresh_sco_status_for_final_entry(doc)
+
 	if doc.stock_entry_type == "Material Issue":
 		for row in doc.items:
 			if row.batch_no and flt(row.get("custom_sec_qty")):
@@ -878,6 +892,7 @@ def on_cancel_stock_entry(doc, method):
 	reservations and the consumed Sec Qty (Nos) on the batch."""
 	_restore_material_planning_reservations(doc)
 	_restore_batch_sec_qty(doc)
+	_refresh_sco_status_for_final_entry(doc)
 
 	# Cut Sheet: the stock is back, so the batch must stop advertising the offcut's
 	# dimensions. Runs after _restore_batch_sec_qty, which would otherwise overwrite

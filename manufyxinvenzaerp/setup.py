@@ -1467,6 +1467,7 @@ def after_install():
     remove_sco_purchase_order_mandatory()
     hide_sco_job_worker_warehouse()
     make_sco_job_worker_conditional()
+    add_sco_working_status()
     create_sco_custom_fields()
     create_sco_client_script()
     create_sco_ops_client_script()
@@ -1515,6 +1516,7 @@ def after_migrate():
     remove_sco_purchase_order_mandatory()
     hide_sco_job_worker_warehouse()
     make_sco_job_worker_conditional()
+    add_sco_working_status()
     create_sco_custom_fields()
     create_sco_client_script()
     create_sco_ops_client_script()
@@ -3496,6 +3498,44 @@ def remove_sco_purchase_order_mandatory():
     frappe.db.commit()
 
 
+def add_sco_working_status():
+    """Add "Working" to the Job Work Order's Status options.
+
+    A Production-Plan-flow Subcontracting Order has no Subcontracting Receipt and no
+    Raw Materials Supplied table, so every status ERPNext can derive from those --
+    Partially Received, Material Transferred -- is unreachable, and the order sat on
+    "Open" from submit to finish. CustomSubcontractingOrder.update_status derives
+    Open / Working / Completed from its operations instead, and "Working" has to be a
+    valid option or the next ordinary save of the order fails Frappe's Select
+    validation.
+
+    The core options are kept as they are rather than trimmed: standard SCOs on this
+    site still use them, and removing an option a saved document already holds would
+    make that document unsaveable."""
+    options = frappe.db.get_value(
+        "DocField", {"parent": "Subcontracting Order", "fieldname": "status"}, "options"
+    ) or ""
+    existing = frappe.db.get_value(
+        "Property Setter",
+        {"doc_type": "Subcontracting Order", "field_name": "status", "property": "options"},
+        "value",
+    )
+    current = existing or options
+    if "Working" in (current or "").split("\n"):
+        return
+
+    frappe.make_property_setter(
+        {
+            "doctype": "Subcontracting Order",
+            "fieldname": "status",
+            "property": "options",
+            "value": (current.rstrip("\n") + "\nWorking") if current else "Working",
+            "property_type": "Text",
+        }
+    )
+    frappe.db.commit()
+
+
 def hide_sco_job_worker_warehouse():
     """Hide Job Worker Warehouse — CustomSubcontractingOrder._auto_set_supplier_warehouse
     (overrides.py) resolves it automatically from the Job Worker's dedicated Warehouse
@@ -3722,7 +3762,28 @@ frappe.ui.form.on("Subcontracting Order", {
 \t\t\t}
 \t\t}
 
+\t\t// ERPNext offers "Subcontracting Receipt" under Create on every submitted
+\t\t// order. A Job Work Order raised from a Production Plan has no service items
+\t\t// and no Raw Materials Supplied table to receive against, so that button can
+\t\t// only lead to a broken receipt -- finished goods arrive through the Material
+\t\t// Issue Plan's final Stock Entry instead. Runs after the standard controller's
+\t\t// refresh, which is what added it.
+\t\tfrm.remove_custom_button(__("Subcontracting Receipt"), __("Create"));
+
 \t\tif (frm.doc.docstatus === 1 && frm.doc.custom_production_plan) {
+
+\t\t\t// Straight to the Material Issue Plan for this order -- the two documents
+\t\t\t// are worked on together and there is no link field either way. Placed
+\t\t\t// before the Create group so it reads as navigation, not creation.
+\t\t\tfrappe.db.get_value("Material Issue Plan",
+\t\t\t\t{ subcontracting_order: frm.doc.name, docstatus: ["!=", 2] }, "name")
+\t\t\t\t.then(function(r) {
+\t\t\t\t\tvar mip = r && r.message && r.message.name;
+\t\t\t\t\tif (!mip) return;
+\t\t\t\t\tfrm.add_custom_button(__("Open MIP"), function() {
+\t\t\t\t\t\tfrappe.set_route("Form", "Material Issue Plan", mip);
+\t\t\t\t\t});
+\t\t\t\t});
 
 \t\t\tfrm.add_custom_button(__("Material Issue Plan"), function() {
 \t\t\t\tfrappe.call({
@@ -3911,6 +3972,35 @@ frappe.ui.form.on("SOE Consumption Log", {
 });
 
 frappe.ui.form.on("Supplier Operation Entry", {
+\tstatus: function(frm) {
+\t\t// Completed is the last thing that happens to an operation: submitting is
+\t\t// gated on it, and submitting is what hands this quantity to the next
+\t\t// operation. So ask once, here, and carry it through -- rather than leaving
+\t\t// a Completed-but-draft entry sitting there looking finished while the next
+\t\t// operation still shows nothing available.
+\t\t//
+\t\t// The server refuses Completed while any drawing is short or an inspection
+\t\t// round is still open (see _validate_completed_status), so a save that fails
+\t\t// puts the status back and never reaches the submit.
+\t\tif (frm.doc.status !== "Completed" || frm.doc.docstatus !== 0 || frm.is_new()) return;
+\t\tif (frm._mfx_completing) return;
+
+\t\tfrappe.confirm(
+\t\t\t__("Mark this operation Completed and submit it?<br><br>Submitting passes its finished quantity to the next operation. It cannot be cancelled on its own afterwards — only by cancelling the whole Job Work Order."),
+\t\t\tfunction() {
+\t\t\t\t// save("Submit") rather than savesubmit(): savesubmit() raises its own
+\t\t\t\t// "Permanently Submit?" confirmation, and asking twice for one decision
+\t\t\t\t// trains people to click through both.
+\t\t\t\tfrm._mfx_completing = true;
+\t\t\t\tfrm.save("Submit").always(function() { frm._mfx_completing = false; });
+\t\t\t},
+\t\t\tfunction() {
+\t\t\t\t// Declined -- put the status back so the form matches what was saved.
+\t\t\t\tfrm.set_value("status", (frm.doc.consumption_log || []).length ? "In Progress" : "Open");
+\t\t\t}
+\t\t);
+\t},
+
 \trefresh: function(frm) {
 \t\t_sync_drawing_nos(frm);
 \t\t// Filter drawing link in log to only drawings present in this SOE

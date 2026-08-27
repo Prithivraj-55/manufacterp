@@ -6,6 +6,10 @@ frappe.ui.form.on("Material Issue Plan", {
 		// action buttons below. The matching whitelisted endpoints also refuse
 		// directly (_ensure_mip_editable), so this is UI convenience on top of
 		// a real server-side lock, not the only thing enforcing it.
+		// Added before the Completed lock below: opening the Job Work Order is
+		// navigation, not an edit, and is just as useful on a finished plan.
+		_add_open_sco_button(frm);
+
 		if (frm.doc.status === "Completed") {
 			frm.disable_form();
 			frappe.show_alert({
@@ -510,6 +514,15 @@ function _check_transfer_readiness(frm, on_proceed) {
 // this batch (with its Sec Qty) is what's planned, per drawing. The preview
 // popup and the downloaded PDF render from the exact same server-built HTML
 // (get_mip_batch_plan_html), so what you see is exactly what you download.
+
+function _add_open_sco_button(frm) {
+	// Counterpart of the Job Work Order's "Open MIP" button: the two documents are
+	// worked on together, so each one opens the other in a click.
+	if (frm.is_new() || !frm.doc.subcontracting_order) return;
+	frm.add_custom_button(__("Open Job Work Order"), function() {
+		frappe.set_route("Form", "Subcontracting Order", frm.doc.subcontracting_order);
+	});
+}
 
 function _add_pdf_button(frm) {
 	if (frm.is_new()) return;
