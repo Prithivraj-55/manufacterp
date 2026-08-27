@@ -844,7 +844,7 @@ const ERP_MANUAL_MATERIAL_PLANNING_CHILDREN = [
 		buttons: [
 			{ name: "Get Raw Materials", note: "Pulls the requirement list in from the BOMs you selected on the Selected BOMs tab." },
 			{ name: "Verify Raw Materials", note: "A sanity pass over the pulled-in rows before you commit to checking stock." },
-			{ name: "Check Stock Availability", note: "The big one. Runs the whole matching engine and splits every row into Available Raw Materials, Material Mapping, or Unavailable Items — explained in the next sections." },
+			{ name: "Check Stock Availability", note: "The big one. Runs the whole matching engine and splits every row into Available Raw Materials, Material Mapping, or Unavailable Items — explained in the next sections. <b>Safe to re-run once a purchase is under way:</b> rows whose item is already on an active Material Request are carried over untouched, and the popup says how many it kept. Without that they were wiped, taking with them the only rows the eventual Purchase Receipt could have matched — so the goods arrived and the plan still showed everything unmapped." },
 		],
 	},
 	{
@@ -2140,6 +2140,7 @@ const ERP_MANUAL_PROCUREMENT_CHILDREN = [
 			"Create the receipt from the Purchase Order so the dimensions and references come with it. Correct anything that arrived different to what was ordered <b>before</b> submitting.",
 			"If any item on the receipt requires inspection, run that first — the receipt will not submit until its Inspection Status is Completed.",
 			"On submit, one batch is created per line, named and dimensioned from that line. See <b>The Batch Record</b> under Item for how the name is built.",
+			"<b>A receipt can also fill rows already sitting in Material Mapping</b> — the state a plan is left in when Check Stock Availability has moved its requirements out of Unavailable Items. Those rows are filled in place rather than added again, so the requirement is never duplicated, and a row the receipt can only cover in part keeps its remainder as a separate blank-batch row to assign by hand.",
 			"On submit, <b>Batches Allocated — Reserve Them</b> names the Material Planning the new batches went to and opens it from the dialog. <b>Allocated is not reserved</b>: only reserved rows are offered for transfer on a Material Issue Plan, so go and reserve them. Reserve the last one and the plan's status moves to Batch Mapping Completed by itself.",
 			"<b>If nothing was allocated, the receipt now says why.</b> Allocation follows the chain <b>Receipt line → Purchase Order line → Material Request line → that request's Material Planning</b>, and it only takes one missing link — a Purchase Order raised by hand instead of from the request, say — for the batches never to reach the plan. The receipt names the first broken link per item instead of submitting in silence. An ordinary purchase with no plan behind it stays quiet, as it should.",
 			"<b>Material Planning → Allocate to Material Planning</b> runs the allocation again on a submitted receipt, once the chain is repaired — so a receipt that missed its plan does not have to be cancelled and re-entered for stock that has already arrived. Safe to press twice: a requirement already covered has nothing left to match.",

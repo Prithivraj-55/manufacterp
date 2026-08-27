@@ -41,10 +41,25 @@ def check(label, got, want):
     print("  %-4s %-54s got=%r want=%r" % ("OK" if ok else "FAIL", label, got, want))
 
 
+def _receipt_with_an_intact_chain():
+    """A receipt that actually traces to a plan.
+
+    Taking the first submitted one is not good enough: the site accumulates receipts
+    from other verify scripts whose lines were never raised from a Purchase Order, and
+    picking one of those failed the very checks that are about an INTACT chain. The
+    broken ones are what the second half of this file builds on purpose."""
+    for name in frappe.get_all("Purchase Receipt", filters={"docstatus": 1},
+                               pluck="name", order_by="creation desc"):
+        d = diagnose_mp_allocation(name)
+        if d["plans"] and not d["broken"]:
+            return name
+    return None
+
+
 def run():
-    pr = frappe.db.get_value("Purchase Receipt", {"docstatus": 1}, "name")
+    pr = _receipt_with_an_intact_chain()
     if not pr:
-        print("=== no submitted Purchase Receipt on this site ===")
+        print("=== no submitted Purchase Receipt traces cleanly to a Material Planning ===")
         _wiring()
         _summary()
         return

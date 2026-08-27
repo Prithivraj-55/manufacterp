@@ -280,12 +280,21 @@ frappe.ui.form.on("Purchase Receipt", {
 						_mfx_pr_report_no_allocation(frm);
 						return;
 					}
+					// filled_mapping counts rows the allocation filled IN PLACE -- Material
+					// Mapping rows that were already sitting there waiting for a batch,
+					// which is what a plan looks like after a re-check has moved its
+					// requirements out of Unavailable Items. Leaving it out of this tally
+					// reported "Nothing Left to Allocate" over a run that had just
+					// rescued every row on the plan.
 					let lines = (d.results || []).map(function(x) {
-						return __("{0}: {1} into Exact Match, {2} into Material Mapping", [
-							x.material_planning, x.added_exact, x.added_mapping]);
+						let parts = [];
+						if (x.added_exact) parts.push(__("{0} into Exact Match", [x.added_exact]));
+						if (x.filled_mapping) parts.push(__("{0} filled in Material Mapping", [x.filled_mapping]));
+						if (x.added_mapping) parts.push(__("{0} added to Material Mapping", [x.added_mapping]));
+						return x.material_planning + ": " + (parts.length ? parts.join(", ") : __("nothing"));
 					});
 					let none = (d.results || []).every(function(x) {
-						return !x.added_exact && !x.added_mapping;
+						return !x.added_exact && !x.added_mapping && !x.filled_mapping;
 					});
 					frappe.msgprint({
 						title: none ? __("Nothing Left to Allocate") : __("Allocated"),

@@ -644,6 +644,9 @@ frappe.ui.form.on("Material Planning", {
 						<tr style="background:${s.unavail ? "#fff5f5" : ""};">
 							<td style="padding:8px 12px;">
 								${__("Added to <b>Unavailable Items (No Stock — Needs Purchase)</b>")}
+								${s.preserved_ordered ? `<br><span class="text-muted" style="font-size:11px;">
+									${__("includes {0} row(s) left untouched — already on an active Material Request", [s.preserved_ordered])}
+								</span>` : ""}
 							</td>
 							<td style="padding:8px 12px;font-weight:700;text-align:center;color:${s.unavail ? "red" : "green"};">${s.unavail}</td>
 						</tr>
@@ -912,7 +915,10 @@ frappe.ui.form.on("Material Planning", {
 					_update_weight_summary(frm);
 
 					// Stash summary for after_save popup
-					frm._check_stock_summary = { avail, mapping, unavail, shortfall_mapping };
+					frm._check_stock_summary = {
+						avail, mapping, unavail, shortfall_mapping,
+						preserved_ordered: result.preserved_ordered_count || 0,
+					};
 					frm.save();
 				},
 			});
