@@ -17,6 +17,12 @@
 // starts where Material Planning finds a shortfall) and Reference (every status flow
 // in one place, plus Manufyxinvenza Settings). Nothing that was here was removed.
 //
+// Then: the job work order gained a real status flow (Open -> Working -> Completed,
+// driven by its operations and the Material Issue Plan's Final Stock Entry) and the
+// Open MIP / Open Job Work Order buttons; Supplier Operation Entry gained the rules
+// around closing one -- what Completed now requires, the confirm-and-submit prompt,
+// and why an operation cannot be cancelled on its own.
+//
 // Layout/tree/scrollspy come from the shared renderer
 // (public/js/manual_renderer.js) via manufyx_render_manual_tree(); this file is
 // only the content. A leaf uses the same shape as the old flat manuals: {id,
@@ -1385,6 +1391,7 @@ const ERP_MANUAL_JOB_WORK_ORDER_CHILDREN = [
 		fields: [
 			{ name: "Drawing Items", note: "Every drawing/DUNO this job covers, each with its own Customer Provided Weight, Planned RM Weight, Mapped Weight, Excess Weight, and Transferred Weight — rolled up from Material Planning." },
 			{ name: "All Operations Complete", note: "Ticks itself once every operation in the chain has been submitted. Informational — it no longer gates anything: <b>Make Final Stock Entry</b> follows the last operation's completed pieces instead, so part of a job can be booked without waiting for the whole of it." },
+			{ name: "Status", note: "<b>Open → Working → Completed</b>, and it moves on its own. Open on submit; Working the moment any operation has quantity logged against it; Completed once every operation is submitted <i>and</i> the Material Issue Plan's Final Stock Entry has been submitted. It is worked out fresh each time rather than remembered, so cancelling that Final Stock Entry puts the order back to Working." },
 		],
 		steps: [
 			"Submitting the Job work order and clicking “Job work order & MIP” back on Production Plan creates one Supplier Operation Entry per Operation table row, in sequence order.",
@@ -1392,12 +1399,15 @@ const ERP_MANUAL_JOB_WORK_ORDER_CHILDREN = [
 			"The Operations tab shows a live summary table — Seq, Operation, Status, Overall Qty, Available to Consume, Total Consumed, Difference, Entry, Drawings. Click any operation's name (shown in blue, underlined) to jump straight into that Supplier Operation Entry.",
 		],
 		buttons: [
+			{ name: "Open MIP", note: "Opens this job's Material Issue Plan. Sits on its own, before the Create group, because it goes to a document that already exists rather than making a new one. It only appears once there is an MIP to open. The Material Issue Plan carries the matching <b>Open Job Work Order</b> button back the other way." },
 			{ name: "Material Issue Plan (under Create)", note: "Creates the Material Issue Plan if it doesn't already exist, or opens the existing one." },
 			{ name: "Supplier Operation Entries (under Create)", note: "Creates any still-missing Supplier Operation Entry in the chain — normally already done automatically by “Job work order & MIP”." },
 		],
 		notes: [
 			"“Job work order” is a display name only — underneath, it's still the same Subcontracting Order doctype; it just reads as “Job work order” everywhere in the UI.",
 			"The old separate “Work Order / Subcontract PO” create option under Production Plan is disabled — use “Job work order & MIP” there instead.",
+			"Standard ERPNext offers <b>Subcontracting Receipt</b> under Create on a submitted order. It is removed here: a job work order raised from a Production Plan has no service items and no Raw Materials Supplied table to receive against, so that button could only produce a broken receipt. Finished goods come in through the Material Issue Plan's Final Stock Entry instead.",
+			"Cancelling the job work order cancels and removes every Supplier Operation Entry under it, in reverse sequence. That is the only supported way to undo an operation — see Supplier Operation Entry.",
 		],
 	},
 ];
@@ -1419,12 +1429,16 @@ const ERP_MANUAL_SOE_CHILDREN = [
 		steps: [
 			"Logging Nos against a drawing in Consumption Log auto-advances Status from Open to In Progress, and — when Inspection Mandatory is off — immediately updates that drawing's Completed Qty.",
 			"Status must be set to Completed before a Supplier Operation Entry can be submitted, and every earlier operation in the sequence must already be submitted too.",
+			"Completed is only accepted when the operation really is finished: every drawing must have reached the quantity this operation was given — its own Qty to Manufacture on operation 1, whatever the previous operation handed over from operation 2 on. A drawing that received nothing from the operation before it blocks Completed too, because there is nothing there to have finished.",
+			"Setting Status to Completed asks “Mark this operation Completed and submit it?” — answering Yes saves and submits in one step, so there is no separate Submit click. Answering No puts the Status back where it was.",
 		],
 		buttons: [
 			{ name: "Add All Drawing (Testing group)", note: "Fills Consumption Log with one row per drawing at its full available quantity in one click, instead of adding rows one by one. For quick testing or data entry, not a normal production step — which is why it only appears when <b>Auto Purchase from Material Planning</b> is ticked in Manufyxinvenza Settings, the same switch that reveals the Auto Purchase section on Material Planning. Leave that off on a live site and this button is not there at all." },
 		],
 		notes: [
-			"If Inspection Mandatory is ticked for this operation, Consumption Log no longer completes anything directly — see Inspection for what happens instead.",
+			"If Inspection Mandatory is ticked for this operation, Consumption Log no longer completes anything directly — see Inspection for what happens instead. On such an operation Completed also needs the inspection <i>cleared</i>: no round may still be Pending, and since the quantity comes from Accepted Qty, an operation cannot be closed on pieces QC has not passed.",
+			"<b>A Supplier Operation Entry cannot be cancelled on its own.</b> The Job work order's Operations tab, the next operation's Available to Consume and the Drawing Items' completion all report from submitted entries, so a cancelled one leaves the order quoting a quantity nothing accounts for. To undo an operation, cancel the Job work order — that takes the whole chain together and leaves nothing pointing at a cancelled document.",
+			"Amending an entry that was cancelled before this rule existed works normally, and the amendment starts at Open rather than Completed: the cancelled document's Status copies across but its finished quantities do not, so re-enter the Consumption Log before completing it again.",
 		],
 	},
 ];
@@ -1555,6 +1569,9 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 			"excess. Nothing here invents quantities — it inherits what Material Planning " +
 			"reserved and asks you to decide the one thing a planner cannot know in advance: " +
 			"how many whole physical pieces are going out today.",
+		buttons: [
+			{ name: "Open Job Work Order", note: "Opens the job work order this plan belongs to. The two documents are worked on together, so each opens the other in one click — the job work order carries the matching <b>Open MIP</b> button. Still available on a Completed plan, where the rest of the form is locked, because opening a document is not an edit." },
+		],
 	},
 	{
 		id: "raw-materials",
@@ -2174,8 +2191,9 @@ const ERP_MANUAL_REFERENCE_CHILDREN = [
 			{ name: "Drawing", note: "<b>Working → Old Revision / Final Revision</b>. A drawing stays Working while it is being edited. Marking it Final Revision is what allows a BOM to be created from it; superseded revisions become Old Revision." },
 			{ name: "Material Planning (Planning Status)", note: "<b>Open → Working → Batch Mapping Completed</b>. Moves to Working as soon as raw materials are fetched and mapping starts, and reaches Batch Mapping Completed only when every row has stock behind it — which is what lets a Production Plan be created." },
 			{ name: "Production Plan", note: "Standard ERPNext plan statuses. What matters here is submission: <b>Job work order &amp; MIP</b> only appears once the plan is submitted." },
+			{ name: "Job work order", note: "<b>Open → Working → Completed</b>. Open on submit; Working once any operation has quantity logged; Completed when every operation is submitted <i>and</i> the Material Issue Plan's Final Stock Entry is submitted. Re-derived on each of those events rather than latched, so cancelling the Final Stock Entry returns it to Working. (ERPNext's own receipt-driven statuses — Partially Received, Material Transferred — are unreachable here: a plan-driven job work order has no Subcontracting Receipt and no Raw Materials Supplied table, which is why every order used to sit on Open for its whole life.)" },
 			{ name: "Material Issue Plan", note: "<b>Open → In Progress → Completed</b>. In Progress from the first partial transfer; Completed when every row has been fully issued." },
-			{ name: "Supplier Operation Entry", note: "<b>Open → In Progress → Completed</b>. Logging any quantity in the Consumption Log moves it to In Progress. It must read Completed before the entry can be submitted, and every earlier operation in the sequence must already be submitted." },
+			{ name: "Supplier Operation Entry", note: "<b>Open → In Progress → Completed</b>. Logging any quantity in the Consumption Log moves it to In Progress. Completed is only accepted when every drawing has reached the quantity this operation was given and no inspection round is still Pending; setting it asks for confirmation and then submits. Every earlier operation in the sequence must already be submitted." },
 			{ name: "Inspection Entry", note: "<b>Open → Working → Completed</b>, plus <b>Feedback: Ok / Not Ok</b>. Feedback must be set before Status can be set to Completed. Saving as Completed also submits, after a confirmation prompt." },
 			{ name: "Inspection Status (on Supplier Operation Entry and Purchase Receipt)", note: "<b>Open → Working → Completed</b>. Not set by hand — it mirrors the status of the Inspection Entry that answered the latest round when that entry is submitted." },
 			{ name: "Inspection Call Log — Round Status", note: "<b>Pending → Completed</b>, per round. Pending until that round's Inspection Entry is submitted." },

@@ -171,6 +171,23 @@ manufyxinvenzaerp/
   release/restore on Stock Entry submit/cancel. The adjustment is a single atomic UPDATE
   (`_reduce_batch_sec_qty`) — never read-modify-write, or two entries consuming one batch
   lose a write between them.
+- **A Supplier Operation Entry is not cancellable on its own.** `before_cancel_supplier_operation_entry`
+  throws unless `doc.flags.mfx_cancelled_by_sco` is set, which only the two SCO-cancel cascades
+  do (`overrides.CustomSubcontractingOrder._cancel_and_delete_soes` and
+  `subcontracting.on_cancel_subcontracting_order`). The reason is that the SCO's Operations tab,
+  the next operation's `available_to_consume_nos` and the SCO Drawing Items all report from
+  SUBMITTED entries — a cancelled one leaves the order quoting a quantity nothing accounts for.
+  If you add a third cascade, set that flag or it will be blocked.
+- **Subcontracting Order status is derived, not stored, on PP-flow orders.**
+  `CustomSubcontractingOrder.update_status` overrides ERPNext's for orders with a
+  `custom_production_plan`: Open → Working (any operation has Consumption Log qty) → Completed
+  (`custom_all_ops_complete` AND a SUBMITTED `Manufacture` Stock Entry for the SCO). ERPNext's own
+  rules are unreachable there — no Subcontracting Receipt, no `supplied_items` — which is why every
+  such order sat on "Open" for its whole life before this. It is recomputed by `refresh_sco_status`
+  from the SOE `on_update`/`on_submit` hooks and from Stock Entry submit/cancel, so a new event that
+  changes either input must call it too. "Working" is not a core option: `setup.add_sco_working_status`
+  appends it via Property Setter, and without that the next ordinary save of an order fails Select
+  validation.
 - **Work Order and Job Card carry NO customizations.** Every field, client script, hook and
   helper this app once added to them was removed — first disabled under the client's Phase 0.4
   change request, then deleted outright on 2026-08-20 (1,827 lines). Subcontracting Order and
