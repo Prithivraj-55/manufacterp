@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-08-28 00:27:49_
+_Generated: 2026-08-28 01:34:21_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -128,9 +128,9 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `get_production_plans_for_sales_order` | 1268 |
-| `@frappe.validate_and_sanitize_search_inputs` | 1293 |
-| `get_job_work_order_for_production_plan` | 1327 |
+| `get_production_plans_for_sales_order` | 1283 |
+| `@frappe.validate_and_sanitize_search_inputs` | 1308 |
+| `get_job_work_order_for_production_plan` | 1342 |
 ## production_plan_management/production_plan.py
 
 | Method | Line |
@@ -196,12 +196,12 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `` | 1868 |
-| `` | 1871 |
-| `` | 1874 |
-| `` | 1877 |
-| `` | 1880 |
 | `create_sco_and_mip_from_production_plan` | 189 |
+| `` | 2016 |
+| `` | 2019 |
+| `` | 2022 |
+| `` | 2025 |
+| `` | 2028 |
 | `delete_sco_and_mip_for_production_plan` | 214 |
 | `create_sco_from_production_plan` | 26 |
 | `` | 294 |

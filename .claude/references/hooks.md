@@ -1,6 +1,6 @@
 # hooks — manufyxinvenzaerp
 
-_Generated: 2026-08-28 00:27:49_
+_Generated: 2026-08-28 01:34:21_
 
 ## doc_events
 
@@ -62,6 +62,7 @@ doc_events = {
 		],
 		"on_update": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_update_supplier_operation_entry",
 		"on_submit": "manufyxinvenzaerp.subcontracting_management.subcontracting.on_submit_supplier_operation_entry",
+		"before_cancel": "manufyxinvenzaerp.subcontracting_management.subcontracting.before_cancel_supplier_operation_entry",
 		"before_delete": "manufyxinvenzaerp.subcontracting_management.subcontracting.before_delete_supplier_operation_entry",
 	},
 	"Subcontracting Order": {
