@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-08-26 23:50:42_
+_Generated: 2026-08-28 00:27:49_
 
 ## drawing
 
@@ -370,6 +370,8 @@ _Generated: 2026-08-26 23:50:42_
 | ` _nos_from_weight` | no |
 | ` _reconcile_sec_qty_with_sales_order` | no |
 | ` get_raw_materials` | no |
+| ` _requirement_key` | no |
+| ` _ordered_item_codes` | no |
 | ` check_stock_availability` | no |
 | ` _alloc_sec_qty` | no |
 | ` _get_non_batch_stock` | no |

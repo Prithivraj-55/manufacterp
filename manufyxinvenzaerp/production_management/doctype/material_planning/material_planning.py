@@ -1143,6 +1143,44 @@ def get_raw_materials(doc):
 
 
 
+def _requirement_key(row):
+    """Identify one requirement line across the tables it moves between.
+
+    raw_materials, unavailable_items and material_mapping all carry the same
+    identifying fields for a requirement -- item, its BOM/drawing origin and
+    the size wanted. Qty is deliberately NOT part of the key: a partly
+    received row has its qty reduced in place, and it must still be
+    recognisable as the same requirement afterwards."""
+    return (
+        row.get("item_code") or "",
+        row.get("bom_no") or "",
+        row.get("duno_mark_no") or "",
+        row.get("item_number") or "",
+        flt(row.get("length"), 3),
+        flt(row.get("width"), 3),
+        flt(row.get("thickness"), 3),
+    )
+
+
+def _ordered_item_codes(mp_name):
+    """Item codes this Material Planning already has on an active (not
+    Cancelled/Stopped) Material Request -- i.e. a purchase is in motion for
+    them. Same rule update_exact_match_from_consolidate uses to decide which
+    Consolidate Item rows it must leave alone."""
+    if not mp_name:
+        return set()
+    active_mrs = frappe.get_all(
+        "Material Request",
+        filters={"custom_material_planning": mp_name, "status": ["not in", ["Cancelled", "Stopped"]]},
+        pluck="name",
+    )
+    if not active_mrs:
+        return set()
+    return set(frappe.get_all(
+        "Material Request Item", filters={"parent": ["in", active_mrs]}, pluck="item_code"
+    ))
+
+
 @frappe.whitelist()
 def check_stock_availability(doc):
     """
@@ -1175,6 +1213,35 @@ def check_stock_availability(doc):
         if r.get("is_reserved"):
             key = (r.get("item_code"), r.get("bom_no") or "")
             reserved_by_key[key] = r
+
+    # Unavailable Items rows that are already being purchased must survive a
+    # re-check untouched.
+    #
+    # This function rebuilds every bucket from raw_materials, and a batch item
+    # is never classified into Unavailable Items (only non-batch shortages go
+    # there) -- so a plain re-run of "Check Stock Availability" used to empty
+    # the whole table, including rows Finalize Mapping had put there and a
+    # Material Request/Purchase Order had since been raised against. That is
+    # silently destructive twice over: it drops each row's consolidated_into
+    # link, and it removes the only rows allocate_pr_stock_to_mp matches
+    # against, so the eventual Purchase Receipt allocates nothing at all and
+    # says nothing about it (MP-2026-00012 / PR-26-00005: 13 rows and
+    # 5,507 Kg received against a plan that still showed everything unmapped).
+    #
+    # Rows whose item is on an active Material Request are therefore passed
+    # straight through, and the raw_materials rows they correspond to are
+    # skipped rather than reclassified -- otherwise the same requirement would
+    # exist twice, once here and once in Material Mapping.
+    ordered_item_codes = _ordered_item_codes(doc.get("name") or "")
+    protected_unavailable = []
+    protected_counts = {}
+    if ordered_item_codes:
+        for r in doc.get("unavailable_items") or []:
+            if (r.get("alternate_item") or r.get("item_code")) not in ordered_item_codes:
+                continue
+            protected_unavailable.append(dict(r))
+            key = _requirement_key(r)
+            protected_counts[key] = protected_counts.get(key, 0) + 1
 
     updated_raw_materials = []
     available_raw_materials = []
@@ -1221,6 +1288,17 @@ def check_stock_availability(doc):
         item_code = row.get("item_code")
         required_qty = flt(row.get("qty"))
         has_batch = item_batch_flag.get(item_code, 0)
+
+        # Requirement already committed to a purchase -- its Unavailable Items
+        # row is being carried over as-is, so leave this line alone rather than
+        # re-bucketing it into Material Mapping alongside itself. Counted, not
+        # just matched: two rows can share every identifying field, and only as
+        # many lines are skipped as there are rows to carry over.
+        _protect_key = _requirement_key(row)
+        if protected_counts.get(_protect_key):
+            protected_counts[_protect_key] -= 1
+            updated_raw_materials.append(dict(row))
+            continue
 
         base_row = {
             "item_number": row.get("item_number") or "",
@@ -1438,8 +1516,9 @@ def check_stock_availability(doc):
         "raw_materials": updated_raw_materials,
         "available_raw_materials": available_raw_materials,
         "material_mapping": material_mapping,
-        "unavailable_items": unavailable_items,
+        "unavailable_items": protected_unavailable + unavailable_items,
         "shortfall_mapping_count": shortfall_count,
+        "preserved_ordered_count": len(protected_unavailable),
     }
 
 

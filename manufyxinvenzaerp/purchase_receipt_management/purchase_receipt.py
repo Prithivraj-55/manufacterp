@@ -397,10 +397,22 @@ def _build_mapping_row(
     item was bought, or because the original item was bought at a different
     (typically standard stock) size via a Consolidate Item line.
 
-    The requirement's own Length/Width/Thickness/Qty stay on the row's plain
+    The requirement's own Length/Width/Thickness stay on the row's plain
     fields while the batch's go on the batch_* fields, so the size actually
     needed survives alongside the size actually purchased.
+
+    Qty is the part of the requirement THIS batch covers, not the whole
+    requirement. When a receipt covers a row only partly the caller splits the
+    remainder off into its own blank-batch row, so writing the full figure here
+    counted the shortfall twice -- and because a reserve_without_dimensions row
+    reserves exactly its Qty, _validate_batch_calc_qty then refused the save
+    ("Required Qty 30 Kg, Free stock 10 Kg") and took the entire allocation
+    down with it: the receipt submitted, the plan kept every row unmapped, and
+    the only trace was an Error Log entry. Any partly-received consolidated
+    purchase hit this.
     """
+    covered_qty = flt(min(flt(alloc_qty), flt(mp_row.qty)), 3)
+    covered_ratio = (covered_qty / flt(mp_row.qty)) if flt(mp_row.qty) else 1.0
     return {
         "item_number":             mp_row.item_number,
         "sales_order":             mp_row.sales_order,
@@ -410,9 +422,9 @@ def _build_mapping_row(
         "drawing":                 mp_row.drawing,
         "duno_mark_no":            mp_row.duno_mark_no,
         "customer_drawing_number": mp_row.customer_drawing_number,
-        "qty":                     mp_row.qty,
+        "qty":                     covered_qty,
         "uom":                     mp_row.uom,
-        "sec_qty":                 mp_row.sec_qty,
+        "sec_qty":                 flt(flt(mp_row.sec_qty) * covered_ratio, 3),
         "sec_uom":                 mp_row.sec_uom,
         "parent_item_group":       mp_row.parent_item_group,
         "length":                  mp_row.length,
@@ -440,6 +452,49 @@ def _build_mapping_row(
         # transfer time on the Material Issue Plan.
         "reserve_without_dimensions": 1,
     }
+
+
+def _fill_mapping_row_from_receipt(
+    mp_row,
+    *,
+    alloc_qty,
+    ratio,
+    pr_item,
+    pr_name,
+    purchased_item_code,
+    batch_no,
+    purchased_item_data,
+    batch_total_qty,
+    batch_reserved_qty,
+):
+    """Write a received batch onto a Material Mapping row that was still
+    waiting for one: the requirement's own dimensions stay on the row's plain
+    fields and the batch's go on the batch_* fields -- the same shape
+    _build_mapping_row produces, applied to a row that already exists.
+
+    Qty is the caller's business, not this function's: when the receipt covers
+    the row only in part, the caller shrinks it here and adds a second
+    blank-batch row for the remainder.
+    """
+    mp_row.batch                   = batch_no
+    mp_row.planned_item            = purchased_item_code
+    mp_row.batch_mapped            = "Mapped" if batch_no else "Not Mapped"
+    mp_row.batch_parent_item_group = purchased_item_data.get("custom_parent_item_group") or ""
+    mp_row.batch_length            = flt(pr_item.custom_length)
+    mp_row.batch_width             = flt(pr_item.custom_width)
+    mp_row.batch_thickness         = flt(pr_item.custom_thickness)
+    mp_row.batch_unit_weight       = flt(purchased_item_data.get("custom_unit_weight"))
+    mp_row.batch_sec_qty           = flt(flt(pr_item.custom_sec_qty) * ratio, 3)
+    mp_row.batch_calc_qty          = flt(alloc_qty, 3)
+    mp_row.batch_total_qty         = flt(batch_total_qty, 3)
+    mp_row.batch_reserved_qty      = flt(batch_reserved_qty, 3)
+    mp_row.batch_free_qty          = flt(max(0.0, batch_total_qty - batch_reserved_qty), 3)
+    mp_row.purchase_receipt        = pr_name
+    # Unlike _build_mapping_row's path, a receipt CAN land here in the exact
+    # size the row asks for (the row is only in this table because a re-check
+    # moved it, not because the size differs) -- so only waive the dimension
+    # check when the sizes actually differ.
+    mp_row.reserve_without_dimensions = 0 if _pr_dimensions_match(pr_item, mp_row) else 1
 
 
 @frappe.whitelist()
@@ -514,10 +569,57 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
                 unavail_by_item_code.get(c_row.item_code, [])
             )
 
+    # Fallback candidates: Material Mapping rows still waiting for a batch.
+    #
+    # Unavailable Items is where a requirement waiting to be purchased is
+    # SUPPOSED to sit, but it is not the only place one can be found by the
+    # time the goods arrive -- re-running "Check Stock Availability" moves
+    # batch-item requirements into Material Mapping (blank batch, "Not
+    # Mapped") no matter how far along their purchase already is. Matching
+    # only against Unavailable Items meant such a receipt allocated nothing
+    # whatsoever, silently: no error, no message, and a plan still showing
+    # every row unmapped with the stock sitting in the warehouse
+    # (MP-2026-00012 / PR-26-00005).
+    #
+    # These rows are filled IN PLACE rather than appended to, because unlike
+    # an Unavailable Item -- which is consumed and replaced by a new row --
+    # the requirement already lives in this table; appending would duplicate
+    # it. Rows already carrying a batch, reserved rows, and rows fulfilled by
+    # the virtual-excess/excess-material paths are never candidates.
+    mm_by_duno, mm_by_any, mm_by_item_code = {}, {}, {}
+    for row in (mp.material_mapping or []):
+        if row.batch or row.is_reserved or row.is_virtual_excess or row.excess_material:
+            continue
+        # A blank-batch row this very receipt already stamped is its own
+        # shortfall marker -- what it could NOT cover. Running the allocation
+        # again (the "Retry Allocation" button does exactly that) must not
+        # hand the same batch out a second time: the plan would then claim
+        # more of it than was ever received.
+        if row.purchase_receipt == pr_name:
+            continue
+        mm_by_duno.setdefault((row.item_code, row.duno_mark_no or ""), []).append(row)
+        mm_by_any.setdefault(row.item_code, []).append(row)
+        mm_by_item_code.setdefault(row.item_code, []).append(row)
+
+    # A Consolidate Item's bulk alternate-item decision fans out over Material
+    # Mapping rows exactly as it does over Unavailable Items ones above.
+    mm_by_consolidate_alt_any = {}
+    for c_row in (mp.consolidate_items or []):
+        if c_row.alternate_item:
+            mm_by_consolidate_alt_any.setdefault(c_row.alternate_item, []).extend(
+                mm_by_item_code.get(c_row.item_code, [])
+            )
+
     added_exact   = 0
     added_mapping = 0
+    filled_mapping = 0
     fulfilled_row_names  = set()
     remaining_qty_by_row = {}  # row.name -> qty still short after this PR's receipts
+    # Material Mapping rows share the two trackers above so _split_allocation
+    # sequences across them the same way, but they are NOT Unavailable Items:
+    # the reconcile step below must not count them, and never sees them since
+    # it only walks mp.unavailable_items.
+    mapping_row_names = set()
     QTY_EPSILON = 0.001  # matches the 3-decimal rounding used throughout this table
 
     def _consume(mp_row, received_qty):
@@ -640,6 +742,21 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
                         matched_alternate.append(r)
                         seen_names.add(r.name)
 
+        # Only when nothing is waiting in Unavailable Items -- that table stays
+        # the primary and preferred match, so a plan following the intended
+        # route behaves exactly as before.
+        matched_mapping = []
+        if not matched_alternate and not matched_original:
+            if pr_duno:
+                matched_mapping = list(mm_by_duno.get((item_code, pr_duno), []))
+            else:
+                matched_mapping = list(mm_by_any.get(item_code, []))
+                seen_names = {r.name for r in matched_mapping}
+                for r in mm_by_consolidate_alt_any.get(item_code, []):
+                    if r.name not in seen_names:
+                        matched_mapping.append(r)
+                        seen_names.add(r.name)
+
         if matched_alternate:
             # Alternate item purchased → Material Mapping, fully populated as
             # if the user had picked this batch by hand (batch dimensions,
@@ -749,6 +866,88 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
                 })
                 added_exact += 1
 
+        elif matched_mapping:
+            # Nothing left in Unavailable Items, but Material Mapping rows for
+            # this item are still waiting for a batch -- fill them in place.
+            map_item_data = frappe.db.get_value(
+                "Item", item_code,
+                ["custom_parent_item_group", "custom_unit_weight"],
+                as_dict=True,
+            ) or {}
+            batch_total_qty    = _get_batch_total_stock(batch_no, mp.for_warehouse) if batch_no else 0.0
+            batch_reserved_qty = _get_batch_reserved_by_others(batch_no, mp_name) if batch_no else 0.0
+            received_qty = flt(pr_item.qty)
+
+            for mp_row, alloc_qty in _split_allocation(matched_mapping, received_qty, sequential):
+                # _split_allocation hands a lone matched row the WHOLE receipt
+                # line (its sequential capping only kicks in for two or more
+                # rows). On this path the row's own requirement is the cap:
+                # batch_calc_qty records what this row takes FROM the batch,
+                # so claiming more than it needs both overstates the plan's
+                # mapped weight and would reserve the surplus away from every
+                # other requirement that batch could still serve.
+                outstanding = flt(remaining_qty_by_row.get(mp_row.name, mp_row.qty))
+                alloc_qty = flt(min(flt(alloc_qty), outstanding), 3)
+                if alloc_qty <= 0:
+                    continue
+
+                row_sec_qty = flt(mp_row.sec_qty)
+                covered_ratio = (alloc_qty / outstanding) if outstanding else 1.0
+                shortfall_qty = flt(outstanding - alloc_qty, 3)
+
+                _consume(mp_row, alloc_qty)
+                mapping_row_names.add(mp_row.name)
+                ratio = (alloc_qty / received_qty) if received_qty else 0.0
+                _fill_mapping_row_from_receipt(
+                    mp_row,
+                    alloc_qty=alloc_qty,
+                    ratio=ratio,
+                    pr_item=pr_item,
+                    pr_name=pr_name,
+                    purchased_item_code=item_code,
+                    batch_no=batch_no,
+                    purchased_item_data=map_item_data,
+                    batch_total_qty=batch_total_qty,
+                    batch_reserved_qty=batch_reserved_qty,
+                )
+                filled_mapping += 1
+
+                # A row this receipt could only cover in part is split, exactly
+                # as the Unavailable Items route splits one: this row shrinks to
+                # what the batch actually supplies and the rest becomes its own
+                # blank-batch row to assign by hand. Leaving the full
+                # requirement on a reserve_without_dimensions row would have it
+                # reserve more of the batch than arrived, which
+                # _validate_batch_calc_qty refuses -- taking the whole
+                # allocation down with it.
+                covered_sec_qty = flt(row_sec_qty * covered_ratio, 3)
+                mp_row.qty = alloc_qty
+                mp_row.sec_qty = covered_sec_qty
+                if shortfall_qty > QTY_EPSILON:
+                    mp.append("material_mapping", {
+                        "item_number":            mp_row.item_number,
+                        "sales_order":            mp_row.sales_order,
+                        "item_code":              mp_row.item_code,
+                        "item_name":              mp_row.item_name,
+                        "bom_no":                 mp_row.bom_no,
+                        "drawing":                mp_row.drawing,
+                        "duno_mark_no":           mp_row.duno_mark_no,
+                        "customer_drawing_number": mp_row.customer_drawing_number,
+                        "qty":                    shortfall_qty,
+                        "uom":                    mp_row.uom,
+                        "sec_qty":                flt(row_sec_qty - covered_sec_qty, 3),
+                        "sec_uom":                mp_row.sec_uom,
+                        "parent_item_group":      mp_row.parent_item_group,
+                        "length":                 mp_row.length,
+                        "width":                  mp_row.width,
+                        "thickness":              mp_row.thickness,
+                        "unit_weight":            mp_row.unit_weight,
+                        "batch":                  "",
+                        "batch_mapped":           "Not Mapped",
+                        "purchase_receipt":       pr_name,
+                    })
+                    added_mapping += 1
+
     # Reconcile Unavailable Items. A row this receipt covered in full simply
     # goes; a row it covered only partly leaves behind its shortfall as a
     # Material Mapping row with NO batch, for someone to assign by hand.
@@ -796,7 +995,7 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
             added_mapping += 1
         mp.unavailable_items = kept
 
-    if added_exact or added_mapping or fulfilled_row_names or remaining_qty_by_row:
+    if added_exact or added_mapping or filled_mapping or fulfilled_row_names or remaining_qty_by_row:
         # The receipt is saving the plan, not a person editing it -- see
         # _warn_undersized_purchase_dimensions.
         mp.flags.mfx_saved_by_another_document = True
@@ -805,8 +1004,9 @@ def allocate_pr_stock_to_mp(pr_name, mp_name):
     return {
         "added_exact": added_exact,
         "added_mapping": added_mapping,
-        "fulfilled": len(fulfilled_row_names),
-        "partial": len(remaining_qty_by_row),
+        "filled_mapping": filled_mapping,
+        "fulfilled": len(fulfilled_row_names - mapping_row_names),
+        "partial": len([n for n in remaining_qty_by_row if n not in mapping_row_names]),
     }
 
 
@@ -886,7 +1086,29 @@ def on_submit_purchase_receipt(doc, method):
     affected_mps = get_mp_for_pr(doc.name)
     for mp_name in affected_mps:
         try:
-            allocate_pr_stock_to_mp(doc.name, mp_name)
+            result = allocate_pr_stock_to_mp(doc.name, mp_name) or {}
+            if not (
+                result.get("added_exact")
+                or result.get("added_mapping")
+                or result.get("filled_mapping")
+            ):
+                # Tracing to a plan but allocating nothing into it is not a
+                # normal outcome -- it means every requirement this receipt
+                # could have covered has already been mapped, or none of them
+                # could be matched at all. Both used to look identical to a
+                # successful allocation from the outside: the receipt
+                # submitted, no error was raised, and the plan quietly stayed
+                # unmapped.
+                frappe.msgprint(
+                    _(
+                        "Nothing was allocated into Material Planning {0} from this receipt — "
+                        "no requirement row was left waiting for these items. Check the plan's "
+                        "Material Mapping and Unavailable Items tables before treating the "
+                        "material as planned."
+                    ).format(mp_name),
+                    indicator="orange",
+                    title=_("No Material Planning Rows Matched"),
+                )
             _archive_consolidate_items(mp_name, doc.name)
         except Exception:
             frappe.log_error(

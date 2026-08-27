@@ -103,7 +103,17 @@ def run():
     # Cross-mapping: an ISMB400 requirement satisfied by an ISA100 bar. If this query
     # ever starts filtering by the row's item, that stops being possible.
     items = {frappe.db.get_value("Batch", b, "item") for b in offered}
-    check("batches of more than one item are offered together", len(items) > 1, True)
+    if len(items) < 2:
+        # Depends on what the site happens to hold, so it is stated rather than failed:
+        # a warehouse with one item's batches proves nothing either way about filtering.
+        print("   Only one item's batches are in %s; nothing to mix." % stocked)
+    else:
+        check("batches of more than one item are offered together", len(items) > 1, True)
+    check("and the query never filters on item at all",
+          "item_code" in open(frappe.get_app_path(
+              "manufyxinvenzaerp", "production_management", "doctype", "material_planning",
+              "material_planning.py")).read().split("def material_mapping_batch_query")[1]
+          .split("\ndef ")[0].split("filters=")[1][:200], False)
 
     _wiring()
     _summary()

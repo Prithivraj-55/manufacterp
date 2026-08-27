@@ -37,8 +37,13 @@ def run():
     print("=== nothing on the site carries one ===")
     check("no Item has a default BOM",
           frappe.get_all("Item", filters={"default_bom": ["!=", ""]}, pluck="name"), [])
-    check("no BOM is flagged as the default",
-          frappe.db.count("BOM", {"is_default": 1}), 0)
+    # Submitted only. ERPNext defaults is_default to 1 on a new BOM and
+    # manage_default_bom -- the override that clears it -- runs on submit, cancel and
+    # update-after-submit, never on the insert of a draft. A draft carrying the flag has
+    # not reached the Item and never will; after_migrate's sweep clears it regardless.
+    # Asserting over every BOM failed the moment a test created a draft one.
+    check("no submitted BOM is flagged as the default",
+          frappe.db.count("BOM", {"is_default": 1, "docstatus": 1}), 0)
 
     print()
     print("=== and a Sales Order line does not pick one up ===")

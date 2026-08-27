@@ -41,11 +41,16 @@ def run():
 
     print()
     print("=== the buttons that remain ===")
-    for label, group in (("Batch Mapping Completed", "Status"),
-                         ("Reopen Mapping", "Status"),
-                         ("Validate Stock", None)):
+    # Batch Mapping Completed and Reopen Mapping were listed here too, until d4c983f
+    # made the status follow the reservations and removed both. This assertion was not
+    # re-run then and went on demanding buttons the app had deliberately dropped -- so
+    # it is now the one place that records which buttons the form is supposed to have.
+    for label in ("Check Mapping", "Validate Stock"):
         check("%s is still there" % label,
               'add_custom_button(__("%s")' % label in js, True)
+    for label in ("Batch Mapping Completed", "Reopen Mapping"):
+        check("%s is gone, with the status it used to set" % label,
+              'add_custom_button(__("%s")' % label in js, False)
 
     print()
     print("=== but the method behind it still works ===")
