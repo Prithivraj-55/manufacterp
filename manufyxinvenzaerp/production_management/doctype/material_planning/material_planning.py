@@ -132,6 +132,12 @@ def excess_aware_mapped_status(batch_no):
 
 class MaterialPlanning(Document):
     def validate(self):
+        # First, before anything reads the drawing rows. A plan may now cover several
+        # Sales Orders, and per-drawing weights, reservations and transfers are all
+        # keyed on DUNO/Mark No within a plan -- so two rows sharing a mark would
+        # double-count weight and could ship one order's material to another's
+        # supplier. See drawing_management/duno_uniqueness.py.
+        self._validate_unique_dunos()
         self._move_skipped_arm_to_mapping()
         self.raw_materials = [r for r in (self.raw_materials or []) if r.item_code]
         self.available_raw_materials = [r for r in (self.available_raw_materials or []) if r.item_code]
@@ -155,6 +161,24 @@ class MaterialPlanning(Document):
         self._sync_batch_remarks()
         self._sync_cut_sheet_calc()
         self._warn_undersized_purchase_dimensions()
+
+    def _validate_unique_dunos(self):
+        """No two BOM Items rows may share a DUNO/Mark No.
+
+        Checked on bom_items rather than the derived tables because that is where
+        the drawings are chosen -- everything below it (raw_materials, mapping,
+        available, unavailable) is exploded from these rows and inherits their marks,
+        so blocking here is enough and the message can point at the row the user
+        actually picked.
+        """
+        from manufyxinvenzaerp.drawing_management.duno_uniqueness import (
+            assert_unique, normalise,
+        )
+
+        assert_unique(
+            [normalise(r) for r in (self.bom_items or [])],
+            _("BOM Items"),
+        )
 
     # Fields that decide whether a purchase line is big enough. A change to any of
     # them is a reason to look again; a change to anything else is not.
@@ -1003,37 +1027,54 @@ def get_bom_info(bom_no):
 @frappe.whitelist()
 def get_so_drawings_for_bom_picker(so_name, mp_name=None):
     """
-    Return all drawings from a Sales Order that have a submitted BOM.
+    Return all drawings that have a submitted BOM, for one or several Sales Orders.
+
+    `so_name` accepts a single name, a JSON list, or a Python list. One Material
+    Planning may now cover several Sales Orders so that their procurement can be
+    grouped -- see the "Add Sales Order" picker in material_planning.js -- and each
+    returned row carries its own `sales_order` (from get_bom_info, off the Drawing),
+    which is what every downstream document keys on.
+
     Each result includes `already_used_in` — the name of another Material Planning
     document that already has this BOM in its bom_items table (empty if free).
     """
-    so = frappe.get_doc("Sales Order", so_name)
+    if isinstance(so_name, str) and so_name.strip().startswith("["):
+        so_name = json.loads(so_name)
+    so_names = [s for s in (so_name if isinstance(so_name, (list, tuple)) else [so_name]) if s]
+
     results = []
 
-    for row in (so.custom_duno_items or []):
-        if not row.drawing:
-            continue
+    for one_so in so_names:
+        so = frappe.get_doc("Sales Order", one_so)
 
-        bom_name = frappe.db.get_value(
-            "BOM", {"custom_drawing": row.drawing, "docstatus": 1}, "name"
-        )
-        if not bom_name:
-            continue
+        for row in (so.custom_duno_items or []):
+            if not row.drawing:
+                continue
 
-        # Reuse get_bom_info to build the same row structure as a manual selection
-        info = get_bom_info(bom_name)
-        if not info:
-            continue
+            bom_name = frappe.db.get_value(
+                "BOM", {"custom_drawing": row.drawing, "docstatus": 1}, "name"
+            )
+            if not bom_name:
+                continue
 
-        info["bom_no"] = bom_name
-        # Prefer duno_mark_no and customer_drawing_number from the DUNO Item row
-        if not info.get("duno_mark_no"):
-            info["duno_mark_no"] = row.duno_mark_no or ""
-        if not info.get("customer_drawing_number"):
-            info["customer_drawing_number"] = row.drawing_number or ""
-        info["already_used_in"] = ""
+            # Reuse get_bom_info to build the same row structure as a manual selection
+            info = get_bom_info(bom_name)
+            if not info:
+                continue
 
-        results.append(info)
+            info["bom_no"] = bom_name
+            # Prefer duno_mark_no and customer_drawing_number from the DUNO Item row
+            if not info.get("duno_mark_no"):
+                info["duno_mark_no"] = row.duno_mark_no or ""
+            if not info.get("customer_drawing_number"):
+                info["customer_drawing_number"] = row.drawing_number or ""
+            # get_bom_info reads it off the Drawing; fall back to the order being
+            # walked so a row can never come back without the Sales Order it came from.
+            if not info.get("sales_order"):
+                info["sales_order"] = one_so
+            info["already_used_in"] = ""
+
+            results.append(info)
 
     # Check which BOMs are already mapped in another Material Planning document
     bom_names = [r["bom_no"] for r in results]

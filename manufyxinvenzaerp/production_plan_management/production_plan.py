@@ -1065,11 +1065,48 @@ def _plan_material_transferred(pp_name, sco_names):
 	))
 
 
-def validate_process_planning_contiguity(doc, method):
-	"""custom_process_planning must be Subcontractor rows first, then Internal Jobcard
-	rows — no interleaving, and every row must have a work_type set. A subcontractor
-	can't hand off to internal ops and then get material back mid-stream."""
-	seen_internal = False
+def validate_duno_uniqueness(doc, method):
+	"""No two Production Plan Items may share a DUNO/Mark No.
+
+	The twin of Material Planning's own check, and needed separately because a plan
+	does not have to come from one: the "Add Drawings" picker builds po_items
+	directly, and can pull from several Material Plannings and several Sales Orders
+	in one go.
+
+	This is the gate that matters most for the transfer chain. The Material Issue
+	Plan's transfer scope (_linked_mp_names_and_duno_scope) is built from THIS
+	table's DUNOs and then applied to the linked Material Planning's reserved rows --
+	so a repeated mark here would offer another Sales Order's reserved batches for
+	shipment to this job's supplier.
+	"""
+	from manufyxinvenzaerp.drawing_management.duno_uniqueness import assert_unique, normalise
+
+	rows = [
+		normalise(r, duno_field="custom_duno_mark_no",
+		          cdn_field="custom_customer_drawing_number",
+		          drawing_field="custom_drawing")
+		for r in (doc.po_items or [])
+	]
+	assert_unique(rows, _("Items to Manufacture"))
+
+
+def validate_process_planning(doc, method):
+	"""Every custom_process_planning row needs a work_type, and a plan with any
+	Subcontractor row needs a Vendor/Contractor.
+
+	Work Type ORDER is deliberately not checked. This used to insist that every
+	Subcontractor row came before every Internal Jobcard row, on the reasoning that
+	a subcontractor cannot hand off to internal ops and then get material back
+	mid-stream. That is not how the shop actually works -- a job routinely goes out
+	for cutting, comes back for fit-up, and goes out again for painting -- and the
+	rule was removed at the client's request so Work Type can be set freely per row.
+
+	Nothing downstream ever depended on the ordering: create_sco_from_production_plan
+	says so in its own docstring, and _create_soes_for_sco builds one Supplier
+	Operation Entry per row in sequence_id order, reading work_type only to decide
+	whether that entry carries a supplier and supplier warehouse. A mixed plan is
+	covered by tests/verify_mixed_sco_regression.py.
+	"""
 	has_subcontractor = False
 	for row in (doc.custom_process_planning or []):
 		if not row.work_type:
@@ -1078,19 +1115,8 @@ def validate_process_planning_contiguity(doc, method):
 				.format(row.idx, row.operation_name),
 				title=_("Work Type Required"),
 			)
-		if row.work_type == "Internal Jobcard":
-			seen_internal = True
-		elif row.work_type == "Subcontractor":
+		if row.work_type == "Subcontractor":
 			has_subcontractor = True
-			if seen_internal:
-				frappe.throw(
-					_("Row {0} ({1}): all Subcontractor operations must come before Internal "
-					  "Jobcard operations — group all Subcontractor rows first, then all "
-					  "Internal Jobcard rows. Alternating (Subcontractor → Internal Jobcard → "
-					  "Subcontractor) is not allowed.")
-					.format(row.idx, row.operation_name),
-					title=_("Invalid Operation Sequence"),
-				)
 
 	# Backstop for the field's client-side mandatory_depends_on — covers API/
 	# import-created documents that bypass the form's own validation.

@@ -27,9 +27,42 @@ class Drawing(Document):
 
     def validate(self):
         self.customer_no = self.customer or ""
+        self._warn_duno_reused_elsewhere()
         self._recalculate_all()
         self._check_missing_fields(throw=False)
         self._calculate_totals()
+
+    def _warn_duno_reused_elsewhere(self):
+        """Say so when this mark is already used by a different Sales Order.
+
+        Closes the back door left by the Sales Order gate: a Drawing created by hand
+        never goes through Verify Raw Materials, so without this the first anyone
+        hears of a clash is a Material Planning refusing to save much later.
+
+        A warning, not a block, for the same reason it is a warning there -- the mark
+        is the customer's. Only a plan that would actually combine the two jobs
+        refuses, and Material Planning / Production Plan do that themselves.
+
+        Skipped for a revision: create_revision cancels the old drawing before
+        inserting the new one, so the only drawing that could match is this one's own
+        previous revision -- and find_clashes_on_other_sales_orders ignores cancelled
+        drawings and this Sales Order anyway.
+        """
+        if not (self.duno_mark_no and self.sales_order):
+            return
+
+        from manufyxinvenzaerp.drawing_management.duno_uniqueness import (
+            find_clashes_on_other_sales_orders, warn_text_for_clashes, warnings_enabled,
+        )
+
+        # Manufyxinvenza Settings -> "Show Warning for Duplicate DUNO". Off means
+        # silent here; it does NOT relax Material Planning or Production Plan.
+        if not warnings_enabled():
+            return
+
+        clashes = find_clashes_on_other_sales_orders(self.sales_order, [self.duno_mark_no])
+        for line in warn_text_for_clashes(clashes):
+            frappe.msgprint(line, title=_("DUNO/Mark No Reused"), indicator="orange")
 
     def before_submit(self):
         self._check_missing_fields(throw=True)

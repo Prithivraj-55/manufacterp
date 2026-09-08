@@ -145,7 +145,7 @@
   {
    "fieldname": "section_bom_import",
    "fieldtype": "Section Break",
-   "label": "Import BOMs from Sales Order"
+   "label": "Add Drawings from Sales Orders"
   },
   {
    "fieldname": "so_bom_import",
@@ -154,7 +154,9 @@
    "in_standard_filter": 1,
    "label": "Sales Order",
    "options": "Sales Order",
-   "search_index": 1
+   "search_index": 1,
+   "hidden": 1,
+   "description": "Superseded by the Add Sales Order button. A Material Planning may now cover several Sales Orders; each BOM Items row carries its own Sales Order."
   },
   {
    "fieldname": "column_break_bom_import",
@@ -163,7 +165,7 @@
   {
    "fieldname": "show_drawings_btn",
    "fieldtype": "Button",
-   "label": "Show Drawings"
+   "label": "Add Sales Order"
   },
   {
    "collapsible": 0,
@@ -238,7 +240,7 @@
    "description": "Upstream staging table -- consolidated (deduped by Item Code) into the Consolidate Item table below, which is now the purchasing-facing table. Kept for per-drawing/DUNO traceability: this is what Purchase Receipt allocation and re-check-stock still operate on internally, even though those actions are now triggered from Consolidate Item. Collapsed by default to keep the form clean.",
    "fieldname": "section_unavailable_items",
    "fieldtype": "Section Break",
-   "label": "Unavailable Items (No Stock — Needs Purchase)"
+   "label": "Unavailable Items (No Stock \u2014 Needs Purchase)"
   },
   {
    "fieldname": "unavailable_items",
@@ -247,7 +249,7 @@
    "options": "Material Planning Unavailable Item"
   },
   {
-   "description": "One consolidated line per raw material item, deduped by Item Code across all Unavailable Items rows (regardless of drawing/sales order) — used to purchase in bulk. Enter Length/Width/Thickness/Sec Qty to auto-calculate Purchase Kg. Fully editable.",
+   "description": "One consolidated line per raw material item, deduped by Item Code across all Unavailable Items rows (regardless of drawing/sales order) \u2014 used to purchase in bulk. Enter Length/Width/Thickness/Sec Qty to auto-calculate Purchase Kg. Fully editable.",
    "fieldname": "section_consolidate_items",
    "fieldtype": "Section Break",
    "label": "Consolidate Item"
@@ -284,7 +286,7 @@
    "description": "Sum of required Kg across all items in Raw Materials.",
    "fieldname": "total_weight_plates_structurals",
    "fieldtype": "Float",
-   "label": "Total Weight — Plates & Structurals (Kg)",
+   "label": "Total Weight \u2014 Plates & Structurals (Kg)",
    "precision": "3",
    "read_only": 1
   },
@@ -292,7 +294,7 @@
    "description": "Sum of required Kg in Available Raw Materials (Exact Match).",
    "fieldname": "weight_exact_raw_material",
    "fieldtype": "Float",
-   "label": "Weight — Exact Raw Material (Kg)",
+   "label": "Weight \u2014 Exact Raw Material (Kg)",
    "precision": "3",
    "read_only": 1
   },
@@ -304,7 +306,7 @@
    "description": "Sum of required Kg for primary items in Material Mapping (Alternate Stock).",
    "fieldname": "expected_weight_material_mapping",
    "fieldtype": "Float",
-   "label": "Expected Item Weight — Material Mapping (Kg)",
+   "label": "Expected Item Weight \u2014 Material Mapping (Kg)",
    "precision": "3",
    "read_only": 1
   },

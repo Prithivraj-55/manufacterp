@@ -35,18 +35,23 @@ frappe.ui.form.on("Material Issue Plan", {
 				filters: { company: frm.doc.company || "", is_group: 0 },
 			}));
 		});
-		_add_view_all_raw_materials_button(frm);
+		_lock_raw_materials_row_adding(frm);
+		// Update Batch first, then View All beside it -- both in the grid's TOP
+		// toolbar. View All used to sit in the bottom toolbar, a table's length
+		// away from the button people reach for next.
 		_add_update_batch_button(frm);
+		_add_view_all_raw_materials_button(frm);
 		// The Manual button is removed at the client's request in favour of one
 		// doctype-wise ERP Manual page (production_management/page/erp_manual),
 		// added to a Workspace separately rather than linked from here. The
 		// per-doctype material-issue-plan-manual page it used to open has since
 		// been deleted outright -- all manual content now lives in ERP Manual.
 		_add_transfer_buttons(frm);
-		_add_pdf_button(frm);
+		_add_download_button(frm);
 		_render_excess_action_btn(frm);
 		_add_final_stock_entry_button(frm);
 		_add_process_loss_button(frm);
+		_mip_paint_buttons(frm);
 
 		// Recompute excess return totals on load so the summary fields are
 		// always in sync with the child table rows (previously only recalculated
@@ -157,6 +162,9 @@ function _add_final_stock_entry_button(frm) {
 			frm.add_custom_button(__("Make Final Stock Entry"), function() {
 				_show_final_stock_entry_preview(frm);
 			});
+			// Painted here, not in _mip_paint_buttons: this button is added from a
+			// frappe.call callback, so it does not exist yet when that runs.
+			window.mfx_paint_button && window.mfx_paint_button(frm, "Make Final Stock Entry", "primary");
 		},
 	});
 }
@@ -256,6 +264,33 @@ function _create_final_stock_entry(frm) {
 	});
 }
 
+// No manual rows on Raw Materials. Every row here is a snapshot of a reserved
+// Material Planning row (source_table + source_row point back at it), so a
+// hand-typed row describes a reservation that does not exist: it survives until
+// the next Refresh Raw Materials, transfers nothing, and reconciles against
+// nothing.
+//
+// material_issue_plan.json has carried `"cannot_add_rows": 1` on this table for
+// a while and it has never done anything, which is worth spelling out because
+// the JSON reads like the job is done. `cannot_add_rows` is NOT a property of
+// the DocField doctype in Frappe v15.116.0 -- grep docfield.json, it is not
+// there. It exists only as a runtime flag the browser reads off the grid object
+// (frappe/public/js/frappe/form/grid.js: `this.cannot_add_rows || (this.df &&
+// this.df.cannot_add_rows)`). Syncing the doctype drops the unknown key, so
+// df.cannot_add_rows is undefined at runtime and Add Row keeps showing.
+//
+// Setting it on the grid object itself is the path grid.js actually reads. The
+// JSON key is left in place: it is harmless, and it states the intent for
+// whoever reads the doctype next.
+function _lock_raw_materials_row_adding(frm) {
+	let grid = frm.fields_dict["raw_materials"] && frm.fields_dict["raw_materials"].grid;
+	if (!grid) return;
+	grid.cannot_add_rows = true;
+	// refresh() re-renders the footer that carries the Add Row link. Without it
+	// the button stays on screen until something else redraws the grid.
+	grid.refresh();
+}
+
 // "View All" — raw_materials can run past 100 rows, well beyond the grid's
 // default page size, and the grid also hides several columns (Planned Item/
 // Alternate, Batch) at normal width. Show every row and column in one popup,
@@ -264,9 +299,15 @@ function _add_view_all_raw_materials_button(frm) {
 	let grid = frm.fields_dict["raw_materials"] && frm.fields_dict["raw_materials"].grid;
 	if (!grid || frm.is_new()) return;
 
+	// "top" (.grid-custom-buttons), beside Update Batch. Two reasons it cannot
+	// stay at the bottom: on a 100-row table the footer is a long scroll away
+	// from the toolbar people are already using, and -- the same trap
+	// _add_update_batch_button documents -- Frappe hides .grid-footer entirely
+	// once every row fits on one page, which silently takes the button with it.
 	grid.add_custom_button(
-		frappe.utils.icon("eye", "xs") + " " + __("View All"),
-		() => _show_mip_raw_materials_popup(frm)
+		frappe.utils.icon("view", "xs") + " " + __("View All"),
+		() => _show_mip_raw_materials_popup(frm),
+		"top"
 	);
 }
 
@@ -534,7 +575,11 @@ function _add_process_loss_button(frm) {
 
 			frm.add_custom_button(__("Process Loss"), function () {
 				_show_process_loss_dialog(frm, s);
-			}).addClass("btn-danger");
+			});
+			// Red, and the only red button on the form: this one writes stock off.
+			// Was a bare btn-danger; now goes through the app-wide palette so it
+			// matches the red used elsewhere and survives a theme change.
+			window.mfx_paint_button && window.mfx_paint_button(frm, "Process Loss", "danger");
 		},
 	});
 }
@@ -636,24 +681,53 @@ function _add_open_sco_button(frm) {
 	});
 }
 
-function _add_pdf_button(frm) {
+// "Download" — one toolbar group, two documents. The batch-wise plan answers
+// "what goes out, batch by batch, and for which drawings"; the consolidated one
+// answers "how much of each item+batch in total", which is the sheet the store
+// actually picks against. They are two views of the same transfer, so they live
+// under one button rather than competing for space in the toolbar.
+function _add_download_button(frm) {
 	if (frm.is_new()) return;
-	frm.add_custom_button(frappe.utils.icon("filetype", "xs") + " " + __("PDF"), function() {
-		_show_mip_batch_plan_popup(frm);
-	});
+	frm.add_custom_button(__("Batch wise PDF"), function() {
+		_show_mip_plan_popup(frm, "batch");
+	}, __("Download"));
+	frm.add_custom_button(__("Consolidate item wise PDF"), function() {
+		_show_mip_plan_popup(frm, "consolidate");
+	}, __("Download"));
 }
 
-function _show_mip_batch_plan_popup(frm) {
+// Both plans render from server-built HTML and both download from a server-built
+// PDF of that same HTML, so what is on screen is exactly what lands in the file.
+// One function drives both because the only differences are which endpoint to
+// call and what to put in the title.
+const _MIP_PLAN_VARIANTS = {
+	batch: {
+		html_method: "get_mip_batch_plan_html",
+		pdf_method: "download_mip_batch_plan_pdf",
+		building: "Building batch plan…",
+		title: "Batch Plan — {0}",
+	},
+	consolidate: {
+		html_method: "get_mip_consolidate_plan_html",
+		pdf_method: "download_mip_consolidate_plan_pdf",
+		building: "Building consolidated plan…",
+		title: "Consolidated Item Plan — {0}",
+	},
+};
+
+function _show_mip_plan_popup(frm, variant) {
+	const v = _MIP_PLAN_VARIANTS[variant];
+	const base = "manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.";
 	frappe.call({
-		method: "manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.get_mip_batch_plan_html",
+		method: base + v.html_method,
 		args: { mip_name: frm.doc.name },
 		freeze: true,
-		freeze_message: __("Building batch plan…"),
+		freeze_message: __(v.building),
 		callback: function(r) {
 			if (!r.message) return;
 
 			var dlg = new frappe.ui.Dialog({
-				title: __("Batch Plan — {0}", [frm.doc.name]),
+				title: __(v.title, [frm.doc.name]),
 				size: "extra-large",
 				fields: [{ fieldtype: "HTML", fieldname: "content" }],
 			});
@@ -666,8 +740,7 @@ function _show_mip_batch_plan_popup(frm) {
 			);
 			$download.on("click", function() {
 				window.open(
-					"/api/method/manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.download_mip_batch_plan_pdf?mip_name="
-					+ encodeURIComponent(frm.doc.name),
+					"/api/method/" + base + v.pdf_method + "?mip_name=" + encodeURIComponent(frm.doc.name),
 					"_blank"
 				);
 			});
@@ -676,6 +749,22 @@ function _show_mip_batch_plan_popup(frm) {
 			dlg.show();
 		},
 	});
+}
+
+// ── Button tones ─────────────────────────────────────────────────────────────
+// See public/js/mfx_buttons.js for what each tone means. Called last in refresh
+// so every button that is going to exist already does -- the two added from
+// inside a frappe.call callback (Make Final Stock Entry, Process Loss) paint
+// themselves at their own call site instead, because they arrive after this runs.
+function _mip_paint_buttons(frm) {
+	if (!window.mfx_paint_group) return;
+	// "Select Materials to Transfer" lives INSIDE the Transfer group, so the thing
+	// on screen is the group's own toggle -- frm.custom_buttons holds the hidden
+	// dropdown item, and painting that colours nothing anyone can see.
+	window.mfx_paint_group(frm, "Transfer", "primary");
+	window.mfx_paint_button(frm, "Return Excess Entry", "primary");
+	// Navigation and reports stay grey on purpose: Open Job Work Order, Download.
+	window.mfx_paint_grid(frm, "raw_materials", { alt: ["Update Batch"] });
 }
 
 // ── Transfer / CNC buttons ───────────────────────────────────────────────────

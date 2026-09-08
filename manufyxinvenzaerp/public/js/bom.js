@@ -15,4 +15,19 @@ frappe.ui.form.on("BOM", {
 			frm.set_value("routing", "Standard Manufacturing Routing");
 		}
 	},
+
+	// The Rate Schedule belongs to the DRAWING, and this BOM is one of three places
+	// showing it. Changing it here changes it everywhere -- so if the drawing
+	// already has a different one, ask before overwriting rather than after.
+	// The actual propagation is server-side (rate_schedule_sync.on_update_bom);
+	// this only decides whether the change is allowed to stand.
+	custom_rate_schedule(frm) {
+		mfx_confirm_rate_schedule_change({
+			drawing: frm.doc.custom_drawing,
+			new_schedule: frm.doc.custom_rate_schedule,
+			source_doctype: "BOM",
+			source_name: frm.doc.name,
+			on_decline: (current) => frm.set_value("custom_rate_schedule", current || ""),
+		});
+	},
 });

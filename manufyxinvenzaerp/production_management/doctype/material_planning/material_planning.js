@@ -13,43 +13,21 @@
 //
 // The palette is Frappe's own CSS variables, so it follows the desk theme
 // instead of hard-coding a hex that goes unreadable in dark mode.
-const _MFX_BTN_STYLE_ID = "mfx-mp-action-btn-style";
-const _MFX_BTN_CSS = `
-.mfx-action-btn, .mfx-action-btn:focus {
-	background-color: var(--blue-500) !important;
-	border-color: var(--blue-500) !important;
-	color: var(--white, #fff) !important;
-}
-.mfx-action-btn:hover { filter: brightness(0.92); }
-.mfx-action-btn-alt, .mfx-action-btn-alt:focus {
-	background-color: var(--orange-500) !important;
-	border-color: var(--orange-500) !important;
-	color: var(--white, #fff) !important;
-}
-.mfx-action-btn-alt:hover { filter: brightness(0.92); }
-.mfx-action-btn .icon, .mfx-action-btn-alt .icon { filter: brightness(0) invert(1); }
-`;
-
+//
+// The CSS and the painting helpers used to live here. They now live in
+// public/js/mfx_buttons.js, loaded app-wide through manufyxinvenzaerp.bundle.js,
+// because the same three tones are wanted on Sales Order, Material Issue Plan,
+// Supplier Operation Entry and the rest -- and two copies of a palette is one
+// copy too many. The two wrappers below keep this file's own call sites reading
+// as they did; the class names and colours are unchanged.
 function _mfx_inject_button_style() {
-	if (document.getElementById(_MFX_BTN_STYLE_ID)) return;
-	$("<style>").attr("id", _MFX_BTN_STYLE_ID).text(_MFX_BTN_CSS).appendTo("head");
+	window.mfx_inject_button_style && window.mfx_inject_button_style();
 }
 
-// Grid toolbar buttons are keyed by the label they were added with, and that
-// key carries an icon prefix -- so match on the label text, not equality.
-// Only the named buttons are touched: Download/Upload sit on the same
-// toolbars and are housekeeping, not actions to draw the eye to.
 function _mfx_highlight_grid_buttons(frm, fieldname, primary_labels, alt_labels) {
-	let grid = frm.fields_dict[fieldname] && frm.fields_dict[fieldname].grid;
-	if (!grid || !grid.custom_buttons) return;
-	Object.keys(grid.custom_buttons).forEach(function (label) {
-		let $btn = grid.custom_buttons[label];
-		if (!$btn || !$btn.length) return;
-		let is_alt = (alt_labels || []).some(function (t) { return label.indexOf(t) !== -1; });
-		let is_primary = (primary_labels || []).some(function (t) { return label.indexOf(t) !== -1; });
-		if (!is_alt && !is_primary) return;
-		$btn.removeClass("btn-secondary mfx-action-btn mfx-action-btn-alt")
-			.addClass(is_alt ? "mfx-action-btn-alt" : "mfx-action-btn");
+	window.mfx_paint_grid && window.mfx_paint_grid(frm, fieldname, {
+		primary: primary_labels || [],
+		alt: alt_labels || [],
 	});
 }
 
@@ -367,7 +345,7 @@ frappe.ui.form.on("Material Planning", {
 
 		// Add icons to inline form buttons. The Stock Details ones are filled in
 		// as well (the variant argument): Frappe's default button colour left
-		// them impossible to pick out on that tab -- see _MFX_BTN_CSS.
+		// them impossible to pick out on that tab -- see public/js/mfx_buttons.js.
 		function _style_btn(fieldname, icon, label, variant) {
 			let $btn = frm.fields_dict[fieldname] && frm.fields_dict[fieldname].$input;
 			if (!$btn || !$btn.length) return;
@@ -377,7 +355,11 @@ frappe.ui.form.on("Material Planning", {
 		}
 		setTimeout(function () {
 			_mfx_inject_button_style();
-			_style_btn("get_raw_materials_btn",  "refresh", "Get Raw Materials");
+			// Blue: the two steps that actually build the plan. "Add Sales Order"
+			// is where a plan starts, and until Get Raw Materials has run there is
+			// nothing on the Stock Details tab to work with.
+			_style_btn("show_drawings_btn",      "add",     "Add Sales Order",            "mfx-action-btn");
+			_style_btn("get_raw_materials_btn",  "refresh", "Get Raw Materials",          "mfx-action-btn");
 			_style_btn("verify_raw_materials_btn", "check", "Verify Raw Materials");
 			_style_btn("check_stock_btn",        "search",  "Check Stock Availability",   "mfx-action-btn");
 			_style_btn("update_exact_match_btn", "tick",    "Update & Map Exact Matches", "mfx-action-btn");
@@ -388,7 +370,7 @@ frappe.ui.form.on("Material Planning", {
 				if (!$anchor_input || !$anchor_input.length) return;
 				$anchor_input.closest(".frappe-control").find("." + css_class).remove();
 				let $va = $('<button class="btn btn-default btn-sm ' + css_class + '" style="margin-left:8px;"></button>');
-				$va.html(frappe.utils.icon("eye", "sm") + "&nbsp;" + __("View All"));
+				$va.html(frappe.utils.icon("view", "sm") + "&nbsp;" + __("View All"));
 				$va.on("click", function () { _show_table_popup(frm, fieldname); });
 				$anchor_input.after($va);
 			}
@@ -531,6 +513,9 @@ frappe.ui.form.on("Material Planning", {
 			frm.add_custom_button(__("Check Mapping"), function () {
 				_run_batch_mapping_complete(frm);
 			});
+			// Outlined, not filled: complete_batch_mapping reads the plan and reports
+			// on it -- it writes nothing -- so it must not read as the next step.
+			window.mfx_paint_button && window.mfx_paint_button(frm, "Check Mapping", "info");
 		}
 
 		// ── Validate Stock — planned Kg / Sec Nos per item, for reference ───
@@ -538,6 +523,8 @@ frappe.ui.form.on("Material Planning", {
 			frm.add_custom_button(__("Validate Stock"), function () {
 				_show_planned_stock_validation(frm);
 			});
+			// Same category as Check Mapping: a reference view of what is committed.
+			window.mfx_paint_button && window.mfx_paint_button(frm, "Validate Stock", "info");
 		}
 	},
 });
@@ -1351,28 +1338,75 @@ frappe.ui.form.on("Material Planning", {
 // ── SO Drawing picker — "Show Drawings" button ───────────────────────────────
 
 frappe.ui.form.on("Material Planning", {
+	// "Add Sales Order" -- the Sales Order is chosen INSIDE the picker now, and more
+	// than one may be chosen at a time, so that several orders' procurement can be
+	// planned and bought together. The old so_bom_import field on the form is hidden:
+	// it only ever filtered this picker (nothing server-side read it), and a single
+	// Link field cannot express "these three orders".
+	//
+	// Each inserted row carries its own sales_order, which is what every downstream
+	// document keys on -- Production Plan Item, SCO/MIP drawing rows, and the
+	// MR -> PO -> PR reference chain all already work per row.
 	show_drawings_btn(frm) {
-		let so = frm.doc.so_bom_import;
-		if (!so) {
-			frappe.msgprint(__("Select a Sales Order first."));
-			return;
-		}
-		frappe.call({
-			method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.get_so_drawings_for_bom_picker",
-			args: { so_name: so, mp_name: frm.doc.name || "" },
-			freeze: true,
-			freeze_message: __("Loading drawings…"),
-			callback(r) {
-				let drawings = r.message || [];
-				if (!drawings.length) {
-					frappe.msgprint(__("No submitted BOMs found for Sales Order {0}.", [so]));
-					return;
-				}
-				_show_drawings_picker_dialog(frm, so, drawings);
-			},
-		});
+		_show_sales_order_picker(frm);
 	},
 });
+
+// Step 1: which Sales Orders. Kept as its own small dialog rather than a control
+// inside the drawings list, because choosing the orders is a decision on its own --
+// and loading every drawing of every order on the site to let someone filter it down
+// afterwards would not survive the 500-drawing orders this app imports.
+function _show_sales_order_picker(frm) {
+	let d = new frappe.ui.Dialog({
+		title: __("Add Sales Order"),
+		fields: [
+			{
+				fieldtype: "MultiSelectList",
+				fieldname: "sales_orders",
+				label: __("Sales Orders"),
+				reqd: 1,
+				description: __("Pick one or more. Their drawings are listed together in the next step."),
+				get_data(txt) {
+					return frappe.db.get_link_options("Sales Order", txt, {
+						docstatus: 1,
+						company: frm.doc.company || undefined,
+					});
+				},
+			},
+			{
+				fieldtype: "HTML",
+				fieldname: "note",
+				options: '<div style="color:#6c757d;font-size:12px;padding-top:4px">'
+					+ __("Drawings already planned in another Material Planning are listed but cannot be selected.")
+					+ "</div>",
+			},
+		],
+		primary_action_label: __("Show Drawings"),
+		primary_action(values) {
+			let so_names = (values.sales_orders || []).filter(Boolean);
+			if (!so_names.length) {
+				frappe.msgprint(__("Select at least one Sales Order."));
+				return;
+			}
+			frappe.call({
+				method: "manufyxinvenzaerp.production_management.doctype.material_planning.material_planning.get_so_drawings_for_bom_picker",
+				args: { so_name: JSON.stringify(so_names), mp_name: frm.doc.name || "" },
+				freeze: true,
+				freeze_message: __("Loading drawings…"),
+				callback(r) {
+					let drawings = r.message || [];
+					if (!drawings.length) {
+						frappe.msgprint(__("No submitted BOMs found for: {0}.", [so_names.join(", ")]));
+						return;
+					}
+					d.hide();
+					_show_drawings_picker_dialog(frm, so_names.join(", "), drawings);
+				},
+			});
+		},
+	});
+	d.show();
+}
 
 function _show_drawings_picker_dialog(frm, so_name, drawings) {
 
@@ -1392,11 +1426,16 @@ function _show_drawings_picker_dialog(frm, so_name, drawings) {
 			let duno = frappe.utils.escape_html(String(d.duno_mark_no || "—"));
 			let bom  = frappe.utils.escape_html(d.bom_no || "");
 			let item = frappe.utils.escape_html(d.item_name || d.item_code || "");
+			// Shown because the list can now mix several Sales Orders. Without it two
+			// rows reading "1B1" are indistinguishable, which is exactly the case the
+			// DUNO check below refuses.
+			let so   = frappe.utils.escape_html(d.sales_order || "—");
 			return `<label style="display:flex;align-items:center;gap:10px;padding:6px 4px;cursor:pointer;border-bottom:1px solid #f0f0f0;user-select:none;">
 				<input type="checkbox" class="mp-dchk" data-bom="${bom}" data-orig="${d._orig_idx}"
 				       style="width:15px;height:15px;flex-shrink:0;cursor:pointer;" checked>
-				<span style="flex:0 0 260px;font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${cdn}</span>
-				<span style="flex:0 0 120px;font-size:12px;color:#495057;">${duno}</span>
+				<span style="flex:0 0 200px;font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${cdn}</span>
+				<span style="flex:0 0 110px;font-size:12px;color:#495057;">${duno}</span>
+				<span style="flex:0 0 150px;font-size:11px;color:#6c757d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${so}">${so}</span>
 				<span style="flex:0 0 130px;font-size:11px;color:#6c757d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item}</span>
 				<span style="flex:1;font-size:11px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${bom}</span>
 			</label>`;
@@ -1436,8 +1475,9 @@ function _show_drawings_picker_dialog(frm, so_name, drawings) {
 		</div>
 		<div style="display:flex;gap:10px;padding:5px 4px;background:#f4f5f7;border-radius:4px;margin-bottom:4px;font-size:11px;font-weight:600;color:#6c757d;">
 			<span style="flex:0 0 15px;"></span>
-			<span style="flex:0 0 260px;">${__("Customer Drawing ID")}</span>
-			<span style="flex:0 0 120px;">${__("DUNO / Mark No")}</span>
+			<span style="flex:0 0 200px;">${__("Customer Drawing ID")}</span>
+			<span style="flex:0 0 110px;">${__("DUNO / Mark No")}</span>
+			<span style="flex:0 0 150px;">${__("Sales Order")}</span>
 			<span style="flex:0 0 130px;">${__("Item Name")}</span>
 			<span style="flex:1;">${__("BOM No")}</span>
 		</div>`;
@@ -1489,6 +1529,51 @@ function _show_drawings_picker_dialog(frm, so_name, drawings) {
 			let existing = new Set((frm.doc.bom_items || []).map(r => r.bom_no));
 			let to_add  = selected.filter(s => !existing.has(s.bom_no));
 			let skipped = selected.length - to_add.length;
+
+			// DUNO/Mark No must be unique inside one plan. Per-drawing weights, batch
+			// reservations and the transfer scope are all keyed on it, so two rows
+			// sharing a mark double-count weight and can offer one Sales Order's
+			// reserved batches for shipment to another's supplier.
+			//
+			// The server refuses this on save (Material Planning._validate_unique_dunos)
+			// -- caught here as well because being told at Insert, while the dialog is
+			// still open and the offending rows are on screen, is the difference between
+			// unticking one and hunting through a saved table for what went wrong.
+			let dunos = new Map();
+			(frm.doc.bom_items || []).forEach(function(r) {
+				let k = (r.duno_mark_no || "").toString().trim();
+				if (k) dunos.set(k, __("already in this plan") + " (" + (r.sales_order || "—") + ")");
+			});
+			let clashes = [];
+			to_add.forEach(function(s) {
+				let k = (s.duno_mark_no || "").toString().trim();
+				if (!k) return;
+				if (dunos.has(k)) {
+					clashes.push({ duno: k, so: s.sales_order || "—", against: dunos.get(k) });
+				} else {
+					dunos.set(k, (s.sales_order || "—"));
+				}
+			});
+			if (clashes.length) {
+				frappe.msgprint({
+					title: __("Duplicate DUNO/Mark No"),
+					indicator: "red",
+					message: "<p>"
+						+ __("These marks would appear twice in this Material Planning:")
+						+ "</p><ul>"
+						+ clashes.map(c => `<li><b>${frappe.utils.escape_html(c.duno)}</b> — `
+							+ __("from {0}, clashes with {1}", [
+								frappe.utils.escape_html(c.so),
+								frappe.utils.escape_html(c.against),
+							]) + "</li>").join("")
+						+ "</ul><p>"
+						+ __("Weights, reservations and transfers are tracked per DUNO within a plan, so "
+						     + "these Sales Orders cannot be combined unless one of the marks is changed. "
+						     + "Plan them separately, or untick the clashing drawings.")
+						+ "</p>",
+				});
+				return;
+			}
 
 			to_add.forEach(function(s) {
 				let child = frm.add_child("bom_items");

@@ -22,5 +22,7 @@
 // added here must attach anything it wants globally to `window` itself (see the
 // tail of manual_renderer.js).
 
+import "./mfx_buttons.js";
+import "./rate_schedule.js";
 import "./item.js";
 import "./manual_renderer.js";

@@ -219,6 +219,69 @@ manufyxinvenzaerp/
   ERPNext's own, called by the BOM form and tree view by dotted path. A dead-code sweep will
   flag them as unreferenced because nothing in THIS app calls them. Removing them breaks the
   BOM form.
+- **DUNO/Mark No is unique only WITHIN a Sales Order, and a plan must not break that.**
+  `unique` is 0 on both Drawing and Sales Order DUNO Item, and the marks are the
+  customer's own (`1B1`…`1B22`, `TYPE 1`) — so two orders reusing one is normal, and
+  `drawing.py` has always scoped its own check as `{parent: sales_order, duno_mark_no}`.
+  That was harmless while one Material Planning covered one Sales Order. It stopped
+  being harmless when a plan gained the ability to cover several, because ~10 places
+  key per-drawing figures on the DUNO **alone within a plan** —
+  `_get_mp_drawing_weights_by_duno`, `_get_mp_mapped_weight_by_duno`,
+  `_get_mp_excess_by_duno`, `_get_mp_reserved_batches`, `_consumption_for_completed`,
+  `refresh_weight_summary`, `_linked_mp_names_and_duno_scope`, `drawing_by_duno`, and
+  purchase_receipt's `mm_by_duno`. Two rows sharing a mark collapse into one key:
+  weights double-count, and the transfer offers **another Sales Order's reserved
+  batches** for shipment to this job's supplier. So Material Planning and Production
+  Plan **throw** on a duplicate (`drawing_management/duno_uniqueness.py`), which makes
+  all ten correct by construction without touching the ledger code. Sales Order and
+  Drawing only **warn**, under `Manufyxinvenza Settings → Show Warning for Duplicate
+  DUNO`; that switch must never gate the two throws.
+- **Rate Schedule propagates only on an actual EDIT, never on disagreement.**
+  `rate_schedule_sync.py` keeps one drawing's schedule the same on the Drawing, its
+  BOM and every Production Plan row quoting it, in all three directions. Every hook
+  gates on `has_value_changed` and returns early on insert. Reconciling "documents
+  that disagree" instead sounds tidier and is destructive: every BOM and plan created
+  before the feature carries a blank, so the first unrelated save of one would push
+  that blank onto the Drawing and wipe the rate off everything quoting it, with
+  nothing connecting the loss to the save. Writes go through `db_set`, which is also
+  what stops the three-way sync recursing — and avoids re-running BOM costing as a
+  side effect of correcting a label. `verify_rate_schedule_sync.py` check 4 is that case.
+- **Frappe's child-table grid has a hard 11-column budget, and blowing it is silent.**
+  `grid.js setup_visible_columns` walks fields in order adding up `columns`, and the
+  first time the running total passes 11 it **returns** — dropping that column and
+  every one after it, with no error. The total starts at 1, so the widths may sum to
+  at most 10. This is why Purchase Receipt showed no Accepted Warehouse: it was always
+  `in_list_view`, but six custom columns exhausted the budget before it was reached, so
+  Length/Width/Thickness/Rate/Amount/Net Amount were invisible too. `setup.py
+  layout_purchase_receipt_item_grid` now spends it deliberately. **Production Plan Item
+  is still over budget** (26 against 11) — `planned_qty`, `warehouse` and
+  `planned_start_date` do not render there. Anything added to a grid must take width
+  from something else.
+- **`cannot_add_rows` is NOT a DocField property in Frappe v15.116.0.** Grep
+  `docfield.json` — it is not there. It exists only as a runtime flag the browser reads
+  off the grid object (`grid.js`: `this.cannot_add_rows || (this.df && this.df.cannot_add_rows)`),
+  so a doctype sync discards the key and the JSON alone does nothing. Set it on the
+  grid in `refresh` instead (see `_lock_raw_materials_row_adding` in material_issue_plan.js).
+- **Client scripts in setup.py are JS inside a Python string — mind the backslash.**
+  `message: "<p style=\"color:#…\">"` in the file reaches the browser as
+  `style="color:#…"`, because Python consumes the escape: the JS string closes early
+  and the whole Client Script fails to parse, taking the form down with an error that
+  surfaces inside some other app's `setup`. Use single quotes for HTML attributes.
+  `tests/verify_client_scripts_parse.py` checks every constant at its **runtime value**
+  (`ast` + `eval`, then `node --check`) plus every installed script — a raw-file scan
+  cannot see this class of bug and will report clean.
+- **Icon names must exist or the button renders an empty box.** `frappe.utils.icon()`
+  fails silently for an unknown name. `eye` and `filetype` are **not** in the set
+  (verified against the injected sprite, 179 symbols); `view`, `file`, `add`, `search`,
+  `check`, `refresh`, `tick`, `move`, `edit` are.
+- **Button colour is a shared system, not per-file CSS.** `public/js/mfx_buttons.js`
+  (in the app bundle) defines four tones and `window.mfx_paint_*` helpers. Blue = the
+  next step forward; **outlined blue = reads and reports, writes nothing** (Check
+  Mapping, Validate Stock); orange = undo/overwrite; red = destructive; grey =
+  navigation, deliberately left alone so colour keeps meaning something. Paint AFTER
+  `add_custom_button` (the lookup is by label), and paint the **group** rather than the
+  button when one was added into a group — `frm.custom_buttons` holds the hidden
+  dropdown item, not the visible toggle.
 - **No scheduler_events** are registered (all commented out in hooks.py).
 
 ## This bench does not hot-reload

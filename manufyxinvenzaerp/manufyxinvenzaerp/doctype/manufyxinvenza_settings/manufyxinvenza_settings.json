@@ -10,7 +10,9 @@
   "cut_sheet_tolerance_percent",
   "create_new_batch_for_cut_sheet_stock_entry",
   "process_loss_section",
-  "process_loss_warning_percent"
+  "process_loss_warning_percent",
+  "duno_section",
+  "warn_on_duplicate_duno"
  ],
  "fields": [
   {
@@ -22,7 +24,7 @@
    "fieldname": "auto_purchase_from_material_planning",
    "fieldtype": "Check",
    "label": "Auto Purchase from Material Planning",
-   "description": "When enabled, shows an Auto Purchase button on Material Planning to automatically create MR → PO → PR in one click for all unavailable items."
+   "description": "When enabled, shows an Auto Purchase button on Material Planning to automatically create MR \u2192 PO \u2192 PR in one click for all unavailable items."
   },
   {
    "fieldname": "cut_sheet_section",
@@ -53,7 +55,19 @@
    "fieldtype": "Percent",
    "label": "Process Loss Warning Above (%)",
    "default": "5",
-   "description": "Warn when a job's process loss is above this share of what was transferred. Above it, the material was probably not used effectively rather than lost in cutting — that is a purchase return to recover payment from the supplier, not a write-off. A warning only; the write-off is still allowed with a reason."
+   "description": "Warn when a job's process loss is above this share of what was transferred. Above it, the material was probably not used effectively rather than lost in cutting \u2014 that is a purchase return to recover payment from the supplier, not a write-off. A warning only; the write-off is still allowed with a reason."
+  },
+  {
+   "fieldname": "duno_section",
+   "fieldtype": "Section Break",
+   "label": "DUNO / Mark No"
+  },
+  {
+   "fieldname": "warn_on_duplicate_duno",
+   "fieldtype": "Check",
+   "label": "Show Warning for Duplicate DUNO",
+   "default": "1",
+   "description": "Warn on the Sales Order (Verify Raw Materials) and when saving a Drawing if the DUNO/Mark No is already used by a different Sales Order. This is only a warning and never blocks either one \u2014 a mark comes from the customer's drawing, and two customers reusing one is normal. Material Planning and Production Plan still REFUSE two rows sharing a DUNO whatever this is set to: weights, batch reservations and transfers are tracked per DUNO within a plan, so a repeat there would double-count weight and could send one Sales Order's material to another's supplier."
   }
  ],
  "issingle": 1,
