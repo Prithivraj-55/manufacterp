@@ -152,6 +152,8 @@ function _cs_inactive_button(frm) {
 			__("Mark Inactive")
 		);
 	});
+	// Amber, not blue: retiring a sheet is not a step forward in cutting it.
+	window.mfx_paint_button && window.mfx_paint_button(frm, "Mark Inactive", "alt");
 }
 
 // W1/W2 are locked once a job is planning from this sheet. The server refuses the
@@ -233,6 +235,8 @@ function _cs_release_button(frm) {
 			}
 		);
 	});
+	// Amber: this undoes claims other Material Plannings already made.
+	window.mfx_paint_button && window.mfx_paint_button(frm, "Release Allocations", "alt");
 }
 
 function _cs_toggle_dimension_fields(frm) {

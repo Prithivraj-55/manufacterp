@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-09-04 00:52:54_
+_Generated: 2026-09-09 02:19:11_
 
 ## drawing
 
@@ -10,6 +10,7 @@ _Generated: 2026-09-04 00:52:54_
 | Path | `drawing_management/doctype/drawing` |
 | Controller | `drawing_management/doctype/drawing/drawing.py` |
 | Client script | `drawing_management/doctype/drawing/drawing.js` |
+| doc_events | see hooks.md |
 
 ### Methods
 
@@ -17,6 +18,7 @@ _Generated: 2026-09-04 00:52:54_
 |--------|-------------|
 | ` before_insert` | no |
 | ` validate` | no |
+| ` _warn_duno_reused_elsewhere` | no |
 | ` before_submit` | no |
 | ` on_submit` | no |
 | ` on_cancel` | no |
@@ -426,6 +428,7 @@ _Generated: 2026-09-04 00:52:54_
 | ` _cut_sheet_thickness` | no |
 | ` excess_aware_mapped_status` | no |
 | ` validate` | no |
+| ` _validate_unique_dunos` | no |
 | ` _consolidate_rows_touched` | no |
 | ` _warn_undersized_purchase_dimensions` | no |
 | ` _sync_cut_sheet_flag` | no |
@@ -644,7 +647,11 @@ _Generated: 2026-09-04 00:52:54_
 | ` get_target_context` | no |
 | ` get_mip_batch_plan_html` | no |
 | ` download_mip_batch_plan_pdf` | no |
+| ` _mip_plan_supplier` | no |
 | ` _render_mip_batch_plan_html` | no |
+| ` get_mip_consolidate_plan_html` | no |
+| ` download_mip_consolidate_plan_pdf` | no |
+| ` _render_mip_consolidate_plan_html` | no |
 
 ---
 

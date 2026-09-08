@@ -35,6 +35,23 @@
 // Returnable passes are chased through Return Entries that net off row by row, and the
 // status goes Overdue on its own once the return date passes.
 //
+// Then: one Material Planning may cover SEVERAL Sales Orders, so their procurement can
+// be bought together. The single Sales Order field is gone in favour of "Add Sales
+// Order", which takes as many orders as you like and lists their drawings in one
+// table. Two things follow and are written up under Selected BOMs: each row keeps its
+// own Sales Order, so nothing downstream is pooled that should not be; and DUNO/Mark
+// No must be unique inside one plan, because per-drawing weights, reservations and the
+// transfer scope are all keyed on it -- a repeat would double-count weight and could
+// ship one order's material to another's supplier. Material Planning and Production
+// Plan refuse a duplicate outright; Sales Order and Drawing only warn, under a switch.
+//
+// In the same pass: the Rate Schedule became shared between Drawing, BOM and
+// Production Plan rows, editable in all three and syncing to the other two (Rates and
+// Costing, under BOM); Process Planning rows may mix Work Type in any order, the
+// old "Subcontractor rows first" rule having been removed; and the Material Issue
+// Plan's single PDF became a Download menu with a batch-wise and a consolidated
+// sheet -- the latter being the one the store actually picks against.
+//
 // Layout/tree/scrollspy come from the shared renderer
 // (public/js/manual_renderer.js) via manufyx_render_manual_tree(); this file is
 // only the content. A leaf uses the same shape as the old flat manuals: {id,
@@ -178,6 +195,7 @@ const ERP_MANUAL_SALES_ORDER_CHILDREN = [
 		],
 		buttons: [
 			{ name: "Verify Raw Materials", note: "Runs every check above. Passing sets the order's verified flag; failing lists each problem <b>led by the row it is on</b> — <i>Raw Materials row 100 · …</i> or <i>Drawing List row 22 · …</i> — followed by the drawing, Material Code and Item No. The table is named because both are on this order and row 22 of one is not row 22 of the other." },
+			{ name: "Warnings vs issues", note: "Issues block: the order stays unverified and drawings cannot be created until each one is fixed in the sheet. <b>Warnings do not.</b> A warning is reported alongside a pass — <i>“Verified — with warnings”</i> — and the only one at present is a DUNO/Mark No already used by another Sales Order, which is allowed and merely worth knowing early. Switch it off in Manufyxinvenza Settings if it is not useful. It becomes a hard refusal only if those two orders are later planned together." },
 		],
 	},
 	{
@@ -317,7 +335,7 @@ const ERP_MANUAL_DRAWING_CHILDREN = [
 			{ name: "FG Item Code / Name / Description", note: "The finished-goods item, from the sheet's FG Item column — which is why the same code must be on the Sales Order's Items table." },
 			{ name: "No of Qty to Manufacture", note: "From the sheet's Total Qty. Every row's totals are multiplied by this." },
 			{ name: "Nature of Work", note: "From the sheet. Must already exist in the Nature of Work master." },
-			{ name: "Rate Schedule / Type", note: "The schedule comes from the sheet; Type is read from the schedule itself, along with Job Nature, Details, Work Content, Job Reference and Rate per Kg." },
+			{ name: "Rate Schedule / Type", note: "The schedule comes from the sheet; Type is read from the schedule itself, along with Job Nature, Details, Work Content, Job Reference and Rate per Kg. <b>It is now shared.</b> The same schedule shows on the drawing's BOM and on every Production Plan row quoting it, and changing it in any of the three updates the other two — see <i>Rates and Costing</i> under BOM." },
 			{ name: "Rev No", note: "Revision number. 0 on the original — see Revisions below." },
 		],
 		notes: [
@@ -470,8 +488,13 @@ const ERP_MANUAL_BOM_CHILDREN = [
 			{ name: "Rate Of Materials Based On", note: "Set to Valuation Rate. Each row is priced at the item's valuation at the moment the BOM is built." },
 			{ name: "Raw Material Cost / Total Cost", note: "The estimate that follows from those rates." },
 			{ name: "Operating Cost", note: "Zero — see Operations above." },
+			{ name: "Rate Schedule (section)", note: "The job-work rate this drawing is charged at. The <b>Rate Schedule</b> link is editable; Type, Job Nature, Details, Work Content, Job Reference and Rate/KG below it are filled from the schedule and read-only — the rate itself is edited on the Rate Schedule master, never here. Editable after submit, because a rate is usually revisited long after the BOM is submitted." },
 		],
 		notes: [
+			"<b>The Rate Schedule is shared between three documents.</b> It belongs to the DRAWING, and the same schedule is shown on the drawing itself, on its BOM, and on every Production Plan row quoting it. Change it in any one of the three and the other two follow, because all three point at the same drawing. A popup afterwards lists every document that was updated, each as a link.",
+			"<b>You are asked before overwriting.</b> Set a schedule here that differs from the drawing's and you get the drawing's current schedule, and how many documents follow it, before anything changes. Decline and the field returns to the drawing's value.",
+			"<b>Only the choice of schedule travels — never the rate.</b> Editing Rate/KG is done on the Rate Schedule master, where it is versioned in the Price Change Log. Nothing on a Drawing, BOM or Production Plan can change a rate.",
+			"<b>A BOM made from a drawing already carries its schedule.</b> Older BOMs, created before this existed, start blank and stay blank until somebody sets one — a blank is left alone rather than filled in automatically, so nothing is written onto a submitted document behind your back.",
 			"<b>Treat the BOM value as indicative.</b> It is a snapshot of valuation on the day the BOM was created. Valuation moves with every purchase, so the same BOM built a month later would show a different figure for identical material.",
 			"<b>The actual cost is recorded on the Stock Entry.</b> When material is issued against a job, the rate on that entry is what the stock was really worth, and that is what the raw-material cost of the job is calculated from. If you need to know what a job cost, look at its Stock Entries, not its BOM.",
 			"<b>A zero rate on a BOM means zero valuation, not free material.</b> If stock was received without a rate, its valuation is zero and every BOM using it will show zero for those rows. Fix it at the receipt — the BOM is only reporting what it was told.",
@@ -806,22 +829,30 @@ const ERP_MANUAL_MATERIAL_PLANNING_CHILDREN = [
 		title: "Selected BOMs",
 		kicker: "Choosing what to plan",
 		purpose:
-			"Where a plan gets its scope. Pick the Sales Order, then choose which of its BOMs " +
+			"Where a plan gets its scope. Choose the Sales Orders, then which of their BOMs " +
 			"this plan covers — all of them, or a few. Everything the plan later does is limited " +
 			"to what you select here.",
 		steps: [
-			"Set <b>Sales Order</b> in the Import BOMs section.",
-			"The picker lists every submitted BOM on that order, with its drawing and DUNO/Mark No. Tick <b>all of them</b>, or only the ones this plan is for.",
-			"The chosen BOMs land in the <b>BOM Items</b> table, each carrying its drawing, DUNO, customer, Customer Provided Weight and Planned Weight.",
+			"Press <b>Add Sales Order</b>.",
+			"Pick <b>one or more</b> Sales Orders. Their drawings are listed together in the next step.",
+			"The picker lists every submitted BOM on those orders, with its drawing, DUNO/Mark No and — since the list can now mix orders — the <b>Sales Order</b> each one belongs to. Tick <b>all of them</b>, or only the ones this plan is for.",
+			"The chosen BOMs land in the <b>BOM Items</b> table, each carrying its own Sales Order, drawing, DUNO, customer, Customer Provided Weight and Planned Weight.",
 			"Press <b>Get Raw Materials</b> to pull in every raw material those BOMs need.",
 		],
 		notes: [
-			"<b>One plan per order, or several — both are supported.</b> A single plan can cover a whole sales order, which is the simplest way to buy in bulk: requirements for the same item consolidate across every drawing on the order. Or split the order across several plans — by area, by phase, by delivery date — and each plans and reserves independently. Nothing forces one plan per order.",
+			"<b>Several Sales Orders in one plan.</b> This is how you buy for more than one order together: requirements for the same item consolidate across every drawing selected, whichever order it came from. Each row keeps its own Sales Order, and every document downstream — Production Plan, Job Work Order, Material Issue Plan, and the Material Request → PO → Purchase Receipt chain — carries it per line, so nothing is pooled that should not be.",
+			"<b>Grouping here does not force grouping later.</b> One Material Planning can feed several Production Plans. Use the Production Plan's own <b>Add Drawings</b> picker, which searches by Sales Order, to split production back out per order while still having bought in bulk. The Material Issue Plan takes only the drawings its own Production Plan holds.",
+			"<b>DUNO/Mark No must be unique inside one plan.</b> Two drawings sharing a mark are refused, naming both rows and both Sales Orders. This is not tidiness: per-drawing weights, batch reservations and the transfer scope are all tracked by DUNO within a plan, so a repeated mark would double-count weight and could send one order's reserved material to another's supplier. Marks come from the customer's drawing and two customers reusing one is normal — plan those orders separately, or change one of the marks.",
+			"<b>One plan per order, or several — both are supported.</b> Split an order across several plans — by area, by phase, by delivery date — and each plans and reserves independently. Nothing forces one plan per order.",
 			"<b>Only submitted BOMs appear.</b> A BOM still in draft is not offered, because its quantities can still change. Submit it on the Sales Order first.",
+			"<b>Drawings already planned elsewhere are locked.</b> A BOM sitting in another Material Planning is listed greyed out, naming the plan that holds it, and cannot be selected.",
 			"<b>Adding BOMs later is fine.</b> Select more and press Get Raw Materials again; the new requirements are added. Reservations already made are not disturbed.",
 		],
 		buttons: [
+			{ name: "Add Sales Order", note: "Opens the picker. Replaces the old <b>Sales Order</b> field, which could only ever name one order — the field is hidden now, and existing plans keep whatever it held." },
 			{ name: "Get Raw Materials", note: "Pulls every raw material from the selected BOMs into the Raw Materials table. This is the starting point for everything else." },
+			{ name: "Check Mapping", note: "Reads the plan and reports: overlapping or over-allocated batches, and anything left unmapped. Writes nothing — outlined rather than filled for that reason." },
+			{ name: "Validate Stock", note: "Reference view of what the plan has committed, per item and batch, against what the batch actually holds. Also read-only." },
 		],
 	},
 	{
@@ -1382,7 +1413,7 @@ const ERP_MANUAL_PRODUCTION_PLAN_CHILDREN = [
 			"order, once the Job work order is created.",
 		fields: [
 			{ name: "Operation Name", note: "The step itself." },
-			{ name: "Work Type (Internal Jobcard / Subcontractor)", note: "Who performs THIS operation. Can vary row by row in the same plan — e.g. Welding done in-house, Blasting sent to a supplier — but every Subcontractor row must come before every Internal Jobcard row, no interleaving." },
+			{ name: "Work Type (Internal Jobcard / Subcontractor)", note: "Who performs THIS operation. Free to vary row by row, <b>in any order</b> — out for cutting, back in-house for fit-up, out again for painting is a normal routing and is now allowed. The old rule that every Subcontractor row had to come before every Internal Jobcard row was removed; nothing downstream ever depended on it, and a Supplier Operation Entry is still created for each row in sequence either way. Only two rules remain: every row needs a Work Type, and a plan with any Subcontractor row needs a Vendor/Contractor." },
 			{ name: "Inspection Mandatory", note: "Tick on any operation that needs a formal QC sign-off before its completed quantity counts. Covered in full in the Inspection category." },
 		],
 		buttons: [
@@ -1934,7 +1965,14 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 			{ name: "CNC to Supplier/WIP", note: "Second leg. Only appears once material has physically arrived at CNC." },
 			{ name: "Return Excess Entry", note: "Review quantities and enter a mandatory reason per row, then the return Stock Entry is created into the Finished Goods Warehouse." },
 			{ name: "Make Final Stock Entry", note: "Draft Manufacture entry for the finished goods. Appears once the final operation exists, and needs at least one completed piece on it. Books only the drawings that operation has finished, and consumes only their share of the raw material." },
-			{ name: "PDF", note: "A shareable batch plan — DUNO/Mark No, Customer Drawing No, planned Kg, batch details and Sec Qty — for the production or supplier team." },
+			{ name: "Download → Batch wise PDF", note: "A shareable batch plan — DUNO/Mark No, Customer Drawing No, planned Kg, batch details and Sec Qty — for the production or supplier team. One line per drawing requirement, so a plate cut for fourteen drawings appears fourteen times." },
+			{ name: "Download → Consolidate item wise PDF", note: "The same transfer seen from the store's side: one line per item + batch, with the DUNOs it covers named on the line. Item, batch, L×W×T, Sec Nos, Reqd Kg, Issued Kg, Pending Kg, merged row count, and a totals row. CNC rows are flagged, because that material goes to the CNC warehouse first. This is the sheet to pick against — nobody pulls stock fourteen times for one plate." },
+			{ name: "Update Batch", note: "Reassign the batch on a raw-material row. In the grid's top toolbar, next to View All. Refused once that row has been transferred." },
+			{ name: "View All", note: "Every row and every column in one popup, filterable by DUNO and Item Code. Moved to the top toolbar beside Update Batch — the table can run past a hundred rows, and Frappe hides the bottom toolbar entirely when they all fit on one page." },
+		],
+		notes: [
+			"<b>Raw Materials rows cannot be added by hand.</b> Every row is a snapshot of a reserved Material Planning row, so a typed row would describe a reservation that does not exist — it transfers nothing and reconciles against nothing. Rows come from <b>Refresh Raw Materials</b> only.",
+			"<b>Load Drawings is gone from the form.</b> A plan created from a Production Plan loads its drawings the moment it is created, so the button only ever repeated work already done.",
 		],
 	},
 ];
@@ -2326,7 +2364,7 @@ const ERP_MANUAL_REFERENCE_CHILDREN = [
 	{
 		id: "ref-settings",
 		title: "Settings",
-		kicker: "Three switches that change what you see",
+		kicker: "The switches that change what you see",
 		purpose:
 			"<b>Manufyxinvenza Settings</b> is a single settings document holding the handful of " +
 			"options that change how the app behaves site-wide. Two of them change which buttons " +
@@ -2336,9 +2374,11 @@ const ERP_MANUAL_REFERENCE_CHILDREN = [
 			{ name: "Auto Purchase from Material Planning", note: "Off by default. When ticked, an <b>Auto Purchase</b> button appears on Material Planning that creates Material Request → Purchase Order → Purchase Receipt in one click for every unavailable item — and the same switch reveals the <b>Add All Drawing</b> testing button on Supplier Operation Entry. Both are data-entry shortcuts for setting up test data. On a live site this stays off, and neither button exists." },
 			{ name: "Cut Sheet Tolerance (%)", note: "Default <b>2</b>. How far To Use (W1) plus Balance (W2) may differ from the sheet actually being cut before a warning appears. Cutting always loses a little to the saw, so a small gap is normal — the warning exists to catch a mis-typed dimension, not to police the kerf. Set 0 to warn on any difference at all. It never blocks a save." },
 			{ name: "Create New Batch for Cut Sheet Stock Entry", note: "Default <b>off</b>. Off: once the cut has been transferred, the sheet's own batch is rewritten to the Balance (W2) dimensions — same batch, same name, new size. On: the batch is never rewritten; a Repack Stock Entry empties it and creates a <b>new</b> batch carrying the W2 dimensions, Sec Qty and Kg, so documents already issued against the original still read true." },
+			{ name: "Show Warning for Duplicate DUNO", note: "Default <b>on</b>. Warns on the Sales Order (Verify Raw Materials) and when saving a Drawing if that DUNO/Mark No is already used by a different Sales Order. It is only a warning and never blocks either one — a mark comes from the customer's drawing, and two customers reusing one is ordinary. Switch it off if the noise is not useful to you." },
 		],
 		notes: [
 			"Turn <b>Create New Batch for Cut Sheet Stock Entry</b> on where paperwork already issued against a batch must stay accurate after the plate is cut. Leave it off where fewer batch records is worth more than that.",
+			"<b>Switching off the DUNO warning does not switch off DUNO checking.</b> Material Planning and Production Plan still refuse two rows sharing a mark whatever that setting says, and they always will: weights, batch reservations and transfers are tracked per DUNO within a plan, so a repeat there would double-count weight and could send one Sales Order's material to another's supplier. The setting governs the two <i>warnings</i>, nothing else.",
 			"These are site-wide settings, not per-user. Changing one changes the app for everybody.",
 		],
 	},

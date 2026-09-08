@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-09-04 00:52:54_
+_Generated: 2026-09-09 02:19:11_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -27,29 +27,34 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `check_existing_bom` | 189 |
+| `check_existing_bom` | 222 |
 ## drawing_management/drawing_utils.py
 
 | Method | Line |
 |--------|------|
 | `create_bom_from_drawing` | 112 |
-| `create_production_plan_from_bom` | 224 |
+| `create_production_plan_from_bom` | 229 |
 | `create_revision` | 24 |
-| `parse_drawing_items_csv` | 278 |
-| `update_customer_provided_weight` | 399 |
+| `parse_drawing_items_csv` | 283 |
+| `update_customer_provided_weight` | 404 |
 | `get_batches_for_drawing_item` | 80 |
 | `mark_as_final_revision` | 10 |
+## drawing_management/rate_schedule_sync.py
+
+| Method | Line |
+|--------|------|
+| `get_rate_schedule_conflict` | 153 |
 ## drawing_management/so_drawing_import.py
 
 | Method | Line |
 |--------|------|
-| `clear_drawing_import` | 1030 |
-| `get_cancelled_drawing_links` | 1065 |
+| `download_bom_template` | 1013 |
+| `clear_drawing_import` | 1068 |
+| `get_cancelled_drawing_links` | 1103 |
 | `parse_bom_excel` | 127 |
 | `create_drawings_from_import` | 385 |
 | `process_drawings` | 566 |
-| `verify_raw_materials` | 856 |
-| `download_bom_template` | 975 |
+| `verify_raw_materials` | 887 |
 ## item_management/item.py
 
 | Method | Line |
@@ -91,38 +96,38 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `get_so_drawings_for_bom_picker` | 1004 |
-| `get_raw_materials` | 1111 |
-| `check_stock_availability` | 1252 |
-| `move_to_exact_match` | 1646 |
-| `update_exact_match_from_consolidate` | 1809 |
-| `finalize_mapping` | 2033 |
-| `verify_raw_materials` | 2292 |
-| `get_batch_reservation_summary` | 2308 |
-| `get_batch_item` | 2344 |
-| `get_batch_stock_summary` | 2352 |
-| `get_batch_cross_table_usage` | 2590 |
-| `validate_planned_stock` | 2722 |
-| `reserve_batches` | 2849 |
-| `get_available_excess_batches` | 3021 |
-| `add_excess_material_mapping` | 3087 |
-| `get_available_virtual_excess_items` | 3182 |
-| `claim_virtual_excess_mapping` | 3295 |
-| `reserve_exact_match_batches` | 3508 |
-| `unreserve_exact_match_batches` | 3655 |
-| `check_mapping_batch_availability` | 3706 |
-| `unreserve_batches` | 3767 |
-| `reassign_batch` | 3932 |
-| `make_production_plan` | 4194 |
-| `make_material_request` | 4265 |
-| `make_material_request_from_consolidate` | 4419 |
-| `update_so_difference_kg` | 4557 |
-| `auto_suggest_consolidate_dimensions` | 4587 |
-| `auto_purchase_from_mp` | 4675 |
-| `complete_batch_mapping` | 4864 |
-| `@frappe.validate_and_sanitize_search_inputs` | 872 |
-| `@frappe.validate_and_sanitize_search_inputs` | 926 |
-| `get_bom_info` | 952 |
+| `get_so_drawings_for_bom_picker` | 1028 |
+| `get_raw_materials` | 1152 |
+| `check_stock_availability` | 1293 |
+| `move_to_exact_match` | 1687 |
+| `update_exact_match_from_consolidate` | 1850 |
+| `finalize_mapping` | 2074 |
+| `verify_raw_materials` | 2333 |
+| `get_batch_reservation_summary` | 2349 |
+| `get_batch_item` | 2385 |
+| `get_batch_stock_summary` | 2393 |
+| `get_batch_cross_table_usage` | 2631 |
+| `validate_planned_stock` | 2763 |
+| `reserve_batches` | 2890 |
+| `get_available_excess_batches` | 3062 |
+| `add_excess_material_mapping` | 3128 |
+| `get_available_virtual_excess_items` | 3223 |
+| `claim_virtual_excess_mapping` | 3336 |
+| `reserve_exact_match_batches` | 3549 |
+| `unreserve_exact_match_batches` | 3696 |
+| `check_mapping_batch_availability` | 3747 |
+| `unreserve_batches` | 3808 |
+| `reassign_batch` | 3973 |
+| `make_production_plan` | 4235 |
+| `make_material_request` | 4306 |
+| `make_material_request_from_consolidate` | 4460 |
+| `update_so_difference_kg` | 4598 |
+| `auto_suggest_consolidate_dimensions` | 4628 |
+| `auto_purchase_from_mp` | 4716 |
+| `complete_batch_mapping` | 4905 |
+| `@frappe.validate_and_sanitize_search_inputs` | 896 |
+| `@frappe.validate_and_sanitize_search_inputs` | 950 |
+| `get_bom_info` | 976 |
 ## production_management/inspection.py
 
 | Method | Line |
@@ -180,6 +185,8 @@ All `@frappe.whitelist()` methods. Call from JS:
 | `refresh_weight_summary` | 1030 |
 | `get_mip_batch_plan_html` | 1206 |
 | `download_mip_batch_plan_pdf` | 1212 |
+| `get_mip_consolidate_plan_html` | 1351 |
+| `download_mip_consolidate_plan_pdf` | 1357 |
 | `check_mip_raw_materials_refreshable` | 175 |
 | `refresh_mip_raw_materials_manual` | 189 |
 | `refresh_mip_raw_materials` | 209 |
@@ -235,6 +242,11 @@ All `@frappe.whitelist()` methods. Call from JS:
 | Method | Line |
 |--------|------|
 | `    # The link check is skipped for one reason only: the link it objects to is the` | 126 |
+## tests/verify_mip_download_and_grid.py
+
+| Method | Line |
+|--------|------|
+| `    # registered. Checking membership there is the only thing that proves the` | 105 |
 ## tests/verify_pr_partial_receipt_allocation.py
 
 | Method | Line |
@@ -243,4 +255,4 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 ## Total
 
-_139 whitelisted methods_
+_143 whitelisted methods_

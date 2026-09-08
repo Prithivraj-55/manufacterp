@@ -9,6 +9,10 @@ frappe.ui.form.on("Supplier Operation Entry", {
 			frm.add_custom_button(__("Create Inspection"), function () {
 				_soe_create_inspection(frm, pending);
 			}, __("Inspection"));
+			// Blue only while there is inspection work to do. Once the entry exists
+			// the group holds nothing but a link, so it drops back to grey -- the
+			// colour is meant to say "your turn", not "this doctype has a group".
+			window.mfx_paint_group && window.mfx_paint_group(frm, "Inspection", "primary");
 		} else {
 			frm.add_custom_button(__("View Inspection Entry"), function () {
 				frappe.set_route("Form", "Inspection Entry", pending.inspection_entry);

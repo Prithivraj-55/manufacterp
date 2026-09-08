@@ -104,7 +104,8 @@
    "depends_on": "eval:doc.production_plan",
    "fieldname": "load_drawings_btn",
    "fieldtype": "Button",
-   "label": "Load Drawings"
+   "label": "Load Drawings",
+   "hidden": 1
   },
   {
    "fieldname": "section_source_doc",
@@ -138,7 +139,7 @@
    "label": "Warehouses"
   },
   {
-   "description": "Warehouse to transfer raw materials FROM. Auto-fetched from the Production Plan's Raw Material Warehouse — override here if needed.",
+   "description": "Warehouse to transfer raw materials FROM. Auto-fetched from the Production Plan's Raw Material Warehouse \u2014 override here if needed.",
    "fieldname": "source_warehouse",
    "fieldtype": "Link",
    "label": "Source Warehouse (RM)",
@@ -202,7 +203,7 @@
    "read_only": 1
   },
   {
-   "description": "Over-mapped weight (allocated beyond planned) — the difference expected back as excess/off-cut.",
+   "description": "Over-mapped weight (allocated beyond planned) \u2014 the difference expected back as excess/off-cut.",
    "fieldname": "excess_weight_kg",
    "fieldtype": "Float",
    "label": "Excess Weight (Kg)",
@@ -213,7 +214,7 @@
    "fieldtype": "Float",
    "label": "Used in FG (Kg)",
    "read_only": 1,
-   "description": "What the Final Stock Entry actually consumed for this job — not what was sent.",
+   "description": "What the Final Stock Entry actually consumed for this job \u2014 not what was sent.",
    "precision": "3"
   },
   {
@@ -227,7 +228,7 @@
   {
    "fieldname": "process_loss_weight_kg",
    "fieldtype": "Float",
-   "label": "Process Loss — Not Returned (Kg)",
+   "label": "Process Loss \u2014 Not Returned (Kg)",
    "read_only": 1,
    "description": "Transferred, minus what the job used, minus what came back. Written off with a reason once the supplier confirms it.",
    "precision": "3"
@@ -278,7 +279,7 @@
   {
    "fieldname": "consolidate_html",
    "fieldtype": "HTML",
-   "options": "<p class='text-muted small'>One row per item and batch — what will physically move, with rows for the same batch merged. Rebuilt on every save from the Raw Materials table; not editable here.</p>"
+   "options": "<p class='text-muted small'>One row per item and batch \u2014 what will physically move, with rows for the same batch merged. Rebuilt on every save from the Raw Materials table; not editable here.</p>"
   },
   {
    "fieldname": "consolidate_items",
@@ -293,7 +294,7 @@
    "label": "Excess Material Return"
   },
   {
-   "description": "Off-cut / balance material left after cutting the transferred raw material. Enter the items in their new dimensions and Sec Nos — weight (Kg) is auto-calculated.",
+   "description": "Off-cut / balance material left after cutting the transferred raw material. Enter the items in their new dimensions and Sec Nos \u2014 weight (Kg) is auto-calculated.",
    "fieldname": "excess_return_items",
    "fieldtype": "Table",
    "label": "Excess Material Items",

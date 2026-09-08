@@ -134,6 +134,11 @@ def create_bom_from_drawing(drawing_name):
     bom.custom_drawing = drawing_name
     bom.custom_duno_mark_no = drawing.duno_mark_no or 0
     bom.custom_customer_drawing_number = drawing.customer_drawing_number or ""
+    # Seeded from the drawing rather than left blank and synced later. The sync in
+    # rate_schedule_sync.py only fires on an actual EDIT, so a BOM born blank would
+    # stay blank until somebody typed the schedule it already implicitly has. The
+    # fetch_from fields (custom_rs_*) fill themselves in on insert.
+    bom.custom_rate_schedule = drawing.rate_schedule or ""
     bom.project = drawing.project or ""
     bom.company = company
     bom.currency = (

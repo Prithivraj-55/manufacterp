@@ -1,3 +1,17 @@
+// Blue for the two forward steps in the drawing's life (submit it, then make its
+// BOM); amber for the two that redo or overwrite a decision already made. Painting
+// by label is a no-op for a button that is not on screen, so this can be called
+// from anywhere without first working out which buttons exist.
+function _drawing_paint_buttons(frm) {
+	if (!window.mfx_paint_button) return;
+	window.mfx_paint_button(frm, "Mark as Final Revision", "primary");
+	window.mfx_paint_button(frm, "Create Revision", "alt");
+	window.mfx_paint_button(frm, "Update Customer Weight", "alt");
+	// "Create BOM" sits inside the Create dropdown, so the group's own toggle is
+	// what is on screen -- painting the button would colour a hidden menu item.
+	window.mfx_paint_group(frm, "Create", "primary");
+}
+
 frappe.ui.form.on("Drawing", {
 	refresh(frm) {
 		if (frm.doc.docstatus === 1 && frm.doc.status === "Working") {
@@ -54,6 +68,8 @@ frappe.ui.form.on("Drawing", {
                             }
                         );
                     }, __("Create"));
+                    // Arrives after refresh has finished, so it paints itself.
+                    _drawing_paint_buttons(frm);
 
                 }
             });
@@ -150,6 +166,7 @@ frappe.ui.form.on("Drawing", {
 		});
 
 		update_totals(frm);
+		_drawing_paint_buttons(frm);
 
 		// Items grid: Download (always) and Upload (draft only) — bottom-right of table
 		setTimeout(function () {

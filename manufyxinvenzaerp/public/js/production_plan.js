@@ -135,6 +135,22 @@ frappe.ui.form.on("Production Plan Item", {
 		// Auto-fill Process Planning table from BOM routing operations
 		_pp_autofill_operations(frm, row.bom_no);
 	},
+
+	// Same contract as the BOM's own handler: the Rate Schedule belongs to the
+	// drawing, so editing it on this row edits the Drawing and its BOM too. Ask
+	// before overwriting a schedule the drawing already has. The propagation runs
+	// server-side on save (rate_schedule_sync.on_update_production_plan).
+	custom_rate_schedule(frm, cdt, cdn) {
+		let row = locals[cdt][cdn];
+		window.mfx_confirm_rate_schedule_change({
+			drawing: row.custom_drawing,
+			new_schedule: row.custom_rate_schedule,
+			source_doctype: "Production Plan Item",
+			source_name: row.name,
+			on_decline: (current) =>
+				frappe.model.set_value(cdt, cdn, "custom_rate_schedule", current || ""),
+		});
+	},
 });
 
 function _pp_autofill_operations(frm, bom_no) {

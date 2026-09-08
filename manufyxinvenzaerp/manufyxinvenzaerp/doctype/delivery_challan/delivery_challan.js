@@ -181,7 +181,7 @@ function dc_add_print_buttons(frm) {
 	});
 
 	frm.add_custom_button(
-		frappe.utils.icon("filetype", "xs") + " " + __("PDF"),
+		frappe.utils.icon("file", "xs") + " " + __("PDF"),
 		function () {
 			open_url_post(
 				"/api/method/manufyxinvenzaerp.manufyxinvenzaerp.doctype.delivery_challan.delivery_challan.download_delivery_challan_pdf",

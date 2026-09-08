@@ -743,14 +743,17 @@ function _so_render_rm_verify_btn(frm) {
 	var verified = !!frm.doc.custom_raw_materials_verified;
 
 	if (has_unlocked) {
-		$('<button class="btn btn-sm btn-default">')
+		var $verify = $('<button class="btn btn-sm btn-default">')
 			.text(__("Verify Raw Materials"))
 			.on("click", function() { _so_verify_rm(frm); })
 			.appendTo($row);
+		// Blue: nothing else on this Sales Order can proceed until it passes.
+		// "View All" beside it stays grey -- see public/js/mfx_buttons.js.
+		window.mfx_paint_el && window.mfx_paint_el($verify, "primary");
 	}
 
 	$('<button class="btn btn-sm btn-default">')
-		.html(frappe.utils.icon("eye", "sm") + "&nbsp;" + __("View All"))
+		.html(frappe.utils.icon("view", "sm") + "&nbsp;" + __("View All"))
 		.on("click", function() { _so_show_table_popup(frm, "custom_so_raw_materials"); })
 		.appendTo($row);
 
@@ -786,11 +789,39 @@ function _so_verify_rm(frm) {
 				frm.doc.custom_raw_materials_verified = res.verified ? 1 : 0;
 				_so_render_rm_verify_btn(frm);
 				_so_render_bom_summary(frm);
+				// Warnings are not issues. They never block verification -- a DUNO
+				// reused by an unrelated customer is their paperwork, not a fault in
+				// this sheet -- so they are shown alongside a pass as well as a fail,
+				// and worded as something to know rather than something to fix.
+				var warns = res.warnings || [];
+				var warn_html = warns.length
+					? '<div style="margin-top:14px;padding:10px 12px;background:#fffbeb;'
+						+ 'border-left:3px solid #f59e0b;border-radius:3px;">'
+						+ "<b>" + __("{0} warning(s) — verification still passed:", [warns.length]) + "</b><br><br>"
+						+ warns.map(function(w) { return "• " + w; }).join("<br><br>")
+						+ "</div>"
+					: "";
+
 				if (res.verified) {
-					frappe.show_alert({ message: __("All raw materials verified!"), indicator: "green" }, 5);
+					if (warns.length) {
+						frappe.msgprint({
+							title: __("Verified — with warnings"),
+							// Single quotes for the HTML attribute on purpose. This string
+							// lives inside a Python triple-quoted literal, so a \" here is
+							// consumed by Python and reaches the browser as a bare quote --
+							// which closes the JS string early and breaks the whole Client
+							// Script (SyntaxError, and the Sales Order form stops loading).
+							message: "<p style='color:#22863a'>"
+								+ __("All raw materials verified. Drawings can be created.")
+								+ "</p>" + warn_html,
+							indicator: "orange",
+						});
+					} else {
+						frappe.show_alert({ message: __("All raw materials verified!"), indicator: "green" }, 5);
+					}
 				} else {
 					var msg = "<b>" + res.issues.length + " " + __("issue(s) found:") + "</b><br><br>" +
-						res.issues.map(function(i) { return "• " + i; }).join("<br>");
+						res.issues.map(function(i) { return "• " + i; }).join("<br>") + warn_html;
 					frappe.msgprint({ title: __("Raw Material Issues"), message: msg, indicator: "orange" });
 				}
 			}
@@ -860,6 +891,13 @@ function _so_render_file_buttons(frm) {
 function _so_render_drawing_buttons(frm) {
 	if (frm.doc.__islocal || frm.doc.docstatus === 2) return;
 
+	// The Drawing group carries the whole drawing -> BOM sequence, so it is the
+	// forward action on this form. Painting is idempotent and the buttons arrive
+	// from several async callbacks, so every one of them calls this afterwards.
+	function _paint_drawing_group() {
+		window.mfx_paint_group && window.mfx_paint_group(frm, "Drawing", "primary");
+	}
+
 	var items = frm.doc.custom_duno_items || [];
 
 	// Create Drawing — synchronous: no drawing exists yet
@@ -868,6 +906,7 @@ function _so_render_drawing_buttons(frm) {
 		frm.add_custom_button(__("Create Drawing"), function() {
 			_so_create_drawings(frm);
 		}, __("Drawing"));
+			_paint_drawing_group();
 	}
 
 	// Remaining 3 buttons depend on live drawing docstatus — fetch async
@@ -889,6 +928,7 @@ function _so_render_drawing_buttons(frm) {
 			frm.add_custom_button(__("Submit Drawing"), function() {
 				_so_run_step(frm, "submit", __("Submit Drawing"), __("Submitting Drawings…"), submit_count, __("Submit"));
 			}, __("Drawing"));
+			_paint_drawing_group();
 		}
 
 		// Mark as Final Revision — only if submitted (non-final) drawings with checkbox on
@@ -905,6 +945,7 @@ function _so_render_drawing_buttons(frm) {
 				}
 				_so_run_step(frm, "final_revision", __("Mark as Final Revision"), __("Marking Final Revision…"), final_count, __("Final Revision"));
 			}, __("Drawing"));
+			_paint_drawing_group();
 		}
 
 		// BOM — one button, and only while there is a BOM left to make.
@@ -939,6 +980,7 @@ function _so_render_drawing_buttons(frm) {
 						_so_run_step(frm, "create_and_submit_bom", __("Create and Submit BOM"),
 							__("Creating and Submitting BOMs…"), pending.length, __("Create BOM"));
 					}, __("Drawing"));
+			_paint_drawing_group();
 				} else if (final_names.every(function(n) { return done.has(n); })) {
 					frm.add_custom_button(__("View Drawing"), function() {
 						// Says the drawing stage is finished, and where the work goes next.
@@ -951,6 +993,7 @@ function _so_render_drawing_buttons(frm) {
 						});
 						frappe.set_route("List", "Drawing", { sales_order: frm.doc.name });
 					}, __("Drawing"));
+			_paint_drawing_group();
 				}
 			});
 		}
@@ -965,6 +1008,7 @@ function _so_render_drawing_buttons(frm) {
 				frm.add_custom_button(__("Submit BOM"), function() {
 					_so_run_step(frm, "submit_bom", __("Submit BOM"), __("Submitting BOMs…"), draft_boms.length, null);
 				}, __("Drawing"));
+			_paint_drawing_group();
 			}
 		});
 	});
@@ -978,7 +1022,7 @@ function _so_render_duno_view_all_btn(frm) {
 	var $top = grid.wrapper.find(".grid-custom-buttons");
 	$top.empty();
 	$('<button class="btn btn-default btn-sm">')
-		.html(frappe.utils.icon("eye", "xs") + " " + __("View All"))
+		.html(frappe.utils.icon("view", "xs") + " " + __("View All"))
 		.on("click", function() { _so_show_table_popup(frm, "custom_duno_items"); })
 		.appendTo($top);
 }
@@ -1443,6 +1487,7 @@ def after_install():
     hide_purchase_order_weight_fields()
     create_purchase_order_client_script()
     create_purchase_receipt_custom_fields()
+    layout_purchase_receipt_item_grid()
     create_batch_custom_fields()
     create_purchase_receipt_client_script()
     create_material_request_custom_fields()
@@ -1456,6 +1501,10 @@ def after_install():
     create_bom_custom_fields()
     create_bom_client_script()
     create_production_plan_custom_fields()
+    # After both of the above: its BOM fields anchor on custom_customer_drawing_number
+    # and its Production Plan Item fields on custom_material_planning, so on a fresh
+    # install those anchors have to exist first or the new fields land at the bottom.
+    create_rate_schedule_sync_fields()
     create_production_plan_client_script()
     # Work Order and Job Card are deliberately left standard -- every customization
     # this app once added to them was removed under the client's Phase 0.4 change
@@ -1466,6 +1515,7 @@ def after_install():
     create_doctype_label_translations()
     remove_sco_purchase_order_mandatory()
     hide_sco_job_worker_warehouse()
+    hide_sco_unused_tabs()
     make_sco_job_worker_conditional()
     add_sco_working_status()
     create_sco_custom_fields()
@@ -1492,6 +1542,7 @@ def after_migrate():
     hide_purchase_order_weight_fields()
     create_purchase_order_client_script()
     create_purchase_receipt_custom_fields()
+    layout_purchase_receipt_item_grid()
     create_batch_custom_fields()
     create_purchase_receipt_client_script()
     create_material_request_custom_fields()
@@ -1505,6 +1556,10 @@ def after_migrate():
     create_bom_custom_fields()
     create_bom_client_script()
     create_production_plan_custom_fields()
+    # After both of the above: its BOM fields anchor on custom_customer_drawing_number
+    # and its Production Plan Item fields on custom_material_planning, so on a fresh
+    # install those anchors have to exist first or the new fields land at the bottom.
+    create_rate_schedule_sync_fields()
     create_production_plan_client_script()
     # Work Order and Job Card are deliberately left standard -- every customization
     # this app once added to them was removed under the client's Phase 0.4 change
@@ -1515,6 +1570,7 @@ def after_migrate():
     create_doctype_label_translations()
     remove_sco_purchase_order_mandatory()
     hide_sco_job_worker_warehouse()
+    hide_sco_unused_tabs()
     make_sco_job_worker_conditional()
     add_sco_working_status()
     create_sco_custom_fields()
@@ -1844,6 +1900,7 @@ def create_purchase_receipt_custom_fields():
                 "fieldtype": "Float",
                 "insert_after": "uom",
                 "in_list_view": 1,
+                "columns": 1,
             },
             {
                 "fieldname": "custom_sec_uom",
@@ -1854,6 +1911,7 @@ def create_purchase_receipt_custom_fields():
                 "read_only": 1,
                 "insert_after": "custom_sec_qty",
                 "in_list_view": 1,
+                "columns": 1,
             },
             {
                 "fieldname": "custom_unit_weight",
@@ -1862,7 +1920,7 @@ def create_purchase_receipt_custom_fields():
                 "fetch_from": "item_code.custom_unit_weight",
                 "read_only": 1,
                 "insert_after": "custom_sec_uom",
-                "in_list_view": 1,
+                "in_list_view": 0,
             },
             {
                 "fieldname": "custom_thickness",
@@ -1872,6 +1930,7 @@ def create_purchase_receipt_custom_fields():
                 "depends_on": "eval:doc.custom_parent_item_group === 'Plates'",
                 "insert_after": "custom_unit_weight",
                 "in_list_view": 1,
+                "columns": 1,
             },
             {
                 "fieldname": "custom_length",
@@ -1881,6 +1940,7 @@ def create_purchase_receipt_custom_fields():
                 "depends_on": "eval:['Structurals','Plates'].includes(doc.custom_parent_item_group)",
                 "insert_after": "custom_thickness",
                 "in_list_view": 1,
+                "columns": 1,
             },
             {
                 "fieldname": "custom_width",
@@ -1890,6 +1950,7 @@ def create_purchase_receipt_custom_fields():
                 "depends_on": "eval:doc.custom_parent_item_group === 'Plates'",
                 "insert_after": "custom_length",
                 "in_list_view": 1,
+                "columns": 1,
             },
             {
                 "fieldname": "custom_drawing",
@@ -1994,6 +2055,176 @@ def create_purchase_receipt_custom_fields():
         ],
     }
     create_custom_fields(custom_fields, update=True)
+
+
+def layout_purchase_receipt_item_grid():
+    """Spend the Purchase Receipt Item grid's column budget deliberately.
+
+    Frappe's grid has a hard budget: it walks the fields in order adding up their
+    `columns`, and the moment the running total passes 11 it STOPS and drops every
+    remaining column (frappe/public/js/frappe/form/grid.js, setup_visible_columns).
+    The total starts at 1, so the widths may add up to at most 10.
+
+    This app put six custom columns into that grid, and the budget was being blown
+    at Sec UOM — which meant Length, Width, Thickness, Unit Weight, Rate, Amount,
+    Net Amount and Accepted Warehouse were ALL invisible, with no error and nothing
+    on screen to say why. Accepted Warehouse was reported as "missing" and looked
+    like a field that needed enabling; it was already enabled and had simply run off
+    the end of the budget.
+
+    The layout below is the client's, and totals exactly 10:
+
+        item_code 2 + qty 1 + custom_sec_qty 1 + custom_sec_uom 1
+        + custom_thickness 1 + custom_length 1 + custom_width 1 + warehouse 2
+
+    Rejected Qty, Unit Weight, Rate, Amount and Net Amount come out of the grid to
+    pay for it. They are only dropped from the ROW VIEW — every one stays on the
+    doctype and stays editable by expanding the row, and Rate/Amount continue to
+    drive valuation exactly as before.
+
+    Anything added to this grid later has to come out of this budget. Adding one
+    more in_list_view field without taking width back from another does not push a
+    column off the right-hand edge — it silently blanks everything after it.
+    """
+    widths = {"item_code": 2, "qty": 1, "warehouse": 2}
+    for fieldname, columns in widths.items():
+        frappe.make_property_setter(
+            {
+                "doctype": "Purchase Receipt Item",
+                "fieldname": fieldname,
+                "property": "columns",
+                "value": columns,
+                "property_type": "Int",
+            }
+        )
+
+    for fieldname in ("rejected_qty", "rate", "amount", "net_amount"):
+        frappe.make_property_setter(
+            {
+                "doctype": "Purchase Receipt Item",
+                "fieldname": fieldname,
+                "property": "in_list_view",
+                "value": 0,
+                "property_type": "Check",
+            }
+        )
+    frappe.db.commit()
+
+
+def create_rate_schedule_sync_fields():
+    """Mirror the Drawing's Rate Schedule onto BOM and Production Plan Item.
+
+    The rate a job is charged at is decided once, per drawing, and then has to be
+    readable everywhere that drawing is worked on. It lived only on the Drawing,
+    so a BOM or a Production Plan gave no idea what the work was being priced at.
+
+    Shape is copied from the Drawing's own section (drawing.json):
+      - the Rate Schedule LINK is editable, and allow_on_submit so it can still be
+        corrected after the document is submitted -- which is the normal case here,
+        since Drawings and BOMs are submitted long before rates get revisited;
+      - everything else is read_only with fetch_from, so the schedule's own details
+        are shown but never typed. Editing a rate means editing the Rate Schedule
+        master, not one of the documents quoting it.
+
+    BOM gets the full section: one BOM is one drawing (custom_drawing), so there is
+    room and a reason to show all of it. Production Plan Item gets only the link,
+    Job Nature and Rate/KG -- it is a grid row, not a form.
+
+    Keeping the two sides in step is rate_schedule_sync.py; these are just the
+    fields it writes to.
+    """
+    rs_detail_fields = [
+        ("custom_rs_job_nature", "Job Nature", "Data", "job_nature"),
+        ("custom_rs_details", "Details", "Data", "details"),
+        ("custom_rs_work_content", "Work Content", "Data", "work_content"),
+        ("custom_rs_job_reference", "Job Reference", "Data", "job_reference"),
+        ("custom_rs_rate_per_kg", "Rate/KG", "Currency", "rate_per_kg"),
+    ]
+
+    bom_fields = [
+        {
+            "fieldname": "custom_rate_schedule_section",
+            "label": "Rate Schedule",
+            "fieldtype": "Section Break",
+            "insert_after": "custom_customer_drawing_number",
+        },
+        {
+            "fieldname": "custom_rate_schedule",
+            "label": "Rate Schedule",
+            "fieldtype": "Link",
+            "options": "Rate Schedule",
+            "insert_after": "custom_rate_schedule_section",
+            "allow_on_submit": 1,
+            "description": "Changing this updates the Drawing and every other document that follows it.",
+        },
+        {
+            "fieldname": "custom_rs_type",
+            "label": "Type",
+            "fieldtype": "Data",
+            "fetch_from": "custom_rate_schedule.type",
+            "read_only": 1,
+            "insert_after": "custom_rate_schedule",
+            "allow_on_submit": 1,
+        },
+        {
+            "fieldname": "custom_rate_schedule_col",
+            "fieldtype": "Column Break",
+            "insert_after": "custom_rs_type",
+        },
+    ]
+    previous = "custom_rate_schedule_col"
+    for fieldname, label, fieldtype, source in rs_detail_fields:
+        bom_fields.append({
+            "fieldname": fieldname,
+            "label": label,
+            "fieldtype": fieldtype,
+            "fetch_from": "custom_rate_schedule.{0}".format(source),
+            "read_only": 1,
+            "insert_after": previous,
+            "allow_on_submit": 1,
+        })
+        previous = fieldname
+
+    # Production Plan Item is a grid row. Deliberately NOT in_list_view: that grid
+    # is already well past Frappe's 11-column budget (see the note in
+    # layout_purchase_receipt_item_grid), so an in_list_view field added here would
+    # not appear at all -- it would land in the silently-dropped tail. The fields
+    # are edited by expanding the row until that grid is re-budgeted.
+    pp_item_fields = [
+        {
+            "fieldname": "custom_rate_schedule",
+            "label": "Rate Schedule",
+            "fieldtype": "Link",
+            "options": "Rate Schedule",
+            "insert_after": "custom_material_planning",
+            "allow_on_submit": 1,
+            "description": "Changing this updates the Drawing and its BOM.",
+        },
+        {
+            "fieldname": "custom_rs_job_nature",
+            "label": "Job Nature",
+            "fieldtype": "Data",
+            "fetch_from": "custom_rate_schedule.job_nature",
+            "read_only": 1,
+            "insert_after": "custom_rate_schedule",
+            "allow_on_submit": 1,
+        },
+        {
+            "fieldname": "custom_rs_rate_per_kg",
+            "label": "Rate/KG",
+            "fieldtype": "Currency",
+            "fetch_from": "custom_rate_schedule.rate_per_kg",
+            "read_only": 1,
+            "insert_after": "custom_rs_job_nature",
+            "allow_on_submit": 1,
+        },
+    ]
+
+    create_custom_fields(
+        {"BOM": bom_fields, "Production Plan Item": pp_item_fields},
+        ignore_validate=True,
+    )
+    frappe.db.commit()
 
 
 def create_batch_custom_fields():
@@ -3562,6 +3793,32 @@ def hide_sco_job_worker_warehouse():
             "property_type": "Check",
         }
     )
+    frappe.db.commit()
+
+
+def hide_sco_unused_tabs():
+    """Hide the Job Work Order's 'Additional Costs' and 'Other Info' tabs.
+
+    Neither is used on this site's flow. Additional Costs prices a subcontracting
+    service the ERPNext way — via Subcontracting Receipt and supplied_items — and
+    PP-flow orders have neither (see CustomSubcontractingOrder.update_status, which
+    exists precisely because ERPNext's own status rules are unreachable here).
+    Other Info carries printing settings and accounting dimensions nobody sets.
+
+    Hidden, not removed: the fields and their data stay exactly where they are, so
+    this is reversible by deleting two Property Setters, and any document that
+    already carries a value in them keeps it.
+    """
+    for fieldname in ("tab_additional_costs", "tab_other_info"):
+        frappe.make_property_setter(
+            {
+                "doctype": "Subcontracting Order",
+                "fieldname": fieldname,
+                "property": "hidden",
+                "value": 1,
+                "property_type": "Check",
+            }
+        )
     frappe.db.commit()
 
 

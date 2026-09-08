@@ -852,6 +852,37 @@ def _check_drawing_headers(so):
     return issues
 
 
+def _check_duno_reuse(so):
+    """Marks on this Sales Order that another Sales Order already uses.
+
+    A warning, never an issue. A DUNO is the customer's own mark off their drawing,
+    so two unrelated customers both sending "TYPE 1" is ordinary and refusing the
+    import over it would be refusing their paperwork. It only bites if somebody
+    later plans both jobs in one Material Planning or Production Plan, and those two
+    documents block it outright with a message naming both sides.
+
+    Reported here anyway because import time is when it is cheap to fix -- renaming
+    a mark once the Drawings, BOMs and plans exist is not.
+
+    Covers rows whose Drawing has not been created yet AND rows that already have
+    one: a clash can appear later, when the OTHER Sales Order is imported, long
+    after this one was verified.
+    """
+    from manufyxinvenzaerp.drawing_management.duno_uniqueness import (
+        find_clashes_on_other_sales_orders, warn_text_for_clashes, warnings_enabled,
+    )
+
+    # Switched off in Manufyxinvenza Settings -> "Show Warning for Duplicate DUNO".
+    # Checked before the query, not after: on an order of 500 drawings this is a
+    # lookup nobody asked for.
+    if not warnings_enabled():
+        return []
+
+    dunos = [r.get("duno_mark_no") for r in (so.get("custom_duno_items") or [])]
+    clashes = find_clashes_on_other_sales_orders(so.name, dunos)
+    return warn_text_for_clashes(clashes)
+
+
 @frappe.whitelist()
 def verify_raw_materials(so_name):
     """
@@ -876,6 +907,11 @@ def verify_raw_materials(so_name):
     # longer applies to them.
     unlocked = [r for r in (so.custom_so_raw_materials or []) if not r.get("is_locked")]
     issues = _check_drawing_masters(so) + _check_drawing_headers(so)
+    # Kept OUT of `issues` on purpose. `verified` is `not issues`, so anything added
+    # there blocks drawing creation -- and a mark reused by an unrelated customer is
+    # not a fault in this sheet. It is reported separately so it is seen at import
+    # time, when renaming is still cheap, without refusing the import.
+    warnings = _check_duno_reuse(so)
 
     if not unlocked:
         verified = not issues
@@ -883,7 +919,8 @@ def verify_raw_materials(so_name):
                             1 if verified else 0, update_modified=False)
         frappe.db.commit()
         modified = frappe.db.get_value("Sales Order", so_name, "modified")
-        return {"issues": issues, "verified": verified, "modified": str(modified)}
+        return {"issues": issues, "warnings": warnings, "verified": verified,
+                "modified": str(modified)}
 
     all_mat = {r.material_code for r in unlocked if r.material_code}
     # The group and unit weight are read from the Item master rather than the
@@ -968,7 +1005,8 @@ def verify_raw_materials(so_name):
     frappe.db.set_value("Sales Order", so_name, "custom_raw_materials_verified", 1 if verified else 0, update_modified=False)
     frappe.db.commit()
     modified = frappe.db.get_value("Sales Order", so_name, "modified")
-    return {"issues": issues, "verified": verified, "modified": str(modified)}
+    return {"issues": issues, "warnings": warnings, "verified": verified,
+            "modified": str(modified)}
 
 
 @frappe.whitelist()

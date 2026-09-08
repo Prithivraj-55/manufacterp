@@ -906,7 +906,7 @@
    "bold": 0,
    "collapsible": 0,
    "collapsible_depends_on": null,
-   "columns": 0,
+   "columns": 1,
    "creation": "2026-08-18 22:53:00.606272",
    "default": null,
    "depends_on": "eval:['Structurals','Plates'].includes(doc.custom_parent_item_group)",
@@ -1098,7 +1098,7 @@
    "bold": 0,
    "collapsible": 0,
    "collapsible_depends_on": null,
-   "columns": 0,
+   "columns": 1,
    "creation": "2026-08-18 22:52:49.057259",
    "default": null,
    "depends_on": null,
@@ -1162,7 +1162,7 @@
    "bold": 0,
    "collapsible": 0,
    "collapsible_depends_on": null,
-   "columns": 0,
+   "columns": 1,
    "creation": "2026-08-18 22:52:53.839912",
    "default": null,
    "depends_on": null,
@@ -1226,7 +1226,7 @@
    "bold": 0,
    "collapsible": 0,
    "collapsible_depends_on": null,
-   "columns": 0,
+   "columns": 1,
    "creation": "2026-08-18 22:52:57.948958",
    "default": null,
    "depends_on": "eval:doc.custom_parent_item_group === 'Plates'",
@@ -1309,7 +1309,7 @@
    "ignore_user_permissions": 0,
    "ignore_xss_filter": 0,
    "in_global_search": 0,
-   "in_list_view": 1,
+   "in_list_view": 0,
    "in_preview": 0,
    "in_standard_filter": 0,
    "insert_after": "custom_sec_uom",
@@ -1354,7 +1354,7 @@
    "bold": 0,
    "collapsible": 0,
    "collapsible_depends_on": null,
-   "columns": 0,
+   "columns": 1,
    "creation": "2026-08-18 22:53:02.576799",
    "default": null,
    "depends_on": "eval:doc.custom_parent_item_group === 'Plates'",
@@ -2310,6 +2310,14 @@
  "links": [],
  "property_setters": [
   {
+   "doctype_or_field": "DocField",
+   "doc_type": "Purchase Receipt Item",
+   "field_name": "amount",
+   "property": "in_list_view",
+   "property_type": "Check",
+   "value": "0"
+  },
+  {
    "_assign": null,
    "_comments": null,
    "_liked_by": null,
@@ -2331,6 +2339,54 @@
    "property_type": "Check",
    "row_name": null,
    "value": "0"
+  },
+  {
+   "doctype_or_field": "DocField",
+   "doc_type": "Purchase Receipt Item",
+   "field_name": "item_code",
+   "property": "columns",
+   "property_type": "Int",
+   "value": "2"
+  },
+  {
+   "doctype_or_field": "DocField",
+   "doc_type": "Purchase Receipt Item",
+   "field_name": "net_amount",
+   "property": "in_list_view",
+   "property_type": "Check",
+   "value": "0"
+  },
+  {
+   "doctype_or_field": "DocField",
+   "doc_type": "Purchase Receipt Item",
+   "field_name": "qty",
+   "property": "columns",
+   "property_type": "Int",
+   "value": "1"
+  },
+  {
+   "doctype_or_field": "DocField",
+   "doc_type": "Purchase Receipt Item",
+   "field_name": "rate",
+   "property": "in_list_view",
+   "property_type": "Check",
+   "value": "0"
+  },
+  {
+   "doctype_or_field": "DocField",
+   "doc_type": "Purchase Receipt Item",
+   "field_name": "rejected_qty",
+   "property": "in_list_view",
+   "property_type": "Check",
+   "value": "0"
+  },
+  {
+   "doctype_or_field": "DocField",
+   "doc_type": "Purchase Receipt Item",
+   "field_name": "warehouse",
+   "property": "columns",
+   "property_type": "Int",
+   "value": "2"
   }
  ],
  "sync_on_migrate": 1

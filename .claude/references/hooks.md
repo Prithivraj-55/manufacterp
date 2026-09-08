@@ -1,6 +1,6 @@
 # hooks — manufyxinvenzaerp
 
-_Generated: 2026-09-04 00:52:54_
+_Generated: 2026-09-09 02:19:11_
 
 ## doc_events
 
@@ -29,6 +29,11 @@ doc_events = {
 	},
 	"BOM": {
 		"validate": "manufyxinvenzaerp.drawing_management.drawing_utils.validate_bom_from_drawing",
+		"on_update": "manufyxinvenzaerp.drawing_management.rate_schedule_sync.on_update_bom",
+		# on_update_after_submit as well: the Rate Schedule field is allow_on_submit,
+		# and a BOM is normally already submitted by the time a rate is revisited --
+		# on_update alone would never fire for the case this feature exists for.
+		"on_update_after_submit": "manufyxinvenzaerp.drawing_management.rate_schedule_sync.on_update_bom",
 	},
 	"Material Request": {
 		"validate": "manufyxinvenzaerp.material_request_management.material_request.validate_material_request",
@@ -72,10 +77,18 @@ doc_events = {
 		"autoname": "manufyxinvenzaerp.production_plan_management.production_plan.autoname_production_plan",
 		"validate": [
 			"manufyxinvenzaerp.production_plan_management.production_plan.after_save_production_plan",
-			"manufyxinvenzaerp.production_plan_management.production_plan.validate_process_planning_contiguity",
+			"manufyxinvenzaerp.production_plan_management.production_plan.validate_duno_uniqueness",
+			"manufyxinvenzaerp.production_plan_management.production_plan.validate_process_planning",
+			"manufyxinvenzaerp.drawing_management.rate_schedule_sync.seed_production_plan_rows",
 		],
+		"on_update": "manufyxinvenzaerp.drawing_management.rate_schedule_sync.on_update_production_plan",
+		"on_update_after_submit": "manufyxinvenzaerp.drawing_management.rate_schedule_sync.on_update_production_plan",
 		"on_trash": "manufyxinvenzaerp.production_plan_management.production_plan.unlink_production_plan_on_trash",
 		"on_cancel": "manufyxinvenzaerp.production_plan_management.production_plan.unlink_production_plan_on_trash",
+	},
+	"Drawing": {
+		"on_update": "manufyxinvenzaerp.drawing_management.rate_schedule_sync.on_update_drawing",
+		"on_update_after_submit": "manufyxinvenzaerp.drawing_management.rate_schedule_sync.on_update_drawing",
 	},
 	"Inspection Entry": {
 		"on_submit": "manufyxinvenzaerp.production_management.inspection.on_submit_inspection_entry",

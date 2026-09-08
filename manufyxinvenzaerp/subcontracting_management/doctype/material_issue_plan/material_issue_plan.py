@@ -4,7 +4,7 @@ from collections import defaultdict
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt, now
+from frappe.utils import cint, flt, now
 
 from manufyxinvenzaerp.subcontracting_management.overrides import resolve_supplier_warehouse
 from manufyxinvenzaerp.utils.dimension_formula import calculate_qty
@@ -1221,12 +1221,21 @@ def download_mip_batch_plan_pdf(mip_name):
     frappe.local.response.type = "pdf"
 
 
-def _render_mip_batch_plan_html(mip):
-    supplier = ""
+def _mip_plan_supplier(mip):
+    """Who the material is going to, for a plan's printed header.
+
+    Shared by both plan PDFs so the two documents always name the same party --
+    they describe one transfer from two angles and must not disagree on it.
+    """
     if mip.subcontracting_order:
-        supplier = frappe.db.get_value("Subcontracting Order", mip.subcontracting_order, "supplier") or ""
-    elif mip.work_order:
-        supplier = _("Internal")
+        return frappe.db.get_value("Subcontracting Order", mip.subcontracting_order, "supplier") or ""
+    if mip.work_order:
+        return _("Internal")
+    return ""
+
+
+def _render_mip_batch_plan_html(mip):
+    supplier = _mip_plan_supplier(mip)
 
     rows = []
     for r in (mip.raw_materials or []):
@@ -1321,3 +1330,178 @@ def _render_mip_batch_plan_html(mip):
     )
 
     return source_warehouse, [w for w in target_warehouses if w]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Consolidated Item Plan PDF -- the same transfer as the Batch Plan above, seen
+# from the store's side rather than the drawing's.
+#
+# The Batch Plan lists one line per drawing requirement, so a plate cut for
+# fourteen drawings appears fourteen times. Nobody picks stock that way: the
+# store pulls one batch once, for its total weight. This prints the Consolidate
+# Items table instead -- one line per item + batch + CNC leg -- with the DUNOs it
+# covers named on the line, so a picker gets one row per thing to physically
+# fetch and can still see which drawings it serves.
+#
+# Renders straight from mip.consolidate_items, which _sync_consolidate_items
+# rebuilds on every save, so the PDF cannot drift from the table on screen.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@frappe.whitelist()
+def get_mip_consolidate_plan_html(mip_name):
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+    return _render_mip_consolidate_plan_html(mip)
+
+
+@frappe.whitelist()
+def download_mip_consolidate_plan_pdf(mip_name):
+    from frappe.utils.pdf import get_pdf
+
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+    html = _render_mip_consolidate_plan_html(mip)
+    frappe.local.response.filename = "{0}-Consolidated-Item-Plan.pdf".format(
+        mip_name.replace(" ", "-").replace("/", "-")
+    )
+    frappe.local.response.filecontent = get_pdf(html)
+    frappe.local.response.type = "pdf"
+
+
+def _render_mip_consolidate_plan_html(mip):
+    supplier = _mip_plan_supplier(mip)
+    posting_date = frappe.utils.formatdate(mip.posting_date) if mip.posting_date else ""
+
+    rows = list(mip.consolidate_items or [])
+
+    if not rows:
+        body_html = """
+            <tr><td colspan="10" class="empty">{msg}</td></tr>
+        """.format(msg=_(
+            "No consolidated items. Batches have to be allocated on the Raw Materials "
+            "tab before this plan has anything to show."
+        ))
+        totals_html = ""
+    else:
+        cells = []
+        total_sec = total_reqd = total_issued = total_pending = 0.0
+        for idx, r in enumerate(rows, start=1):
+            dims = " x ".join(
+                str(flt(v, 2)) for v in (r.length, r.width, r.thickness) if flt(v)
+            ) or "-"
+            reqd = flt(r.qty, 3)
+            issued = flt(r.transferred_qty, 3)
+            # Recomputed rather than read off pending_qty: a row saved before that
+            # field existed has it blank, and a printed picking sheet showing 0
+            # pending against 1,200 Kg outstanding is worse than no sheet at all.
+            pending = flt(max(reqd - issued, 0.0), 3)
+            total_sec += flt(r.sec_qty)
+            total_reqd += reqd
+            total_issued += issued
+            total_pending += pending
+
+            cells.append("""
+                <tr>
+                    <td class="num">{idx}</td>
+                    <td>{item_code}<br><span class="item-name">{item_name}</span></td>
+                    <td>{batch_no}{cnc}</td>
+                    <td>{dims}</td>
+                    <td class="num">{sec_qty} {sec_uom}</td>
+                    <td class="num">{reqd}</td>
+                    <td class="num">{issued}</td>
+                    <td class="num pending">{pending}</td>
+                    <td class="num">{merged}</td>
+                    <td class="duno">{dunos}</td>
+                </tr>
+            """.format(
+                idx=idx,
+                item_code=frappe.utils.escape_html(r.item_code or ""),
+                item_name=frappe.utils.escape_html(r.item_name or ""),
+                batch_no=frappe.utils.escape_html(r.batch_no or _("Not Yet Allocated")),
+                # CNC is a routing instruction, not a note: this material goes to the
+                # CNC warehouse first and only then to the supplier, so a picker
+                # working off this sheet has to see it on the line.
+                cnc=' <span class="cnc">{0}</span>'.format(_("CNC")) if r.cnc_process else "",
+                dims=frappe.utils.escape_html(dims),
+                sec_qty=flt(r.sec_qty, 3),
+                sec_uom=frappe.utils.escape_html(r.sec_uom or ""),
+                reqd=reqd, issued=issued, pending=pending,
+                merged=cint(r.source_rows),
+                dunos=frappe.utils.escape_html(r.duno_mark_no or "-"),
+            ))
+        body_html = "".join(cells)
+
+        totals_html = """
+            <tr class="totals">
+                <td colspan="4">{label}</td>
+                <td class="num">{sec}</td>
+                <td class="num">{reqd}</td>
+                <td class="num">{issued}</td>
+                <td class="num">{pending}</td>
+                <td colspan="2"></td>
+            </tr>
+        """.format(
+            label=_("Total — {0} line(s)").format(len(rows)),
+            sec=flt(total_sec, 3), reqd=flt(total_reqd, 3),
+            issued=flt(total_issued, 3), pending=flt(total_pending, 3),
+        )
+
+    return """
+    <div class="mip-consolidate-plan">
+        <style>
+            .mip-consolidate-plan {{ font-family: Arial, Helvetica, sans-serif; color:#222; }}
+            .mip-consolidate-plan h2 {{ margin:0 0 4px; }}
+            .mip-consolidate-plan .meta {{ font-size:12px; color:#555; margin-bottom:14px; }}
+            .mip-consolidate-plan table {{ width:100%; border-collapse:collapse; font-size:11.5px; }}
+            .mip-consolidate-plan th {{ background:#f4f4f4; text-align:left; padding:6px 8px; border:1px solid #ccc; }}
+            .mip-consolidate-plan td {{ padding:6px 8px; border:1px solid #ddd; vertical-align:top; }}
+            .mip-consolidate-plan td.num {{ text-align:right; }}
+            .mip-consolidate-plan td.pending {{ font-weight:600; }}
+            .mip-consolidate-plan td.duno {{ font-size:10.5px; color:#555; }}
+            .mip-consolidate-plan td.empty {{ text-align:center; color:#777; padding:18px; }}
+            .mip-consolidate-plan .item-name {{ color:#777; font-size:10.5px; }}
+            .mip-consolidate-plan .cnc {{
+                background:#fff3cd; border:1px solid #ffc107; border-radius:3px;
+                padding:0 4px; font-size:9.5px; font-weight:700; color:#856404;
+            }}
+            .mip-consolidate-plan tr.totals td {{ background:#f4f4f4; font-weight:700; }}
+        </style>
+        <h2>{title}</h2>
+        <div class="meta">
+            {mip_label}: {mip_name} &nbsp;|&nbsp; {company_label}: {company} &nbsp;|&nbsp;
+            {date_label}: {posting_date} &nbsp;|&nbsp; {supplier_label}: {supplier}
+            <br>{source_label}: {source_warehouse}
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>{col_item}</th>
+                    <th>{col_batch}</th>
+                    <th>{col_dims}</th>
+                    <th>{col_secqty}</th>
+                    <th>{col_reqd}</th>
+                    <th>{col_issued}</th>
+                    <th>{col_pending}</th>
+                    <th>{col_merged}</th>
+                    <th>{col_duno}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {body_html}
+                {totals_html}
+            </tbody>
+        </table>
+    </div>
+    """.format(
+        title=_("Material Issue Plan — Consolidated Item Plan"),
+        mip_label=_("MIP"), mip_name=mip.name,
+        company_label=_("Company"), company=frappe.utils.escape_html(mip.company or ""),
+        date_label=_("Posting Date"), posting_date=posting_date,
+        supplier_label=_("Supplier"), supplier=frappe.utils.escape_html(supplier),
+        source_label=_("Source Warehouse"),
+        source_warehouse=frappe.utils.escape_html(mip.source_warehouse or "-"),
+        col_item=_("Item"), col_batch=_("Batch No"), col_dims=_("Dimensions (mm)"),
+        col_secqty=_("Sec Nos"), col_reqd=_("Reqd Kg"), col_issued=_("Issued Kg"),
+        col_pending=_("Pending Kg"), col_merged=_("Merged Rows"), col_duno=_("DUNO/Mark No"),
+        body_html=body_html,
+        totals_html=totals_html,
+    )
