@@ -42,15 +42,24 @@ from frappe import _
 from frappe.utils import flt
 
 from manufyxinvenzaerp.production_management.doctype.material_planning.material_planning import (
+    _apply_batch_to_arm_row,
+    _apply_batch_to_mapping_row,
+    _batch_change_remarks,
     _calc_batch_qty,
     _calc_kg_per_nos,
     _get_batch_dims,
     _get_batch_inspection_block_reason,
     _get_batch_reserved_by_others,
     _get_batch_total_stock,
+    _mark_excess_item_mapped,
     _require_write,
     get_batch_item,
+    reserve_batches,
+    reserve_exact_match_batches,
+    unreserve_batches,
+    unreserve_exact_match_batches,
 )
+from manufyxinvenzaerp.utils.decision_log import log_decision
 
 # The child tables store three decimals, so anything finer is noise. Matches the
 # tolerance _validate_batch_calc_qty works to.
@@ -303,6 +312,92 @@ def plan_fill(members, targets):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# What to write onto each member's row
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plan_member_writes(fill, targets):
+    """Decide, per member, the waiver flag and Sec Nos the reassign will write.
+
+    This is the single most dangerous decision in the whole feature, and the
+    reason it lives in its own function is that getting it wrong fails SILENTLY.
+
+    _apply_batch_to_mapping_row, handed `reserve_without_dimensions = 0` and no
+    Sec Nos, leaves the row's EXISTING batch_sec_qty in place and recomputes
+    batch_calc_qty from it against the NEW batch's dimensions. Nothing throws.
+    The row simply comes to hold a weight that is the old batch's piece count
+    priced at the new batch's size -- a number that means nothing, and which then
+    flows into the reservation, the Stock Entry and the excess figures.
+
+    So the rule is asserted here rather than trusted to the dialog:
+
+    - **Structurals and Plates** -- waiver ON, Sec Nos left for the server.
+      _apply_rwd_fractional_nos derives it on save, fractional by design, from the
+      weight the row actually reserves. A dialog that forgot to tick the box cannot
+      produce the silent case above, because this function never emits it.
+    - **Nuts and Bolts** -- waiver OFF, because a bolt's weight is exact and a
+      fractional bolt is meaningless. But Sec Nos must then be computed HERE and
+      sent explicitly, for exactly the reason above. A count that does not come out
+      whole is surfaced as a warning, not silently rounded: rounding it changes the
+      line's total weight.
+
+    Returns (writes, blockers, warnings).
+    """
+    writes, blockers, warnings = [], [], []
+    fractional_bolts = []
+
+    for assignment in fill.assignments:
+        member = assignment.member
+        target = targets[assignment.target_index]
+        # The batch's own item group decides, not the requirement's: it is the
+        # batch that is being cut into pieces.
+        group = target.get("parent_item_group") or member.parent_item_group or ""
+
+        if group in RWD_GROUPS:
+            writes.append(frappe._dict({
+                "member": member,
+                "target_index": assignment.target_index,
+                "batch_no": target["batch_no"],
+                "batch_item": target.get("item_code"),
+                "reserve_without_dimensions": 1,
+                "sec_qty": None,
+            }))
+            continue
+
+        unit_weight = flt(target.get("unit_weight"))
+        if not unit_weight:
+            blockers.append(
+                _("Batch {0} is {1}, whose Sec Nos must be counted rather than derived, "
+                  "but its item has no Unit Weight set. Set it on the Item first.")
+                .format(target["batch_no"], group or _("an unsupported item group"))
+            )
+            continue
+
+        pieces = flt(flt(member.target_kg) / unit_weight, 3)
+        if abs(pieces - round(pieces)) > EPS:
+            fractional_bolts.append((member, pieces))
+        writes.append(frappe._dict({
+            "member": member,
+            "target_index": assignment.target_index,
+            "batch_no": target["batch_no"],
+            "batch_item": target.get("item_code"),
+            "reserve_without_dimensions": 0,
+            "sec_qty": pieces,
+        }))
+
+    if fractional_bolts:
+        warnings.append(
+            _("{0} row(s) work out to a fractional piece count (e.g. {1} on row {2}). "
+              "The weight is kept exactly as planned rather than rounded, so the piece "
+              "count carries the fraction.")
+            .format(len(fractional_bolts),
+                    flt(fractional_bolts[0][1], 3),
+                    fractional_bolts[0][0].idx)
+        )
+
+    return writes, blockers, warnings
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Preview — every refusal happens here, before anything is written
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -352,14 +447,19 @@ def _member_flags(members):
     return flags
 
 
-@frappe.whitelist()
-def preview_consolidate_batch_update(mip_name, consolidate_row_name, targets_json=None):
-    """Everything a reassignment would do, and every reason it would be refused.
+def _build_plan(mip_name, consolidate_row_name, targets_json=None):
+    """Work out the whole reassignment from live state: members, targets, fill,
+    per-row writes, and every reason it would be refused.
 
-    Mutates nothing. This is where the operation is allowed to fail: once the apply
-    path starts, the internal commits in the reserve/unreserve helpers mean a failure
-    half way through leaves one plan already changed. So every condition that can be
-    checked up front is checked here, and the apply path treats this as a gate.
+    Mutates nothing. Both the preview and the apply path go through here, and that
+    is the point -- the apply path must not be able to act on a plan computed even
+    slightly differently from the one the user was shown. It returns the client
+    payload under `response` and the objects the apply path needs alongside it.
+
+    This is also where the operation is ALLOWED to fail. Once applying starts, the
+    internal commits in the reserve/unreserve helpers mean a failure half way
+    through leaves one plan already changed, so every condition that can be
+    established up front is established here.
     """
     mip = frappe.get_doc("Material Issue Plan", mip_name)
     key, members = expand_consolidate_row(mip, consolidate_row_name)
@@ -369,8 +469,12 @@ def preview_consolidate_batch_update(mip_name, consolidate_row_name, targets_jso
     if not members:
         blockers.append(_("This line no longer has any raw-material rows behind it. "
                           "Refresh Raw Materials and try again."))
-        return {"ok": False, "blockers": blockers, "warnings": warnings,
-                "members": [], "material_plannings": [], "targets": []}
+        return frappe._dict({
+            "response": {"ok": False, "blockers": blockers, "warnings": warnings,
+                         "members": [], "material_plannings": [], "targets": []},
+            "mip": mip, "key": key, "members": [], "warehouse": "",
+            "mp_names": [], "targets": [], "fill": None, "writes": [],
+        })
 
     # 0.2 — a transferred line is refused whole. Reassigning only the untransferred
     # remainder would split the line in two on the next rebuild, which is exactly the
@@ -399,6 +503,24 @@ def preview_consolidate_batch_update(mip_name, consolidate_row_name, targets_jso
         blockers.append(
             _("{0} row(s) on this line are cutting from a Cut Sheet. "
               "Release the allocation on the Cut Sheet first.").format(len(on_sheet))
+        )
+
+    # Only the two batched tables can be reassigned. An Unavailable Item row has no
+    # batch to move and no reservation to release, and would otherwise fail deep in
+    # the apply loop with "row is no longer in Exact Match" -- a confusing way to be
+    # told something that can be said plainly here.
+    wrong_table = [m for m in members
+                   if m.source_table not in (MATERIAL_MAPPING, AVAILABLE_RAW_MATERIAL)]
+    if wrong_table:
+        blockers.append(
+            _("{0} row(s) on this line are not batched stock and cannot be reassigned.")
+            .format(len(wrong_table))
+        )
+    orphan = [m for m in members if not m.material_planning]
+    if orphan:
+        blockers.append(
+            _("{0} row(s) on this line have lost their link to a Material Planning. "
+              "Refresh Raw Materials and try again.").format(len(orphan))
         )
 
     # 0.4 / 0.5 — every plan must be writable, and they must share one warehouse or the
@@ -520,7 +642,14 @@ def preview_consolidate_batch_update(mip_name, consolidate_row_name, targets_jso
                 .format(stranded_kg, detail)
             )
 
-    return {
+    # Decide what each member's row will actually be given. This can refuse too --
+    # an item group whose Sec Nos must be counted rather than derived, with no unit
+    # weight to count it by -- so it runs before "ok" is settled.
+    writes, write_blockers, write_warnings = plan_member_writes(fill, targets) if fill else ([], [], [])
+    blockers.extend(write_blockers)
+    warnings.extend(write_warnings)
+
+    response = {
         "ok": not blockers and bool(targets),
         "blockers": blockers,
         "warnings": warnings,
@@ -547,6 +676,18 @@ def preview_consolidate_batch_update(mip_name, consolidate_row_name, targets_jso
         "shortfall_kg": fill.shortfall_kg if fill else total_kg,
     }
 
+    return frappe._dict({
+        "response": response,
+        "mip": mip, "key": key, "members": members, "warehouse": warehouse,
+        "mp_names": mp_names, "targets": targets, "fill": fill, "writes": writes,
+    })
+
+
+@frappe.whitelist()
+def preview_consolidate_batch_update(mip_name, consolidate_row_name, targets_json=None):
+    """What a reassignment would do, and every reason it would be refused. Read-only."""
+    return _build_plan(mip_name, consolidate_row_name, targets_json).response
+
 
 def _target_index_of(fill, member):
     if not fill:
@@ -558,32 +699,55 @@ def _target_index_of(fill, member):
 
 
 def _cross_table_conflicts(mp_names, batch_nos, members):
-    """Target batches already present in the other child table of a plan being saved.
+    """Target batches that would end up in BOTH child tables of one plan.
 
-    _validate_no_cross_table_batch_duplicate refuses a Material Planning that holds one
-    batch in both Material Mapping and Available Raw Material. It fires at save time,
-    which is far too late here -- by then the members have been unreserved.
+    _validate_no_cross_table_batch_duplicate refuses a Material Planning that holds
+    one batch in Material Mapping and Available Raw Material at the same time. It
+    fires at save time, which is far too late here: by then the members have been
+    unreserved and the plan is half-changed.
 
-    Rows that are themselves members are excluded: they are about to move, so they are
-    not a conflict with where they are moving to.
+    What is emphatically NOT a conflict is many rows of the SAME table sharing one
+    batch. That is the ordinary case -- one plate cut into a dozen parts -- and
+    treating it as a clash refuses nearly every real reassignment.
+
+    So the duplicate can only arise two ways, and both are checked per plan:
+      1. the target batch already sits in the table the members are NOT in, or
+      2. this line's own members straddle both tables, so moving them all onto one
+         batch puts that batch in both by itself.
     """
     member_rows = {(m.source_table, m.source_row) for m in members}
+    tables_by_mp = {}
+    for m in members:
+        tables_by_mp.setdefault(m.material_planning, set()).add(m.source_table)
+
     problems = []
-    for table, field in ((MATERIAL_MAPPING, "batch"), (AVAILABLE_RAW_MATERIAL, "batch_no")):
-        rows = frappe.get_all(
-            table,
-            filters={"parent": ["in", mp_names], field: ["in", batch_nos]},
-            fields=["name", "parent", "idx", field + " as batch_no"],
-        )
-        for r in rows:
-            if (table, r.name) in member_rows:
+    for mp_name in sorted(tables_by_mp):
+        tables = tables_by_mp[mp_name]
+
+        if MATERIAL_MAPPING in tables and AVAILABLE_RAW_MATERIAL in tables:
+            problems.append(
+                _("On {0} this line's rows sit in both Material Mapping and Exact Match. "
+                  "Moving them all to one batch would put that batch in both tables, which "
+                  "a Material Planning does not allow. Reassign them separately.")
+                .format(mp_name)
+            )
+            continue
+
+        other = AVAILABLE_RAW_MATERIAL if MATERIAL_MAPPING in tables else MATERIAL_MAPPING
+        field = "batch_no" if other == AVAILABLE_RAW_MATERIAL else "batch"
+        for r in frappe.get_all(
+            other,
+            filters={"parent": mp_name, field: ["in", batch_nos]},
+            fields=["name", "idx", field + " as batch_no"],
+        ):
+            if (other, r.name) in member_rows:
                 continue
             problems.append(
                 _("Batch {0} is already used on {1} row {2} of {3}. "
                   "A plan cannot hold one batch in both tables.")
                 .format(r.batch_no,
-                        _("Material Mapping") if table == MATERIAL_MAPPING else _("Exact Match"),
-                        r.idx, r.parent)
+                        _("Exact Match") if other == AVAILABLE_RAW_MATERIAL else _("Material Mapping"),
+                        r.idx, mp_name)
             )
     return problems
 
@@ -621,3 +785,281 @@ def get_candidate_batches(item_code, warehouse, limit=50):
 
     out.sort(key=lambda b: -b["free_kg"])
     return out[: int(limit)]
+# ─────────────────────────────────────────────────────────────────────────────
+# Apply — the only code in this module that writes
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _apply_to_one_plan(mp_name, plan_writes, mip_name, progress=None):
+    """Reassign every member belonging to ONE Material Planning, and re-reserve it.
+
+    The unit of atomicity. unreserve_batches, unreserve_exact_match_batches,
+    reserve_batches and reserve_exact_match_batches each commit internally, and
+    MariaDB destroys every SAVEPOINT on COMMIT, so a savepoint taken before the
+    first of them no longer exists by the time you would roll back to it. There is
+    no way to make the whole fan-out atomic without changing those four functions
+    (see Phase 7 in the task plan). What there IS a way to do is bound the damage:
+    do one plan completely before starting the next, so a failure leaves at most
+    one plan's reservations released, and release them only as late as possible.
+
+    Returns what happened, for the composed report. Raises to stop the fan-out.
+    """
+    mm_writes = [w for w in plan_writes if w.member.source_table == MATERIAL_MAPPING]
+    arm_writes = [w for w in plan_writes if w.member.source_table == AVAILABLE_RAW_MATERIAL]
+
+    # 1/2 — release first. _validate_batch_calc_qty refuses outright to save a
+    # reserved row whose batch changed ("Unreserve the stock to update"), so the
+    # release cannot be deferred until after the write. Each call takes the whole
+    # list at once; never mix the two tables' row names, and never call with an
+    # empty list -- both helpers throw "No matching reserved rows found." when
+    # nothing they were given exists in their own table.
+    if mm_writes:
+        unreserve_batches(mp_name, json.dumps([w.member.source_row for w in mm_writes]))
+    if arm_writes:
+        unreserve_exact_match_batches(mp_name, json.dumps([w.member.source_row for w in arm_writes]))
+
+    # Past this line the rows are released and COMMITTED. The caller needs to know,
+    # because the two failure states read very differently to whoever has to clean up:
+    # a failure before here changed nothing at all, a failure after here left rows
+    # unreserved on their old batch.
+    if progress is not None:
+        progress["released"] = True
+
+    # 3 — re-fetch: those calls saved and committed the document underneath us.
+    mp = frappe.get_doc("Material Planning", mp_name)
+    mm_by_name = {r.name: r for r in mp.material_mapping}
+    arm_by_name = {r.name: r for r in mp.available_raw_materials}
+
+    # 4 — apply, and log one audit row per member, mirroring reassign_batch.
+    first_row_for_batch = {}
+    for w in plan_writes:
+        member = w.member
+        if member.source_table == MATERIAL_MAPPING:
+            row = mm_by_name.get(member.source_row)
+            if not row:
+                frappe.throw(_("Row {0} is no longer in Material Mapping on {1}.")
+                             .format(member.source_row, mp_name))
+            old_batch = row.batch
+            old_sec, old_qty = flt(row.batch_sec_qty), flt(row.batch_calc_qty)
+            # Dimensions are deliberately NOT passed. On a Material Mapping row
+            # length/width/thickness are the REQUIREMENT's -- what the drawing asks
+            # for -- and the batch's own live in batch_length/width/thickness, which
+            # _apply_batch_to_mapping_row refreshes from the Batch record itself.
+            # Passing dimensions here would rewrite the demand, not the supply.
+            _apply_batch_to_mapping_row(
+                row, w.batch_no, w.batch_item, {}, w.sec_qty, w.reserve_without_dimensions
+            )
+            new_sec, new_qty = flt(row.batch_sec_qty), flt(row.batch_calc_qty)
+            planned_item = row.planned_item if row.planned_item and row.planned_item != row.item_code else ""
+        else:
+            row = arm_by_name.get(member.source_row)
+            if not row:
+                frappe.throw(_("Row {0} is no longer in Exact Match on {1}.")
+                             .format(member.source_row, mp_name))
+            old_batch = row.batch_no
+            old_sec, old_qty = flt(row.sec_qty), flt(row.required_qty)
+            # Here the opposite is true: an exact-match row has ONE set of
+            # dimensions and they ARE the batch's, so _apply_batch_to_arm_row
+            # refreshes them from the new batch. required_qty is never touched.
+            _apply_batch_to_arm_row(
+                row, w.batch_no, {}, w.sec_qty, w.reserve_without_dimensions,
+                old_batch=old_batch,
+            )
+            new_sec, new_qty = flt(row.sec_qty), flt(row.required_qty)
+            planned_item = ""
+
+        first_row_for_batch.setdefault(w.batch_no, member.source_row)
+        mp.append("batch_change_log", {
+            "material_issue_plan": mip_name or "",
+            "source_table": member.source_table,
+            "source_row": member.source_row,
+            "item_code": row.item_code,
+            "planned_item": planned_item,
+            "old_batch": old_batch,
+            "new_batch": w.batch_no or "",
+            "old_sec_qty": old_sec,
+            "new_sec_qty": new_sec,
+            "old_qty": old_qty,
+            "new_qty": new_qty,
+            "remarks": _batch_change_remarks(row.item_code, old_batch, w.batch_no, mip_name),
+        })
+
+    # 5 — ONE save for the whole plan. This is where _apply_rwd_fractional_nos
+    # turns every waived row's Sec Nos into the fraction, and it runs BEFORE
+    # _validate_batch_calc_qty checks coverage, which is the order that makes
+    # sending sec_qty=None safe for Structurals and Plates.
+    mp.save(ignore_permissions=True)
+
+    # 6 — a batch recovered from someone's excess return records where it landed.
+    for batch_no, row_name in first_row_for_batch.items():
+        _mark_excess_item_mapped(batch_no, mp_name, row_name)
+
+    # 7/8 — re-reserve. Guarded exactly as reassign_batch guards it, including the
+    # substring re-raise: a batch still awaiting inspection is a warning to carry
+    # back, not a reason to abandon a reassignment that has already been saved.
+    partial, inspection = [], []
+    mp = frappe.get_doc("Material Planning", mp_name)
+    if any(not r.is_reserved and r.batch for r in mp.material_mapping):
+        try:
+            partial.extend((reserve_batches(mp_name) or {}).get("partial") or [])
+        except frappe.ValidationError as e:
+            if "blocked pending inspection completion" not in str(e):
+                raise
+            inspection.append(str(e))
+        mp = frappe.get_doc("Material Planning", mp_name)
+    if any(not r.is_reserved and r.batch_no for r in mp.available_raw_materials):
+        try:
+            partial.extend((reserve_exact_match_batches(mp_name) or {}).get("partial") or [])
+        except frappe.ValidationError as e:
+            if "blocked pending inspection completion" not in str(e):
+                raise
+            inspection.append(str(e))
+
+    # 9 — one entry per plan. Unlike the per-row dialog, this IS one decision.
+    kg = flt(sum(flt(w.member.target_kg) for w in plan_writes), 3)
+    batches = sorted({w.batch_no for w in plan_writes})
+    log_decision(
+        "Reassign Batch",
+        reference_doctype="Material Planning",
+        reference_name=mp_name,
+        rows_affected=len(plan_writes),
+        qty=kg,
+        new_batch_no=", ".join(batches),
+        details=_("Reassigned {0} row(s) ({1} Kg) to {2} from Material Issue Plan {3}.")
+                .format(len(plan_writes), kg, ", ".join(batches), mip_name or "-"),
+    )
+
+    return frappe._dict({
+        "material_planning": mp_name,
+        "rows": len(plan_writes),
+        "qty": kg,
+        "batches": batches,
+        "partial": partial,
+        "inspection_warnings": inspection,
+    })
+
+
+def _composed_failure(applied, stopped_mp, reason, untouched, released=True):
+    """The message a part-way failure leaves behind.
+
+    Written out in full because the state it describes is genuinely mixed, and an
+    operator who is told only "it failed" will either re-run blindly or go looking
+    for damage that is not there. Each plan is in exactly one of three states and
+    each needs a different response, so each is named.
+    """
+    lines = [_("<b>Batch update stopped part-way.</b>")]
+
+    if applied:
+        lines.append("<br><b>" + _("Applied and committed") + "</b>")
+        for a in applied:
+            lines.append(_("• {0} — {1} row(s) → {2} ({3} Kg), reserved.")
+                         .format(a.material_planning, a.rows, ", ".join(a.batches), a.qty))
+
+    lines.append("<br><b>" + _("Stopped at") + "</b>")
+    lines.append(_("• {0} — {1}").format(stopped_mp, reason))
+    if released:
+        lines.append(_("Its rows are <b>released from reservation but still carry their "
+                       "original batch</b>. Nothing was lost. Reserve them again, or simply "
+                       "re-run this update — it recomputes from the current state, so the "
+                       "plans above are no longer part of it."))
+    else:
+        lines.append(_("<b>Nothing on this plan was changed</b> — it failed before anything "
+                       "was released. Re-running is safe: it recomputes from the current "
+                       "state, so the plans above are no longer part of it."))
+
+    if untouched:
+        lines.append("<br><b>" + _("Not touched") + "</b>")
+        lines.append("• " + ", ".join(untouched))
+
+    lines.append(_("<br>If the reason above looks unrelated to the batch change, that plan "
+                   "most likely has a pre-existing validation problem that this save was "
+                   "the first to re-check."))
+    return "<br>".join(lines)
+
+
+@frappe.whitelist()
+def apply_consolidate_batch_update(mip_name, consolidate_row_name, targets_json, plan_hash=None):
+    """Reassign every row behind one Consolidate Items line. Writes.
+
+    Runs the plan again from live state and refuses unless it still agrees with the
+    one the user confirmed -- see plan_hash. Then works through the Material
+    Plannings one at a time, in sorted name order, each fully finished before the
+    next is started.
+
+    That ordering is the safety property. The four reserve/unreserve helpers commit
+    internally, so there is no transaction spanning the fan-out and a failure cannot
+    be rolled back wholesale. Doing one plan at a time bounds what a failure can
+    leave behind to a single plan's reservations, and leaves that plan holding its
+    ORIGINAL batch -- a state that is recoverable by re-running, because the members
+    are re-derived by grouping key each time and rows that already moved no longer
+    match the line.
+    """
+    plan = _build_plan(mip_name, consolidate_row_name, targets_json)
+    response = plan.response
+
+    if not response.get("ok"):
+        frappe.throw(
+            "<br>• ".join([_("This reassignment cannot be applied:")]
+                          + (response.get("blockers") or [_("No target batch was given.")])),
+            title=_("Batch Update Refused"),
+        )
+
+    # A plan is confirmed against figures that were true when it was previewed. If
+    # stock moved, a row shipped, or someone else reassigned a member in between,
+    # the fingerprint changes and the stale plan is refused rather than applied to a
+    # world it no longer describes.
+    if plan_hash and response.get("plan_hash") != plan_hash:
+        frappe.throw(
+            _("The figures behind this line changed while the dialog was open — stock "
+              "moved, a row was transferred, or someone else reassigned one of these "
+              "rows. Preview it again and check before applying."),
+            title=_("Plan Out Of Date"),
+        )
+
+    writes_by_mp = {}
+    for w in plan.writes:
+        writes_by_mp.setdefault(w.member.material_planning, []).append(w)
+
+    ordered = sorted(writes_by_mp)
+    applied, partial, inspection = [], [], []
+
+    for i, mp_name in enumerate(ordered):
+        progress = {"released": False}
+        try:
+            result = _apply_to_one_plan(mp_name, writes_by_mp[mp_name], mip_name, progress)
+        except Exception as e:
+            frappe.throw(
+                _composed_failure(applied, mp_name, str(e), ordered[i + 1:],
+                                  released=progress["released"]),
+                title=_("Batch Update Stopped"),
+            )
+        applied.append(result)
+        partial.extend(result.partial)
+        inspection.extend(result.inspection_warnings)
+
+    # Stage 2 — one rebuild of the MIP's read-only snapshot, after every plan is
+    # done. The consolidate table regenerates from it, so the line the user was
+    # looking at is replaced by one keyed on the new batch.
+    from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
+        refresh_mip_raw_materials,
+    )
+    refresh_mip_raw_materials(mip_name)
+
+    warnings = list(response.get("warnings") or []) + inspection
+    if partial:
+        # reserve_batches does NOT throw on a shortfall -- it reserves what it can
+        # and records the rest. Without surfacing that, a fan-out that reserved half
+        # of what it moved would report success.
+        warnings.append(
+            _("{0} row(s) could only be partly reserved ({1} Kg short in total). "
+              "The batch was reassigned; the reservation is incomplete.")
+            .format(len(partial), flt(sum(flt(p.get("shortfall_qty")) for p in partial), 3))
+        )
+
+    return {
+        "ok": True,
+        "applied": [dict(a) for a in applied],
+        "rows": sum(a.rows for a in applied),
+        "qty": flt(sum(a.qty for a in applied), 3),
+        "warnings": warnings,
+        "partial": partial,
+    }

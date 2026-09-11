@@ -1,10 +1,9 @@
 # SEP 10 — TASK 1
 ## Batch reassignment from the Consolidate Items table (Material Issue Plan)
 
-> **Status: planned, not started. No code written.**
-> Resume with: *"check the sep 10 task1 and proceed for coding"*.
-> Implement phase by phase — each phase below is independently shippable and testable.
+> **Status: Phases 1-6 built and verified. Phase 7 (true atomicity) not started.**
 > Every fact here was verified against source twice (exploration + an independent design pass).
+> See §8 at the end for what was actually built, what changed from this plan, and why.
 
 ---
 
@@ -514,3 +513,96 @@ bench build --app manufyxinvenzaerp  # for public/js/
 bench --site manufact clear-cache    # for doctype JS (build alone is not enough)
 bench --site manufact migrate        # for the new ARM field in Phase 2
 ```
+
+
+---
+
+## 8. Build record — what was actually done
+
+**Phases 1-6 are built, tested and verified against live restored production data.
+Phase 7 is not started and is not needed for the feature to work.**
+
+| Phase | State | Notes |
+|---|---|---|
+| 1 — read-only preview | **done** | `verify_consolidate_batch_reassign.py`, 28 checks |
+| 2 — ARM `reserve_without_dimensions` | **done** | `verify_arm_reserve_without_dimensions.py`, 31 checks |
+| 3 — bulk apply | **done** | merged with Phase 4, see below |
+| 4 — the fill | **done** | `verify_consolidate_batch_apply.py`, 18 checks |
+| 5 — dialog polish | **done** | two-step dialog, MP roster confirmation, per-row assignment table |
+| 6 — Nuts and Bolts | **done** | folded into `plan_member_writes` |
+| 7 — true atomicity | **not started** | optional; the per-plan sequencing in §4.3 is what bounds the damage today |
+
+### Deviations from the plan above, and why
+
+**Phases 3 and 4 shipped together.** The plan separated them so a single-target apply
+could soak first. In the code the split is not a separate mode: `plan_fill` already
+returns one assignment per member carrying its target index, and `_apply_to_one_plan`
+simply writes `w.batch_no` per member. Building a single-target-only path first would
+have meant writing a special case and then deleting it. Both were verified live: a
+one-batch move and a two-batch split, each moved and moved back.
+
+**Preview and apply share one code path.** `_build_plan` computes members, targets,
+fill and per-row writes; `preview_*` serialises it and `apply_*` executes it. The plan
+had apply "re-run preview internally"; making them two functions over one builder is
+the same guarantee with no chance of the two drifting.
+
+**§4.4 #1 — no `read_only_depends_on` on the exact-match `sec_qty`.** The plan said to
+mirror Material Mapping's. Material Mapping's `batch_sec_qty` is normally typed by the
+user and goes read-only under the waiver; exact-match `sec_qty` is `read_only: 1`
+always and server-derived. Mirroring would have made it hand-editable when the waiver
+is off — a new and unwanted capability, over a field the plan itself (§4.4, "What
+breaks when the flag is off") warns must not be written casually.
+
+**§4.4 #13 — the flag is not a grid column.** Material Mapping's own waiver is not one
+either; both are edited in the expanded row. It would also have been invisible: the
+exact-match grid already declares **22 columns against Frappe's budget of 11**, so
+everything from `overall_required_qty` onward is silently dropped today. Pre-existing,
+reported separately, not fixed here.
+
+**A zero guard was added to the exact-match waiver loop.** If the batch yields no
+per-piece weight (a dimension or unit weight missing), the derived count is 0.
+Material Mapping writes that 0; the new loop leaves the existing figure alone instead,
+because exact-match `sec_qty` goes straight onto the Stock Entry as `custom_sec_qty`
+and zeroing a good proportional allocation is worse than leaving a stale one.
+
+**`_apply_batch_to_arm_row` falls back to the batch's dimensions** when the batch
+changed and the caller passed none — the waiver path, where the dialog hides the
+dimension inputs. Without it §4.4 #12 bites: the transfer ships the new batch tagged
+with the old size. A caller that passes dimensions still wins, a same-batch round trip
+changes nothing, and a Batch with no dimensions recorded does not zero the row's.
+
+### A bug found and fixed during Phase 3
+
+`_cross_table_conflicts` (Stage 0.7) flagged **same-table** rows sharing a batch. One
+plate cut into a dozen parts is a dozen Material Mapping rows on one batch — the normal
+case — and `_validate_no_cross_table_batch_duplicate` only refuses a batch held in
+Material Mapping *and* Exact Match at once. As written it refused nearly every real
+reassignment. It now checks only the table the members are **not** moving into, and
+separately refuses a line whose own members straddle both tables (moving them onto one
+batch would create the duplicate by itself). Check 3 of
+`verify_consolidate_batch_apply.py` pins this against live data.
+
+### One behaviour worth knowing
+
+The Length/Width entered against a target batch declare a **cut size for capacity only**
+— "how much of this batch may this line take". The row still records the batch's own
+dimensions, because that is what `_get_mp_reserved_batches` puts on the Stock Entry.
+
+### Verified live (restored production data, 11 Sep)
+
+`MIP-2026-00005` / `PLATE25` / 3 rows / 217.344 Kg / `MP-2026-00017`:
+
+* moved to `PLT25-P25-L11025-W2000-SR001` and back — rows returned byte-identical
+  (batch, `batch_calc_qty`, `batch_sec_qty` 0.042/0.056/0.042, reserved, dimensions)
+* Sec Nos re-derived correctly against the new piece (0.042 → 0.015 on a piece 2.8x
+  larger), total Kg preserved exactly at 217.344 throughout
+* split across two batches (98.125 Kg declared + the rest): row 1 → batch A, rows 2-3
+  → batch B, **32.903 Kg correctly stranded** on batch A because row 2 did not fit and
+  rows are never split; then merged back to one line
+* the dialog was driven end to end in a real browser: line picker, live capacity,
+  preview, per-row assignment table, the confirmation naming every plan, cancel, and
+  the guard that drops back to Preview after any edit
+
+**A reassign discards that line's parked transfer draft** — the draft is keyed on the
+batch. The dialog warns before applying; the round trips above restored it by hand from
+a backup.

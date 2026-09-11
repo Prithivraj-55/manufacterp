@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-09-09 02:19:11_
+_Generated: 2026-09-11 13:23:09_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-09-09 02:19:11_
 
 ## Python files
 
-_Total: 296_
+_Total: 311_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -186,6 +186,7 @@ _Total: 296_
 - subcontracting_management/doctype/supplier_operation_item/__init__.py
 - subcontracting_management/doctype/supplier_operation_item/supplier_operation_item.py
 - subcontracting_management/__init__.py
+- subcontracting_management/material_issue_plan_batch_update.py
 - subcontracting_management/material_issue_plan_transfer.py
 - subcontracting_management/overrides.py
 - subcontracting_management/report/excess_material_return_report/excess_material_return_report.py
@@ -194,19 +195,30 @@ _Total: 296_
 - subcontracting_management/subcontracting.py
 - templates/__init__.py
 - templates/pages/__init__.py
+- tests/_applytest.py
+- tests/_armmeta.py
 - tests/_chk_tmp.py
 - tests/create_full_test_entry.py
 - tests/create_test_data.py
+- tests/_draftchk.py
+- tests/_draftrestore.py
 - tests/find_cascade_fixture.py
 - tests/find_clean_mp.py
 - tests/_find_mip_excess.py
 - tests/__init__.py
+- tests/_mmchk.py
 - tests/move_fixtures_to_custom_json.py
+- tests/_p2col.py
 - tests/_probe_ab.py
 - tests/_probe_tmp.py
 - tests/_render_challan.py
 - tests/reset_transactions.py
+- tests/_restoretest.py
 - tests/revert_wo_jc_cleanup.py
+- tests/_splitrestore.py
+- tests/_splittest.py
+- tests/_state.py
+- tests/_sweep.py
 - tests/_t_close.py
 - tests/_t_cs.py
 - tests/test_alternate_item.py
@@ -219,6 +231,7 @@ _Total: 296_
 - tests/test_whitelist_coverage.py
 - tests/_t_loss.py
 - tests/_t_sample.py
+- tests/verify_arm_reserve_without_dimensions.py
 - tests/verify_auto_purchase_gated.py
 - tests/verify_batch_receipt_line_match.py
 - tests/verify_batch_remark_isolation.py
@@ -233,6 +246,8 @@ _Total: 296_
 - tests/verify_client_scripts_parse.py
 - tests/verify_cnc_consumption_and_kg_chain.py
 - tests/verify_consolidate_alternate_item.py
+- tests/verify_consolidate_batch_apply.py
+- tests/verify_consolidate_batch_reassign.py
 - tests/verify_consolidate_finalize.py
 - tests/verify_consolidate_item2.py
 - tests/verify_consolidate_item.py
@@ -813,6 +828,8 @@ _Total: 166_
   - validate_planned_stock:
   - _add:
   - _sec_nos_for_weight:
+  - _item_unit_weights:
+  - _sec_nos_for_weight_arm:
   - _refresh_touched_cut_sheets:
   - _require_write:
   - reserve_batches:
@@ -833,6 +850,7 @@ _Total: 166_
   - _mark_excess_item_mapped:
   - _batch_change_remarks:
   - reassign_batch:
+  - _apply_batch_to_arm_row:
   - _apply_batch_to_mapping_row:
   - make_production_plan:
   - make_material_request:
@@ -1308,6 +1326,26 @@ Functions:
   - 70:_recalculate_qty:
   - 85:_check_missing_fields:
 
+### subcontracting_management/material_issue_plan_batch_update.py
+Functions:
+  - 81:consolidate_group_key:
+  - 102:expand_consolidate_row:
+  - 156:_member_target_kg:
+  - 180:_batch_free_kg:
+  - 195:get_batch_capacity:
+  - 255:plan_fill:
+  - 318:plan_member_writes:
+  - 404:_plan_hash:
+  - 424:_member_flags:
+  - 450:_build_plan:
+  - 687:preview_consolidate_batch_update:
+  - 692:_target_index_of:
+  - 701:_cross_table_conflicts:
+  - 756:get_candidate_batches:
+  - 792:_apply_to_one_plan:
+  - 941:_composed_failure:
+  - 980:apply_consolidate_batch_update:
+
 ### subcontracting_management/material_issue_plan_transfer.py
 Functions:
   - 32:_ensure_mip_editable:
@@ -1402,6 +1440,15 @@ Functions:
   - 2048:_build_jc_drawing_rows:
   - 2081:_populate_jcs_for_wo:
 
+### tests/_applytest.py
+Functions:
+  - 8:_snap:
+  - 17:run:
+
+### tests/_armmeta.py
+Functions:
+  - 2:run:
+
 ### tests/_chk_tmp.py
 Functions:
   - 2:run:
@@ -1427,6 +1474,14 @@ Functions:
   - 135:make_bom:
   - 171:run:
 
+### tests/_draftchk.py
+Functions:
+  - 3:run:
+
+### tests/_draftrestore.py
+Functions:
+  - 2:run:
+
 ### tests/find_cascade_fixture.py
 Functions:
   - 4:run:
@@ -1439,10 +1494,18 @@ Functions:
 Functions:
   - 4:run:
 
+### tests/_mmchk.py
+Functions:
+  - 2:run:
+
 ### tests/move_fixtures_to_custom_json.py
 Functions:
   - 64:_all_target_doctypes:
   - 70:run:
+
+### tests/_p2col.py
+Functions:
+  - 2:run:
 
 ### tests/_probe_ab.py
 Functions:
@@ -1471,9 +1534,30 @@ Functions:
   - 258:_test_companies:
   - 263:_delete_test_companies:
 
+### tests/_restoretest.py
+Functions:
+  - 8:run:
+
 ### tests/revert_wo_jc_cleanup.py
 Functions:
   - 106:run:
+
+### tests/_splitrestore.py
+Functions:
+  - 9:run:
+
+### tests/_splittest.py
+Functions:
+  - 11:snap:
+  - 16:run:
+
+### tests/_state.py
+Functions:
+  - 5:run:
+
+### tests/_sweep.py
+Functions:
+  - 4:run:
 
 ### tests/_t_close.py
 Functions:
@@ -1560,6 +1644,13 @@ Functions:
   - 17:_wh:
   - 25:run:
 
+### tests/verify_arm_reserve_without_dimensions.py
+Functions:
+  - 45:check:
+  - 51:_src:
+  - 55:_arm_row:
+  - 63:run:
+
 ### tests/verify_auto_purchase_gated.py
 Functions:
   - 30:check:
@@ -1640,6 +1731,19 @@ Functions:
 ### tests/verify_consolidate_alternate_item.py
 Functions:
   - 41:run:
+
+### tests/verify_consolidate_batch_apply.py
+Functions:
+  - 39:check:
+  - 45:_member:
+  - 53:_target:
+  - 58:run:
+  - 193:_round_trip:
+
+### tests/verify_consolidate_batch_reassign.py
+Functions:
+  - 31:check:
+  - 37:run:
 
 ### tests/verify_consolidate_finalize.py
 Functions:
@@ -2207,6 +2311,10 @@ Functions:
 - `production_plan_management/production_plan.py:873` — `get_standard_routing_operations`
 - `production_plan_management/production_plan.py:886` — `make_material_request`
 - `material_request_management/material_request.py:11` — `get_mr_item_uom`
+- `subcontracting_management/material_issue_plan_batch_update.py:195` — `get_batch_capacity`
+- `subcontracting_management/material_issue_plan_batch_update.py:687` — `preview_consolidate_batch_update`
+- `subcontracting_management/material_issue_plan_batch_update.py:756` — `get_candidate_batches`
+- `subcontracting_management/material_issue_plan_batch_update.py:980` — `apply_consolidate_batch_update`
 - `subcontracting_management/material_issue_plan_transfer.py:258` — `get_mip_process_loss_state`
 - `subcontracting_management/material_issue_plan_transfer.py:331` — `create_mip_process_loss_entry`
 - `subcontracting_management/material_issue_plan_transfer.py:554` — `get_mip_pending_items`
@@ -2241,12 +2349,12 @@ Functions:
 - `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:209` — `refresh_mip_raw_materials`
 - `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:457` — `save_transfer_draft`
 - `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:506` — `get_transfer_draft`
-- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:830` — `unlink_excess_claim`
-- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:1030` — `refresh_weight_summary`
-- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:1206` — `get_mip_batch_plan_html`
-- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:1212` — `download_mip_batch_plan_pdf`
-- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:1351` — `get_mip_consolidate_plan_html`
-- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:1357` — `download_mip_consolidate_plan_pdf`
+- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:839` — `unlink_excess_claim`
+- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:1039` — `refresh_weight_summary`
+- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:1215` — `get_mip_batch_plan_html`
+- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:1221` — `download_mip_batch_plan_pdf`
+- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:1360` — `get_mip_consolidate_plan_html`
+- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:1366` — `download_mip_consolidate_plan_pdf`
 - `permissions_bulk.py:67` — `get_targets`
 - `permissions_bulk.py:92` — `get_role_state`
 - `permissions_bulk.py:144` — `apply_permissions`
@@ -2258,38 +2366,38 @@ Functions:
 - `production_management/stock_entry.py:1349` — `get_job_work_order_for_production_plan`
 - `production_management/production_utils.py:103` — `get_routing_operations_for_bom`
 - `production_management/production_utils.py:128` — ``
-- `production_management/doctype/material_planning/material_planning.py:896` — `@frappe.validate_and_sanitize_search_inputs`
-- `production_management/doctype/material_planning/material_planning.py:950` — `@frappe.validate_and_sanitize_search_inputs`
-- `production_management/doctype/material_planning/material_planning.py:976` — `get_bom_info`
-- `production_management/doctype/material_planning/material_planning.py:1028` — `get_so_drawings_for_bom_picker`
-- `production_management/doctype/material_planning/material_planning.py:1152` — `get_raw_materials`
-- `production_management/doctype/material_planning/material_planning.py:1293` — `check_stock_availability`
-- `production_management/doctype/material_planning/material_planning.py:1687` — `move_to_exact_match`
-- `production_management/doctype/material_planning/material_planning.py:1850` — `update_exact_match_from_consolidate`
-- `production_management/doctype/material_planning/material_planning.py:2074` — `finalize_mapping`
-- `production_management/doctype/material_planning/material_planning.py:2333` — `verify_raw_materials`
-- `production_management/doctype/material_planning/material_planning.py:2349` — `get_batch_reservation_summary`
-- `production_management/doctype/material_planning/material_planning.py:2385` — `get_batch_item`
-- `production_management/doctype/material_planning/material_planning.py:2393` — `get_batch_stock_summary`
-- `production_management/doctype/material_planning/material_planning.py:2631` — `get_batch_cross_table_usage`
-- `production_management/doctype/material_planning/material_planning.py:2763` — `validate_planned_stock`
-- `production_management/doctype/material_planning/material_planning.py:2890` — `reserve_batches`
-- `production_management/doctype/material_planning/material_planning.py:3062` — `get_available_excess_batches`
-- `production_management/doctype/material_planning/material_planning.py:3128` — `add_excess_material_mapping`
-- `production_management/doctype/material_planning/material_planning.py:3223` — `get_available_virtual_excess_items`
-- `production_management/doctype/material_planning/material_planning.py:3336` — `claim_virtual_excess_mapping`
-- `production_management/doctype/material_planning/material_planning.py:3549` — `reserve_exact_match_batches`
-- `production_management/doctype/material_planning/material_planning.py:3696` — `unreserve_exact_match_batches`
-- `production_management/doctype/material_planning/material_planning.py:3747` — `check_mapping_batch_availability`
-- `production_management/doctype/material_planning/material_planning.py:3808` — `unreserve_batches`
-- `production_management/doctype/material_planning/material_planning.py:3973` — `reassign_batch`
-- `production_management/doctype/material_planning/material_planning.py:4235` — `make_production_plan`
-- `production_management/doctype/material_planning/material_planning.py:4306` — `make_material_request`
-- `production_management/doctype/material_planning/material_planning.py:4460` — `make_material_request_from_consolidate`
-- `production_management/doctype/material_planning/material_planning.py:4598` — `update_so_difference_kg`
-- `production_management/doctype/material_planning/material_planning.py:4628` — `auto_suggest_consolidate_dimensions`
-- `production_management/doctype/material_planning/material_planning.py:4716` — `auto_purchase_from_mp`
-- `production_management/doctype/material_planning/material_planning.py:4905` — `complete_batch_mapping`
+- `production_management/doctype/material_planning/material_planning.py:944` — `@frappe.validate_and_sanitize_search_inputs`
+- `production_management/doctype/material_planning/material_planning.py:998` — `@frappe.validate_and_sanitize_search_inputs`
+- `production_management/doctype/material_planning/material_planning.py:1024` — `get_bom_info`
+- `production_management/doctype/material_planning/material_planning.py:1076` — `get_so_drawings_for_bom_picker`
+- `production_management/doctype/material_planning/material_planning.py:1200` — `get_raw_materials`
+- `production_management/doctype/material_planning/material_planning.py:1341` — `check_stock_availability`
+- `production_management/doctype/material_planning/material_planning.py:1735` — `move_to_exact_match`
+- `production_management/doctype/material_planning/material_planning.py:1898` — `update_exact_match_from_consolidate`
+- `production_management/doctype/material_planning/material_planning.py:2122` — `finalize_mapping`
+- `production_management/doctype/material_planning/material_planning.py:2381` — `verify_raw_materials`
+- `production_management/doctype/material_planning/material_planning.py:2397` — `get_batch_reservation_summary`
+- `production_management/doctype/material_planning/material_planning.py:2433` — `get_batch_item`
+- `production_management/doctype/material_planning/material_planning.py:2441` — `get_batch_stock_summary`
+- `production_management/doctype/material_planning/material_planning.py:2679` — `get_batch_cross_table_usage`
+- `production_management/doctype/material_planning/material_planning.py:2811` — `validate_planned_stock`
+- `production_management/doctype/material_planning/material_planning.py:2977` — `reserve_batches`
+- `production_management/doctype/material_planning/material_planning.py:3149` — `get_available_excess_batches`
+- `production_management/doctype/material_planning/material_planning.py:3215` — `add_excess_material_mapping`
+- `production_management/doctype/material_planning/material_planning.py:3310` — `get_available_virtual_excess_items`
+- `production_management/doctype/material_planning/material_planning.py:3423` — `claim_virtual_excess_mapping`
+- `production_management/doctype/material_planning/material_planning.py:3636` — `reserve_exact_match_batches`
+- `production_management/doctype/material_planning/material_planning.py:3783` — `unreserve_exact_match_batches`
+- `production_management/doctype/material_planning/material_planning.py:3834` — `check_mapping_batch_availability`
+- `production_management/doctype/material_planning/material_planning.py:3895` — `unreserve_batches`
+- `production_management/doctype/material_planning/material_planning.py:4060` — `reassign_batch`
+- `production_management/doctype/material_planning/material_planning.py:4363` — `make_production_plan`
+- `production_management/doctype/material_planning/material_planning.py:4434` — `make_material_request`
+- `production_management/doctype/material_planning/material_planning.py:4588` — `make_material_request_from_consolidate`
+- `production_management/doctype/material_planning/material_planning.py:4726` — `update_so_difference_kg`
+- `production_management/doctype/material_planning/material_planning.py:4756` — `auto_suggest_consolidate_dimensions`
+- `production_management/doctype/material_planning/material_planning.py:4844` — `auto_purchase_from_mp`
+- `production_management/doctype/material_planning/material_planning.py:5050` — `complete_batch_mapping`
 - `production_management/doctype/cut_sheet/cut_sheet.py:390` — `suggest_w1_sec_qty`
 - `production_management/doctype/cut_sheet/cut_sheet.py:431` — `get_available_cut_sheets`
 - `production_management/doctype/cut_sheet/cut_sheet.py:457` — `get_cut_sheet_for_batch`

@@ -442,4 +442,106 @@ script kept at `tests/move_fixtures_to_custom_json.py`.
 
 ---
 
+## 20. Batch reassignment from Consolidate Items (2026-09-11)
+
+Material Issue Plan's **Raw Materials** grid has long had an *Update Batch* action that
+moves one Material Planning row to a different batch. This adds the same action to the
+**Consolidate Items** grid, where a line is not a row but a *merge* of N rows pointing
+at N Material Planning child rows, possibly across several plans. Reassigning one line
+reassigns all of them.
+
+What makes that workable is **Reserve stock without dimensions**: a row in that mode
+reserves exactly its required Kg and expresses the piece count as a fraction, so
+per-row dimension matching disappears and only one number has to reconcile - total Kg.
+A line needing 1,000 Kg across 50 rows can move to a new batch whatever mixture of
+dimension-matched and dimensionless rows it started as.
+
+### 20.1 Reserve stock without dimensions, on Exact Match
+
+The waiver existed only on Material Mapping. It is now on **Material Planning Available
+Raw Material** too, which fixes the per-row *Update Batch* dialog for exact-match rows:
+the dialog always sent the checkbox and the server silently dropped it.
+
+It does **less** here, deliberately. An exact-match row already reserves its Allocated
+Qty in Kg verbatim - `reserve_exact_match_batches` does no dimension arithmetic at all -
+so that figure is untouched. The waiver's only effect is Sec Qty (NOS), which stops
+being a whole-piece allocation and becomes the reserved weight expressed as a fraction
+of one piece of the assigned batch. **Allocated Qty in Batch is never rewritten**: it is
+this row's share of a requirement that may have been split across several batches.
+
+The flag is set automatically when a batch is reassigned from the Material Issue Plan,
+and can be ticked by hand during planning. It is edited in the expanded row (like
+Material Mapping's), not as a grid column. Reserved rows cannot be toggled, and it
+applies to Structurals and Plates only.
+
+### 20.2 The Update Batch dialog on Consolidate Items
+
+Two steps, because applying cannot be undone in one action:
+
+1. **Preview.** Pick a line, name one or more target batches, optionally declare a cut
+   size and piece count for each. The dialog shows each batch's capacity against its
+   free stock, then reports what would happen: how many rows and Kg, every Material
+   Planning involved with its row count, and **which row lands on which batch**.
+2. **Reassign Batch**, which appears only after a clean preview. It asks for
+   confirmation naming every plan and its row count before anything is written. Any
+   edit afterwards drops back to Preview, and the server independently refuses a plan
+   whose figures have changed since it was previewed.
+
+Only batches with free stock in the plan's source warehouse are offered - a zero-stock
+batch is the one case downstream validation does not catch.
+
+### 20.3 Splitting one line across several batches
+
+Rows fill the first batch in table order until its capacity is used, then move to the
+next. **A row is never split across two batches**, and once the fill passes a batch it
+never comes back to it - the only order an operator can predict by reading the grid top
+to bottom. A row too big for what is left closes that batch, and the capacity left
+stranded is reported rather than hidden, naming the row that closed it.
+
+If the batches entered cannot cover the whole line, the reassignment is **refused**
+rather than partly applied.
+
+The Length/Width entered against a target declare a **cut size for capacity only** -
+how much of that batch this line may take. The row still records the batch's own
+dimensions, because those are what reach the Stock Entry.
+
+### 20.4 Nuts and Bolts
+
+No waiver - a bolt's weight is exact and a fractional bolt means nothing. The piece
+count is computed explicitly instead, and a count that does not come out whole is
+reported rather than rounded, because rounding would change the line's total weight.
+
+### 20.5 What happens when something goes wrong
+
+Everything that can be refused is refused **before** the first write: a line with
+anything already transferred, rows holding material claimed from another plan's excess
+or from a Cut Sheet, plans the user cannot write to, plans using different warehouses,
+a batch already in the other table, a batch with no free stock, and any shortfall.
+Uninspected batches and a parked transfer draft raise warnings rather than blocks.
+
+Plans are then written **one at a time**. If one fails, the message names exactly what
+was applied, where it stopped and what was untouched. The stopped plan's rows are
+released from reservation but **still carry their original batch** - nothing is lost,
+and re-running recovers, because members are re-derived from current state each time so
+rows that already moved are no longer part of the line.
+
+**A reassign discards that line's parked transfer draft**, since the draft is keyed on
+the batch. The dialog warns before applying.
+
+### 20.6 Verified
+
+Against restored live data: a 3-row / 217.344 Kg line moved to another batch and back
+with every row returning byte-identical; Sec Nos correctly re-derived against a piece
+2.8x larger; the same line split across two batches with 32.903 Kg correctly reported
+as stranded; and the whole dialog driven end to end in a browser.
+
+**Key files**: `subcontracting_management/material_issue_plan_batch_update.py` (new),
+`material_planning.py` (`_apply_batch_to_arm_row`, `_sec_nos_for_weight_arm`, the
+exact-match waiver loop), `material_planning_available_raw_material.json` (new field),
+`material_issue_plan.js` (the dialog), `material_planning.js` (the row handler).
+Tests: `verify_consolidate_batch_reassign.py`, `verify_arm_reserve_without_dimensions.py`,
+`verify_consolidate_batch_apply.py`. Plan of record: `.claude/tasks/sep10_task1.md`.
+
+---
+
 *This document covers all major features implemented in the custom app. Minor utility helpers, internal validation guards, and test scaffolding are not listed.*

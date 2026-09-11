@@ -2390,7 +2390,16 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 	// paths run through here rather than each caller deciding for itself.
 	function _refresh_alloc_figures() {
 		if (dialog.get_value("reserve_without_dimensions")) {
-			let kg = flt(selected_row && selected_row.reqd_kg);
+			// Which field holds "the Kg this row will reserve" differs by table.
+			// Material Mapping reserves its requirement, and reqd_kg is a copy of it.
+			// Exact Match's reqd_kg is overall_required_qty -- the WHOLE requirement,
+			// which check_stock_availability may have split across several batches --
+			// so the row's own share is qty (required_qty). Using reqd_kg there
+			// overstates a split requirement by every other batch's share.
+			let kg = flt(selected_row && (
+				selected_row.source_table === "Material Planning Available Raw Material"
+					? selected_row.qty
+					: selected_row.reqd_kg));
 			let per = _kg_per_piece();
 			dialog.set_value("calculated_qty", flt(kg, 3));
 			dialog.set_value("sec_qty", per ? flt(kg / per, 3) : 0);
@@ -2566,6 +2575,19 @@ function _show_consolidate_update_batch_dialog(frm) {
 		primary_action() { _preview(); },
 	});
 
+	// The dialog is deliberately two steps. Applying commits as it goes -- the
+	// reserve/unreserve helpers each commit internally, so a fan-out across several
+	// plans cannot be rolled back as a unit -- and the only defence against that is
+	// that the user has seen exactly what will happen first. So Reassign is not
+	// reachable until a preview has come back clean, and ANY edit afterwards drops
+	// back to Preview rather than applying a plan nobody looked at.
+	let lastPlan = null;
+
+	function _armPreview() {
+		lastPlan = null;
+		d.set_primary_action(__("Preview"), () => _preview());
+	}
+
 	// ── Line picker ──────────────────────────────────────────────────────────
 	function _render_lines() {
 		let th = "padding:6px 8px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;white-space:nowrap;";
@@ -2602,6 +2624,7 @@ function _show_consolidate_update_batch_dialog(frm) {
 
 		d.fields_dict.lines_html.$wrapper.find("tr[data-ok='1']").on("click", function () {
 			selected = lines.find((x) => x.name === $(this).data("name"));
+			_armPreview();
 			_render_lines();
 			d.fields_dict.result_html.$wrapper.empty();
 			frappe.call({
@@ -2658,6 +2681,7 @@ function _show_consolidate_update_batch_dialog(frm) {
 		$w.find("._cb_batch").on("change", function () {
 			let i = $(this).closest("tr").data("i");
 			targets[i].batch_no = $(this).val();
+			_armPreview();
 			_price(i);
 		});
 		$w.find("._cb_len, ._cb_wid, ._cb_pcs").on("change", function () {
@@ -2665,10 +2689,12 @@ function _show_consolidate_update_batch_dialog(frm) {
 			targets[i].length = flt($tr.find("._cb_len").val());
 			targets[i].width = flt($tr.find("._cb_wid").val());
 			targets[i].pieces = flt($tr.find("._cb_pcs").val());
+			_armPreview();
 			_price(i);
 		});
-		$w.find("._cb_add").on("click", function () { targets.push({}); _render_targets(); });
+		$w.find("._cb_add").on("click", function () { _armPreview(); targets.push({}); _render_targets(); });
 		$w.find("._cb_del").on("click", function () {
+			_armPreview();
 			targets.splice($(this).closest("tr").data("i"), 1);
 			_render_targets();
 		});
@@ -2713,7 +2739,84 @@ function _show_consolidate_update_batch_dialog(frm) {
 			},
 			freeze: true,
 			freeze_message: __("Checking…"),
-			callback(r) { _render_result(r.message || {}); },
+			callback(r) {
+				let res = r.message || {};
+				_render_result(res);
+				if (res.ok) {
+					lastPlan = res;
+					d.set_primary_action(__("Reassign Batch"), () => _confirm());
+				} else {
+					_armPreview();
+				}
+			},
+		});
+	}
+
+	// ── Confirm, then apply ──────────────────────────────────────────────────
+	function _confirm() {
+		if (!lastPlan) { _preview(); return; }
+		let g = lastPlan.group || {};
+		let batches = (lastPlan.targets || []).map((t) => t.batch_no).join(", ");
+
+		// Every plan is named with its row count before anything is written. A
+		// consolidate line can reach across several Material Plannings, and the
+		// person clicking this usually opened only one of them -- being told after
+		// the fact that a second plan was rewritten is not acceptable.
+		let plans = (lastPlan.material_plannings || []).map((p) =>
+			`<li><b>${frappe.utils.escape_html(p.material_planning)}</b> — `
+			+ __("{0} row(s), {1} Kg", [p.rows, format_number(flt(p.qty), null, 3)]) + `</li>`).join("");
+
+		let warn = (lastPlan.warnings || []).map((w) =>
+			`<div style="margin-top:6px;padding:6px 8px;background:#fffbeb;border-left:3px solid #f59e0b;
+			border-radius:3px;font-size:12px;color:#78350f">${w}</div>`).join("");
+
+		frappe.confirm(
+			__("Reassign all <b>{0}</b> row(s) of <b>{1}</b> — <b>{2} Kg</b> — to <b>{3}</b>?",
+				[g.rows || 0, frappe.utils.escape_html(g.item_code || ""),
+				 format_number(flt(g.total_kg), null, 3), frappe.utils.escape_html(batches)])
+			+ (g.rwd_applies
+				? `<div style="margin-top:6px;font-size:12px;color:#495057">`
+					+ __("Their existing batches are released and each row reserves its own required Kg against the new batch, without matching dimensions.")
+					+ `</div>`
+				: "")
+			+ `<div style="margin-top:8px;font-size:12px">` + __("This changes:") + `<ul style="margin:4px 0 0 18px">${plans}</ul></div>`
+			+ warn,
+			() => _apply()
+		);
+	}
+
+	function _apply() {
+		frappe.call({
+			method: _MIP_CB + "apply_consolidate_batch_update",
+			args: {
+				mip_name: frm.doc.name,
+				consolidate_row_name: selected.name,
+				targets_json: JSON.stringify(targets.filter((t) => t.batch_no)),
+				plan_hash: lastPlan.plan_hash,
+			},
+			freeze: true,
+			freeze_message: __("Reassigning and re-reserving…"),
+			callback(r) {
+				let m = r.message || {};
+				if (!m.ok) return;
+				d.hide();
+				if ((m.warnings || []).length) {
+					frappe.msgprint({
+						title: __("Reassigned, with warnings"),
+						indicator: "orange",
+						message: __("{0} row(s) moved ({1} Kg).", [m.rows, format_number(flt(m.qty), null, 3)])
+							+ "<ul style='margin:8px 0 0 18px'>"
+							+ (m.warnings).map((w) => `<li>${w}</li>`).join("") + "</ul>",
+					});
+				} else {
+					frappe.show_alert({
+						message: __("{0} row(s) moved ({1} Kg) and re-reserved.",
+							[m.rows, format_number(flt(m.qty), null, 3)]),
+						indicator: "green",
+					}, 7);
+				}
+				frm.reload_doc();
+			},
 		});
 	}
 
@@ -2763,10 +2866,41 @@ function _show_consolidate_update_batch_dialog(frm) {
 				}).join("") + `</tbody></table>`;
 		}
 
+		// Which row lands on which batch. Essential once there is more than one
+		// target: a row is never split and the cursor never goes back, so the cut
+		// point is a consequence of table order that has to be visible BEFORE
+		// applying, not discovered afterwards.
+		if ((res.members || []).length) {
+			let multi = (res.targets || []).length > 1;
+			let th = "padding:5px 8px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;";
+			html += `<div style="margin-top:12px;font-size:12px;font-weight:600">`
+				+ __("Rows on this line") + `</div>
+				<div style="max-height:24vh;overflow:auto;border:1px solid #e9ecef;border-radius:4px;margin-top:4px">
+				<table style="width:100%;border-collapse:collapse;font-size:12px"><thead style="position:sticky;top:0;z-index:1"><tr>
+				<th style="${th};text-align:right">${__("Row")}</th>
+				<th style="${th}">${__("DUNO/Mark")}</th>
+				<th style="${th}">${__("Material Planning")}</th>
+				<th style="${th};text-align:right">${__("Kg")}</th>
+				<th style="${th}">${__("Goes to")}</th></tr></thead><tbody>`
+				+ (res.members).map(function (m) {
+					let unplaced = m.target_index === null || m.target_index === undefined;
+					let dest = unplaced
+						? `<span style="color:#b91c1c">${__("not placed")}</span>`
+						: frappe.utils.escape_html((res.targets[m.target_index] || {}).batch_no || "");
+					return `<tr style="${unplaced ? "background:#fef2f2" : ""}">
+						<td style="padding:4px 8px;text-align:right;color:#6c757d">${m.idx}</td>
+						<td style="padding:4px 8px">${frappe.utils.escape_html(m.duno_mark_no || "")}</td>
+						<td style="padding:4px 8px;color:#6c757d">${frappe.utils.escape_html(m.material_planning || "")}</td>
+						<td style="padding:4px 8px;text-align:right">${format_number(flt(m.target_kg), null, 3)}</td>
+						<td style="padding:4px 8px">${multi || unplaced ? dest : `<span style="color:#6c757d">${dest}</span>`}</td>
+					</tr>`;
+				}).join("") + `</tbody></table></div>`;
+		}
+
 		html += `<div style="margin-top:12px;padding:8px 10px;border-radius:3px;font-size:12px;`
 			+ (res.ok
 				? `background:#e3f3ea;color:#1a7f4b">` + __("This reassignment is valid.")
-					+ " " + __("Applying it is not built yet — this is a preview only.")
+					+ " " + __("Choose <b>Reassign Batch</b> to apply it.")
 				: `background:#f4f5f7;color:#495057">` + __("Nothing would be changed."))
 			+ `</div>`;
 
