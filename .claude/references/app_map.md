@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-09-11 13:23:09_
+_Generated: 2026-09-11 14:47:44_
 
 ## Modules
 
@@ -25,7 +25,7 @@ _Generated: 2026-09-11 13:23:09_
 
 ## Python files
 
-_Total: 311_
+_Total: 300_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -195,30 +195,19 @@ _Total: 311_
 - subcontracting_management/subcontracting.py
 - templates/__init__.py
 - templates/pages/__init__.py
-- tests/_applytest.py
-- tests/_armmeta.py
 - tests/_chk_tmp.py
 - tests/create_full_test_entry.py
 - tests/create_test_data.py
-- tests/_draftchk.py
-- tests/_draftrestore.py
 - tests/find_cascade_fixture.py
 - tests/find_clean_mp.py
 - tests/_find_mip_excess.py
 - tests/__init__.py
-- tests/_mmchk.py
 - tests/move_fixtures_to_custom_json.py
-- tests/_p2col.py
 - tests/_probe_ab.py
 - tests/_probe_tmp.py
 - tests/_render_challan.py
 - tests/reset_transactions.py
-- tests/_restoretest.py
 - tests/revert_wo_jc_cleanup.py
-- tests/_splitrestore.py
-- tests/_splittest.py
-- tests/_state.py
-- tests/_sweep.py
 - tests/_t_close.py
 - tests/_t_cs.py
 - tests/test_alternate_item.py
@@ -1440,15 +1429,6 @@ Functions:
   - 2048:_build_jc_drawing_rows:
   - 2081:_populate_jcs_for_wo:
 
-### tests/_applytest.py
-Functions:
-  - 8:_snap:
-  - 17:run:
-
-### tests/_armmeta.py
-Functions:
-  - 2:run:
-
 ### tests/_chk_tmp.py
 Functions:
   - 2:run:
@@ -1474,14 +1454,6 @@ Functions:
   - 135:make_bom:
   - 171:run:
 
-### tests/_draftchk.py
-Functions:
-  - 3:run:
-
-### tests/_draftrestore.py
-Functions:
-  - 2:run:
-
 ### tests/find_cascade_fixture.py
 Functions:
   - 4:run:
@@ -1494,18 +1466,10 @@ Functions:
 Functions:
   - 4:run:
 
-### tests/_mmchk.py
-Functions:
-  - 2:run:
-
 ### tests/move_fixtures_to_custom_json.py
 Functions:
   - 64:_all_target_doctypes:
   - 70:run:
-
-### tests/_p2col.py
-Functions:
-  - 2:run:
 
 ### tests/_probe_ab.py
 Functions:
@@ -1534,30 +1498,9 @@ Functions:
   - 258:_test_companies:
   - 263:_delete_test_companies:
 
-### tests/_restoretest.py
-Functions:
-  - 8:run:
-
 ### tests/revert_wo_jc_cleanup.py
 Functions:
   - 106:run:
-
-### tests/_splitrestore.py
-Functions:
-  - 9:run:
-
-### tests/_splittest.py
-Functions:
-  - 11:snap:
-  - 16:run:
-
-### tests/_state.py
-Functions:
-  - 5:run:
-
-### tests/_sweep.py
-Functions:
-  - 4:run:
 
 ### tests/_t_close.py
 Functions:
