@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-09-11 14:47:44_
+_Generated: 2026-09-11 15:27:31_
 
 ## Modules
 
@@ -1330,10 +1330,11 @@ Functions:
   - 687:preview_consolidate_batch_update:
   - 692:_target_index_of:
   - 701:_cross_table_conflicts:
-  - 756:get_candidate_batches:
-  - 792:_apply_to_one_plan:
-  - 941:_composed_failure:
-  - 980:apply_consolidate_batch_update:
+  - 756:get_consolidate_line_context:
+  - 787:get_candidate_batches:
+  - 823:_apply_to_one_plan:
+  - 972:_composed_failure:
+  - 1011:apply_consolidate_batch_update:
 
 ### subcontracting_management/material_issue_plan_transfer.py
 Functions:
@@ -1681,7 +1682,7 @@ Functions:
   - 45:_member:
   - 53:_target:
   - 58:run:
-  - 193:_round_trip:
+  - 223:_round_trip:
 
 ### tests/verify_consolidate_batch_reassign.py
 Functions:
@@ -2256,8 +2257,9 @@ Functions:
 - `material_request_management/material_request.py:11` — `get_mr_item_uom`
 - `subcontracting_management/material_issue_plan_batch_update.py:195` — `get_batch_capacity`
 - `subcontracting_management/material_issue_plan_batch_update.py:687` — `preview_consolidate_batch_update`
-- `subcontracting_management/material_issue_plan_batch_update.py:756` — `get_candidate_batches`
-- `subcontracting_management/material_issue_plan_batch_update.py:980` — `apply_consolidate_batch_update`
+- `subcontracting_management/material_issue_plan_batch_update.py:756` — `get_consolidate_line_context`
+- `subcontracting_management/material_issue_plan_batch_update.py:787` — `get_candidate_batches`
+- `subcontracting_management/material_issue_plan_batch_update.py:1011` — `apply_consolidate_batch_update`
 - `subcontracting_management/material_issue_plan_transfer.py:258` — `get_mip_process_loss_state`
 - `subcontracting_management/material_issue_plan_transfer.py:331` — `create_mip_process_loss_entry`
 - `subcontracting_management/material_issue_plan_transfer.py:554` — `get_mip_pending_items`

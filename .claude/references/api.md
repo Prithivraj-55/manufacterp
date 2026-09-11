@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-09-11 14:47:44_
+_Generated: 2026-09-11 15:27:31_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -200,10 +200,11 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
+| `apply_consolidate_batch_update` | 1011 |
 | `get_batch_capacity` | 195 |
 | `preview_consolidate_batch_update` | 687 |
-| `get_candidate_batches` | 756 |
-| `apply_consolidate_batch_update` | 980 |
+| `get_consolidate_line_context` | 756 |
+| `get_candidate_batches` | 787 |
 ## subcontracting_management/material_issue_plan_transfer.py
 
 | Method | Line |
@@ -263,4 +264,4 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 ## Total
 
-_147 whitelisted methods_
+_148 whitelisted methods_

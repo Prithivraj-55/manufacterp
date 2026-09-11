@@ -753,6 +753,37 @@ def _cross_table_conflicts(mp_names, batch_nos, members):
 
 
 @frappe.whitelist()
+def get_consolidate_line_context(mip_name, consolidate_row_name):
+    """The item and warehouse for one line, resolved the way the preview resolves them.
+
+    The dialog used to take the warehouse from the Material Issue Plan's own
+    `source_warehouse`, but every stock figure the server computes comes from the
+    Material Planning's `for_warehouse`. On a plan where the two differ -- or where
+    the Material Issue Plan's is simply blank, which happens -- the candidate list
+    and the live capacity were priced against a different warehouse from the one the
+    reassignment would actually use, or came back empty for no visible reason.
+
+    Asking the server settles it: there is one answer and both halves use it.
+    """
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+    key, members = expand_consolidate_row(mip, consolidate_row_name)
+
+    warehouses = set()
+    for name in sorted({m.material_planning for m in members if m.material_planning}):
+        warehouses.add(frappe.db.get_value("Material Planning", name, "for_warehouse") or "")
+
+    return {
+        "item_code": key[0],
+        "batch_no": key[1],
+        "rows": len(members),
+        # Empty when the plans disagree; the preview refuses that case outright, and
+        # the dialog should not pretend to price it in the meantime.
+        "warehouse": next(iter(warehouses), "") if len(warehouses) == 1 else "",
+        "warehouses": sorted(w for w in warehouses if w),
+    }
+
+
+@frappe.whitelist()
 def get_candidate_batches(item_code, warehouse, limit=50):
     """Batches of this item that actually have free stock in this warehouse.
 

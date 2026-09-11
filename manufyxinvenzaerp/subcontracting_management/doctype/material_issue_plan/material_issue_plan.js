@@ -2557,6 +2557,12 @@ function _show_consolidate_update_batch_dialog(frm) {
 
 	let selected = null;
 	let targets = [{}];
+	// Resolved by the server per line, NOT taken from frm.doc.source_warehouse.
+	// Every stock figure the server computes comes from the Material Planning's
+	// for_warehouse, and the two are not always the same -- on some plans the Issue
+	// Plan's is blank. Pricing candidates against the wrong one is invisible until
+	// the numbers do not add up.
+	let lineWarehouse = "";
 	// Only batches with free stock in this plan's source warehouse are offered. A
 	// zero-stock batch is precisely the case downstream validation does not catch.
 	let candidates = [];
@@ -2627,10 +2633,31 @@ function _show_consolidate_update_batch_dialog(frm) {
 			_armPreview();
 			_render_lines();
 			d.fields_dict.result_html.$wrapper.empty();
+			targets.forEach((t) => { delete t._info; });
 			frappe.call({
-				method: _MIP_CB + "get_candidate_batches",
-				args: { item_code: selected.item_code, warehouse: frm.doc.source_warehouse || "" },
-				callback(r) { candidates = r.message || []; _render_targets(); },
+				method: _MIP_CB + "get_consolidate_line_context",
+				args: { mip_name: frm.doc.name, consolidate_row_name: selected.name },
+				callback(ctx) {
+					let c = ctx.message || {};
+					lineWarehouse = c.warehouse || "";
+					if (!lineWarehouse) {
+						candidates = [];
+						_render_targets();
+						frappe.show_alert({
+							message: (c.warehouses || []).length > 1
+								? __("The plans behind this line use different warehouses ({0}). They cannot be reassigned together.",
+									[(c.warehouses || []).join(", ")])
+								: __("No Raw Materials Warehouse is set on the linked Material Planning."),
+							indicator: "red",
+						}, 8);
+						return;
+					}
+					frappe.call({
+						method: _MIP_CB + "get_candidate_batches",
+						args: { item_code: c.item_code, warehouse: lineWarehouse },
+						callback(r) { candidates = r.message || []; _render_targets(); },
+					});
+				},
 			});
 		});
 	}
@@ -2708,7 +2735,7 @@ function _show_consolidate_update_batch_dialog(frm) {
 		frappe.call({
 			method: _MIP_CB + "get_batch_capacity",
 			args: {
-				batch_no: t.batch_no, warehouse: frm.doc.source_warehouse || "",
+				batch_no: t.batch_no, warehouse: lineWarehouse,
 				pieces: t.pieces || 0, length: t.length || null, width: t.width || null,
 			},
 			callback(r) {

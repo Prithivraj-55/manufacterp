@@ -171,6 +171,36 @@ def run(live=0):
                    or "already uses" in str(e)), True)
 
     print()
+    print("=== 5b. The line's warehouse comes from the plan, not the Issue Plan ===")
+    # Every stock figure the server computes uses the Material Planning's
+    # for_warehouse. The dialog used to price candidate batches against the Material
+    # Issue Plan's own source_warehouse instead. On most plans the two agree, which is
+    # exactly why this went unnoticed -- and on a plan where the Issue Plan's is blank
+    # the candidate list came back empty for no visible reason.
+    mismatched = frappe.db.sql("""
+        SELECT c.parent AS mip, c.name AS crow, m.source_warehouse AS mip_wh,
+               p.for_warehouse AS mp_wh
+        FROM `tabMaterial Issue Plan Consolidate Item` c
+        JOIN `tabMaterial Issue Plan` m ON m.name = c.parent
+        JOIN `tabMaterial Issue Plan Raw Material` r
+             ON r.parent = c.parent AND r.batch_no = c.batch_no
+        JOIN `tabMaterial Planning` p ON p.name = r.material_planning
+        WHERE IFNULL(m.source_warehouse, '') != IFNULL(p.for_warehouse, '')
+          AND IFNULL(p.for_warehouse, '') != ''
+        LIMIT 1
+    """, as_dict=True)
+    if not mismatched:
+        print("  (every plan on this site agrees with its Issue Plan -- nothing to prove)")
+    else:
+        case = mismatched[0]
+        ctx = bu.get_consolidate_line_context(case.mip, case.crow)
+        check("%s: Issue Plan says %r, plan says %r"
+              % (case.mip, case.mip_wh or "", case.mp_wh),
+              ctx["warehouse"], case.mp_wh)
+        check("and candidates are found there",
+              len(bu.get_candidate_batches(ctx["item_code"], ctx["warehouse"])) > 0, True)
+
+    print()
     print("=== 6. Live round trip (writes) ===")
     if not live:
         print("  (skipped -- pass live=1 to run it; see this file's docstring)")
