@@ -573,9 +573,18 @@ def _sync_consolidate_items(mip):
     and saved without transferring (see save_transfer_draft), so they are carried across
     the rebuild, matched on the same key the rows are grouped by. Losing them would mean
     "Save and Close" quietly discarded the work the moment anything re-saved the plan.
+
+    The grouping rule itself lives in consolidate_group_key (material_issue_plan_batch_update),
+    because the Consolidate Items Update Batch dialog has to expand a line back to these
+    same rows. Two copies of this tuple would be two chances for the table and the thing
+    that edits it to disagree about what a line is.
     """
+    from manufyxinvenzaerp.subcontracting_management.material_issue_plan_batch_update import (
+        consolidate_group_key,
+    )
+
     drafts = {
-        (r.item_code, r.batch_no or "", 1 if r.cnc_process else 0): {
+        consolidate_group_key(r): {
             f: r.get(f) for f in _CONSOLIDATE_DRAFT_FIELDS
         }
         for r in (mip.consolidate_items or [])
@@ -597,7 +606,7 @@ def _sync_consolidate_items(mip):
         if not row.batch_no:
             continue
         item_code = row.planned_item or row.item_code
-        key = (item_code, row.batch_no, 1 if row.cnc_process else 0)
+        key = consolidate_group_key(row)
         g = groups.get(key)
         if not g:
             g = groups[key] = {

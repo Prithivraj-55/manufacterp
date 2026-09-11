@@ -1,0 +1,623 @@
+"""Reassign the batch behind a whole Consolidate Items line.
+
+The Raw Materials grid already has an Update Batch dialog, and it works one Material
+Planning child row at a time. A Consolidate Items line cannot: it is a *merge* of N
+raw-material rows, which point at N child rows across possibly several Material
+Planning documents. Reassigning one line means reassigning all of them.
+
+What makes that tractable is Reserve Without Dimensions. A row in that mode reserves
+exactly its required Kg and expresses the piece count as a fraction, so per-row
+dimension matching disappears and only one number has to reconcile: total Kg. A line
+needing 1,000 Kg across 50 rows can move to a new batch whatever mixture of
+dimension-mapped and dimensionless rows it started as.
+
+This module is read-only for now (Phase 1): it expands a line to its members, prices
+the target batches, and reports what a reassignment *would* do. Nothing here mutates.
+The apply path arrives in a later phase -- see .claude/tasks/sep10_task1.md.
+
+It lives beside material_issue_plan_transfer.py rather than inside
+material_issue_plan.py for the same reason that module does: it is a large MIP action
+with its own vocabulary, and material_planning.py is already past 4,900 lines.
+
+Two things to know before changing anything here.
+
+**A consolidate row has no back-link.** It carries no material_planning, source_table
+or source_row -- it is regenerated wholesale on every save. Members are therefore
+*re-derived* from mip.raw_materials by the same grouping key the sync uses, never read
+from client input. That is what makes a re-run after a partial failure safe: rows that
+already moved have a different key and are simply no longer members.
+
+**The Kg a member will consume is not the Kg it consumes today.** After a dimensionless
+reassign a Material Mapping row reserves its *requirement* (`reqd_kg`), which is what
+_apply_rwd_fractional_nos writes into batch_calc_qty on save. Its current `qty` is the
+batch-derived weight and can be larger or smaller. Sizing the fill off `qty` would
+quietly plan for the wrong tonnage -- see _member_target_kg.
+"""
+
+import hashlib
+import json
+
+import frappe
+from frappe import _
+from frappe.utils import flt
+
+from manufyxinvenzaerp.production_management.doctype.material_planning.material_planning import (
+    _calc_batch_qty,
+    _calc_kg_per_nos,
+    _get_batch_dims,
+    _get_batch_inspection_block_reason,
+    _get_batch_reserved_by_others,
+    _get_batch_total_stock,
+    _require_write,
+    get_batch_item,
+)
+
+# The child tables store three decimals, so anything finer is noise. Matches the
+# tolerance _validate_batch_calc_qty works to.
+EPS = 0.001
+
+MATERIAL_MAPPING = "Material Planning Material Mapping"
+AVAILABLE_RAW_MATERIAL = "Material Planning Available Raw Material"
+UNAVAILABLE_ITEM = "Material Planning Unavailable Item"
+
+# Reserve Without Dimensions only applies where a piece has a computable weight.
+# _apply_rwd_fractional_nos guards on exactly this set.
+RWD_GROUPS = ("Structurals", "Plates")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Grouping — the single definition of what a consolidate line is
+# ─────────────────────────────────────────────────────────────────────────────
+
+def consolidate_group_key(row):
+    """The (item, batch, CNC leg) tuple that defines one Consolidate Items line.
+
+    Deliberately works on BOTH a raw-material row and a consolidate row, so the
+    sync and the expansion below can never drift apart. A raw-material row carries
+    `planned_item` (the batch's own item, which differs from the requirement's on an
+    alternate-item row); a consolidate row has already resolved that, and `.get()`
+    returns None there, so the fallback does the right thing for both.
+
+    `batch_no` is normalised to "" rather than left None. _sync_consolidate_items
+    skips batch-less rows outright so the two agree today, but a key that can hold
+    None is a key that sorts and compares inconsistently the first time something
+    stops skipping them.
+    """
+    return (
+        row.get("planned_item") or row.get("item_code"),
+        row.get("batch_no") or "",
+        1 if row.get("cnc_process") else 0,
+    )
+
+
+def expand_consolidate_row(mip, consolidate_row_name):
+    """Expand one Consolidate Items line back to the raw-material rows it merges.
+
+    Returns `(key, members)`. Members are in `mip.raw_materials` order, which is
+    deterministic: for each Material Planning in sorted name order, all Material
+    Mapping rows in idx order, then all Available Raw Material rows, then Unavailable
+    (see refresh_mip_raw_materials). That order is what the preview table shows and
+    what the fill consumes, so the user can predict the split by reading top to bottom.
+    """
+    target = None
+    for row in (mip.consolidate_items or []):
+        if row.name == consolidate_row_name:
+            target = row
+            break
+    if not target:
+        frappe.throw(
+            _("Consolidate row {0} no longer exists on {1}. Reload the plan and try again.")
+            .format(consolidate_row_name, mip.name)
+        )
+
+    key = consolidate_group_key(target)
+
+    members = []
+    for row in (mip.raw_materials or []):
+        if not row.batch_no:
+            continue
+        if consolidate_group_key(row) != key:
+            continue
+        members.append(frappe._dict({
+            "idx": row.idx,
+            "raw_material_row": row.name,
+            "material_planning": row.material_planning,
+            "source_table": row.source_table,
+            "source_row": row.source_row,
+            "item_code": row.item_code,
+            "planned_item": row.planned_item,
+            "batch_no": row.batch_no,
+            "qty": flt(row.qty, 3),
+            "reqd_kg": flt(row.reqd_kg, 3),
+            "sec_qty": flt(row.sec_qty, 3),
+            "transferred_qty": flt(row.transferred_qty, 3),
+            "is_reserved": 1 if row.is_reserved else 0,
+            "parent_item_group": row.parent_item_group or "",
+            "unit_weight": flt(row.unit_weight),
+            "duno_mark_no": row.duno_mark_no or "",
+            "customer_drawing_number": row.customer_drawing_number or "",
+            "sales_order": row.sales_order or "",
+            "cut_sheet_ref": row.get("cut_sheet_ref") or "",
+            "target_kg": _member_target_kg(row),
+        }))
+
+    return key, members
+
+
+def _member_target_kg(row):
+    """How much of the NEW batch this member will consume once reassigned.
+
+    Not the same as what it consumes now, and the two tables differ:
+
+    - **Material Mapping** reserves its *requirement* under RWD --
+      _apply_rwd_fractional_nos sets `batch_calc_qty = row.qty`, and the MIP row's
+      `reqd_kg` is a copy of exactly that field. The MIP row's own `qty` is the
+      batch-derived weight, which is what the OLD batch happened to give.
+    - **Available Raw Material** has no such indirection: reserve_exact_match_batches
+      reserves `required_qty` verbatim with no dimension arithmetic, and the MIP row's
+      `qty` is a copy of that. Its `reqd_kg` is `overall_required_qty`, the whole
+      requirement -- which is wrong to use here, because one requirement can be split
+      across several exact-match rows and summing it would double-count.
+    """
+    if row.source_table == AVAILABLE_RAW_MATERIAL:
+        return flt(row.qty, 3)
+    return flt(row.reqd_kg, 3)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Target batches — what one candidate batch can actually supply
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _batch_free_kg(batch_no, warehouse):
+    """Free Kg of a batch in a warehouse, counting EVERY plan's reservations.
+
+    Deliberately not get_batch_stock_summary: that helper takes an `exclude_mp` and
+    drops all of that plan's reservations from the total, which is right when you are
+    asking "how much more can THIS plan take". Here the question spans several plans
+    at once, so excluding any of them overstates what is free. Passing "" as the
+    exclusion makes `parent != ''` match every row, which is the whole point.
+    """
+    total = flt(_get_batch_total_stock(batch_no, warehouse))
+    reserved = flt(_get_batch_reserved_by_others(batch_no, "", None))
+    return flt(total - reserved, 3)
+
+
+@frappe.whitelist()
+def get_batch_capacity(batch_no, warehouse, pieces=0, length=None, width=None, thickness=None):
+    """Price one candidate batch for the dialog. Read-only.
+
+    Capacity and free stock are returned SEPARATELY and both are shown, because they
+    answer different questions: capacity is how much the user says they are cutting
+    from this batch, free stock is how much of it is actually in the warehouse and
+    unclaimed. A capacity above free stock is a piece count nobody can honour, and it
+    has to read as a warning rather than be silently clamped.
+
+    Dimensions default to the Batch record's own but stay overridable -- the split
+    case works by declaring a cut size and a piece count against a batch.
+    """
+    item_code = get_batch_item(batch_no) if batch_no else None
+    if not item_code:
+        return {"ok": False, "error": _("Batch {0} not found.").format(batch_no)}
+
+    item = frappe.db.get_value(
+        "Item", item_code, ["custom_parent_item_group", "custom_unit_weight"], as_dict=True
+    ) or {}
+    group = item.get("custom_parent_item_group") or ""
+    unit_weight = flt(item.get("custom_unit_weight"))
+
+    b_length, b_width, b_thickness = _get_batch_dims(batch_no)
+    length = flt(length) if length not in (None, "") else flt(b_length)
+    width = flt(width) if width not in (None, "") else flt(b_width)
+    thickness = flt(thickness) if thickness not in (None, "") else flt(b_thickness)
+    pieces = flt(pieces)
+
+    kg_per_piece = flt(_calc_kg_per_nos(group, length, width, thickness, unit_weight), 3)
+    capacity_kg = flt(_calc_batch_qty(group, length, width, thickness, pieces, unit_weight), 3)
+    free_kg = _batch_free_kg(batch_no, warehouse) if warehouse else 0.0
+
+    return {
+        "ok": True,
+        "batch_no": batch_no,
+        "item_code": item_code,
+        "parent_item_group": group,
+        "unit_weight": unit_weight,
+        "batch_length": flt(b_length),
+        "batch_width": flt(b_width),
+        "batch_thickness": flt(b_thickness),
+        "length": length,
+        "width": width,
+        "thickness": thickness,
+        "pieces": pieces,
+        "kg_per_piece": kg_per_piece,
+        "capacity_kg": capacity_kg,
+        "free_kg": free_kg,
+        # min() of the two, because you can neither cut more than you declared nor
+        # take more than is there.
+        "effective_capacity_kg": flt(min(capacity_kg, free_kg), 3) if capacity_kg else free_kg,
+        "inspection_block": _get_batch_inspection_block_reason(batch_no) or "",
+        "rwd_applies": group in RWD_GROUPS,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The fill — which member lands on which batch
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plan_fill(members, targets):
+    """Assign members to target batches, first-fit in table order, never splitting a row.
+
+    A single row cannot be split across two batches -- one row holds one batch link --
+    so a member that does not fit the current target moves wholly to the next one and
+    whatever was left on the previous target is stranded.
+
+    Once the cursor passes a target it never returns. That is the only variant an
+    operator can predict by reading the table top to bottom, which is what the
+    consolidate view is for. Best-fit or back-filling would pack the batches better and
+    produce an assignment nobody can anticipate from the grid.
+
+    Stranded capacity is reported per target rather than hidden, so an oversized row
+    early in the list that pushes everything onto batch 2 is visible as the cause.
+
+    `targets` are dicts from get_batch_capacity. Mutates neither argument.
+    """
+    leftover = [flt(t.get("effective_capacity_kg"), 3) for t in targets]
+    # Which member's weight closed each target. Reported because "226 Kg unused and the
+    # smallest unplaced row needs 141 Kg" invites the user to raise the count by 141 --
+    # and it still would not fit, because the batch closed earlier on a bigger row and
+    # the cursor never goes back. Naming the row that closed it is the only way that
+    # figure is actionable.
+    closed_by = [None] * len(targets)
+    assignments, unassigned = [], []
+
+    cursor = 0
+    for member in members:
+        need = flt(member.target_kg, 3)
+        while cursor < len(targets) and need > leftover[cursor] + EPS:
+            closed_by[cursor] = need
+            cursor += 1
+        if cursor >= len(targets):
+            unassigned.append(member)
+            continue
+        leftover[cursor] = flt(leftover[cursor] - need, 3)
+        assignments.append(frappe._dict({
+            "member": member,
+            "target_index": cursor,
+            "batch_no": targets[cursor].get("batch_no"),
+        }))
+
+    assigned_kg = [0.0] * len(targets)
+    assigned_rows = [0] * len(targets)
+    for a in assignments:
+        assigned_kg[a.target_index] = flt(assigned_kg[a.target_index] + a.member.target_kg, 3)
+        assigned_rows[a.target_index] += 1
+
+    return frappe._dict({
+        "assignments": assignments,
+        "unassigned": unassigned,
+        "leftover_kg": leftover,
+        "closed_by_kg": closed_by,
+        "assigned_kg": assigned_kg,
+        "assigned_rows": assigned_rows,
+        "shortfall_kg": flt(sum(flt(m.target_kg) for m in unassigned), 3),
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Preview — every refusal happens here, before anything is written
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _plan_hash(mip_name, key, members, targets):
+    """Fingerprint of everything the plan was computed against.
+
+    The apply path re-runs the preview and compares this. If stock moved, a row was
+    transferred, or someone else reassigned a member between preview and confirm, the
+    fingerprint changes and the stale plan is refused rather than applied to a world
+    that no longer matches it.
+    """
+    payload = json.dumps({
+        "mip": mip_name,
+        "key": list(key),
+        "members": sorted(
+            [m.source_table, m.source_row, m.batch_no, m.target_kg, m.transferred_qty]
+            for m in members
+        ),
+        "targets": [[t.get("batch_no"), t.get("effective_capacity_kg")] for t in targets],
+    }, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
+def _member_flags(members):
+    """Per-member flags that live on the Material Planning child row, not the MIP copy.
+
+    `is_virtual_excess` is not copied onto the MIP raw-material row at all, and
+    `cut_sheet_ref` is copied but can go stale. Both decide whether a member may be
+    touched, so both are read from the source of truth. One query per table.
+    """
+    flags = {}
+    by_table = {}
+    for m in members:
+        by_table.setdefault(m.source_table, []).append(m.source_row)
+
+    for table, names in by_table.items():
+        if table == UNAVAILABLE_ITEM:
+            continue
+        fields = ["name", "cut_sheet_ref"]
+        if table == MATERIAL_MAPPING:
+            fields.append("is_virtual_excess")
+        for r in frappe.get_all(table, filters={"name": ["in", names]}, fields=fields):
+            flags[(table, r.name)] = frappe._dict({
+                "cut_sheet_ref": r.get("cut_sheet_ref") or "",
+                "is_virtual_excess": 1 if r.get("is_virtual_excess") else 0,
+            })
+    return flags
+
+
+@frappe.whitelist()
+def preview_consolidate_batch_update(mip_name, consolidate_row_name, targets_json=None):
+    """Everything a reassignment would do, and every reason it would be refused.
+
+    Mutates nothing. This is where the operation is allowed to fail: once the apply
+    path starts, the internal commits in the reserve/unreserve helpers mean a failure
+    half way through leaves one plan already changed. So every condition that can be
+    checked up front is checked here, and the apply path treats this as a gate.
+    """
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+    key, members = expand_consolidate_row(mip, consolidate_row_name)
+
+    blockers, warnings = [], []
+
+    if not members:
+        blockers.append(_("This line no longer has any raw-material rows behind it. "
+                          "Refresh Raw Materials and try again."))
+        return {"ok": False, "blockers": blockers, "warnings": warnings,
+                "members": [], "material_plannings": [], "targets": []}
+
+    # 0.2 — a transferred line is refused whole. Reassigning only the untransferred
+    # remainder would split the line in two on the next rebuild, which is exactly the
+    # confusion this feature exists to remove.
+    moved = [m for m in members if m.transferred_qty > EPS]
+    if moved:
+        blockers.append(
+            _("{0} of {1} rows on this line have already been transferred ({2} Kg). "
+              "A line cannot be reassigned once any of it has shipped.")
+            .format(len(moved), len(members), flt(sum(m.transferred_qty for m in moved), 3))
+        )
+
+    # 0.3 — rows whose unreserve has side effects on ANOTHER document. unreserve_batches
+    # blanks a virtual-excess or cut-sheet row and hands its pieces back to the Cut Sheet
+    # or the SCO Excess Material Item it claimed them from. A re-run cannot undo that, so
+    # these are refused rather than risked.
+    flags = _member_flags(members)
+    claimed = [m for m in members if flags.get((m.source_table, m.source_row), {}).get("is_virtual_excess")]
+    on_sheet = [m for m in members if flags.get((m.source_table, m.source_row), {}).get("cut_sheet_ref")]
+    if claimed:
+        blockers.append(
+            _("{0} row(s) on this line hold material claimed from another plan's excess. "
+              "Unlink the claim on the Material Planning first.").format(len(claimed))
+        )
+    if on_sheet:
+        blockers.append(
+            _("{0} row(s) on this line are cutting from a Cut Sheet. "
+              "Release the allocation on the Cut Sheet first.").format(len(on_sheet))
+        )
+
+    # 0.4 / 0.5 — every plan must be writable, and they must share one warehouse or the
+    # reservation arithmetic below spans incomparable stock.
+    mp_names = sorted({m.material_planning for m in members if m.material_planning})
+    plans, warehouses = [], set()
+    for name in mp_names:
+        try:
+            mp = frappe.get_doc("Material Planning", name)
+            _require_write(mp)
+        except frappe.PermissionError:
+            blockers.append(_("You do not have permission to change reservations on {0}.").format(name))
+            continue
+        warehouses.add(mp.for_warehouse or "")
+        rows = [m for m in members if m.material_planning == name]
+        plans.append({
+            "material_planning": name,
+            "for_warehouse": mp.for_warehouse or "",
+            "rows": len(rows),
+            "qty": flt(sum(m.target_kg for m in rows), 3),
+        })
+
+    if len(warehouses) > 1:
+        blockers.append(
+            _("The plans behind this line use different Raw Material Warehouses ({0}). "
+              "They cannot be reassigned together.").format(", ".join(sorted(w or "—" for w in warehouses)))
+        )
+    warehouse = next(iter(warehouses), "") if len(warehouses) == 1 else ""
+    if not warehouse:
+        blockers.append(_("No Raw Materials Warehouse is set on the linked Material Planning."))
+
+    # 0.11 — the parked transfer draft is keyed on the batch, so changing it discards
+    # whatever was typed into the transfer popup and saved without transferring.
+    for row in (mip.consolidate_items or []):
+        if row.name == consolidate_row_name and row.get("draft_saved_on"):
+            warnings.append(
+                _("This line has a saved transfer draft from {0}. Changing the batch discards it.")
+                .format(frappe.utils.format_datetime(row.draft_saved_on))
+            )
+
+    # ── Targets ──────────────────────────────────────────────────────────────
+    targets_in = json.loads(targets_json) if isinstance(targets_json, str) else (targets_json or [])
+    targets = []
+    for t in targets_in:
+        priced = get_batch_capacity(
+            t.get("batch_no"), warehouse, t.get("pieces") or 0,
+            t.get("length"), t.get("width"), t.get("thickness"),
+        )
+        if not priced.get("ok"):
+            blockers.append(priced.get("error"))
+            continue
+        targets.append(priced)
+
+        # 0.6 — reassigning to the batch it already has is a no-op that would still
+        # unreserve and re-reserve every row.
+        if priced["batch_no"] == key[1]:
+            blockers.append(
+                _("Batch {0} is the one this line already uses.").format(priced["batch_no"])
+            )
+        # The batch must hold the item the line actually moves.
+        if priced["item_code"] != key[0]:
+            blockers.append(
+                _("Batch {0} holds {1}, but this line moves {2}.")
+                .format(priced["batch_no"], priced["item_code"], key[0])
+            )
+        # 0.9b — a batch with no free stock does NOT get caught downstream:
+        # _validate_batch_calc_qty skips its coverage check entirely when batch_stock is
+        # zero, so the save succeeds and the reservation silently comes back as nothing.
+        if priced["free_kg"] <= EPS:
+            blockers.append(
+                _("Batch {0} has no free stock in {1}.").format(priced["batch_no"], warehouse)
+            )
+        elif priced["capacity_kg"] > priced["free_kg"] + EPS:
+            warnings.append(
+                _("Batch {0}: {1} Kg was declared but only {2} Kg is free in {3}. "
+                  "Only what is free can be used.")
+                .format(priced["batch_no"], priced["capacity_kg"], priced["free_kg"], warehouse)
+            )
+        # 0.10 — an uninspected batch reserves nothing. A warning, not a blocker: the
+        # inspection may well complete before the transfer.
+        if priced["inspection_block"]:
+            warnings.append(
+                _("Batch {0}: {1}").format(priced["batch_no"], priced["inspection_block"])
+            )
+
+    # 0.7 — a batch already sitting in the OTHER child table of a plan we are about to
+    # save makes _validate_no_cross_table_batch_duplicate throw at save time. Catch it
+    # here, where nothing has moved yet.
+    if mp_names and targets:
+        blockers.extend(_cross_table_conflicts(mp_names, [t["batch_no"] for t in targets], members))
+
+    # ── Fill ─────────────────────────────────────────────────────────────────
+    total_kg = flt(sum(m.target_kg for m in members), 3)
+    fill = plan_fill(members, targets) if targets else None
+
+    if fill and fill.shortfall_kg > EPS:
+        placed_kg = flt(total_kg - fill.shortfall_kg, 3)
+        stranded_kg = flt(sum(fill.leftover_kg), 3)
+        blockers.append(
+            _("Only {0} Kg of this line's {1} Kg could be placed — {2} Kg short across "
+              "{3} row(s).").format(placed_kg, total_kg, fill.shortfall_kg, len(fill.unassigned))
+        )
+        # Capacity left over while rows go unplaced is NOT "not enough material" -- it
+        # is "no remaining row is small enough to fit what is left". Saying only
+        # "N Kg short" there reads as an empty batch and sends the user hunting for
+        # stock they already have.
+        if stranded_kg > EPS:
+            closers = [kg for kg in fill.closed_by_kg if kg]
+            detail = (
+                _("A batch closes as soon as a row does not fit, and rows are never split "
+                  "or reordered — here a row needing {0} Kg closed one.")
+                .format(flt(max(closers), 3))
+                if closers else
+                _("Rows are placed in table order and are never split.")
+            )
+            blockers.append(
+                _("{0} Kg of the capacity entered could not be used. {1} "
+                  "Raise that batch's piece count so the row fits, or add another batch.")
+                .format(stranded_kg, detail)
+            )
+
+    return {
+        "ok": not blockers and bool(targets),
+        "blockers": blockers,
+        "warnings": warnings,
+        "plan_hash": _plan_hash(mip_name, key, members, targets),
+        "group": {
+            "item_code": key[0], "batch_no": key[1], "cnc_process": key[2],
+            "rows": len(members), "total_kg": total_kg,
+            "plans": len(mp_names),
+            "parent_item_group": members[0].parent_item_group,
+            "rwd_applies": members[0].parent_item_group in RWD_GROUPS,
+        },
+        "material_plannings": plans,
+        "targets": [
+            dict(t,
+                 assigned_kg=fill.assigned_kg[i] if fill else 0.0,
+                 assigned_rows=fill.assigned_rows[i] if fill else 0,
+                 leftover_kg=fill.leftover_kg[i] if fill else flt(t["effective_capacity_kg"], 3))
+            for i, t in enumerate(targets)
+        ],
+        "members": [
+            dict(m, target_index=_target_index_of(fill, m))
+            for m in members
+        ],
+        "shortfall_kg": fill.shortfall_kg if fill else total_kg,
+    }
+
+
+def _target_index_of(fill, member):
+    if not fill:
+        return None
+    for a in fill.assignments:
+        if a.member.source_row == member.source_row and a.member.source_table == member.source_table:
+            return a.target_index
+    return None
+
+
+def _cross_table_conflicts(mp_names, batch_nos, members):
+    """Target batches already present in the other child table of a plan being saved.
+
+    _validate_no_cross_table_batch_duplicate refuses a Material Planning that holds one
+    batch in both Material Mapping and Available Raw Material. It fires at save time,
+    which is far too late here -- by then the members have been unreserved.
+
+    Rows that are themselves members are excluded: they are about to move, so they are
+    not a conflict with where they are moving to.
+    """
+    member_rows = {(m.source_table, m.source_row) for m in members}
+    problems = []
+    for table, field in ((MATERIAL_MAPPING, "batch"), (AVAILABLE_RAW_MATERIAL, "batch_no")):
+        rows = frappe.get_all(
+            table,
+            filters={"parent": ["in", mp_names], field: ["in", batch_nos]},
+            fields=["name", "parent", "idx", field + " as batch_no"],
+        )
+        for r in rows:
+            if (table, r.name) in member_rows:
+                continue
+            problems.append(
+                _("Batch {0} is already used on {1} row {2} of {3}. "
+                  "A plan cannot hold one batch in both tables.")
+                .format(r.batch_no,
+                        _("Material Mapping") if table == MATERIAL_MAPPING else _("Exact Match"),
+                        r.idx, r.parent)
+            )
+    return problems
+
+
+@frappe.whitelist()
+def get_candidate_batches(item_code, warehouse, limit=50):
+    """Batches of this item that actually have free stock in this warehouse.
+
+    Offered instead of a plain Batch link so the dialog cannot suggest a batch with
+    nothing in it. A zero-stock batch is the one failure the downstream validation does
+    NOT catch -- _validate_batch_calc_qty skips its coverage check when batch_stock is
+    zero, so the save succeeds and the reservation quietly comes back as nothing. Best
+    not to offer it in the first place.
+
+    Sorted by free stock descending: the batch most likely to cover a line first.
+    """
+    if not (item_code and warehouse):
+        return []
+
+    out = []
+    for batch_no in frappe.get_all(
+        "Batch", filters={"item": item_code, "disabled": 0}, pluck="name"
+    ):
+        free = _batch_free_kg(batch_no, warehouse)
+        if free <= EPS:
+            continue
+        length, width, thickness = _get_batch_dims(batch_no)
+        out.append({
+            "batch_no": batch_no,
+            "free_kg": free,
+            "length": flt(length),
+            "width": flt(width),
+            "thickness": flt(thickness),
+        })
+
+    out.sort(key=lambda b: -b["free_kg"])
+    return out[: int(limit)]

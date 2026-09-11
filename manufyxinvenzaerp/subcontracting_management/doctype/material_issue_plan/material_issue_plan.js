@@ -41,6 +41,7 @@ frappe.ui.form.on("Material Issue Plan", {
 		// away from the button people reach for next.
 		_add_update_batch_button(frm);
 		_add_view_all_raw_materials_button(frm);
+		_add_consolidate_update_batch_button(frm);
 		// The Manual button is removed at the client's request in favour of one
 		// doctype-wise ERP Manual page (production_management/page/erp_manual),
 		// added to a Workspace separately rather than linked from here. The
@@ -765,6 +766,7 @@ function _mip_paint_buttons(frm) {
 	window.mfx_paint_button(frm, "Return Excess Entry", "primary");
 	// Navigation and reports stay grey on purpose: Open Job Work Order, Download.
 	window.mfx_paint_grid(frm, "raw_materials", { alt: ["Update Batch"] });
+	window.mfx_paint_grid(frm, "consolidate_items", { alt: ["Update Batch"] });
 }
 
 // ── Transfer / CNC buttons ───────────────────────────────────────────────────
@@ -957,6 +959,14 @@ var MIP_THEME_CSS = `
 }
 .mip-transfer-theme .mip-pane table tbody td { background:#ffffff; }
 .mip-transfer-theme .mip-pane table thead th { background:#f4f5f7; }
+/* A row with nothing left over. The dimension boxes are disabled, but a greyed
+   box and a hover tooltip are not an answer to "why can't I type here" -- the
+   row has to say so without being asked. */
+.mip-transfer-theme tr.mfx-no-excess td { background:#fafafa; }
+.mip-transfer-theme .mip-xs-none {
+	display:block; font-size:10px; font-weight:600; line-height:1.3;
+	color:#c62828; white-space:nowrap; margin-top:2px;
+}
 `;
 
 function _mip_inject_theme() {
@@ -1434,6 +1444,19 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 			var why = no_excess
 				? " title='" + __("No excess on this item — nothing to describe.") + "'"
 				: "";
+			// Said in the cell, in red, next to the figure it explains -- not left to
+			// a tooltip nobody hovers. Zero and negative are different facts and must
+			// not share a label: zero means the transfer matched the drawings exactly,
+			// negative means less is going out than the drawings need, which is a
+			// shortfall to go and look at, not an off-cut that happens to be absent.
+			var no_excess_label = "";
+			if (sys === 0) {
+				no_excess_label = "<span class='mip-xs-none'>" + __("No excess material") + "</span>";
+			} else if (sys < 0) {
+				no_excess_label = "<span class='mip-xs-none'>" +
+					__("Short by {0} Kg — no excess", [format_number(Math.abs(sys), null, 3)]) +
+					"</span>";
+			}
 			var num = "<input type='number' step='0.001' min='0' class='form-control input-xs text-right ";
 			function box(cls, width, value, also_disabled) {
 				return num + cls + "' style='width:" + width + "px'" +
@@ -1448,7 +1471,7 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 				"<td class='text-right' style='white-space:nowrap'>" + format_number(e.drawing_kg, null, 3) + "</td>" +
 				"<td class='text-right' style='white-space:nowrap'>" + format_number(e.transfer_kg, null, 3) + "</td>" +
 				"<td class='text-right mip-xs-sys' style='white-space:nowrap;font-weight:600'>" +
-					format_number(sys, null, 3) + "</td>" +
+					format_number(sys, null, 3) + no_excess_label + "</td>" +
 				"<td>" + box("mip-xs-length", 100, flt(saved.length)) + "</td>" +
 				// Width is only used by the Plates formula -- Structurals rows never
 				// need it, so their Width box is read-only whatever the excess.
@@ -2480,4 +2503,277 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 	}
 
 	dialog.show();
+}
+
+// ── Consolidate Items: Update Batch ──────────────────────────────────────────
+//
+// The row-level Update Batch above moves ONE Material Planning child row. This moves
+// a whole consolidate line -- every raw-material row merged into it, across however
+// many Material Plannings they came from.
+//
+// It works because the reassignment is dimensionless: each member reserves its own
+// required Kg and expresses the piece count as a fraction, so the only figure that has
+// to reconcile is total Kg. What the user states per target batch is a cut size and a
+// piece count, which gives that batch a Kg capacity; rows then fill the batches in
+// table order.
+//
+// PHASE 1: preview only. The server endpoint writes nothing, and this dialog has no
+// apply action yet -- it exists to show what a reassignment WOULD do and to prove the
+// line expands to the rows people expect. See .claude/tasks/sep10_task1.md.
+
+const _MIP_CB = "manufyxinvenzaerp.subcontracting_management.material_issue_plan_batch_update.";
+
+function _add_consolidate_update_batch_button(frm) {
+	let grid = frm.fields_dict["consolidate_items"] && frm.fields_dict["consolidate_items"].grid;
+	if (!grid || frm.is_new()) return;
+
+	// "top" is not a preference here, it is required: consolidate_items is read_only,
+	// and Frappe hides .grid-footer entirely for a read-only grid whose rows all fit on
+	// one page -- which would take a bottom-toolbar button with it. Same reason the
+	// raw-materials button uses it, and the reason this is a toolbar button rather than
+	// a per-row Button field.
+	grid.add_custom_button(
+		frappe.utils.icon("edit", "xs") + " " + __("Update Batch"),
+		() => _show_consolidate_update_batch_dialog(frm),
+		"top"
+	);
+}
+
+function _show_consolidate_update_batch_dialog(frm) {
+	let lines = (frm.doc.consolidate_items || []).filter((r) => !!r.batch_no);
+	if (!lines.length) {
+		frappe.msgprint(__("No consolidated lines yet. Allocate batches on the Raw Materials tab first."));
+		return;
+	}
+
+	let selected = null;
+	let targets = [{}];
+	// Only batches with free stock in this plan's source warehouse are offered. A
+	// zero-stock batch is precisely the case downstream validation does not catch.
+	let candidates = [];
+
+	let d = new frappe.ui.Dialog({
+		title: __("Update Batch — Consolidate Items"),
+		size: "extra-large",
+		fields: [
+			{ fieldtype: "HTML", fieldname: "lines_html" },
+			{ fieldtype: "Section Break", label: __("New Batches"), fieldname: "targets_section" },
+			{ fieldtype: "HTML", fieldname: "targets_html" },
+			{ fieldtype: "Section Break", label: __("What This Would Do"), fieldname: "result_section" },
+			{ fieldtype: "HTML", fieldname: "result_html" },
+		],
+		primary_action_label: __("Preview"),
+		primary_action() { _preview(); },
+	});
+
+	// ── Line picker ──────────────────────────────────────────────────────────
+	function _render_lines() {
+		let th = "padding:6px 8px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;white-space:nowrap;";
+		let rows = lines.map(function (r) {
+			// A line with anything shipped cannot be reassigned at all, so it is shown
+			// greyed rather than hidden -- "why is my line not in the list" is a worse
+			// question than "why is it greyed".
+			let done = flt(r.transferred_qty) > 0.001;
+			let sel = selected && selected.name === r.name;
+			let style = done
+				? "cursor:not-allowed;color:#adb5bd;background:#fafbfc;"
+				: "cursor:pointer;" + (sel ? "background:#e3f2fd;" : "");
+			return `<tr data-name="${r.name}" data-ok="${done ? 0 : 1}" style="${style}">
+				<td style="padding:5px 8px">${frappe.utils.escape_html(r.item_code || "")}</td>
+				<td style="padding:5px 8px">${frappe.utils.escape_html(r.batch_no || "")}</td>
+				<td style="padding:5px 8px;text-align:right">${r.source_rows || 0}</td>
+				<td style="padding:5px 8px;text-align:right">${format_number(flt(r.qty), null, 3)}</td>
+				<td style="padding:5px 8px;text-align:right">${format_number(flt(r.transferred_qty), null, 3)}</td>
+				<td style="padding:5px 8px">${r.cnc_process ? __("CNC") : ""}</td>
+			</tr>`;
+		}).join("");
+
+		d.fields_dict.lines_html.$wrapper.html(
+			`<div style="max-height:26vh;overflow:auto;border:1px solid #e9ecef;border-radius:4px">
+			<table style="width:100%;border-collapse:collapse;font-size:12px">
+			<thead style="position:sticky;top:0;z-index:1"><tr>
+				<th style="${th}">${__("Item")}</th><th style="${th}">${__("Batch")}</th>
+				<th style="${th};text-align:right">${__("Rows")}</th>
+				<th style="${th};text-align:right">${__("Reqd Kg")}</th>
+				<th style="${th};text-align:right">${__("Issued Kg")}</th>
+				<th style="${th}">${__("CNC")}</th>
+			</tr></thead><tbody>${rows}</tbody></table></div>`
+		);
+
+		d.fields_dict.lines_html.$wrapper.find("tr[data-ok='1']").on("click", function () {
+			selected = lines.find((x) => x.name === $(this).data("name"));
+			_render_lines();
+			d.fields_dict.result_html.$wrapper.empty();
+			frappe.call({
+				method: _MIP_CB + "get_candidate_batches",
+				args: { item_code: selected.item_code, warehouse: frm.doc.source_warehouse || "" },
+				callback(r) { candidates = r.message || []; _render_targets(); },
+			});
+		});
+	}
+
+	// ── Target batches ───────────────────────────────────────────────────────
+	function _render_targets() {
+		if (!selected) {
+			d.fields_dict.targets_html.$wrapper.html(
+				`<div style="color:#8d99a6;font-size:12px;padding:6px 2px">`
+				+ __("Pick a line above first.") + `</div>`);
+			return;
+		}
+		let th = "padding:6px 8px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;white-space:nowrap;";
+		let rows = targets.map(function (t, i) {
+			return `<tr data-i="${i}">
+				<td style="padding:4px 6px"><input class="form-control input-xs _cb_batch" style="width:230px"
+					list="_cb_batch_options" autocomplete="off"
+					value="${frappe.utils.escape_html(t.batch_no || "")}" placeholder="${__("Batch")}"></td>
+				<td style="padding:4px 6px"><input type="number" step="0.001" class="form-control input-xs text-right _cb_len"
+					style="width:95px" value="${t.length || ""}"></td>
+				<td style="padding:4px 6px"><input type="number" step="0.001" class="form-control input-xs text-right _cb_wid"
+					style="width:95px" value="${t.width || ""}"></td>
+				<td style="padding:4px 6px"><input type="number" step="0.001" class="form-control input-xs text-right _cb_pcs"
+					style="width:85px" value="${t.pieces || ""}"></td>
+				<td style="padding:4px 6px;font-size:11px;color:#6c757d;white-space:nowrap" class="_cb_info">${t._info || ""}</td>
+				<td style="padding:4px 6px">${targets.length > 1
+					? `<button class="btn btn-xs btn-default _cb_del">&times;</button>` : ""}</td>
+			</tr>`;
+		}).join("");
+
+		d.fields_dict.targets_html.$wrapper.html(
+			`<div style="font-size:12px;color:#6c757d;margin-bottom:6px">`
+			+ __("Leave Length/Width blank to use the batch's own size. Pieces × that size is how much of the batch this line may take.")
+			+ `</div>
+			<table style="border-collapse:collapse;font-size:12px"><thead><tr>
+				<th style="${th}">${__("Batch")}</th><th style="${th}">${__("Length (mm)")}</th>
+				<th style="${th}">${__("Width (mm)")}</th><th style="${th}">${__("Pieces")}</th>
+				<th style="${th}">${__("Capacity")}</th><th style="${th}"></th>
+			</tr></thead><tbody>${rows}</tbody></table>
+			<button class="btn btn-xs btn-default _cb_add" style="margin-top:8px">+ ${__("Add batch")}</button>
+			<datalist id="_cb_batch_options">${(candidates || []).map((c) =>
+				`<option value="${frappe.utils.escape_html(c.batch_no)}">`
+				+ __("{0} Kg free · {1}×{2}", [format_number(c.free_kg, null, 3), c.length, c.width])
+				+ `</option>`).join("")}</datalist>`
+		);
+
+		let $w = d.fields_dict.targets_html.$wrapper;
+		$w.find("._cb_batch").on("change", function () {
+			let i = $(this).closest("tr").data("i");
+			targets[i].batch_no = $(this).val();
+			_price(i);
+		});
+		$w.find("._cb_len, ._cb_wid, ._cb_pcs").on("change", function () {
+			let $tr = $(this).closest("tr"), i = $tr.data("i");
+			targets[i].length = flt($tr.find("._cb_len").val());
+			targets[i].width = flt($tr.find("._cb_wid").val());
+			targets[i].pieces = flt($tr.find("._cb_pcs").val());
+			_price(i);
+		});
+		$w.find("._cb_add").on("click", function () { targets.push({}); _render_targets(); });
+		$w.find("._cb_del").on("click", function () {
+			targets.splice($(this).closest("tr").data("i"), 1);
+			_render_targets();
+		});
+	}
+
+	// Live capacity for one target, so the user sees what a piece count is worth before
+	// previewing the whole thing.
+	function _price(i) {
+		let t = targets[i];
+		if (!t.batch_no) return;
+		frappe.call({
+			method: _MIP_CB + "get_batch_capacity",
+			args: {
+				batch_no: t.batch_no, warehouse: frm.doc.source_warehouse || "",
+				pieces: t.pieces || 0, length: t.length || null, width: t.width || null,
+			},
+			callback(r) {
+				let p = r.message || {};
+				if (!p.ok) { t._info = `<span style="color:#c62828">${p.error || __("Unknown batch")}</span>`; }
+				else {
+					t.length = t.length || p.length;
+					t.width = t.width || p.width;
+					let over = p.capacity_kg > p.free_kg + 0.001;
+					t._info = __("{0} Kg", [format_number(p.capacity_kg, null, 3)])
+						+ ` <span style="color:${over ? "#c62828" : "#6c757d"}">(`
+						+ __("free {0}", [format_number(p.free_kg, null, 3)]) + ")</span>";
+				}
+				_render_targets();
+			},
+		});
+	}
+
+	// ── Preview ──────────────────────────────────────────────────────────────
+	function _preview() {
+		if (!selected) { frappe.msgprint(__("Pick a line first.")); return; }
+		frappe.call({
+			method: _MIP_CB + "preview_consolidate_batch_update",
+			args: {
+				mip_name: frm.doc.name,
+				consolidate_row_name: selected.name,
+				targets_json: JSON.stringify(targets.filter((t) => t.batch_no)),
+			},
+			freeze: true,
+			freeze_message: __("Checking…"),
+			callback(r) { _render_result(r.message || {}); },
+		});
+	}
+
+	function _render_result(res) {
+		let html = "";
+		let g = res.group || {};
+
+		html += `<div style="font-size:12px;margin-bottom:10px">`
+			+ __("This line covers <b>{0}</b> row(s) totalling <b>{1} Kg</b>, across <b>{2}</b> Material Planning(s).",
+				[g.rows || 0, format_number(flt(g.total_kg), null, 3), g.plans || 0])
+			+ (g.rwd_applies
+				? " " + __("They would be reassigned without dimensions — each row reserving its own required Kg.")
+				: " " + __("This item group does not use dimensionless reserving."))
+			+ `</div>`;
+
+		(res.material_plannings || []).forEach(function (p) {
+			html += `<div style="font-size:12px;color:#495057">• <b>${frappe.utils.escape_html(p.material_planning)}</b> — `
+				+ __("{0} row(s), {1} Kg", [p.rows, format_number(flt(p.qty), null, 3)]) + `</div>`;
+		});
+
+		(res.blockers || []).forEach(function (b) {
+			html += `<div style="margin-top:8px;padding:8px 10px;background:#fef2f2;border-left:3px solid #b91c1c;
+				border-radius:3px;font-size:12px;color:#7f1d1d">${b}</div>`;
+		});
+		(res.warnings || []).forEach(function (w) {
+			html += `<div style="margin-top:8px;padding:8px 10px;background:#fffbeb;border-left:3px solid #f59e0b;
+				border-radius:3px;font-size:12px;color:#78350f">${w}</div>`;
+		});
+
+		if ((res.targets || []).length) {
+			let th = "padding:5px 8px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;";
+			html += `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:12px">
+				<thead><tr><th style="${th}">${__("Batch")}</th>
+				<th style="${th};text-align:right">${__("Capacity")}</th>
+				<th style="${th};text-align:right">${__("Free")}</th>
+				<th style="${th};text-align:right">${__("Assigned")}</th>
+				<th style="${th};text-align:right">${__("Rows")}</th>
+				<th style="${th};text-align:right">${__("Unused")}</th></tr></thead><tbody>`
+				+ (res.targets).map(function (t) {
+					return `<tr><td style="padding:5px 8px">${frappe.utils.escape_html(t.batch_no)}</td>
+					<td style="padding:5px 8px;text-align:right">${format_number(flt(t.capacity_kg), null, 3)}</td>
+					<td style="padding:5px 8px;text-align:right">${format_number(flt(t.free_kg), null, 3)}</td>
+					<td style="padding:5px 8px;text-align:right;font-weight:600">${format_number(flt(t.assigned_kg), null, 3)}</td>
+					<td style="padding:5px 8px;text-align:right">${t.assigned_rows}</td>
+					<td style="padding:5px 8px;text-align:right;color:${flt(t.leftover_kg) > 0.001 ? "#a8620a" : "#6c757d"}">
+						${format_number(flt(t.leftover_kg), null, 3)}</td></tr>`;
+				}).join("") + `</tbody></table>`;
+		}
+
+		html += `<div style="margin-top:12px;padding:8px 10px;border-radius:3px;font-size:12px;`
+			+ (res.ok
+				? `background:#e3f3ea;color:#1a7f4b">` + __("This reassignment is valid.")
+					+ " " + __("Applying it is not built yet — this is a preview only.")
+				: `background:#f4f5f7;color:#495057">` + __("Nothing would be changed."))
+			+ `</div>`;
+
+		d.fields_dict.result_html.$wrapper.html(html);
+	}
+
+	_render_lines();
+	_render_targets();
+	d.show();
 }
