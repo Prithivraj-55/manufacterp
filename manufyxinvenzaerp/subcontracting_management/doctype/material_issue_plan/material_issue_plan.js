@@ -1132,7 +1132,9 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 		d._planned_qty = flt(d.qty);
 		var is_frac = Math.abs(d._planned_sec_qty - Math.round(d._planned_sec_qty)) > 0.001;
 		var done = flt(d.transferred_qty);
-		var avail = flt(d.available_qty);
+		// What this plan may take: physical stock less other plans' reservations (and a
+		// Cut Sheet's W1 cap). "In Stock" below still shows the physical figure.
+		var avail = flt(d.available_for_plan !== undefined ? d.available_for_plan : d.available_qty);
 		var short = avail + 0.001 < flt(d.qty);
 		// Sec Nos can only drive the weight when both are non-zero.
 		var sec_drives_qty = d._planned_sec_qty > 0 && d._planned_qty > 0;
@@ -1148,8 +1150,13 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 			"<td class='text-right' style='white-space:nowrap'>" +
 				(done > 0 ? "<span style='color:#15803d'>" + format_number(done, null, 3) + "</span>" : "—") + "</td>" +
 			"<td class='text-right' style='white-space:nowrap'>" +
-				(short ? "<span style='color:#b91c1c;font-weight:600'>" + format_number(avail, null, 3) + "</span>"
-				       : format_number(avail, null, 3)) + "</td>" +
+				(short ? "<span style='color:#b91c1c;font-weight:600'>" + format_number(flt(d.available_qty), null, 3) + "</span>"
+				       : format_number(flt(d.available_qty), null, 3)) +
+				(flt(d.reserved_for_others_kg) > 0.001
+					? "<div class='text-muted' style='font-size:11px;white-space:nowrap'>" +
+					  __("{0} reserved for other drawings or plans", [format_number(flt(d.reserved_for_others_kg), null, 3)]) +
+					  "</div>"
+					: "") + "</td>" +
 			"<td class='text-right'>" +
 				(sec_drives_qty
 					? "<input type='number' step='0.001' min='0' class='form-control input-xs text-right mip-sec-qty' " +
@@ -1185,7 +1192,7 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 		var $row = $input.closest("tr");
 		var d = items[parseInt($row.data("idx"), 10)];
 		var v = flt($input.val());
-		var max = Math.min(flt(d.qty), flt(d.available_qty));
+		var max = Math.min(flt(d.qty), flt(d.available_for_plan !== undefined ? d.available_for_plan : d.available_qty));
 
 		if (v <= 0) {
 			frappe.show_alert({ message: __("Transfer qty must be greater than zero."), indicator: "red" }, 5);
@@ -1194,8 +1201,9 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 		}
 		if (v > max + 0.001) {
 			frappe.show_alert({
-				message: __("Only {0} can be transferred now (pending {1}, in stock {2}).",
-					[format_number(max, null, 3), format_number(flt(d.qty), null, 3), format_number(flt(d.available_qty), null, 3)]),
+				message: __("Only {0} can be transferred now (pending {1}, in stock {2}, reserved for other drawings or plans {3}).",
+					[format_number(max, null, 3), format_number(flt(d.qty), null, 3), format_number(flt(d.available_qty), null, 3),
+					 format_number(flt(d.reserved_for_others_kg), null, 3)]),
 				indicator: "red",
 			}, 7);
 			$input.val(flt(max, 3));
@@ -1231,6 +1239,9 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 				planned_sec_qty: d._planned_sec_qty,
 				planned_qty: d._planned_qty,
 				new_sec_qty: new_sec,
+				cnc_process: d.cnc_process ? 1 : 0,
+				// The CNC-to-supplier leg reads what is at CNC, not the source warehouse.
+				transfer_type: is_cnc_fwd ? "cnc_forward" : transfer_type,
 			},
 			callback: function(r) {
 				if (!r.message) return;
@@ -1239,6 +1250,10 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 					frappe.msgprint({ title: __("Not Enough Stock"), message: m.message, indicator: "red" });
 					$input.val(flt(d.custom_sec_qty, 3));
 					return;
+				}
+				if (m.warning) {
+					// Allowed, but it takes stock other rows were planned against.
+					frappe.msgprint({ title: __("Stock Also Planned Elsewhere"), message: m.warning, indicator: "orange" });
 				}
 				d.custom_sec_qty = m.custom_sec_qty;
 				d.qty = m.qty;
@@ -1285,7 +1300,9 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 	var tot_planned = items.reduce(function(a, d) { return a + flt(d.planned_qty); }, 0);
 	var tot_done    = items.reduce(function(a, d) { return a + flt(d.transferred_qty); }, 0);
 	var tot_pending = items.reduce(function(a, d) { return a + flt(d.qty); }, 0);
-	var short_rows  = items.filter(function(d) { return flt(d.available_qty) + 0.001 < flt(d.qty); });
+	var short_rows  = items.filter(function(d) {
+		return flt(d.available_for_plan !== undefined ? d.available_for_plan : d.available_qty) + 0.001 < flt(d.qty);
+	});
 
 	var summary = "<div style='background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px;margin-bottom:10px;font-size:12px'>"
 		+ "<b>" + __("Planned") + ":</b> " + format_number(tot_planned, null, 3) + " Kg"

@@ -605,4 +605,74 @@ Tests: `verify_consolidate_batch_reassign.py`, `verify_arm_reserve_without_dimen
 
 ---
 
+## 21. Transfer popup: piece weight and stock available to the plan (2026-09-14)
+
+Reported on MIP-2026-00005. Raising PLATE16 from 0.48 Nos to 1 whole piece was refused
+with *"has only 2260.8 Kg free … 1.0 Nos needs 2262.108 Kg"*, on a batch holding exactly
+one 2,260.8 Kg plate.
+
+### 21.1 What one piece weighs
+
+The popup worked out a piece as *planned Kg ÷ planned Sec Nos*. Sec Nos is stored to 3
+decimals, so for a small fraction that division is wrong: 1,085.812 ÷ 0.480 = 2,262.108
+Kg, where the plate weighs 2,260.8. On PLATE12 (6.264 Kg = 0.004433 Nos, stored 0.004)
+it priced one piece at **1,566 Kg against a real 1,413**. Rounding up would have shipped
+153 Kg too much and booked 153 Kg of excess that never existed. A transfer to the
+supplier does not recalculate weight from dimensions, so the wrong figure would have
+moved as it was.
+
+A piece is now priced from the line's **own dimensions** (L × W × T × unit weight), the
+same formula used everywhere else. They are only trusted when they **agree with the
+plan**, meaning the stored Sec Nos is exactly what the planned Kg rounds to at that
+piece weight. A line whose dimensions describe something else (a Cut Sheet row, whose
+piece is the cut W1, or inconsistent data) keeps the old plan-based figure, so this is
+never worse than before. Leaving Sec Nos at the plan still sends the exact planned Kg,
+and lowering it can never ask for more than the plan.
+
+The final check at **Verify and Transfer** recalculates the Kg on the server from Sec
+Nos × piece weight and ignores the figure sent from the browser. The CNC → Supplier leg
+does the same, and there it can only lower a line against what is actually at CNC.
+
+### 21.2 How much of a batch this plan may take
+
+This used to be physical stock only. That correctly included the plan's own
+reservation, but it ignored stock reserved by **other drawings or plans**, including
+other DUNOs of a shared Material Planning. Now:
+
+> **Available for this plan = stock in the warehouse − what other rows still hold reserved.**
+
+Reservations in a different warehouse, and rows already released by their own transfer,
+are not counted. The popup's **In Stock** column still shows physical stock, with a note
+such as *"1,965.876 reserved for other drawings or plans"* under it.
+
+Rows elsewhere that are **assigned but not reserved** to the same batch do not reduce
+what is available. Taking the stock they were planned against raises a non-blocking
+**Stock Also Planned Elsewhere** warning that names them.
+
+### 21.3 The message
+
+> **Not enough stock in batch PLT8-T8-L1250-W12000-R010** (Stores - MIPL)
+> You asked for **3 Nos × 942 Kg per piece = 2826 Kg**
+> Planned for this line: 1965.876 Kg · In stock: 4710 Kg
+> Reserved for other drawings or plans: 1965.876 Kg — *each row, with its DUNO*
+> Available for this plan: **2744.124 Kg** · **Short by: 81.876 Kg**
+> The most this batch can give is **2 whole piece(s)** (1884 Kg), or up to 2744.124 Kg as a fraction.
+
+### 21.4 The same warning when reassigning a batch
+
+A Consolidate Items reassignment used to check only **reserved** stock, so it could move
+a line onto a batch that other rows had assigned but not reserved. That Material
+Planning then refused to save. This is how MP-2026-00015 got stuck on 14 Sep 2026: PLATE16 on
+MIP-2026-00005 was moved onto the one-piece PLT16-T16-L12000-W1500-R008, which two
+unreserved MP-2026-00015 rows (TYPE 1 and TYPE 2) were planned against. The preview and
+the confirmation now warn and name those rows. It is a warning, not a block: free stock
+is still decided by reservations.
+
+**Key files**: `material_issue_plan_transfer.py` (`_line_kg_per_piece`, `_qty_for_sec`,
+`_batch_availability_for_plan`, `_shortage_message`, `update_transfer_sec_qty`,
+`_validate_selected_against_stock`, `create_mip_cnc_partial_forward`),
+`material_issue_plan.js` (transfer popup). Test: `verify_transfer_piece_weight.py`.
+
+---
+
 *This document covers all major features implemented in the custom app. Minor utility helpers, internal validation guards, and test scaffolding are not listed.*

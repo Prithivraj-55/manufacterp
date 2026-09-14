@@ -387,6 +387,32 @@ def run(live=0):
           and "check_mip_batch_change_allowed" in js, True)
 
     print()
+    print("=== 5f. A target batch assigned-but-unreserved elsewhere is warned about ===")
+    # Reserved stock is what blocks. A row elsewhere holding the batch WITHOUT a
+    # reservation does not -- but moving a line onto that batch can leave its Material
+    # Planning unable to save (MP-2026-00015, 14 Sep 2026), so the preview says so.
+    claimed = frappe.db.sql("""
+        SELECT m.batch, p.for_warehouse FROM `tabMaterial Planning Material Mapping` m
+        JOIN `tabMaterial Planning` p ON p.name = m.parent
+        WHERE IFNULL(m.batch, '') != '' AND m.is_reserved = 0 AND m.batch_calc_qty > 0
+        LIMIT 20""", as_dict=True)
+    found = next((c for c in claimed if bu._assigned_elsewhere(c.batch, c.for_warehouse, set())), None)
+    if not found:
+        print("  (no batch assigned-but-unreserved on this site -- skipped)")
+    else:
+        rows = bu._assigned_elsewhere(found.batch, found.for_warehouse, set())
+        check("assigned-but-unreserved rows on %s are listed" % found.batch, len(rows) > 0, True)
+        check("each names its plan, row and Kg",
+              all(r["material_planning"] and r["idx"] and r["qty"] > 0 for r in rows), True)
+        excluded = bu._assigned_elsewhere(found.batch, found.for_warehouse,
+                                          {(bu.MATERIAL_MAPPING, n) for n in frappe.get_all(
+                                              bu.MATERIAL_MAPPING, filters={"batch": found.batch}, pluck="name")})
+        check("the line's own members are never listed against it", excluded, [])
+    src = inspect.getsource(bu._build_plan)
+    check("the preview raises it as a warning, not a blocker",
+          "warnings.append(" in src and "_assigned_elsewhere(" in src, True)
+
+    print()
     print("=== 6. Live round trip (writes) ===")
     if not live:
         print("  (skipped -- pass live=1 to run it; see this file's docstring)")

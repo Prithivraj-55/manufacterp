@@ -627,6 +627,37 @@ def _build_plan(mip_name, consolidate_row_name, targets_json=None):
                 _("Batch {0}: {1}").format(priced["batch_no"], priced["inspection_block"])
             )
 
+    # 0.9c — rows elsewhere with a target batch ASSIGNED but not reserved. Nothing is
+    # held for them, so they do not reduce free stock and do not block -- but moving
+    # this line onto the batch can leave them less than they were planned against, and
+    # that Material Planning then refuses to save until someone changes them. That is
+    # exactly how MP-2026-00015 became unsaveable (14 Sep 2026), so it is said up front.
+    member_rows = {(m.source_table, m.source_row) for m in members}
+    for priced in targets:
+        waiting = _assigned_elsewhere(priced["batch_no"], warehouse, member_rows)
+        if not waiting:
+            continue
+        need = flt(sum(w["qty"] for w in waiting), 3)
+        taking = flt(sum(m.target_kg for m in members), 3) if len(targets) == 1 else None
+        left = flt(priced["free_kg"] - (taking or 0), 3)
+        if taking is not None and left + EPS >= need:
+            continue
+        rows_html = "".join(
+            "<li>{0} — {1} {2}{3}: {4} Kg</li>".format(
+                frappe.utils.escape_html(w["material_planning"]), _("row"), w["idx"],
+                " (" + _("DUNO") + " " + frappe.utils.escape_html(w["duno"]) + ")" if w["duno"] else "", w["qty"])
+            for w in waiting)
+        warnings.append(
+            _("Batch {0} is also assigned — but not reserved — to other rows needing {1} Kg:")
+            .format(priced["batch_no"], need)
+            + "<ul style='margin:4px 0 4px 18px'>" + rows_html + "</ul>"
+            + (_("After this reassignment only {0} Kg of it is left for them. Their Material Planning "
+                 "will refuse to save until those rows are given another batch.").format(max(0.0, left))
+               if taking is not None else
+               _("This line may take the stock they were planned against. Their Material Planning "
+                 "will refuse to save if it does."))
+        )
+
     # 0.7 — a batch already sitting in the OTHER child table of a plan we are about to
     # save makes _validate_no_cross_table_batch_duplicate throw at save time. Catch it
     # here, where nothing has moved yet.
@@ -714,6 +745,39 @@ def _build_plan(mip_name, consolidate_row_name, targets_json=None):
 def preview_consolidate_batch_update(mip_name, consolidate_row_name, targets_json=None):
     """What a reassignment would do, and every reason it would be refused. Read-only."""
     return _build_plan(mip_name, consolidate_row_name, targets_json).response
+
+
+def _assigned_elsewhere(batch_no, warehouse, exclude_rows):
+    """Rows on other plans with this batch assigned but not reserved, still needing it.
+
+    A row released by its own transfer looks exactly like one never reserved, so rows
+    on plans that have already issued this batch are left out -- the same rule the
+    transfer popup uses (_mps_that_moved_batch). When that cannot be told apart, nothing
+    is returned rather than a list that might be wrong.
+    """
+    from manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer import (
+        _mps_that_moved_batch,
+    )
+    rows = []
+    for table, field, need_field in ((MATERIAL_MAPPING, "batch", "batch_calc_qty"),
+                                     (AVAILABLE_RAW_MATERIAL, "batch_no", "required_qty")):
+        for r in frappe.get_all(
+            table, filters={field: batch_no, "is_reserved": 0},
+            fields=["name", "parent", "idx", "duno_mark_no", need_field + " as need"],
+            order_by="parent asc, idx asc",
+        ):
+            if (table, r.name) in exclude_rows or flt(r.need) <= EPS:
+                continue
+            if warehouse and (frappe.db.get_value("Material Planning", r.parent, "for_warehouse") or "") != warehouse:
+                continue
+            rows.append({"material_planning": r.parent, "idx": r.idx,
+                         "duno": r.duno_mark_no or "", "qty": flt(r.need, 3)})
+    if not rows:
+        return []
+    moved = _mps_that_moved_batch(batch_no)
+    if moved is None:
+        return []
+    return [r for r in rows if r["material_planning"] not in moved]
 
 
 def _target_index_of(fill, member):

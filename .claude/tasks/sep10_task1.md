@@ -694,3 +694,50 @@ Tests: `verify_consolidate_batch_apply.py` §5e.
 
 Tests: `verify_consolidate_batch_apply.py` §5d. All checks write inside a transaction
 and roll back.
+
+
+---
+
+## 12. Transfer popup piece weight and plan availability, 14 Sep 2026
+
+Reported: PLATE16 0.48 → 1 Nos refused as needing 2,262.108 Kg of a 2,260.8 Kg plate.
+
+Root cause: `update_transfer_sec_qty` priced a piece as planned Kg / planned Sec Nos,
+with Sec Nos rounded to 3 decimals. On MIP-2026-00005 it would have been refused
+wrongly on PLATE16 and PLATE25. On PLATE12 it would have shipped 1,566 Kg where a piece
+is 1,413, and booked 153 Kg of fictitious excess. Availability was physical stock only,
+so other drawings' reservations were invisible.
+
+Fixed in `material_issue_plan_transfer.py`:
+- `_line_kg_per_piece`: price from dimensions when they agree with the plan (tolerance =
+  0.0005 × rows merged + 0.0001), otherwise the old ratio. Checked against all 28 reserved
+  Structurals/Plates lines on the site: all 20 real ones agree, and the 8 fallbacks are
+  test rows with no dimensions.
+- `_qty_for_sec`: unchanged Sec Nos = exact planned Kg; lowering is capped at the plan.
+- `_batch_availability_for_plan`: physical − other rows' reserved_qty, same warehouse
+  only. Own rows come from the same MP/DUNO scope as the pending list. Also lists rows
+  assigned but not reserved, leaving out those released by their own transfer
+  (`_mps_that_moved_batch`).
+- `_validate_selected_against_stock` recalculates Kg on the server; the detailed
+  `_shortage_message` covers single lines and both CNC legs.
+- `_update_cnc_forward_sec_qty` for the CNC → Supplier leg; `create_mip_cnc_partial_forward`
+  also recalculates Kg.
+- Pending lines now carry `source_rows`, `kg_per_piece`, `piece_from_dimensions`,
+  `available_for_plan` and `reserved_for_others_kg`. The popup limits against
+  `available_for_plan`.
+
+New PLATE8 block (3 Nos): genuine. The other 1,965.876 Kg is MP-2026-00017's DUNO TYPE 2
+reservation, which belongs to another Issue Plan.
+
+Also: `_assigned_elsewhere` warning in the Consolidate Items preview (§21.4 of the
+features doc).
+
+**Open, needs a client decision:** MP-2026-00015 cannot be saved. Its rows 5 and 23
+(1,085.812 Kg each, unreserved) are on PLT16-T16-L12000-W1500-R008, and since the
+14:45 reassignment MIP-2026-00005's reserved PLATE16 row holds 1,085.812 Kg of that
+single 2,260.8 Kg plate. `verify_pr_partial_receipt_allocation` §5 fails on this live
+data state; it passed before. No code change caused it.
+
+Tests: `verify_transfer_piece_weight.py` (45), `verify_consolidate_batch_apply.py` §5f.
+Browser-verified: PLATE16 1 Nos accepted at 2,260.800 with the warning; PLATE8 3 Nos
+refused with the full message; no Stock Entry or draft written.
