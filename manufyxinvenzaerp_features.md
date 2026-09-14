@@ -442,4 +442,237 @@ script kept at `tests/move_fixtures_to_custom_json.py`.
 
 ---
 
+## 20. Batch reassignment from Consolidate Items (2026-09-11)
+
+Material Issue Plan's **Raw Materials** grid has long had an *Update Batch* action that
+moves one Material Planning row to a different batch. This adds the same action to the
+**Consolidate Items** grid, where a line is not a row but a *merge* of N rows pointing
+at N Material Planning child rows, possibly across several plans. Reassigning one line
+reassigns all of them.
+
+What makes that workable is **Reserve stock without dimensions**: a row in that mode
+reserves exactly its required Kg and expresses the piece count as a fraction, so
+per-row dimension matching disappears and only one number has to reconcile - total Kg.
+A line needing 1,000 Kg across 50 rows can move to a new batch whatever mixture of
+dimension-matched and dimensionless rows it started as.
+
+### 20.1 Reserve stock without dimensions, on Exact Match
+
+The waiver existed only on Material Mapping. It is now on **Material Planning Available
+Raw Material** too, which fixes the per-row *Update Batch* dialog for exact-match rows:
+the dialog always sent the checkbox and the server silently dropped it.
+
+It does **less** here, deliberately. An exact-match row already reserves its Allocated
+Qty in Kg verbatim - `reserve_exact_match_batches` does no dimension arithmetic at all -
+so that figure is untouched. The waiver's only effect is Sec Qty (NOS), which stops
+being a whole-piece allocation and becomes the reserved weight expressed as a fraction
+of one piece of the assigned batch. **Allocated Qty in Batch is never rewritten**: it is
+this row's share of a requirement that may have been split across several batches.
+
+The flag is set automatically when a batch is reassigned from the Material Issue Plan,
+and can be ticked by hand during planning. It is edited in the expanded row (like
+Material Mapping's), not as a grid column. Reserved rows cannot be toggled, and it
+applies to Structurals and Plates only.
+
+### 20.2 The Update Batch dialog on Consolidate Items
+
+**This is the only place a batch is reassigned on a Material Issue Plan.** Since
+14 Sep 2026 the Raw Materials grid's toolbar *Update Batch* is no longer added and its
+per-row button is hidden (both kept in code, so they can come back). Consolidate Items
+has the button on **every row** — opening the dialog straight onto that line — as well
+as above the grid.
+
+The grid is read-only, and Frappe only renders a Button field on a row it can edit, so
+the row button is drawn by a cell formatter and its click is caught before the row's
+own click handler. A line with anything already transferred shows *Transferred*
+instead of a button.
+
+Three steps, because applying cannot be undone in one action:
+
+1. **Preview.** Name one or more target batches and a **piece count** for each.
+   Length and Width are shown for reference but are the batch's own size and **cannot
+   be edited** — nothing typed there was ever saved or transferred, so they were
+   removed as inputs (the server ignores them too). The dialog shows each batch's
+   **Weight** (pieces × the batch's piece weight) against its **Total available
+   Weight**, then reports what would happen: rows and Kg, every Material Planning
+   involved, and **which row lands on which batch**.
+2. **Reassign Batch**, available only after a clean preview, opens **Confirm Batch
+   Reassignment**: every row with its Material Planning, **current batch, whether it is
+   reserved and how many Kg it holds**, and the new batch and Kg it will get. It spells
+   out what Yes does — the existing reservations are unreserved, every row is assigned
+   to the new batch, and every row is reserved again.
+3. **Yes, Unreserve and Reassign** applies it. The result reads *"Unreserved N row(s)
+   from OLD and reserved them on NEW (X Kg)."* Any edit before confirming drops back to
+   Preview, and the server independently refuses a plan whose figures changed since.
+
+In the result table, **Weight** is what the batch was allowed to give, **Total Batch
+Weight** is its free stock (total less every plan's reservations), and **Excess** is
+the part of that Weight this line did not use — not material returned.
+
+Only batches with free stock in the plan's source warehouse are offered - a zero-stock
+batch is the one case downstream validation does not catch.
+
+### 20.3 Splitting one line across several batches
+
+Rows fill the first batch in table order until its capacity is used, then move to the
+next. **A row is never split across two batches**, and once the fill passes a batch it
+never comes back to it - the only order an operator can predict by reading the grid top
+to bottom. A row too big for what is left closes that batch, and the capacity left
+stranded is reported rather than hidden, naming the row that closed it.
+
+If the batches entered cannot cover the whole line, the reassignment is **refused**
+rather than partly applied.
+
+Each batch is priced at its **own recorded size**. (Until 14 Sep 2026 a cut size could
+be typed here; it steered the split but was never saved, so the Stock Entry carried the
+batch's real size regardless. The inputs were made read-only for that reason.)
+
+### 20.4 Nuts and Bolts
+
+No waiver - a bolt's weight is exact and a fractional bolt means nothing. The piece
+count is computed explicitly instead, and a count that does not come out whole is
+reported rather than rounded, because rounding would change the line's total weight.
+
+### 20.5 What happens when something goes wrong
+
+Everything that can be refused is refused **before** the first write: a line with
+anything already transferred, rows holding material claimed from another plan's excess
+or from a Cut Sheet, plans the user cannot write to, plans using different warehouses,
+a batch already in the other table, a batch with no free stock, and any shortfall.
+Uninspected batches and a parked transfer draft raise warnings rather than blocks.
+
+Plans are then written **one at a time**. If one fails, the message names exactly what
+was applied, where it stopped and what was untouched. The stopped plan's rows are
+released from reservation but **still carry their original batch** - nothing is lost,
+and re-running recovers, because members are re-derived from current state each time so
+rows that already moved are no longer part of the line.
+
+**A reassign clears that line's unfinished "Select Materials to Transfer" entries**
+(the ones parked with *Save and Close*), since they are keyed on the batch. No stock
+has moved when this happens. The dialog warns: *"This line has unfinished entries saved
+from "Select Materials to Transfer" on … (not yet transferred). Changing the batch
+clears them — you will need to re-enter them in the transfer popup."*
+
+### 20.5a Excess after a reassignment
+
+A reassigned row reserves exactly its required Kg, so its planned excess becomes zero.
+The excess appears at **transfer**, when fractional Sec Nos are rounded up to whole
+pieces: the server books *Kg sent − Kg planned* for each item + batch line, and prices a
+piece at the **new batch's own** dimensions. That is the same figure the dialog's
+**Excess** column shows. On a split, each batch is booked separately.
+
+**No batch change once stock has moved (14 Sep 2026).** Once any Stock Entry exists
+against a Material Issue Plan, no batch on it can be reassigned. That covers a
+transfer, a CNC leg, an excess return, process loss or the final entry, and **drafts
+count too**. A reassignment ends by rebuilding the Raw Materials table, and that table
+must not be rebuilt under documents already created from it. Every Update Batch entry
+point checks first and shows *"The batch cannot be reassigned. These actions have
+already been performed on MIP-…: [entries]. Because of this the Raw Materials table
+cannot be refreshed, so the batch cannot be changed."* The server refuses the same case
+on preview, on apply, and on the per-row reassignment when called from the plan.
+Material Planning's own grid is not affected.
+
+This rule is wider than the Refresh Raw Materials button's older one, which only counts
+submitted entries tagged to the SCO or Work Order.
+
+Two gaps were closed on 14 Sep 2026:
+
+- **"Reused by" pointer on excess-return batches.** When a batch that came from an
+  earlier excess return is reserved into a plan, its SCO Excess Material Item records
+  which row took it. Moving that row to another batch used to leave the pointer behind,
+  so the source plan still showed the off-cut as reused. It is now re-pointed to another
+  row still holding the batch, or cleared (`_resync_excess_item_mapping`), for both the
+  Consolidate Items and the per-row reassignment.
+- **Round-up excess on already-transferred rows.** Every rebuild of Raw Materials, which
+  every batch update ends with, used to blank `transfer_excess_kg` on rows transferred
+  earlier. Excess Material Items was never affected. The figure is now carried across
+  the rebuild while the row keeps the same batch. Checked against the Decision Log's
+  "Round Up at Transfer" entries: no plan on the site had lost this figure.
+
+### 20.6 Verified
+
+Against restored live data: a 3-row / 217.344 Kg line moved to another batch and back
+with every row returning byte-identical; Sec Nos correctly re-derived against a piece
+2.8x larger; the same line split across two batches with 32.903 Kg correctly reported
+as stranded; and the whole dialog driven end to end in a browser.
+
+**Key files**: `subcontracting_management/material_issue_plan_batch_update.py` (new),
+`material_planning.py` (`_apply_batch_to_arm_row`, `_sec_nos_for_weight_arm`, the
+exact-match waiver loop), `material_planning_available_raw_material.json` (new field),
+`material_issue_plan.js` (the dialog), `material_planning.js` (the row handler).
+Tests: `verify_consolidate_batch_reassign.py`, `verify_arm_reserve_without_dimensions.py`,
+`verify_consolidate_batch_apply.py`. Plan of record: `.claude/tasks/sep10_task1.md`.
+
+---
+
+## 21. Transfer popup: piece weight and stock available to the plan (2026-09-14)
+
+Reported on MIP-2026-00005. Raising PLATE16 from 0.48 Nos to 1 whole piece was refused
+with *"has only 2260.8 Kg free … 1.0 Nos needs 2262.108 Kg"*, on a batch holding exactly
+one 2,260.8 Kg plate.
+
+### 21.1 What one piece weighs
+
+The popup worked out a piece as *planned Kg ÷ planned Sec Nos*. Sec Nos is stored to 3
+decimals, so for a small fraction that division is wrong: 1,085.812 ÷ 0.480 = 2,262.108
+Kg, where the plate weighs 2,260.8. On PLATE12 (6.264 Kg = 0.004433 Nos, stored 0.004)
+it priced one piece at **1,566 Kg against a real 1,413**. Rounding up would have shipped
+153 Kg too much and booked 153 Kg of excess that never existed. A transfer to the
+supplier does not recalculate weight from dimensions, so the wrong figure would have
+moved as it was.
+
+A piece is now priced from the line's **own dimensions** (L × W × T × unit weight), the
+same formula used everywhere else. They are only trusted when they **agree with the
+plan**, meaning the stored Sec Nos is exactly what the planned Kg rounds to at that
+piece weight. A line whose dimensions describe something else (a Cut Sheet row, whose
+piece is the cut W1, or inconsistent data) keeps the old plan-based figure, so this is
+never worse than before. Leaving Sec Nos at the plan still sends the exact planned Kg,
+and lowering it can never ask for more than the plan.
+
+The final check at **Verify and Transfer** recalculates the Kg on the server from Sec
+Nos × piece weight and ignores the figure sent from the browser. The CNC → Supplier leg
+does the same, and there it can only lower a line against what is actually at CNC.
+
+### 21.2 How much of a batch this plan may take
+
+This used to be physical stock only. That correctly included the plan's own
+reservation, but it ignored stock reserved by **other drawings or plans**, including
+other DUNOs of a shared Material Planning. Now:
+
+> **Available for this plan = stock in the warehouse − what other rows still hold reserved.**
+
+Reservations in a different warehouse, and rows already released by their own transfer,
+are not counted. The popup's **In Stock** column still shows physical stock, with a note
+such as *"1,965.876 reserved for other drawings or plans"* under it.
+
+Rows elsewhere that are **assigned but not reserved** to the same batch do not reduce
+what is available. Taking the stock they were planned against raises a non-blocking
+**Stock Also Planned Elsewhere** warning that names them.
+
+### 21.3 The message
+
+> **Not enough stock in batch PLT8-T8-L1250-W12000-R010** (Stores - MIPL)
+> You asked for **3 Nos × 942 Kg per piece = 2826 Kg**
+> Planned for this line: 1965.876 Kg · In stock: 4710 Kg
+> Reserved for other drawings or plans: 1965.876 Kg — *each row, with its DUNO*
+> Available for this plan: **2744.124 Kg** · **Short by: 81.876 Kg**
+> The most this batch can give is **2 whole piece(s)** (1884 Kg), or up to 2744.124 Kg as a fraction.
+
+### 21.4 The same warning when reassigning a batch
+
+A Consolidate Items reassignment used to check only **reserved** stock, so it could move
+a line onto a batch that other rows had assigned but not reserved. That Material
+Planning then refused to save. This is how MP-2026-00015 got stuck on 14 Sep 2026: PLATE16 on
+MIP-2026-00005 was moved onto the one-piece PLT16-T16-L12000-W1500-R008, which two
+unreserved MP-2026-00015 rows (TYPE 1 and TYPE 2) were planned against. The preview and
+the confirmation now warn and name those rows. It is a warning, not a block: free stock
+is still decided by reservations.
+
+**Key files**: `material_issue_plan_transfer.py` (`_line_kg_per_piece`, `_qty_for_sec`,
+`_batch_availability_for_plan`, `_shortage_message`, `update_transfer_sec_qty`,
+`_validate_selected_against_stock`, `create_mip_cnc_partial_forward`),
+`material_issue_plan.js` (transfer popup). Test: `verify_transfer_piece_weight.py`.
+
+---
+
 *This document covers all major features implemented in the custom app. Minor utility helpers, internal validation guards, and test scaffolding are not listed.*

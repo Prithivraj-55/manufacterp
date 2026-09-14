@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-09-09 02:19:11_
+_Generated: 2026-09-14 22:09:42_
 
 ## drawing
 
@@ -479,6 +479,8 @@ _Generated: 2026-09-09 02:19:11_
 | ` validate_planned_stock` | no |
 | ` _add` | no |
 | ` _sec_nos_for_weight` | no |
+| ` _item_unit_weights` | no |
+| ` _sec_nos_for_weight_arm` | no |
 | ` _refresh_touched_cut_sheets` | no |
 | ` _require_write` | no |
 | ` reserve_batches` | no |
@@ -497,8 +499,10 @@ _Generated: 2026-09-09 02:19:11_
 | ` _calc_batch_qty` | no |
 | ` _precheck_batch_reassignment` | no |
 | ` _mark_excess_item_mapped` | no |
+| ` _resync_excess_item_mapping` | no |
 | ` _batch_change_remarks` | no |
 | ` reassign_batch` | no |
+| ` _apply_batch_to_arm_row` | no |
 | ` _apply_batch_to_mapping_row` | no |
 | ` make_production_plan` | no |
 | ` make_material_request` | no |
@@ -620,6 +624,9 @@ _Generated: 2026-09-09 02:19:11_
 | ` create_from_subcontracting_order` | no |
 | ` populate_from_production_plan` | no |
 | ` _mip_refresh_blocked_message` | no |
+| ` _mip_stock_actions` | no |
+| ` _mip_batch_change_blocked_message` | no |
+| ` check_mip_batch_change_allowed` | no |
 | ` check_mip_raw_materials_refreshable` | no |
 | ` refresh_mip_raw_materials_manual` | no |
 | ` refresh_mip_raw_materials` | no |

@@ -4,7 +4,7 @@ from collections import defaultdict
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import ceil, flt, now, today
+from frappe.utils import ceil, cint, flt, now, today
 
 from manufyxinvenzaerp.utils.decision_log import log_decision
 
@@ -437,6 +437,13 @@ class MaterialPlanning(Document):
                 unit_weight = row.get("batch_unit_weight") or row.get("unit_weight")
                 group = row.get("batch_parent_item_group") or row.get("parent_item_group")
 
+                # Both tables now carry reserve_without_dimensions, but only Material
+                # Mapping carries batch_calc_qty -- an exact-match row has no such
+                # field, so flt(None) is 0 and a waived exact-match row takes the
+                # else branch, exactly as it did before the flag existed. That is
+                # deliberate: Cut Sheet figures on an exact-match row are still
+                # driven by the cut dimensions the user entered. The second half of
+                # this condition is doing real work; do not simplify it away.
                 if row.get("reserve_without_dimensions") and flt(row.get("batch_calc_qty")):
                     # A dimension-waived row takes exactly its Required Qty from the
                     # sheet, and its Sec Nos is that weight expressed as a fraction of
@@ -640,16 +647,52 @@ class MaterialPlanning(Document):
 
         Rows WITHOUT this checkbox are untouched here, so a manually entered
         Sec Nos on a dimension-matched row is never overwritten.
+
+        Both raw-material tables are walked, but they need different work --
+        see the comment above the exact-match loop.
         """
-        if not self.material_mapping:
-            return
-        for row in self.material_mapping:
+        for row in (self.material_mapping or []):
             if row.is_reserved or not row.batch:
                 continue
             if row.batch_parent_item_group not in ("Structurals", "Plates") or not row.reserve_without_dimensions:
                 continue
             row.batch_calc_qty = flt(row.qty, 3)
             row.batch_sec_qty = _sec_nos_for_weight(row, row.qty)
+
+        # An exact-match row has no batch_calc_qty to keep in step, and that is not
+        # an oversight: reserve_exact_match_batches reserves Allocated Qty in Batch
+        # (required_qty) verbatim, with no dimension arithmetic anywhere in the path.
+        # The Kg is therefore ALREADY dimensionless, and required_qty must never be
+        # rewritten here -- it is this row's share of a requirement that
+        # check_stock_availability may have split across several batches, so
+        # recomputing it from the batch would quietly redraw the plan.
+        #
+        # The only thing the flag changes is Sec Nos: it stops being the whole-piece
+        # proportional allocation _alloc_sec_qty made and becomes the reserved weight
+        # expressed as a fraction of one piece of the assigned batch. Guarding on the
+        # flag is what keeps every existing row safe -- sec_qty feeds Nos accounting
+        # downstream, and overwriting it unconditionally would corrupt it.
+        arm_rwd = [
+            row for row in (self.available_raw_materials or [])
+            if not row.is_reserved
+            and row.batch_no
+            and row.get("reserve_without_dimensions")
+            and (row.parent_item_group or "") in ("Structurals", "Plates")
+        ]
+        if arm_rwd:
+            unit_weights = _item_unit_weights(row.item_code for row in arm_rwd)
+            for row in arm_rwd:
+                derived = _sec_nos_for_weight_arm(
+                    row, row.required_qty, unit_weights.get(row.item_code)
+                )
+                # A zero comes back only when the batch cannot yield a per-piece
+                # weight at all (a dimension or the unit weight is missing). Writing
+                # it would replace the proportional allocation _alloc_sec_qty made
+                # with nothing, and that figure goes onto the Stock Entry as
+                # custom_sec_qty. Leaving the existing number is the lesser wrong;
+                # the missing dimension is the thing to fix.
+                if derived:
+                    row.sec_qty = derived
 
     def _move_skipped_arm_to_mapping(self):
         """On save, move Available Raw Material rows with skip_auto_suggest_batch
@@ -677,6 +720,11 @@ class MaterialPlanning(Document):
                 "cnc_process":             row.cnc_process,
                 "store_location":          row.store_location,
                 "batch_mapped":            "Not Mapped",
+                # Carry the dimension waiver across, or a row the user ticked in
+                # Exact Match silently arrives here wanting whole pieces again. The
+                # row lands with no batch, so _apply_rwd_fractional_nos skips it
+                # until one is assigned -- the flag simply waits, as intended.
+                "reserve_without_dimensions": row.get("reserve_without_dimensions") or 0,
             })
         self.available_raw_materials = keep
 
@@ -2854,6 +2902,45 @@ def _sec_nos_for_weight(row, weight_kg):
     return flt(flt(weight_kg) / kg_per_nos, 3)
 
 
+def _item_unit_weights(item_codes):
+    """custom_unit_weight for a set of items, in one query."""
+    codes = sorted({c for c in (item_codes or []) if c})
+    if not codes:
+        return {}
+    return {
+        r.name: flt(r.custom_unit_weight)
+        for r in frappe.get_all(
+            "Item", filters={"name": ["in", codes]}, fields=["name", "custom_unit_weight"]
+        )
+    }
+
+
+def _sec_nos_for_weight_arm(row, weight_kg, unit_weight=None):
+    """_sec_nos_for_weight for an Available Raw Material row.
+
+    That helper reads five batch_* fields, and an exact-match row has none of
+    them. It carries ONE set of dimensions -- the assigned batch's, which is also
+    what goes onto the Stock Entry -- and no unit weight at all; the Material
+    Issue Plan looks that up from the Item (refresh_mip_raw_materials). Rather
+    than write the Kg-per-piece formula out a second time for a second table,
+    shim an exact-match row into the shape the shared helper already expects, so
+    the formula keeps one home.
+
+    Pass `unit_weight` when looping rows, from _item_unit_weights, to avoid a
+    query per row.
+    """
+    if unit_weight is None:
+        unit_weight = frappe.db.get_value("Item", row.item_code, "custom_unit_weight")
+    shim = frappe._dict({
+        "batch_parent_item_group": row.parent_item_group or "",
+        "batch_length": flt(row.length),
+        "batch_width": flt(row.width),
+        "batch_thickness": flt(row.thickness),
+        "batch_unit_weight": flt(unit_weight),
+    })
+    return _sec_nos_for_weight(shim, weight_kg)
+
+
 def _refresh_touched_cut_sheets(mp):
     """Re-derive Allocated/Available on every Cut Sheet this plan draws from.
 
@@ -3960,6 +4047,65 @@ def _mark_excess_item_mapped(batch_no, mp_name, row_name):
     recheck_mip_completion(mip_name)
 
 
+def _resync_excess_item_mapping(batch_no):
+    """Keep an excess-return batch's "reused by" pointer true after rows move off it.
+
+    _mark_excess_item_mapped records, on the SCO Excess Material Item a batch was
+    returned from, which Material Planning row took it -- that is how the source
+    Material Issue Plan shows its off-cut as reused rather than still sitting in the
+    rack. Nothing undid it. A batch reassignment that moved that row onto a different
+    batch left the pointer naming a row that no longer holds the material, so the
+    source plan kept reporting the off-cut as reused, and the excess-logging paths
+    (which treat a mapped row as already claimed) went on skipping it.
+
+    Called after a reassignment has saved. If the pointed-at row still holds the
+    batch, nothing changes. Otherwise it is re-pointed at any other row still drawing
+    on the batch, or cleared when none is. A virtual-excess claim is left alone: it
+    has its own release path (_release_virtual_excess_source), and a claim is a
+    promise about material, not a record of where a real batch was reserved.
+    """
+    if not batch_no:
+        return
+    excess_row_name = frappe.db.get_value("Batch", batch_no, "custom_source_mip_excess_row")
+    if not excess_row_name:
+        return
+    excess = frappe.db.get_value(
+        "SCO Excess Material Item", excess_row_name,
+        ["parent", "mapped_material_planning", "mapped_row_name"], as_dict=True,
+    )
+    if not excess or not excess.mapped_row_name:
+        return
+
+    for table, field in (("Material Planning Material Mapping", "batch"),
+                         ("Material Planning Available Raw Material", "batch_no")):
+        current = frappe.db.get_value(table, excess.mapped_row_name, [field, "parent"], as_dict=True)
+        if current:
+            if current.get(field) == batch_no:
+                return
+            if table == "Material Planning Material Mapping" and frappe.db.get_value(
+                table, excess.mapped_row_name, "is_virtual_excess"
+            ):
+                return
+            break
+
+    holder = (
+        frappe.db.get_value("Material Planning Material Mapping", {"batch": batch_no},
+                            ["parent", "name"], as_dict=True)
+        or frappe.db.get_value("Material Planning Available Raw Material", {"batch_no": batch_no},
+                               ["parent", "name"], as_dict=True)
+    )
+    frappe.db.set_value(
+        "SCO Excess Material Item", excess_row_name,
+        {"mapped_material_planning": holder.parent if holder else "",
+         "mapped_row_name": holder.name if holder else ""},
+        update_modified=False,
+    )
+    from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
+        recheck_mip_completion,
+    )
+    recheck_mip_completion(excess.parent)
+
+
 def _batch_change_remarks(item_code, old_batch, new_batch_no, material_issue_plan):
     text = _("Batch changed from {0} to {1} for {2}").format(
         old_batch or _("(none)"), new_batch_no or _("(none)"), item_code
@@ -3989,6 +4135,18 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
 
     if source_table not in ("Material Planning Material Mapping", "Material Planning Available Raw Material"):
         frappe.throw(_("Unsupported source table for batch reassignment: {0}").format(source_table))
+
+    # From a Material Issue Plan, a batch may not change once any stock action has been
+    # made on that plan -- the reassignment ends by rebuilding its Raw Materials table.
+    # Material Planning's own grid (no material_issue_plan passed) is not affected.
+    if material_issue_plan:
+        from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
+            _mip_batch_change_blocked_message,
+        )
+        stock_block = _mip_batch_change_blocked_message(
+            frappe.get_doc("Material Issue Plan", material_issue_plan))
+        if stock_block:
+            frappe.throw(stock_block, title=_("Batch Cannot Be Reassigned"))
 
     new_item = get_batch_item(new_batch_no) if new_batch_no else None
     new_item_data = (
@@ -4042,6 +4200,8 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
         })
         mp.save(ignore_permissions=True)
         _mark_excess_item_mapped(new_batch_no, material_planning_name, row_name)
+        if old_batch and old_batch != new_batch_no:
+            _resync_excess_item_mapping(old_batch)
         # Reassignment is genuinely a per-row decision, so one entry per row here --
         # unlike Reserve, which is one decision covering however many rows.
         log_decision(
@@ -4110,15 +4270,10 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
             planned_item_for_log = new_item
             target_row_name = new_row.name
         else:
-            row.batch_no = new_batch_no or ""
-            if dimensions.get("length") is not None:
-                row.length = flt(dimensions.get("length"))
-            if dimensions.get("width") is not None:
-                row.width = flt(dimensions.get("width"))
-            if dimensions.get("thickness") is not None:
-                row.thickness = flt(dimensions.get("thickness"))
-            if sec_qty is not None:
-                row.sec_qty = flt(sec_qty)
+            _apply_batch_to_arm_row(
+                row, new_batch_no, dimensions, sec_qty, reserve_without_dimensions,
+                old_batch=old_batch,
+            )
             new_sec_qty, new_qty = flt(row.sec_qty), flt(row.required_qty)
             target_row_name = row_name
 
@@ -4138,6 +4293,8 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
         })
         mp.save(ignore_permissions=True)
         _mark_excess_item_mapped(new_batch_no, material_planning_name, target_row_name)
+        if old_batch and old_batch != new_batch_no:
+            _resync_excess_item_mapping(old_batch)
         log_decision(
             "Reassign Batch",
             reference_doctype="Material Planning",
@@ -4186,6 +4343,52 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
             warnings.append({"reason": str(e)})
 
     return {"warnings": warnings}
+
+
+def _apply_batch_to_arm_row(row, new_batch_no, dimensions, sec_qty,
+                            reserve_without_dimensions, old_batch=None):
+    """Set an Available Raw Material row's batch, dimensions and Sec Nos.
+
+    Extracted from reassign_batch so every caller writes an exact-match row the
+    same way, and so the dimension waiver has one place to be recorded.
+
+    Two things differ sharply from the Material Mapping equivalent.
+
+    **required_qty is never touched.** It is Allocated Qty in Batch -- this row's
+    share of a requirement that check_stock_availability may have split across
+    several batches -- and reserve_exact_match_batches reserves it verbatim, doing
+    no dimension arithmetic at all. There is no batch_calc_qty to recompute here,
+    and recomputing the Kg from the new batch would redraw the plan's allocation
+    rather than change a batch.
+
+    **Dimensions fall back to the new batch's own.** An exact-match row carries
+    ONE set of L/W/T and _get_mp_reserved_batches puts it straight onto the Stock
+    Entry as custom_length/width/thickness, so a row left holding the previous
+    batch's size ships the new batch labelled wrong. Material Mapping cannot make
+    that mistake -- it keeps the requirement's dimensions and the batch's in
+    separate fields. The fallback only fires when the batch actually changed and
+    the caller passed nothing, which is the dimensionless path: with the waiver on,
+    the dialog hides the dimension inputs and sends none. A caller that supplies
+    dimensions still wins, and a Batch with no dimensions recorded leaves the row's
+    own alone rather than zeroing them.
+    """
+    row.batch_no = new_batch_no or ""
+    row.reserve_without_dimensions = 1 if cint(reserve_without_dimensions) else 0
+
+    batch_dims = {}
+    if new_batch_no and new_batch_no != (old_batch or ""):
+        b_length, b_width, b_thickness = _get_batch_dims(new_batch_no)
+        batch_dims = {"length": b_length, "width": b_width, "thickness": b_thickness}
+
+    for field in ("length", "width", "thickness"):
+        supplied = dimensions.get(field)
+        if supplied is not None:
+            row.set(field, flt(supplied))
+        elif flt(batch_dims.get(field)):
+            row.set(field, flt(batch_dims[field]))
+
+    if sec_qty is not None:
+        row.sec_qty = flt(sec_qty)
 
 
 def _apply_batch_to_mapping_row(row, new_batch_no, new_item, dimensions, sec_qty, reserve_without_dimensions):
@@ -4882,6 +5085,23 @@ def _collect_batch_mapping_issues(mp):
                           "Allocated Nos ({3}) exceeds batch stock Nos ({4}).").format(
                             r.idx, r.batch, r.item_code,
                             flt(r.batch_sec_qty, 3), batch_total_nos
+                        )
+                    )
+
+        # 7b. Same check for Exact Match. A waived row's Sec Nos is derived from the
+        # weight rather than counted, so it can exceed what the batch physically
+        # holds without any earlier validation noticing -- exact-match reservation
+        # checks Kg only, never pieces.
+        for r in (mp.available_raw_materials or []):
+            if (r.batch_no and r.is_reserved and r.get("reserve_without_dimensions")
+                    and (r.parent_item_group or "") in ("Structurals", "Plates")):
+                batch_total_nos = flt(frappe.db.get_value("Batch", r.batch_no, "custom_sec_qty") or 0)
+                if batch_total_nos and flt(r.sec_qty, 3) > flt(batch_total_nos, 3):
+                    issues.append(
+                        _("Exact Match Row {0} — Batch <b>{1}</b> ({2}): "
+                          "Allocated Nos ({3}) exceeds batch stock Nos ({4}).").format(
+                            r.idx, r.batch_no, r.item_code,
+                            flt(r.sec_qty, 3), batch_total_nos
                         )
                     )
 

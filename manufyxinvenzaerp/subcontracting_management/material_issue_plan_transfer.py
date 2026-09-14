@@ -15,7 +15,9 @@ import json as _json
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+import math
+
+from frappe.utils import cint, flt
 
 from manufyxinvenzaerp.utils.decision_log import log_decision
 from manufyxinvenzaerp.subcontracting_management.subcontracting import _get_mp_reserved_batches
@@ -85,15 +87,23 @@ def _ensure_cnc_routing(mip):
 
 
 def _validate_selected_against_stock(mip, selected):
-    """Re-check every selected line against real free stock, and against what is
-    still outstanding, immediately before the Stock Entry is built.
+    """Re-check every selected line against what this plan may take, and against what
+    is still outstanding, immediately before the Stock Entry is built.
 
-    The transfer popup lets Sec Nos and Qty be edited by hand, and the figures it
-    was opened with can be minutes old -- another plan may have transferred from
-    the same batch in between. Validating here, server-side, is what makes the
-    edited numbers safe: a browser-side check alone would be trivially stale, and
-    a partial transfer that quietly over-issues is only discoverable once the
-    stock has physically moved.
+    The transfer popup lets Sec Nos be edited by hand, and the figures it was opened
+    with can be minutes old -- another plan may have transferred from the same batch in
+    between. Validating here, server-side, is what makes the edited numbers safe.
+
+    Two things this now does that it did not:
+
+    - **The Kg is recomputed, not trusted.** For a line whose weight follows its Sec
+      Nos, the browser's Kg is replaced by Sec Nos x the piece weight worked out here
+      (_qty_for_sec). A transfer to the supplier does not recalculate weight from
+      dimensions on its own, so a wrong Kg sent from the browser would otherwise move
+      as-is and be booked as excess that never existed.
+    - **Other plans' reservations are subtracted.** Stock another plan holds reserved
+      is not free for this one (_batch_availability_for_plan). This plan's own
+      reservation still counts as available -- it is held for exactly this transfer.
     """
     if not selected:
         return
@@ -108,14 +118,11 @@ def _validate_selected_against_stock(mip, selected):
 
     problems = []
     wanted_by_batch = {}
+    lines_by_batch = {}
     for item in selected:
         item_code = item["item_code"]
         batch_no = item.get("batch_no") or ""
         key = (item_code, batch_no, 1 if item.get("cnc_process") else 0)
-        qty = flt(item.get("qty"))
-        if qty <= 0:
-            problems.append(_("{0} ({1}): transfer qty must be greater than zero.").format(item_code, batch_no or "-"))
-            continue
 
         row = pending_by_key.get(key)
         if not row:
@@ -123,52 +130,70 @@ def _validate_selected_against_stock(mip, selected):
                 _("{0} ({1}): nothing is pending transfer for this item/batch any more.").format(item_code, batch_no or "-"))
             continue
 
+        planned_qty, planned_sec = flt(row["qty"], 3), flt(row.get("custom_sec_qty"), 3)
+        sec = flt(item.get("custom_sec_qty"))
+        if planned_qty > 0 and planned_sec > 0 and sec > 0:
+            item["qty"], item["_kg_per_piece"] = _qty_for_sec(row, sec)
+        qty = flt(item.get("qty"))
+        if qty <= 0:
+            problems.append(_("{0} ({1}): transfer qty must be greater than zero.").format(item_code, batch_no or "-"))
+            continue
+
         # Taking MORE than the plan is the designed workflow, not an error: a
         # fractional 2.818 pieces has to become 3 whole ones before anything can
         # physically leave the rack. The surplus over the plan is booked as excess
         # to return, so it is measured here -- server-side, rather than trusting
         # the figure the browser sent -- and stamped onto the line for
-        # _log_round_up_excess to pick up. Only genuine lack of free stock blocks.
-        over_kg = flt(qty - flt(row["qty"]), 3)
-        if over_kg > 0.001:
+        # _log_round_up_excess to pick up. Only genuine lack of stock blocks.
+        over_kg = flt(qty - planned_qty, 3)
+        if over_kg > _TRANSFER_EPS:
             item["round_up_excess_kg"] = over_kg
-            item["round_up_excess_pieces"] = flt(
-                flt(item.get("custom_sec_qty")) - flt(row.get("custom_sec_qty")), 3)
-            item["_planned_qty"] = flt(row["qty"], 3)
+            item["round_up_excess_pieces"] = flt(max(0.0, sec - planned_sec), 3)
+            item["_planned_qty"] = planned_qty
+        else:
+            item["round_up_excess_kg"] = 0.0
+            item["round_up_excess_pieces"] = 0.0
 
-        # Free stock is per physical batch, so both legs share one running total.
+        # Stock is per physical batch, so both legs share one running total.
         bkey = (item_code, batch_no)
         wanted_by_batch[bkey] = flt(wanted_by_batch.get(bkey, 0) + qty, 3)
-
-    # One batch can appear on several selected lines -- check the batch's free
-    # stock against their combined total, not each line on its own.
-    planned_by_batch = {}
-    for item in selected:
-        bkey = (item["item_code"], item.get("batch_no") or "")
-        key = (item["item_code"], item.get("batch_no") or "", 1 if item.get("cnc_process") else 0)
-        row = pending_by_key.get(key)
-        if row:
-            planned_by_batch[bkey] = flt(planned_by_batch.get(bkey, 0) + flt(row["qty"]), 3)
+        lines_by_batch.setdefault(bkey, []).append((item, row))
 
     for (item_code, batch_no), wanted in wanted_by_batch.items():
-        available = flt(_batch_free_qty(item_code, batch_no, mip.source_warehouse), 3)
-        if wanted > available + 0.001:
-            planned = flt(planned_by_batch.get((item_code, batch_no), 0), 3)
-            # Spell out all three figures: what the plan wanted, what the edit
-            # raised it to, and what is actually in the rack -- the shortfall is
-            # only actionable if you can see which of those to change.
-            problems.append(
-                _("<b>{0}</b> ({1}) — planned <b>{2} Kg</b>, updated to <b>{3} Kg</b>, "
-                  "but only <b>{4} Kg</b> is free in {5}. Short by {6} Kg — lower the Sec Nos, "
-                  "or transfer what is available now and the rest later.").format(
-                    item_code, batch_no or "-", planned, wanted, available,
-                    mip.source_warehouse, flt(wanted - available, 3)))
+        if not batch_no:
+            continue
+        info = _batch_availability_for_plan(mip, item_code, batch_no)
+        lines = lines_by_batch[(item_code, batch_no)]
+        cap = min((flt(r.get("available_for_plan", info.available)) for _i, r in lines), default=info.available)
+        if cap < info.available:
+            info.available = flt(cap, 3)  # a Cut Sheet's W1 total caps it further
+        if wanted <= info.available + _TRANSFER_EPS:
+            continue
+
+        planned = flt(sum(flt(r["qty"]) for _i, r in lines), 3)
+        if len(lines) == 1:
+            it, rw = lines[0]
+            piece = flt(it.get("_kg_per_piece")) or _line_kg_per_piece(rw)[0]
+            problems.append(_shortage_message(
+                batch_no, info, wanted,
+                pieces=flt(it.get("custom_sec_qty")) if flt(it.get("custom_sec_qty")) else None,
+                kg_per_piece=piece if flt(it.get("custom_sec_qty")) else None,
+                planned_kg=planned))
+        else:
+            legs = "".join("<li>{0}: {1} Kg</li>".format(
+                _("CNC leg") if it.get("cnc_process") else _("Direct leg"), flt(it.get("qty"), 3))
+                for it, _r in lines)
+            problems.append(_shortage_message(
+                batch_no, info, wanted, planned_kg=planned,
+                extra=_("Across {0} lines of this batch:").format(len(lines))
+                + "<ul style='margin:2px 0 2px 18px'>" + legs + "</ul>"))
 
     if problems:
         frappe.throw(
-            _("Stock validation failed — nothing has been transferred:<br><br><ul>{0}</ul>"
-              "Reopen <b>Select Materials to Transfer</b> to see the current pending and "
-              "available quantities.").format("".join("<li>%s</li>" % p for p in problems)),
+            _("Stock validation failed — nothing has been transferred:<br><br>{0}<br><br>"
+              "Lower the Sec Nos on the line(s) above, or transfer what is available now and the "
+              "rest later. Reopen <b>Select Materials to Transfer</b> to see the current figures.")
+            .format("<hr style='margin:8px 0'>".join(problems)),
             title=_("Cannot Transfer"),
         )
 
@@ -662,9 +687,13 @@ def get_mip_pending_items(mip_name):
             totals[key]["custom_sec_qty"] = flt(
                 totals[key]["custom_sec_qty"] + item.get("custom_sec_qty", 0), 3
             )
+            totals[key]["source_rows"] += 1
         else:
             totals[key] = dict(item)
             totals[key]["cnc_process"] = 1 if is_cnc else 0
+            # How many rows' rounded Sec Nos were added up into this line -- the
+            # rounding allowance _line_kg_per_piece gives it grows with that count.
+            totals[key]["source_rows"] = 1
 
     primary_done = {}
     for r in frappe.db.sql("""
@@ -692,6 +721,7 @@ def get_mip_pending_items(mip_name):
         """, (mip_name, cnc_warehouse), as_dict=True):
             cnc_done[(r.item_code, r.batch_no or "")] = flt(r.qty)
 
+    availability_cache = {}
     result = []
     for (item_code, batch_no, is_cnc), item in totals.items():
         done_qty = (cnc_done if is_cnc else primary_done).get((item_code, batch_no), 0)
@@ -718,6 +748,7 @@ def get_mip_pending_items(mip_name):
             "available_qty": _available_for_transfer(
                 item_code, batch_no, source_warehouse, w1_totals
             ),
+            "source_rows": item.get("source_rows") or 1,
             "uom": item.get("uom") or "Kg",
             "custom_sec_qty": flt(flt(item.get("custom_sec_qty", 0)) * ratio, 3),
             "custom_sec_uom": item.get("custom_sec_uom") or "",
@@ -746,6 +777,25 @@ def get_mip_pending_items(mip_name):
         # a row up in the transfer popup (update_transfer_sec_qty fills them in).
         row["round_up_excess_kg"] = 0.0
         row["round_up_excess_pieces"] = 0.0
+        row["kg_per_piece"], row["piece_from_dimensions"] = _line_kg_per_piece(row)
+
+        # "In Stock" stays the physical figure. What the popup limits against is what
+        # this plan may take: physical less other plans' reservations, and never more
+        # than a Cut Sheet's W1 total.
+        akey = (row["item_code"], row.get("batch_no") or "")
+        if akey not in availability_cache:
+            availability_cache[akey] = (
+                _batch_availability_for_plan(mip, row["item_code"], row["batch_no"], source_warehouse)
+                if row.get("batch_no") else None
+            )
+        info = availability_cache[akey]
+        if info is None:
+            row["available_for_plan"] = row["available_qty"]
+            row["reserved_for_others_kg"] = 0.0
+        else:
+            cap = w1_totals.get(row["batch_no"])
+            row["available_for_plan"] = flt(min(info.available, cap), 3) if cap is not None else info.available
+            row["reserved_for_others_kg"] = info.reserved_for_others_kg
 
     # Keep every row of one item together, batches in a stable order within it.
     # Rows are collected per Material Planning and then per source table, so an item
@@ -759,49 +809,128 @@ def get_mip_pending_items(mip_name):
 
 
 @frappe.whitelist()
-def update_transfer_sec_qty(mip_name, item_code, batch_no, planned_sec_qty, planned_qty, new_sec_qty):
+def update_transfer_sec_qty(mip_name, item_code, batch_no, planned_sec_qty=None, planned_qty=None,
+                            new_sec_qty=None, cnc_process=0, transfer_type=None):
     """Recalculate one transfer row after the user edits its Sec Qty by hand.
 
-    Nothing rounds automatically any more: the plan hands over the exact
-    fractional Sec Qty a drawing needs (e.g. 2.5 Nos), and it is the user who
-    decides — here, in the transfer popup — whether to hand over whole pieces
-    instead. Raising 2.5 to 3 issues one extra half-piece worth of weight, and
-    that surplus is what comes back through Return Excess Entry.
+    Nothing rounds automatically: the plan hands over the exact fractional Sec Qty a
+    drawing needs (e.g. 2.5 Nos), and it is the user who decides -- here, in the
+    transfer popup -- whether to hand over whole pieces instead. Raising 2.5 to 3
+    issues one extra half-piece worth of weight, and that surplus is what comes back
+    through Return Excess Entry.
 
-    Validates the new figure against real free stock in the source warehouse
-    before accepting it, so a manual bump can never plan a transfer the batch
-    cannot cover. Returns the recomputed Kg/excess plus a `blocked` flag and
-    message; it only computes, it never writes.
+    The planned figures are read from the live pending line, not taken from the
+    browser (planned_sec_qty / planned_qty are accepted for compatibility and
+    ignored). A piece is priced from the line's dimensions -- see _line_kg_per_piece
+    for why dividing planned Kg by planned Sec Nos was wrong. Availability is this
+    plan's, not the whole batch's -- see _batch_availability_for_plan.
+
+    Returns the recomputed Kg and excess plus `blocked`/`message` and a non-blocking
+    `warning`. It only computes, it never writes.
     """
     mip = frappe.get_doc("Material Issue Plan", mip_name)
-    planned_sec_qty, planned_qty, new_sec_qty = flt(planned_sec_qty), flt(planned_qty), flt(new_sec_qty)
-
-    if new_sec_qty <= 0:
+    new_sec = flt(new_sec_qty)
+    if new_sec <= 0:
         frappe.throw(_("Sec Qty must be greater than zero."))
-    if planned_sec_qty <= 0 or planned_qty <= 0:
+
+    if transfer_type == "cnc_forward":
+        return _update_cnc_forward_sec_qty(mip, item_code, batch_no, new_sec)
+
+    cnc = 1 if cint(cnc_process) else 0
+    line = next(
+        (r for r in get_mip_pending_items(mip_name)
+         if r["item_code"] == item_code and (r.get("batch_no") or "") == (batch_no or "")
+         and cint(r.get("cnc_process")) == cnc),
+        None,
+    )
+    if not line:
+        frappe.throw(_("{0} ({1}): nothing is pending transfer for this item/batch any more. "
+                       "Reopen Select Materials to Transfer.").format(item_code, batch_no or "-"))
+
+    planned_qty, planned_sec = flt(line["qty"], 3), flt(line["custom_sec_qty"], 3)
+    if planned_sec <= 0 or planned_qty <= 0:
         frappe.throw(_("This row has no planned Sec Qty to recalculate from."))
 
-    kg_per_piece = planned_qty / planned_sec_qty
-    new_qty = flt(new_sec_qty * kg_per_piece, 3)
-    excess_pieces = flt(new_sec_qty - planned_sec_qty, 3)
-    excess_kg = flt(new_qty - planned_qty, 3)
+    new_qty, kg_per_piece = _qty_for_sec(line, new_sec)
+    excess_kg = flt(max(0.0, new_qty - planned_qty), 3)
+    excess_pieces = flt(max(0.0, new_sec - planned_sec), 3)
 
-    available = flt(_batch_free_qty(item_code, batch_no, mip.source_warehouse), 3)
-    blocked = new_qty > available + 0.001
-    message = None
+    available = flt(line.get("available_for_plan", line.get("available_qty")), 3)
+    info = _batch_availability_for_plan(mip, item_code, batch_no) if batch_no else None
+    blocked = new_qty > available + _TRANSFER_EPS
+    message = warning = None
     if blocked:
-        message = _(
-            "Batch {0} has only {1} Kg free in {2}. {3} Nos needs {4} Kg."
-        ).format(batch_no, available, mip.source_warehouse, flt(new_sec_qty, 3), new_qty)
+        if info is None:
+            message = _("{0}: {1} Kg needed, only {2} Kg available.").format(item_code, new_qty, available)
+        else:
+            if available < info.available:
+                info.available = available  # a Cut Sheet's W1 total caps it further
+            message = _shortage_message(batch_no, info, new_qty, pieces=new_sec,
+                                        kg_per_piece=kg_per_piece, planned_kg=planned_qty)
+    elif info is not None:
+        warning = _waiting_warning(batch_no, info, new_qty)
 
     return {
         "qty": new_qty,
-        "custom_sec_qty": flt(new_sec_qty, 3),
-        "round_up_excess_kg": max(0.0, excess_kg),
-        "round_up_excess_pieces": max(0.0, excess_pieces),
+        "custom_sec_qty": flt(new_sec, 3),
+        "kg_per_piece": flt(kg_per_piece, 3),
+        "round_up_excess_kg": excess_kg,
+        "round_up_excess_pieces": excess_pieces,
         "available_qty": available,
+        "in_stock": info.in_stock if info else available,
+        "reserved_for_others_kg": info.reserved_for_others_kg if info else 0.0,
         "blocked": blocked,
         "message": message,
+        "warning": warning,
+    }
+
+
+def _update_cnc_forward_sec_qty(mip, item_code, batch_no, new_sec):
+    """The CNC-to-supplier leg of update_transfer_sec_qty.
+
+    This leg moves material the job already owns, out of the CNC warehouse. There are
+    no other plans' reservations to weigh and nothing can be rounded up -- only what
+    physically arrived at CNC can go on -- so a Sec Nos here can only lower the line.
+    """
+    line = next(
+        (r for r in get_mip_cnc_pending_items(mip.name)
+         if r["item_code"] == item_code and (r.get("batch_no") or "") == (batch_no or "")),
+        None,
+    )
+    if not line:
+        frappe.throw(_("{0} ({1}): nothing is waiting at CNC for this item/batch any more.")
+                     .format(item_code, batch_no or "-"))
+    planned_qty, planned_sec = flt(line["qty"], 3), flt(line["custom_sec_qty"], 3)
+    if planned_sec <= 0 or planned_qty <= 0:
+        frappe.throw(_("This row has no planned Sec Qty to recalculate from."))
+
+    new_qty, kg_per_piece = _qty_for_sec(line, new_sec)
+    at_cnc = flt(min(planned_qty, flt(line.get("available_qty"))), 3)
+    blocked = new_qty > at_cnc + _TRANSFER_EPS
+    message = None
+    if blocked:
+        message = "<br>".join([
+            _("<b>Not enough at CNC for batch {0}</b> ({1})").format(
+                frappe.utils.escape_html(batch_no or "-"), frappe.utils.escape_html(mip.cnc_warehouse or "")),
+            _("You asked for <b>{0} Nos × {1} Kg per piece = {2} Kg</b>").format(
+                _num(new_sec), _num(kg_per_piece), _num(new_qty)),
+            _("Waiting at CNC for this plan: {0} Kg ({1} Nos)").format(_num(planned_qty), _num(planned_sec)),
+            _("In the CNC warehouse: {0} Kg").format(_num(line.get("available_qty"))),
+            _("<b>Short by: {0} Kg</b>. Only what has arrived at CNC can be forwarded — lower the Sec Nos to {1} or less.")
+            .format(_num(new_qty - at_cnc), _num(planned_sec)),
+        ])
+    return {
+        "qty": new_qty,
+        "custom_sec_qty": flt(new_sec, 3),
+        "kg_per_piece": flt(kg_per_piece, 3),
+        "round_up_excess_kg": 0.0,
+        "round_up_excess_pieces": 0.0,
+        "available_qty": at_cnc,
+        "in_stock": flt(line.get("available_qty"), 3),
+        "reserved_for_others_kg": 0.0,
+        "blocked": blocked,
+        "message": message,
+        "warning": None,
     }
 
 
@@ -812,6 +941,250 @@ def _batch_free_qty(item_code, batch_no, warehouse):
     from erpnext.stock.doctype.batch.batch import get_batch_qty
 
     return flt(get_batch_qty(batch_no=batch_no, warehouse=warehouse, item_code=item_code) or 0)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Transfer arithmetic -- what one piece weighs, and how much of a batch this plan
+# may actually take.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_MM = "Material Planning Material Mapping"
+_ARM = "Material Planning Available Raw Material"
+_FORMULA_GROUPS = ("Structurals", "Plates")
+_TRANSFER_EPS = 0.001
+# Sec Nos is stored to 3 decimals, so a row's figure can sit up to half a thousandth
+# off its exact value -- and a transfer line merging N rows up to N times that.
+_SEC_NOS_ROUNDING = 0.0005
+
+
+def _line_kg_per_piece(line):
+    """Kg of ONE piece on a transfer line, and whether it came from the dimensions.
+
+    This used to be planned Kg / planned Sec Nos. Sec Nos is rounded to 3 decimals, so
+    for a small fraction that division prices a piece wrongly: 6.264 Kg of a 1,413 Kg
+    plate is 0.004433 of a piece, stored as 0.004, which made one piece weigh 1,566 Kg.
+    Rounding that line up to 1 whole piece shipped 153 Kg more than a piece holds and
+    booked 153 Kg of excess that never existed. On a larger fraction the error was
+    small but still enough to refuse a batch holding exactly one piece (2,262.108 Kg
+    asked of a 2,260.8 Kg plate).
+
+    The piece is now priced from the line's own dimensions -- the same formula every
+    other part of the app uses. Those are only trusted when they AGREE with the plan:
+    the stored Sec Nos must be exactly what the planned Kg rounds to at that piece
+    weight. A line whose dimensions describe something else (a Cut Sheet row, whose
+    piece is the cut W1 rather than the whole plate, or data entered inconsistently)
+    fails that test and keeps the old plan-based figure, so this is never worse than
+    before. Items without a dimension formula (Nuts and Bolts) keep the plan ratio too.
+    """
+    planned_qty = flt(line.get("qty"))
+    planned_sec = flt(line.get("custom_sec_qty"))
+    from_plan = planned_qty / planned_sec if planned_qty > 0 and planned_sec > 0 else 0.0
+
+    group = line.get("custom_parent_item_group") or ""
+    if group in _FORMULA_GROUPS:
+        piece = calculate_qty(
+            group, flt(line.get("custom_length")), flt(line.get("custom_width")),
+            flt(line.get("custom_thickness")), flt(line.get("custom_unit_weight")), 1,
+        )
+        if piece:
+            if not from_plan:
+                return flt(piece, 6), True
+            members = max(1, cint(line.get("source_rows")) or 1)
+            if abs(planned_qty / piece - planned_sec) <= _SEC_NOS_ROUNDING * members + 0.0001:
+                return flt(piece, 6), True
+    return flt(from_plan, 6), False
+
+
+def _qty_for_sec(line, new_sec):
+    """Kg for a Sec Nos typed against a transfer line. Returns (qty, kg_per_piece)."""
+    planned_qty = flt(line.get("qty"))
+    planned_sec = flt(line.get("custom_sec_qty"))
+    piece, _from_dims = _line_kg_per_piece(line)
+    # The plan's own figure, untouched, is exact Kg -- the Sec Nos beside it is only
+    # that Kg rounded for display. Recomputing it from pieces would shave grams off.
+    if abs(flt(new_sec) - planned_sec) <= _SEC_NOS_ROUNDING:
+        return flt(planned_qty, 3), piece
+    qty = flt(flt(new_sec) * piece, 3)
+    if flt(new_sec) < planned_sec:
+        # Lowering Sec Nos is a partial transfer: it can never ask for more than the plan.
+        qty = min(qty, flt(planned_qty, 3))
+    return qty, piece
+
+
+def _plan_rows_on_batch(mip, batch_no):
+    """(table, row name) of this plan's own Material Planning rows on a batch.
+
+    Built from the same Material Plannings and DUNO scope get_mip_pending_items reads,
+    rather than from the Raw Materials snapshot, which can be stale.
+    """
+    mp_names, duno_scope = _linked_mp_names_and_duno_scope(mip)
+    own = set()
+    for mp_name in mp_names:
+        dunos = duno_scope.get(mp_name)
+        for table, field in ((_MM, "batch"), (_ARM, "batch_no")):
+            filters = {"parent": mp_name, field: batch_no}
+            if dunos:
+                filters["duno_mark_no"] = ["in", list(dunos)]
+            for name in frappe.get_all(table, filters=filters, pluck="name"):
+                own.add((table, name))
+    return own
+
+
+def _mps_that_moved_batch(batch_no):
+    """Material Plannings whose reservations a submitted issue of this batch released.
+
+    A transfer releases reservations only on the plans it is traced to
+    (production_management/stock_entry._linked_material_plannings), and a released row
+    looks exactly like one never reserved. Knowing which plans already moved the batch
+    is what tells the two apart. Returns None when any issue could not be traced, in
+    which case the release was batch-wide and nothing can be told apart safely.
+    """
+    from manufyxinvenzaerp.production_management.stock_entry import _linked_material_plannings
+
+    names = frappe.db.sql(
+        """
+        SELECT DISTINCT se.name FROM `tabStock Entry` se
+        JOIN `tabStock Entry Detail` d ON d.parent = se.name
+        WHERE d.batch_no = %s AND se.docstatus = 1 AND IFNULL(d.s_warehouse, '') != ''
+        """,
+        batch_no, pluck=True,
+    )
+    moved = set()
+    for name in names:
+        mps = _linked_material_plannings(frappe.get_doc("Stock Entry", name))
+        if not mps:
+            return None
+        moved |= mps
+    return moved
+
+
+def _batch_availability_for_plan(mip, item_code, batch_no, warehouse=None):
+    """How much of a batch THIS plan may take, and who else has a claim on it.
+
+    Physical stock alone was the old answer. It already counts this plan's own
+    reservation -- correctly, since that stock is being held for exactly this
+    transfer -- but it also counted stock another plan has reserved, so a transfer
+    could quietly take steel promised elsewhere.
+
+    available  = physical stock - what OTHER plans' rows still hold reserved here.
+
+    Rows elsewhere that are assigned to the batch but NOT reserved are returned too.
+    They do not reduce what is available -- nothing is held for them -- but taking
+    the stock they were planned against is worth a warning. Rows released by their own
+    transfer are left out of that list, because they need nothing more.
+    """
+    warehouse = warehouse or mip.source_warehouse
+    physical = flt(_batch_free_qty(item_code, batch_no, warehouse), 3)
+    own = _plan_rows_on_batch(mip, batch_no)
+
+    mp_warehouse = {}
+
+    def _same_warehouse(mp_name):
+        if mp_name not in mp_warehouse:
+            mp_warehouse[mp_name] = frappe.db.get_value("Material Planning", mp_name, "for_warehouse") or ""
+        # A reservation against stock in another warehouse is not a claim on this one.
+        return mp_warehouse[mp_name] == warehouse
+
+    reserved, waiting = [], []
+    moved_mps = False  # computed lazily -- only needed when an unreserved row turns up
+    for table, field, need_field, label in (
+        (_MM, "batch", "batch_calc_qty", _("Material Mapping")),
+        (_ARM, "batch_no", "required_qty", _("Exact Match")),
+    ):
+        for r in frappe.get_all(
+            table, filters={field: batch_no},
+            fields=["name", "parent", "idx", "is_reserved", "reserved_qty", "duno_mark_no", need_field + " as need"],
+            order_by="parent asc, idx asc",
+        ):
+            if (table, r.name) in own or not _same_warehouse(r.parent):
+                continue
+            if r.is_reserved:
+                if flt(r.reserved_qty) > _TRANSFER_EPS:
+                    reserved.append({"material_planning": r.parent, "table": label, "idx": r.idx,
+                                     "duno": r.duno_mark_no or "", "qty": flt(r.reserved_qty, 3)})
+                continue
+            if flt(r.need) <= _TRANSFER_EPS:
+                continue
+            if moved_mps is False:
+                moved_mps = _mps_that_moved_batch(batch_no)
+            if moved_mps is None or r.parent in moved_mps:
+                continue
+            waiting.append({"material_planning": r.parent, "table": label, "idx": r.idx,
+                            "duno": r.duno_mark_no or "", "qty": flt(r.need, 3)})
+
+    reserved_kg = flt(sum(x["qty"] for x in reserved), 3)
+    return frappe._dict({
+        "warehouse": warehouse,
+        "in_stock": physical,
+        "reserved_for_others": reserved,
+        "reserved_for_others_kg": reserved_kg,
+        "waiting_elsewhere": waiting,
+        "waiting_elsewhere_kg": flt(sum(x["qty"] for x in waiting), 3),
+        "available": flt(max(0.0, physical - reserved_kg), 3),
+    })
+
+
+def _num(value):
+    """3 decimals, without the trailing zeros -- "1 Nos", "0.48 Nos", "2260.8 Kg"."""
+    text = ("%.3f" % flt(value, 3)).rstrip("0").rstrip(".")
+    return text if text not in ("", "-0") else "0"
+
+
+def _claims_html(claims):
+    # The DUNO is what makes a claim recognisable: one Material Planning is often shared
+    # by several Issue Plans, so "MP-2026-00017" alone reads like this plan's own rows.
+    return "".join(
+        "<li>{0} — {1} {2} {3}{4}: <b>{5} Kg</b></li>".format(
+            frappe.utils.escape_html(c["material_planning"]), c["table"], _("row"), c["idx"],
+            " (" + _("DUNO") + " " + frappe.utils.escape_html(c["duno"]) + ")" if c.get("duno") else "",
+            _num(c["qty"]))
+        for c in claims
+    )
+
+
+def _shortage_message(batch_no, info, need_kg, pieces=None, kg_per_piece=None, planned_kg=None, extra=None):
+    """The whole sum, so the user can see which figure to change."""
+    lines = [_("<b>Not enough stock in batch {0}</b> ({1})").format(
+        frappe.utils.escape_html(batch_no), frappe.utils.escape_html(info.warehouse or ""))]
+    if pieces is not None and kg_per_piece:
+        lines.append(_("You asked for <b>{0} Nos × {1} Kg per piece = {2} Kg</b>").format(
+            _num(pieces), _num(kg_per_piece), _num(need_kg)))
+    else:
+        lines.append(_("You asked for <b>{0} Kg</b>").format(_num(need_kg)))
+    if planned_kg is not None:
+        lines.append(_("Planned for this line: {0} Kg").format(_num(planned_kg)))
+    if extra:
+        lines.append(extra)
+    lines.append(_("In stock: {0} Kg").format(_num(info.in_stock)))
+    if info.reserved_for_others:
+        lines.append(_("Reserved for other drawings or plans: {0} Kg").format(_num(info.reserved_for_others_kg))
+                     + "<ul style='margin:2px 0 2px 18px'>" + _claims_html(info.reserved_for_others) + "</ul>")
+    else:
+        lines.append(_("Reserved for other drawings or plans: 0 Kg"))
+    lines.append(_("Available for this plan: <b>{0} Kg</b>").format(_num(info.available)))
+    short = flt(need_kg - info.available, 3)
+    lines.append(_("<b>Short by: {0} Kg</b>").format(_num(short)))
+    if kg_per_piece:
+        most = int(math.floor((flt(info.available) + _TRANSFER_EPS) / flt(kg_per_piece)))
+        lines.append(_("The most this batch can give is <b>{0} whole piece(s)</b> ({1} Kg), or up to {2} Kg as a fraction.")
+                     .format(most, _num(most * flt(kg_per_piece)), _num(info.available)))
+    return "<br>".join(lines)
+
+
+def _waiting_warning(batch_no, info, taking_kg):
+    """Non-blocking: taking this leaves too little for rows planned on the batch but not reserved."""
+    if not info.waiting_elsewhere:
+        return None
+    left = flt(info.available - taking_kg, 3)
+    if left + _TRANSFER_EPS >= info.waiting_elsewhere_kg:
+        return None
+    return (
+        _("Batch {0} is also assigned — but not reserved — to other rows needing {1} Kg:")
+        .format(frappe.utils.escape_html(batch_no), _num(info.waiting_elsewhere_kg))
+        + "<ul style='margin:4px 0 4px 18px'>" + _claims_html(info.waiting_elsewhere) + "</ul>"
+        + _("Taking {0} Kg now leaves {1} Kg for them. They will come up short when they try to reserve.")
+        .format(_num(taking_kg), _num(max(0.0, left)))
+    )
 
 
 def _apply_transfer_excess_to_raw_materials(mip, item, excess_kg):
@@ -1543,8 +1916,12 @@ def create_mip_cnc_partial_forward(mip_name, selected_items_json):
     problems, se_items = [], []
     for item in selected:
         key = (item["item_code"], item.get("batch_no") or "")
-        qty = flt(item.get("qty"))
         row = pending_by_key.get(key)
+        # Same rule as the source-warehouse leg: where Sec Nos drives the weight, the Kg
+        # is worked out here from the piece, never taken from the browser.
+        if row and flt(row.get("qty")) > 0 and flt(row.get("custom_sec_qty")) > 0 and flt(item.get("custom_sec_qty")) > 0:
+            item["qty"], _piece = _qty_for_sec(row, flt(item.get("custom_sec_qty")))
+        qty = flt(item.get("qty"))
         if qty <= 0:
             problems.append(_("{0} ({1}): qty must be greater than zero.").format(key[0], key[1] or "-"))
             continue

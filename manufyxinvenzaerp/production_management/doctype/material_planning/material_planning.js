@@ -3174,7 +3174,44 @@ frappe.ui.form.on("Material Planning Available Raw Material", {
 		// Make skip checkbox read-only for reserved rows in the expanded row view
 		let df = frappe.meta.get_docfield("Material Planning Available Raw Material", "skip_auto_suggest_batch", cdn);
 		if (df) df.read_only = row.is_reserved ? 1 : 0;
+		// Same for the dimension waiver: _apply_rwd_fractional_nos skips reserved
+		// rows, so a tick on one would appear to take and then do nothing.
+		let rwd_df = frappe.meta.get_docfield("Material Planning Available Raw Material", "reserve_without_dimensions", cdn);
+		if (rwd_df) rwd_df.read_only = row.is_reserved ? 1 : 0;
 		frm.fields_dict["available_raw_materials"].grid.refresh_row(cdn);
+	},
+
+	// Exact Match's waiver does less than Material Mapping's, and the difference
+	// matters: there is no batch_calc_qty to clear here, because an exact-match row
+	// already reserves its Allocated Qty in Kg verbatim. Only Sec Nos changes, and
+	// the server derives it on save from the batch's own dimensions -- which the
+	// browser does not hold for this table (no unit weight field), so there is
+	// nothing honest to preview client-side.
+	reserve_without_dimensions(frm, cdt, cdn) {
+		let row = locals[cdt][cdn];
+		if (!row.reserve_without_dimensions) return;
+
+		if (row.is_reserved) {
+			frappe.model.set_value(cdt, cdn, "reserve_without_dimensions", 0);
+			frappe.show_alert({
+				message: __("Unreserve this row before waiving its dimensions."),
+				indicator: "orange",
+			}, 4);
+			return;
+		}
+		if (["Structurals", "Plates"].indexOf(row.parent_item_group) === -1) {
+			frappe.model.set_value(cdt, cdn, "reserve_without_dimensions", 0);
+			frappe.show_alert({
+				message: __("Reserve without dimensions applies to Structurals and Plates only."),
+				indicator: "orange",
+			}, 5);
+			return;
+		}
+		frappe.show_alert({
+			message: __("Sec Qty (NOS) will be recalculated from batch {0} on save.",
+				[row.batch_no || __("the assigned batch")]),
+			indicator: "blue",
+		}, 5);
 	},
 
 	batch_no(frm, cdt, cdn) {

@@ -171,6 +171,69 @@ def _mip_refresh_blocked_message(mip):
     ).format(", ".join(se_names))
 
 
+def _mip_stock_actions(mip):
+    """Every Stock Entry made against this plan that is not cancelled -- drafts included.
+
+    Wider than _get_mip_transfer_stock_entry_names on purpose. That one answers "has
+    material physically left for the supplier" and only sees submitted entries tagged
+    to the SCO or Work Order. Changing a batch has to stop earlier: a CNC leg, an excess
+    return received with no supplier involved (tagged to the plan alone), a process-loss
+    or final entry, or a draft transfer waiting to be submitted were all built from the
+    reservations as they stand, and rebuilding Raw Materials under them leaves those
+    documents describing batches the plan no longer holds.
+    """
+    conditions = ["se.custom_mip_ref = %(mip)s"]
+    params = {"mip": mip.name}
+    if mip.get("subcontracting_order"):
+        conditions += ["se.custom_sco_ref = %(sco)s", "se.subcontracting_order = %(sco)s"]
+        params["sco"] = mip.subcontracting_order
+    if mip.get("work_order"):
+        conditions += ["se.custom_wo_ref = %(wo)s", "se.work_order = %(wo)s"]
+        params["wo"] = mip.work_order
+    return frappe.db.sql(
+        """
+        SELECT se.name, se.stock_entry_type, se.docstatus, se.posting_date
+        FROM `tabStock Entry` se
+        WHERE se.docstatus < 2 AND ({0})
+        ORDER BY se.posting_date, se.name
+        """.format(" OR ".join(conditions)),
+        params, as_dict=True,
+    )
+
+
+def _mip_batch_change_blocked_message(mip):
+    """Why a batch cannot be reassigned on this plan any more, or None if it can.
+
+    Client decision, 14 Sep 2026: once a transfer or any other stock action has been
+    made on a Material Issue Plan, reassigning a batch is refused outright -- the
+    reassignment ends by rebuilding the Raw Materials table, and that table must not be
+    rebuilt under documents already created from it.
+    """
+    actions = _mip_stock_actions(mip)
+    if not actions:
+        return None
+    lines = "".join(
+        "<li><b>{0}</b> — {1} ({2})</li>".format(
+            a.name, a.stock_entry_type or _("Stock Entry"),
+            _("Draft") if a.docstatus == 0 else _("Submitted"))
+        for a in actions
+    )
+    return _(
+        "<b>The batch cannot be reassigned.</b><br>"
+        "These actions have already been performed on {0}:<ul style='margin:6px 0 6px 18px'>{1}</ul>"
+        "Because of this the Raw Materials table cannot be refreshed, so the batch cannot be "
+        "changed. To change it, those entries would have to be cancelled first."
+    ).format(mip.name, lines)
+
+
+@frappe.whitelist()
+def check_mip_batch_change_allowed(mip_name):
+    """Pre-flight for the Update Batch buttons, so the user is told before the dialog opens."""
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+    message = _mip_batch_change_blocked_message(mip)
+    return {"blocked": bool(message), "message": message}
+
+
 @frappe.whitelist()
 def check_mip_raw_materials_refreshable(mip_name):
     """Live pre-flight check for the 'Refresh Raw Materials' button -- queries submitted
@@ -367,6 +430,20 @@ def refresh_mip_raw_materials(mip_name):
                 "is_reserved": 0,
                 "is_unavailable": 1,
             })
+
+    # The rounding surplus a past transfer booked onto these rows (see
+    # _apply_transfer_excess_to_raw_materials) is history, not something the Material
+    # Planning can supply again -- so a rebuild used to wipe it, and every already-
+    # transferred row came back with a blank Excess column while Excess Material Items
+    # still held the Kg. Any rebuild did it: Refresh Raw Materials, and since Sep 2026
+    # every Consolidate Items batch update, which ends with a rebuild of the whole plan
+    # including lines it never touched. Carried forward only where the row still holds
+    # the SAME batch -- the surplus belongs to the transfer of that batch.
+    for new_row in (mip.raw_materials or []):
+        old = old_rows_by_key.get((new_row.source_table, new_row.source_row))
+        if (old and flt(old.get("transfer_excess_kg"))
+                and (old.batch_no or "") == (new_row.batch_no or "")):
+            new_row.transfer_excess_kg = flt(old.transfer_excess_kg, 3)
 
     mip.save(ignore_permissions=True)
     refresh_weight_summary(mip_name)
@@ -573,9 +650,18 @@ def _sync_consolidate_items(mip):
     and saved without transferring (see save_transfer_draft), so they are carried across
     the rebuild, matched on the same key the rows are grouped by. Losing them would mean
     "Save and Close" quietly discarded the work the moment anything re-saved the plan.
+
+    The grouping rule itself lives in consolidate_group_key (material_issue_plan_batch_update),
+    because the Consolidate Items Update Batch dialog has to expand a line back to these
+    same rows. Two copies of this tuple would be two chances for the table and the thing
+    that edits it to disagree about what a line is.
     """
+    from manufyxinvenzaerp.subcontracting_management.material_issue_plan_batch_update import (
+        consolidate_group_key,
+    )
+
     drafts = {
-        (r.item_code, r.batch_no or "", 1 if r.cnc_process else 0): {
+        consolidate_group_key(r): {
             f: r.get(f) for f in _CONSOLIDATE_DRAFT_FIELDS
         }
         for r in (mip.consolidate_items or [])
@@ -597,7 +683,7 @@ def _sync_consolidate_items(mip):
         if not row.batch_no:
             continue
         item_code = row.planned_item or row.item_code
-        key = (item_code, row.batch_no, 1 if row.cnc_process else 0)
+        key = consolidate_group_key(row)
         g = groups.get(key)
         if not g:
             g = groups[key] = {
