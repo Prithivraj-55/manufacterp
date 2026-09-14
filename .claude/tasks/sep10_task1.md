@@ -606,3 +606,36 @@ dimensions, because that is what `_get_mp_reserved_batches` puts on the Stock En
 **A reassign discards that line's parked transfer draft** — the draft is keyed on the
 batch. The dialog warns before applying; the round trips above restored it by hand from
 a backup.
+
+
+---
+
+## 9. Client review, 14 Sep 2026
+
+| Request | Done |
+|---|---|
+| Rename popup labels | New Batches: Capacity → **Weight**, "free" → **Total available Weight**. Result table: Capacity → **Weight**, Free → **Total Batch Weight**, Unused → **Excess** |
+| Length/Width read-only, Pieces only | Inputs read-only and filled from the Batch record. `get_batch_capacity(batch_no, warehouse, pieces)` no longer takes dimensions and `_build_plan` ignores any a caller sends. Reason: a typed cut size steered the fill but was never stored, so the Stock Entry always carried the batch's real size |
+| Draft warning wording | *This line has unfinished entries saved from "Select Materials to Transfer" on {date} (not yet transferred). Changing the batch clears them — you will need to re-enter them in the transfer popup.* It is the **Save and Close** state of the transfer popup — no Stock Entry is involved |
+| Hide Raw Materials Update Batch | Toolbar call commented out; row `update_batch_btn` set `hidden: 1`. **Side effect:** the freed grid width lets the **Batch** column show in Raw Materials, which the 11-column budget used to drop |
+| Per-row Update Batch on Consolidate Items | New Button field `update_batch_btn` (2 cols; Issued Qty 2→1 keeps the grid at exactly 11). Drawn by a formatter + capture-phase click, because the grid is read-only. Opens the dialog preselected; transferred lines show *Transferred* |
+| Confirmation shows current reservations | **Confirm Batch Reassignment** dialog: per row — Material Planning, current batch, Reserved / Not reserved, reserved Kg (read from the Material Planning row, not the Issue Plan's copy), new batch, new Kg — and the three steps Yes performs |
+
+Also fixed while verifying:
+
+* **The result message repeated the preview's warnings** after the user had already
+  confirmed them. The apply now returns only what happened during the apply
+  (inspection blocks, partial reservations) plus `from_batch` / `to_batches`, and says
+  *"Unreserved N row(s) from OLD and reserved them on NEW (X Kg)."*
+* **`verify_transfer_draft.py` destroyed real data.** It borrowed the first consolidate
+  row on the site, overwrote its parked draft and then cleared it, committing both. On
+  the restored live data that wiped a genuine Save-and-Close on MIP-2026-00005 / PLATE10
+  (11 Sep 13:22, again 14 Sep 14:22). The draft was recovered from the 11 Sep 13:18
+  backup. The test now prefers a row with no draft, snapshots the fields, and restores
+  them in `finally`; verified by diffing every draft on the site before and after.
+
+Verified in the browser end to end: row button → preselected line → read-only L/W →
+preview → confirmation listing the three reserved rows → **Yes** → rows unreserved,
+moved to `PLT25-P25-L11025-W2000-SR001` and reserved again (checked in the database) →
+moved back the same way → rows byte-identical to before, every draft on the site
+identical to before.

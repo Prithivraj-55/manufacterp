@@ -77,6 +77,7 @@
    "depends_on": "eval:doc.source_table !== 'Material Planning Unavailable Item'",
    "fieldname": "update_batch_btn",
    "fieldtype": "Button",
+   "hidden": 1,
    "in_list_view": 1,
    "label": "Update Batch"
   },

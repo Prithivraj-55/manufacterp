@@ -9,6 +9,7 @@
   "item_code",
   "item_name",
   "batch_no",
+  "update_batch_btn",
   "cnc_process",
   "column_break_dims",
   "parent_item_group",
@@ -61,6 +62,14 @@
    "options": "Batch",
    "read_only": 1,
    "columns": 2
+  },
+  {
+   "columns": 2,
+   "description": "Reassign every raw-material row merged into this line to a new batch. Drawn by material_issue_plan.js -- this grid is read-only, and Frappe only renders Button fields on rows it can edit.",
+   "fieldname": "update_batch_btn",
+   "fieldtype": "Button",
+   "in_list_view": 1,
+   "label": "Update Batch"
   },
   {
    "default": "0",
@@ -151,7 +160,7 @@
    "label": "Issued Qty",
    "precision": "3",
    "read_only": 1,
-   "columns": 2
+   "columns": 1
   },
   {
    "fieldname": "pending_qty",

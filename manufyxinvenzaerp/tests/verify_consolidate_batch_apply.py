@@ -201,6 +201,61 @@ def run(live=0):
               len(bu.get_candidate_batches(ctx["item_code"], ctx["warehouse"])) > 0, True)
 
     print()
+    print("=== 5c. Client decisions of 14 Sep 2026 ===")
+    import inspect, re
+    # Batches are reassigned from Consolidate Items only.
+    rm = frappe.get_meta("Material Issue Plan Raw Material").get_field("update_batch_btn")
+    check("Raw Materials row button is hidden", bool(rm and rm.hidden), True)
+    js = open(frappe.get_app_path("manufyxinvenzaerp", "subcontracting_management", "doctype",
+                                  "material_issue_plan", "material_issue_plan.js")).read()
+    check("Raw Materials toolbar button is no longer added",
+          bool(re.search(r"^\s*_add_update_batch_button\(frm\);", js, re.M)), False)
+
+    ci = frappe.get_meta("Material Issue Plan Consolidate Item")
+    btn = ci.get_field("update_batch_btn")
+    check("Consolidate Items has a per-row Update Batch", bool(btn and btn.in_list_view), True)
+    # Frappe silently drops every column after the one that passes 11.
+    budget = 1 + sum((df.columns or 2) for df in ci.fields
+                     if df.in_list_view and not df.hidden
+                     and df.fieldtype not in ("Section Break", "Column Break", "Tab Break"))
+    check("and the grid still fits Frappe's 11-column budget", budget <= 11, True)
+    check("the row button is drawn by a formatter (grid is read-only)",
+          "meta_df.formatter = formatter" in js and "addEventListener(\"click\"" in js, True)
+
+    # Only Pieces is typed; a batch is always priced at its own size.
+    params = list(inspect.signature(bu.get_batch_capacity).parameters)
+    check("get_batch_capacity takes no length/width", params, ["batch_no", "warehouse", "pieces"])
+    check("the dialog sends batch and pieces only",
+          "({ batch_no: t.batch_no, pieces: t.pieces || 0 })" in js, True)
+    check("Length/Width inputs are read-only",
+          js.count('readonly tabindex="-1"') >= 2, True)
+
+    if live_line:
+        line = live_line[0]
+        other = next((b for b in bu.get_candidate_batches(
+            line.item_code, frappe.db.get_value("Material Issue Plan", line.mip, "source_warehouse") or "")
+            if b["batch_no"] != line.batch_no), None)
+        if other:
+            plain = bu.preview_consolidate_batch_update(
+                line.mip, line.crow, json.dumps([{"batch_no": other["batch_no"], "pieces": 1}]))
+            forced = bu.preview_consolidate_batch_update(
+                line.mip, line.crow,
+                json.dumps([{"batch_no": other["batch_no"], "pieces": 1, "length": 1, "width": 1}]))
+            check("a length/width sent anyway is ignored",
+                  forced["targets"][0]["capacity_kg"], plain["targets"][0]["capacity_kg"])
+            m0 = plain["members"][0]
+            src_field = "reserved_qty"
+            live_reserved = flt(frappe.db.get_value(m0["source_table"], m0["source_row"], src_field), 3)
+            check("confirmation shows the reservation as the plan holds it",
+                  (m0["reserved_qty"], "is_reserved" in m0), (live_reserved, True))
+
+    src = inspect.getsource(bu)
+    check("draft warning uses the agreed wording",
+          'unfinished entries saved from \\"Select Materials to Transfer\\"' in src, True)
+    check("confirmation popup names the unreserve step",
+          "Yes, Unreserve and Reassign" in js and "Current reservation and new assignment" in js, True)
+
+    print()
     print("=== 6. Live round trip (writes) ===")
     if not live:
         print("  (skipped -- pass live=1 to run it; see this file's docstring)")

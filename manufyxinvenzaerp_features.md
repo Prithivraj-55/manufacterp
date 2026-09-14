@@ -476,16 +476,38 @@ applies to Structurals and Plates only.
 
 ### 20.2 The Update Batch dialog on Consolidate Items
 
-Two steps, because applying cannot be undone in one action:
+**This is the only place a batch is reassigned on a Material Issue Plan.** Since
+14 Sep 2026 the Raw Materials grid's toolbar *Update Batch* is no longer added and its
+per-row button is hidden (both kept in code, so they can come back). Consolidate Items
+has the button on **every row** — opening the dialog straight onto that line — as well
+as above the grid.
 
-1. **Preview.** Pick a line, name one or more target batches, optionally declare a cut
-   size and piece count for each. The dialog shows each batch's capacity against its
-   free stock, then reports what would happen: how many rows and Kg, every Material
-   Planning involved with its row count, and **which row lands on which batch**.
-2. **Reassign Batch**, which appears only after a clean preview. It asks for
-   confirmation naming every plan and its row count before anything is written. Any
-   edit afterwards drops back to Preview, and the server independently refuses a plan
-   whose figures have changed since it was previewed.
+The grid is read-only, and Frappe only renders a Button field on a row it can edit, so
+the row button is drawn by a cell formatter and its click is caught before the row's
+own click handler. A line with anything already transferred shows *Transferred*
+instead of a button.
+
+Three steps, because applying cannot be undone in one action:
+
+1. **Preview.** Name one or more target batches and a **piece count** for each.
+   Length and Width are shown for reference but are the batch's own size and **cannot
+   be edited** — nothing typed there was ever saved or transferred, so they were
+   removed as inputs (the server ignores them too). The dialog shows each batch's
+   **Weight** (pieces × the batch's piece weight) against its **Total available
+   Weight**, then reports what would happen: rows and Kg, every Material Planning
+   involved, and **which row lands on which batch**.
+2. **Reassign Batch**, available only after a clean preview, opens **Confirm Batch
+   Reassignment**: every row with its Material Planning, **current batch, whether it is
+   reserved and how many Kg it holds**, and the new batch and Kg it will get. It spells
+   out what Yes does — the existing reservations are unreserved, every row is assigned
+   to the new batch, and every row is reserved again.
+3. **Yes, Unreserve and Reassign** applies it. The result reads *"Unreserved N row(s)
+   from OLD and reserved them on NEW (X Kg)."* Any edit before confirming drops back to
+   Preview, and the server independently refuses a plan whose figures changed since.
+
+In the result table, **Weight** is what the batch was allowed to give, **Total Batch
+Weight** is its free stock (total less every plan's reservations), and **Excess** is
+the part of that Weight this line did not use — not material returned.
 
 Only batches with free stock in the plan's source warehouse are offered - a zero-stock
 batch is the one case downstream validation does not catch.
@@ -501,9 +523,9 @@ stranded is reported rather than hidden, naming the row that closed it.
 If the batches entered cannot cover the whole line, the reassignment is **refused**
 rather than partly applied.
 
-The Length/Width entered against a target declare a **cut size for capacity only** -
-how much of that batch this line may take. The row still records the batch's own
-dimensions, because those are what reach the Stock Entry.
+Each batch is priced at its **own recorded size**. (Until 14 Sep 2026 a cut size could
+be typed here; it steered the split but was never saved, so the Stock Entry carried the
+batch's real size regardless. The inputs were made read-only for that reason.)
 
 ### 20.4 Nuts and Bolts
 
@@ -525,8 +547,11 @@ released from reservation but **still carry their original batch** - nothing is 
 and re-running recovers, because members are re-derived from current state each time so
 rows that already moved are no longer part of the line.
 
-**A reassign discards that line's parked transfer draft**, since the draft is keyed on
-the batch. The dialog warns before applying.
+**A reassign clears that line's unfinished "Select Materials to Transfer" entries**
+(the ones parked with *Save and Close*), since they are keyed on the batch. No stock
+has moved when this happens. The dialog warns: *"This line has unfinished entries saved
+from "Select Materials to Transfer" on … (not yet transferred). Changing the batch
+clears them — you will need to re-enter them in the transfer popup."*
 
 ### 20.6 Verified
 

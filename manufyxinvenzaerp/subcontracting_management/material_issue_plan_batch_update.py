@@ -192,17 +192,20 @@ def _batch_free_kg(batch_no, warehouse):
 
 
 @frappe.whitelist()
-def get_batch_capacity(batch_no, warehouse, pieces=0, length=None, width=None, thickness=None):
+def get_batch_capacity(batch_no, warehouse, pieces=0):
     """Price one candidate batch for the dialog. Read-only.
 
-    Capacity and free stock are returned SEPARATELY and both are shown, because they
-    answer different questions: capacity is how much the user says they are cutting
+    Weight and free stock are returned SEPARATELY and both are shown, because they
+    answer different questions: weight is how much the user says they are taking
     from this batch, free stock is how much of it is actually in the warehouse and
-    unclaimed. A capacity above free stock is a piece count nobody can honour, and it
+    unclaimed. A weight above free stock is a piece count nobody can honour, and it
     has to read as a warning rather than be silently clamped.
 
-    Dimensions default to the Batch record's own but stay overridable -- the split
-    case works by declaring a cut size and a piece count against a batch.
+    Always priced at the batch's OWN recorded size. The dialog used to let the user
+    type a Length and Width here, but nothing typed was ever saved or transferred --
+    each row keeps the batch's real dimensions, and those are what reach the Stock
+    Entry -- so a typed cut size planned against one size and shipped another. Only
+    the piece count is taken from the user now (client decision, Sep 2026).
     """
     item_code = get_batch_item(batch_no) if batch_no else None
     if not item_code:
@@ -214,10 +217,8 @@ def get_batch_capacity(batch_no, warehouse, pieces=0, length=None, width=None, t
     group = item.get("custom_parent_item_group") or ""
     unit_weight = flt(item.get("custom_unit_weight"))
 
-    b_length, b_width, b_thickness = _get_batch_dims(batch_no)
-    length = flt(length) if length not in (None, "") else flt(b_length)
-    width = flt(width) if width not in (None, "") else flt(b_width)
-    thickness = flt(thickness) if thickness not in (None, "") else flt(b_thickness)
+    length, width, thickness = (flt(v) for v in _get_batch_dims(batch_no))
+    b_length, b_width, b_thickness = length, width, thickness
     pieces = flt(pieces)
 
     kg_per_piece = flt(_calc_kg_per_nos(group, length, width, thickness, unit_weight), 3)
@@ -436,13 +437,15 @@ def _member_flags(members):
     for table, names in by_table.items():
         if table == UNAVAILABLE_ITEM:
             continue
-        fields = ["name", "cut_sheet_ref"]
+        fields = ["name", "cut_sheet_ref", "is_reserved", "reserved_qty"]
         if table == MATERIAL_MAPPING:
             fields.append("is_virtual_excess")
         for r in frappe.get_all(table, filters={"name": ["in", names]}, fields=fields):
             flags[(table, r.name)] = frappe._dict({
                 "cut_sheet_ref": r.get("cut_sheet_ref") or "",
                 "is_virtual_excess": 1 if r.get("is_virtual_excess") else 0,
+                "is_reserved": 1 if r.get("is_reserved") else 0,
+                "reserved_qty": flt(r.get("reserved_qty"), 3),
             })
     return flags
 
@@ -557,7 +560,9 @@ def _build_plan(mip_name, consolidate_row_name, targets_json=None):
     for row in (mip.consolidate_items or []):
         if row.name == consolidate_row_name and row.get("draft_saved_on"):
             warnings.append(
-                _("This line has a saved transfer draft from {0}. Changing the batch discards it.")
+                _("This line has unfinished entries saved from \"Select Materials to Transfer\" "
+                  "on {0} (not yet transferred). Changing the batch clears them — you will need "
+                  "to re-enter them in the transfer popup.")
                 .format(frappe.utils.format_datetime(row.draft_saved_on))
             )
 
@@ -565,10 +570,9 @@ def _build_plan(mip_name, consolidate_row_name, targets_json=None):
     targets_in = json.loads(targets_json) if isinstance(targets_json, str) else (targets_json or [])
     targets = []
     for t in targets_in:
-        priced = get_batch_capacity(
-            t.get("batch_no"), warehouse, t.get("pieces") or 0,
-            t.get("length"), t.get("width"), t.get("thickness"),
-        )
+        # Batch and piece count only. Any length/width a caller sends is ignored:
+        # a batch is always priced at its own size, which is the size it ships at.
+        priced = get_batch_capacity(t.get("batch_no"), warehouse, t.get("pieces") or 0)
         if not priced.get("ok"):
             blockers.append(priced.get("error"))
             continue
@@ -669,8 +673,14 @@ def _build_plan(mip_name, consolidate_row_name, targets_json=None):
                  leftover_kg=fill.leftover_kg[i] if fill else flt(t["effective_capacity_kg"], 3))
             for i, t in enumerate(targets)
         ],
+        # is_reserved / reserved_qty come from the Material Planning row, not the
+        # Issue Plan's copy -- the confirmation shows what is about to be released,
+        # so it must be the reservation as it stands, not a snapshot of it.
         "members": [
-            dict(m, target_index=_target_index_of(fill, m))
+            dict(m,
+                 target_index=_target_index_of(fill, m),
+                 is_reserved=flags.get((m.source_table, m.source_row), {}).get("is_reserved", m.is_reserved),
+                 reserved_qty=flags.get((m.source_table, m.source_row), {}).get("reserved_qty", 0.0))
             for m in members
         ],
         "shortfall_kg": fill.shortfall_kg if fill else total_kg,
@@ -1075,7 +1085,10 @@ def apply_consolidate_batch_update(mip_name, consolidate_row_name, targets_json,
     )
     refresh_mip_raw_materials(mip_name)
 
-    warnings = list(response.get("warnings") or []) + inspection
+    # Only what happened DURING the apply. The preview's warnings (a parked transfer
+    # draft, an uninspected batch) were already shown on the confirmation the user said
+    # Yes to; repeating them afterwards reads as a new problem.
+    warnings = list(inspection)
     if partial:
         # reserve_batches does NOT throw on a shortfall -- it reserves what it can
         # and records the rest. Without surfacing that, a fan-out that reserved half
@@ -1088,6 +1101,8 @@ def apply_consolidate_batch_update(mip_name, consolidate_row_name, targets_json,
 
     return {
         "ok": True,
+        "from_batch": plan.key[1],
+        "to_batches": sorted({b for a in applied for b in a.batches}),
         "applied": [dict(a) for a in applied],
         "rows": sum(a.rows for a in applied),
         "qty": flt(sum(a.qty for a in applied), 3),

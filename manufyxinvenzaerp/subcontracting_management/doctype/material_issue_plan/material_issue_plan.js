@@ -36,10 +36,11 @@ frappe.ui.form.on("Material Issue Plan", {
 			}));
 		});
 		_lock_raw_materials_row_adding(frm);
-		// Update Batch first, then View All beside it -- both in the grid's TOP
-		// toolbar. View All used to sit in the bottom toolbar, a table's length
-		// away from the button people reach for next.
-		_add_update_batch_button(frm);
+		// Batches are now reassigned from Consolidate Items only, at the client's
+		// request (Sep 2026). The Raw Materials toolbar button is no longer added and
+		// its per-row button is hidden in the child doctype; both are kept, not deleted,
+		// so they can be brought back. View All stays in the Raw Materials top toolbar.
+		// _add_update_batch_button(frm);
 		_add_view_all_raw_materials_button(frm);
 		_add_consolidate_update_batch_button(frm);
 		// The Manual button is removed at the client's request in favour of one
@@ -2522,13 +2523,14 @@ function _show_update_batch_dialog(frm, preselect_row_name) {
 //
 // It works because the reassignment is dimensionless: each member reserves its own
 // required Kg and expresses the piece count as a fraction, so the only figure that has
-// to reconcile is total Kg. What the user states per target batch is a cut size and a
-// piece count, which gives that batch a Kg capacity; rows then fill the batches in
-// table order.
+// to reconcile is total Kg. What the user states per target batch is a piece count,
+// which at the batch's own size gives that batch a weight; rows then fill the batches
+// in table order.
 //
-// PHASE 1: preview only. The server endpoint writes nothing, and this dialog has no
-// apply action yet -- it exists to show what a reassignment WOULD do and to prove the
-// line expands to the rows people expect. See .claude/tasks/sep10_task1.md.
+// Two steps: Preview (read-only), then a confirmation listing every current
+// reservation, then apply. This is now the ONLY place batches are reassigned on a
+// Material Issue Plan -- the Raw Materials buttons are hidden. See
+// .claude/tasks/sep10_task1.md.
 
 const _MIP_CB = "manufyxinvenzaerp.subcontracting_management.material_issue_plan_batch_update.";
 
@@ -2538,17 +2540,68 @@ function _add_consolidate_update_batch_button(frm) {
 
 	// "top" is not a preference here, it is required: consolidate_items is read_only,
 	// and Frappe hides .grid-footer entirely for a read-only grid whose rows all fit on
-	// one page -- which would take a bottom-toolbar button with it. Same reason the
-	// raw-materials button uses it, and the reason this is a toolbar button rather than
-	// a per-row Button field.
+	// one page -- which would take a bottom-toolbar button with it. The per-row button
+	// alongside it needs its own workaround for the same read-only grid; see below.
 	grid.add_custom_button(
 		frappe.utils.icon("edit", "xs") + " " + __("Update Batch"),
 		() => _show_consolidate_update_batch_dialog(frm),
 		"top"
 	);
+	_setup_consolidate_row_buttons(frm, grid);
 }
 
-function _show_consolidate_update_batch_dialog(frm) {
+// Per-row "Update Batch" on Consolidate Items, matching the one Raw Materials had.
+//
+// It cannot simply be a Button field left to Frappe. Frappe only builds a real
+// control for a grid cell when the row is being edited, and this grid is read-only,
+// so a plain Button column would render as an empty cell. Instead the cell's
+// formatter draws the button itself, which works on a static row. Clicking a
+// read-only row normally opens the row's detail view and swallows the click, so the
+// click is caught in the capture phase -- before the row sees it -- and stopped.
+function _setup_consolidate_row_buttons(frm, grid) {
+	const formatter = function (value, df, options, doc) {
+		if (!doc || !doc.batch_no || frm.is_new()) return "";
+		// A line with anything shipped cannot be reassigned at all (refused whole on
+		// the server), so say so in the cell rather than offer a button that fails.
+		if (flt(doc.transferred_qty) > 0.001) {
+			return `<span class="text-muted small" title="${__("Already transferred — this line cannot be reassigned.")}">${__("Transferred")}</span>`;
+		}
+		return `<button type="button" class="btn btn-xs mfx-action-btn-alt mfx-cb-row-btn"
+			data-row="${frappe.utils.escape_html(doc.name)}" style="white-space:nowrap">${__("Update Batch")}</button>`;
+	};
+
+	// Rows copy their docfields from the meta the first time they render, so set it
+	// on the meta for rows not yet drawn and on the grid for rows that already are.
+	let meta_df = frappe.meta.get_docfield("Material Issue Plan Consolidate Item", "update_batch_btn");
+	if (meta_df) meta_df.formatter = formatter;
+	try {
+		grid.update_docfield_property("update_batch_btn", "formatter", formatter);
+	} catch (e) {
+		// A row from before the field existed has no such docfield; the meta copy
+		// above covers it on the next render.
+	}
+
+	if (!grid.wrapper[0].__mfx_cb_row_click) {
+		grid.wrapper[0].addEventListener("click", function (e) {
+			let btn = e.target.closest && e.target.closest(".mfx-cb-row-btn");
+			if (!btn) return;
+			e.preventDefault();
+			e.stopPropagation();
+			_show_consolidate_update_batch_dialog(frm, btn.getAttribute("data-row"));
+		}, true);
+		grid.wrapper[0].__mfx_cb_row_click = true;
+	}
+	grid.refresh();
+}
+
+// The same button inside the expanded row view, where Frappe does render the control.
+frappe.ui.form.on("Material Issue Plan Consolidate Item", {
+	update_batch_btn(frm, cdt, cdn) {
+		_show_consolidate_update_batch_dialog(frm, cdn);
+	},
+});
+
+function _show_consolidate_update_batch_dialog(frm, preselect_row_name) {
 	let lines = (frm.doc.consolidate_items || []).filter((r) => !!r.batch_no);
 	if (!lines.length) {
 		frappe.msgprint(__("No consolidated lines yet. Allocate batches on the Raw Materials tab first."));
@@ -2629,7 +2682,13 @@ function _show_consolidate_update_batch_dialog(frm) {
 		);
 
 		d.fields_dict.lines_html.$wrapper.find("tr[data-ok='1']").on("click", function () {
-			selected = lines.find((x) => x.name === $(this).data("name"));
+			_select_line($(this).data("name"));
+		});
+	}
+
+	function _select_line(name) {
+			selected = lines.find((x) => x.name === name);
+			if (!selected) return;
 			_armPreview();
 			_render_lines();
 			d.fields_dict.result_html.$wrapper.empty();
@@ -2659,7 +2718,6 @@ function _show_consolidate_update_batch_dialog(frm) {
 					});
 				},
 			});
-		});
 	}
 
 	// ── Target batches ───────────────────────────────────────────────────────
@@ -2676,10 +2734,10 @@ function _show_consolidate_update_batch_dialog(frm) {
 				<td style="padding:4px 6px"><input class="form-control input-xs _cb_batch" style="width:230px"
 					list="_cb_batch_options" autocomplete="off"
 					value="${frappe.utils.escape_html(t.batch_no || "")}" placeholder="${__("Batch")}"></td>
-				<td style="padding:4px 6px"><input type="number" step="0.001" class="form-control input-xs text-right _cb_len"
-					style="width:95px" value="${t.length || ""}"></td>
-				<td style="padding:4px 6px"><input type="number" step="0.001" class="form-control input-xs text-right _cb_wid"
-					style="width:95px" value="${t.width || ""}"></td>
+				<td style="padding:4px 6px"><input type="text" class="form-control input-xs text-right _cb_len" readonly tabindex="-1"
+					style="width:95px;background:#f4f5f7;color:#495057;cursor:default" value="${t.length ? format_number(t.length, null, 3) : ""}"></td>
+				<td style="padding:4px 6px"><input type="text" class="form-control input-xs text-right _cb_wid" readonly tabindex="-1"
+					style="width:95px;background:#f4f5f7;color:#495057;cursor:default" value="${t.width ? format_number(t.width, null, 3) : ""}"></td>
 				<td style="padding:4px 6px"><input type="number" step="0.001" class="form-control input-xs text-right _cb_pcs"
 					style="width:85px" value="${t.pieces || ""}"></td>
 				<td style="padding:4px 6px;font-size:11px;color:#6c757d;white-space:nowrap" class="_cb_info">${t._info || ""}</td>
@@ -2690,12 +2748,12 @@ function _show_consolidate_update_batch_dialog(frm) {
 
 		d.fields_dict.targets_html.$wrapper.html(
 			`<div style="font-size:12px;color:#6c757d;margin-bottom:6px">`
-			+ __("Leave Length/Width blank to use the batch's own size. Pieces × that size is how much of the batch this line may take.")
+			+ __("Length and Width are the batch's own size and cannot be changed. Enter Pieces — Pieces × the batch's piece weight is how much of the batch this line may take.")
 			+ `</div>
 			<table style="border-collapse:collapse;font-size:12px"><thead><tr>
 				<th style="${th}">${__("Batch")}</th><th style="${th}">${__("Length (mm)")}</th>
 				<th style="${th}">${__("Width (mm)")}</th><th style="${th}">${__("Pieces")}</th>
-				<th style="${th}">${__("Capacity")}</th><th style="${th}"></th>
+				<th style="${th}">${__("Weight")}</th><th style="${th}"></th>
 			</tr></thead><tbody>${rows}</tbody></table>
 			<button class="btn btn-xs btn-default _cb_add" style="margin-top:8px">+ ${__("Add batch")}</button>
 			<datalist id="_cb_batch_options">${(candidates || []).map((c) =>
@@ -2708,13 +2766,12 @@ function _show_consolidate_update_batch_dialog(frm) {
 		$w.find("._cb_batch").on("change", function () {
 			let i = $(this).closest("tr").data("i");
 			targets[i].batch_no = $(this).val();
+			targets[i].length = targets[i].width = 0;
 			_armPreview();
 			_price(i);
 		});
-		$w.find("._cb_len, ._cb_wid, ._cb_pcs").on("change", function () {
+		$w.find("._cb_pcs").on("change", function () {
 			let $tr = $(this).closest("tr"), i = $tr.data("i");
-			targets[i].length = flt($tr.find("._cb_len").val());
-			targets[i].width = flt($tr.find("._cb_wid").val());
 			targets[i].pieces = flt($tr.find("._cb_pcs").val());
 			_armPreview();
 			_price(i);
@@ -2736,22 +2793,28 @@ function _show_consolidate_update_batch_dialog(frm) {
 			method: _MIP_CB + "get_batch_capacity",
 			args: {
 				batch_no: t.batch_no, warehouse: lineWarehouse,
-				pieces: t.pieces || 0, length: t.length || null, width: t.width || null,
+				pieces: t.pieces || 0,
 			},
 			callback(r) {
 				let p = r.message || {};
 				if (!p.ok) { t._info = `<span style="color:#c62828">${p.error || __("Unknown batch")}</span>`; }
 				else {
-					t.length = t.length || p.length;
-					t.width = t.width || p.width;
+					t.length = p.length;
+					t.width = p.width;
 					let over = p.capacity_kg > p.free_kg + 0.001;
 					t._info = __("{0} Kg", [format_number(p.capacity_kg, null, 3)])
 						+ ` <span style="color:${over ? "#c62828" : "#6c757d"}">(`
-						+ __("free {0}", [format_number(p.free_kg, null, 3)]) + ")</span>";
+						+ __("Total available Weight {0}", [format_number(p.free_kg, null, 3)]) + ")</span>";
 				}
 				_render_targets();
 			},
 		});
+	}
+
+	// Batch and piece count only. Length/Width are shown for reference but the server
+	// always prices a batch at its own recorded size.
+	function _targets_payload() {
+		return targets.filter((t) => t.batch_no).map((t) => ({ batch_no: t.batch_no, pieces: t.pieces || 0 }));
 	}
 
 	// ── Preview ──────────────────────────────────────────────────────────────
@@ -2762,7 +2825,7 @@ function _show_consolidate_update_batch_dialog(frm) {
 			args: {
 				mip_name: frm.doc.name,
 				consolidate_row_name: selected.name,
-				targets_json: JSON.stringify(targets.filter((t) => t.batch_no)),
+				targets_json: JSON.stringify(_targets_payload()),
 			},
 			freeze: true,
 			freeze_message: __("Checking…"),
@@ -2783,33 +2846,95 @@ function _show_consolidate_update_batch_dialog(frm) {
 	function _confirm() {
 		if (!lastPlan) { _preview(); return; }
 		let g = lastPlan.group || {};
-		let batches = (lastPlan.targets || []).map((t) => t.batch_no).join(", ");
+		let members = lastPlan.members || [];
+		let tgt = lastPlan.targets || [];
+		let esc = frappe.utils.escape_html;
+		let fmt = (v) => format_number(flt(v), null, 3);
+		let newBatches = tgt.map((t) => t.batch_no).join(", ");
+		let reservedRows = members.filter((m) => m.is_reserved);
+		let reservedKg = reservedRows.reduce((a, m) => a + flt(m.reserved_qty), 0);
 
-		// Every plan is named with its row count before anything is written. A
-		// consolidate line can reach across several Material Plannings, and the
-		// person clicking this usually opened only one of them -- being told after
-		// the fact that a second plan was rewritten is not acceptable.
+		// Shown BEFORE anything moves: exactly what is reserved today, on which batch,
+		// against which plan, and where each row will go. A line can reach across
+		// several Material Plannings, and the person confirming usually opened only one
+		// of them -- they must see every reservation that is about to be released.
+		let th = "padding:5px 8px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;white-space:nowrap;";
+		let td = "padding:4px 8px;border-bottom:1px solid #eef0f2;";
+		let rows = members.map((m) => {
+			let dest = (m.target_index === null || m.target_index === undefined)
+				? "" : ((tgt[m.target_index] || {}).batch_no || "");
+			return `<tr>
+				<td style="${td}text-align:right;color:#6c757d">${m.idx}</td>
+				<td style="${td}">${esc(m.duno_mark_no || "")}</td>
+				<td style="${td}color:#6c757d">${esc(m.material_planning || "")}</td>
+				<td style="${td}">${esc(m.batch_no || "")}</td>
+				<td style="${td}">${m.is_reserved
+					? `<span style="color:#1a7f4b;font-weight:600">${__("Reserved")}</span>`
+					: `<span style="color:#8d99a6">${__("Not reserved")}</span>`}</td>
+				<td style="${td}text-align:right">${m.is_reserved ? fmt(m.reserved_qty) : "—"}</td>
+				<td style="${td}text-align:center;color:#8d99a6">→</td>
+				<td style="${td}font-weight:600">${esc(dest)}</td>
+				<td style="${td}text-align:right">${fmt(m.target_kg)}</td>
+			</tr>`;
+		}).join("");
+
 		let plans = (lastPlan.material_plannings || []).map((p) =>
-			`<li><b>${frappe.utils.escape_html(p.material_planning)}</b> — `
-			+ __("{0} row(s), {1} Kg", [p.rows, format_number(flt(p.qty), null, 3)]) + `</li>`).join("");
+			`<li><b>${esc(p.material_planning)}</b> — `
+			+ __("{0} row(s), {1} Kg", [p.rows, fmt(p.qty)]) + `</li>`).join("");
 
 		let warn = (lastPlan.warnings || []).map((w) =>
-			`<div style="margin-top:6px;padding:6px 8px;background:#fffbeb;border-left:3px solid #f59e0b;
+			`<div style="margin-top:8px;padding:8px 10px;background:#fffbeb;border-left:3px solid #f59e0b;
 			border-radius:3px;font-size:12px;color:#78350f">${w}</div>`).join("");
 
-		frappe.confirm(
-			__("Reassign all <b>{0}</b> row(s) of <b>{1}</b> — <b>{2} Kg</b> — to <b>{3}</b>?",
-				[g.rows || 0, frappe.utils.escape_html(g.item_code || ""),
-				 format_number(flt(g.total_kg), null, 3), frappe.utils.escape_html(batches)])
-			+ (g.rwd_applies
-				? `<div style="margin-top:6px;font-size:12px;color:#495057">`
-					+ __("Their existing batches are released and each row reserves its own required Kg against the new batch, without matching dimensions.")
-					+ `</div>`
-				: "")
-			+ `<div style="margin-top:8px;font-size:12px">` + __("This changes:") + `<ul style="margin:4px 0 0 18px">${plans}</ul></div>`
-			+ warn,
-			() => _apply()
+		let c = new frappe.ui.Dialog({
+			title: __("Confirm Batch Reassignment"),
+			size: "extra-large",
+			fields: [{ fieldtype: "HTML", fieldname: "body" }],
+			primary_action_label: __("Yes, Unreserve and Reassign"),
+			primary_action() {
+				c.hide();
+				_apply();
+			},
+			secondary_action_label: __("No"),
+			secondary_action() { c.hide(); },
+		});
+
+		c.fields_dict.body.$wrapper.html(
+			`<div style="font-size:13px;margin-bottom:10px">`
+			+ __("<b>{0}</b> row(s) of <b>{1}</b> ({2} Kg) are currently assigned to batch <b>{3}</b>. <b>{4}</b> of them are reserved, holding <b>{5} Kg</b>.",
+				[members.length, esc(g.item_code || ""), fmt(g.total_kg), esc(g.batch_no || ""),
+				 reservedRows.length, fmt(reservedKg)])
+			+ `</div>
+			<div style="font-weight:600;font-size:12px;margin-bottom:4px">${__("Current reservation and new assignment")}</div>
+			<div style="max-height:40vh;overflow:auto;border:1px solid #e9ecef;border-radius:4px">
+			<table style="width:100%;border-collapse:collapse;font-size:12px">
+			<thead style="position:sticky;top:0;z-index:1"><tr>
+				<th style="${th};text-align:right">${__("Row")}</th>
+				<th style="${th}">${__("DUNO/Mark")}</th>
+				<th style="${th}">${__("Material Planning")}</th>
+				<th style="${th}">${__("Current Batch")}</th>
+				<th style="${th}">${__("Status")}</th>
+				<th style="${th};text-align:right">${__("Reserved Kg")}</th>
+				<th style="${th}"></th>
+				<th style="${th}">${__("New Batch")}</th>
+				<th style="${th};text-align:right">${__("New Kg")}</th>
+			</tr></thead><tbody>${rows}</tbody></table></div>
+
+			<div style="margin-top:10px;font-size:12px">${__("Plans that will change:")}
+				<ul style="margin:4px 0 0 18px">${plans}</ul></div>
+
+			<div style="margin-top:10px;padding:10px 12px;background:#eef6ff;border-left:3px solid #2563eb;border-radius:3px;font-size:12px;color:#1e3a8a">
+				${__("On <b>Yes</b>:")}
+				<ol style="margin:4px 0 0 18px">
+					<li>${__("The existing reservations above are <b>unreserved</b> from batch {0}.", [esc(g.batch_no || "")])}</li>
+					<li>${__("Every row is assigned to the new batch {0}{1}.", [esc(newBatches),
+						g.rwd_applies ? __(", without matching dimensions — each row reserves its own required Kg") : ""])}</li>
+					<li>${__("Every row is <b>reserved again</b> against the new batch.")}</li>
+				</ol>
+			</div>`
+			+ warn
 		);
+		c.show();
 	}
 
 	function _apply() {
@@ -2818,7 +2943,7 @@ function _show_consolidate_update_batch_dialog(frm) {
 			args: {
 				mip_name: frm.doc.name,
 				consolidate_row_name: selected.name,
-				targets_json: JSON.stringify(targets.filter((t) => t.batch_no)),
+				targets_json: JSON.stringify(_targets_payload()),
 				plan_hash: lastPlan.plan_hash,
 			},
 			freeze: true,
@@ -2827,20 +2952,19 @@ function _show_consolidate_update_batch_dialog(frm) {
 				let m = r.message || {};
 				if (!m.ok) return;
 				d.hide();
+				let done = __("Unreserved {0} row(s) from <b>{1}</b> and reserved them on <b>{2}</b> ({3} Kg).",
+					[m.rows, frappe.utils.escape_html(m.from_batch || ""),
+					 frappe.utils.escape_html((m.to_batches || []).join(", ")),
+					 format_number(flt(m.qty), null, 3)]);
 				if ((m.warnings || []).length) {
 					frappe.msgprint({
 						title: __("Reassigned, with warnings"),
 						indicator: "orange",
-						message: __("{0} row(s) moved ({1} Kg).", [m.rows, format_number(flt(m.qty), null, 3)])
-							+ "<ul style='margin:8px 0 0 18px'>"
+						message: done + "<ul style='margin:8px 0 0 18px'>"
 							+ (m.warnings).map((w) => `<li>${w}</li>`).join("") + "</ul>",
 					});
 				} else {
-					frappe.show_alert({
-						message: __("{0} row(s) moved ({1} Kg) and re-reserved.",
-							[m.rows, format_number(flt(m.qty), null, 3)]),
-						indicator: "green",
-					}, 7);
+					frappe.show_alert({ message: done, indicator: "green" }, 8);
 				}
 				frm.reload_doc();
 			},
@@ -2877,11 +3001,11 @@ function _show_consolidate_update_batch_dialog(frm) {
 			let th = "padding:5px 8px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;";
 			html += `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:12px">
 				<thead><tr><th style="${th}">${__("Batch")}</th>
-				<th style="${th};text-align:right">${__("Capacity")}</th>
-				<th style="${th};text-align:right">${__("Free")}</th>
+				<th style="${th};text-align:right">${__("Weight")}</th>
+				<th style="${th};text-align:right">${__("Total Batch Weight")}</th>
 				<th style="${th};text-align:right">${__("Assigned")}</th>
 				<th style="${th};text-align:right">${__("Rows")}</th>
-				<th style="${th};text-align:right">${__("Unused")}</th></tr></thead><tbody>`
+				<th style="${th};text-align:right">${__("Excess")}</th></tr></thead><tbody>`
 				+ (res.targets).map(function (t) {
 					return `<tr><td style="padding:5px 8px">${frappe.utils.escape_html(t.batch_no)}</td>
 					<td style="padding:5px 8px;text-align:right">${format_number(flt(t.capacity_kg), null, 3)}</td>
@@ -2937,4 +3061,13 @@ function _show_consolidate_update_batch_dialog(frm) {
 	_render_lines();
 	_render_targets();
 	d.show();
+
+	if (preselect_row_name) {
+		let line = lines.find((x) => x.name === preselect_row_name);
+		if (line && flt(line.transferred_qty) > 0.001) {
+			frappe.msgprint(__("This line has already been transferred and cannot be reassigned."));
+		} else if (line) {
+			_select_line(preselect_row_name);
+		}
+	}
 }

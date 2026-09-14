@@ -10,6 +10,13 @@ rebuilt wholesale on every save of the plan. Surviving that rebuild is the whole
 contract: without it, "Save and Close" would quietly discard the work the moment
 anything re-saved the plan.
 
+This test writes real rows and commits, so it must leave the row it borrows exactly
+as it found it. It used to take the first consolidate row on the site and finish by
+clearing its draft -- which, on live data, destroyed a genuine "Save and Close" a user
+had parked (MIP-2026-00005 / PLATE10 lost one on 11 Sep 2026 and again on 14 Sep). It
+now prefers a row with no draft, snapshots the draft fields first, and puts them back
+at the end whatever happens.
+
 Run: bench --site manufact execute manufyxinvenzaerp.tests.verify_transfer_draft.run
 """
 
@@ -31,16 +38,65 @@ def run():
         save_transfer_draft, get_transfer_draft, _clear_transfer_draft,
     )
 
-    mip_name = frappe.db.get_value(
-        "Material Issue Plan Consolidate Item", {"batch_no": ["!=", ""]}, "parent")
-    if not mip_name:
+    from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
+        _CONSOLIDATE_DRAFT_FIELDS,
+    )
+
+    # Prefer a row nobody has parked anything on, so a failure part-way through cannot
+    # cost a user their work even before the restore below runs.
+    pick = frappe.db.get_value(
+        "Material Issue Plan Consolidate Item",
+        {"batch_no": ["!=", ""], "draft_saved_on": ["is", "not set"]},
+        ["parent", "name"], as_dict=True,
+    ) or frappe.db.get_value(
+        "Material Issue Plan Consolidate Item", {"batch_no": ["!=", ""]},
+        ["parent", "name"], as_dict=True,
+    )
+    if not pick:
         print("no Material Issue Plan with consolidated rows on this site -- skipped")
         return
 
+    mip_name = pick.parent
     mip = frappe.get_doc("Material Issue Plan", mip_name)
-    row = mip.consolidate_items[0]
+    row = next(r for r in mip.consolidate_items if r.name == pick.name)
     key = "%s|%s|%s" % (row.item_code, row.batch_no or "", 1 if row.cnc_process else 0)
     print("plan %s, row %s / %s" % (mip_name, row.item_code, row.batch_no))
+
+    original = {f: row.get(f) for f in _CONSOLIDATE_DRAFT_FIELDS}
+    try:
+        _exercise(mip_name, mip, row, key, save_transfer_draft, get_transfer_draft, _clear_transfer_draft)
+    finally:
+        _restore_draft(mip_name, row, original)
+
+    print()
+    print("=== SUMMARY ===")
+    if all(checks):
+        print("ALL %d CHECKS PASSED" % len(checks))
+    else:
+        print("%d of %d CHECKS FAILED" % (checks.count(False), len(checks)))
+
+
+def _restore_draft(mip_name, row, original):
+    """Put the borrowed row's draft back exactly -- including its original save time.
+
+    The plan's saves above rebuild the consolidate table and rename every row, so the
+    row is found again by its key rather than by name.
+    """
+    current = frappe.get_all(
+        "Material Issue Plan Consolidate Item",
+        filters={"parent": mip_name, "item_code": row.item_code,
+                 "batch_no": row.batch_no, "cnc_process": 1 if row.cnc_process else 0},
+        pluck="name",
+    )
+    for name in current:
+        frappe.db.set_value("Material Issue Plan Consolidate Item", name, original,
+                            update_modified=False)
+    frappe.db.commit()
+    print()
+    print("  (restored the borrowed row's draft: saved_on=%s)" % (original.get("draft_saved_on") or "none"))
+
+
+def _exercise(mip_name, mip, row, key, save_transfer_draft, get_transfer_draft, _clear_transfer_draft):
 
     print()
     print("=== saving parks the state, unvalidated ===")
@@ -100,10 +156,3 @@ def run():
     mip.save(ignore_permissions=True)
     frappe.db.commit()
     check("still gone", key in get_transfer_draft(mip_name), False)
-
-    print()
-    print("=== SUMMARY ===")
-    if all(checks):
-        print("ALL %d CHECKS PASSED" % len(checks))
-    else:
-        print("%d of %d CHECKS FAILED" % (checks.count(False), len(checks)))
