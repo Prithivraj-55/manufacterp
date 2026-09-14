@@ -4047,6 +4047,65 @@ def _mark_excess_item_mapped(batch_no, mp_name, row_name):
     recheck_mip_completion(mip_name)
 
 
+def _resync_excess_item_mapping(batch_no):
+    """Keep an excess-return batch's "reused by" pointer true after rows move off it.
+
+    _mark_excess_item_mapped records, on the SCO Excess Material Item a batch was
+    returned from, which Material Planning row took it -- that is how the source
+    Material Issue Plan shows its off-cut as reused rather than still sitting in the
+    rack. Nothing undid it. A batch reassignment that moved that row onto a different
+    batch left the pointer naming a row that no longer holds the material, so the
+    source plan kept reporting the off-cut as reused, and the excess-logging paths
+    (which treat a mapped row as already claimed) went on skipping it.
+
+    Called after a reassignment has saved. If the pointed-at row still holds the
+    batch, nothing changes. Otherwise it is re-pointed at any other row still drawing
+    on the batch, or cleared when none is. A virtual-excess claim is left alone: it
+    has its own release path (_release_virtual_excess_source), and a claim is a
+    promise about material, not a record of where a real batch was reserved.
+    """
+    if not batch_no:
+        return
+    excess_row_name = frappe.db.get_value("Batch", batch_no, "custom_source_mip_excess_row")
+    if not excess_row_name:
+        return
+    excess = frappe.db.get_value(
+        "SCO Excess Material Item", excess_row_name,
+        ["parent", "mapped_material_planning", "mapped_row_name"], as_dict=True,
+    )
+    if not excess or not excess.mapped_row_name:
+        return
+
+    for table, field in (("Material Planning Material Mapping", "batch"),
+                         ("Material Planning Available Raw Material", "batch_no")):
+        current = frappe.db.get_value(table, excess.mapped_row_name, [field, "parent"], as_dict=True)
+        if current:
+            if current.get(field) == batch_no:
+                return
+            if table == "Material Planning Material Mapping" and frappe.db.get_value(
+                table, excess.mapped_row_name, "is_virtual_excess"
+            ):
+                return
+            break
+
+    holder = (
+        frappe.db.get_value("Material Planning Material Mapping", {"batch": batch_no},
+                            ["parent", "name"], as_dict=True)
+        or frappe.db.get_value("Material Planning Available Raw Material", {"batch_no": batch_no},
+                               ["parent", "name"], as_dict=True)
+    )
+    frappe.db.set_value(
+        "SCO Excess Material Item", excess_row_name,
+        {"mapped_material_planning": holder.parent if holder else "",
+         "mapped_row_name": holder.name if holder else ""},
+        update_modified=False,
+    )
+    from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
+        recheck_mip_completion,
+    )
+    recheck_mip_completion(excess.parent)
+
+
 def _batch_change_remarks(item_code, old_batch, new_batch_no, material_issue_plan):
     text = _("Batch changed from {0} to {1} for {2}").format(
         old_batch or _("(none)"), new_batch_no or _("(none)"), item_code
@@ -4129,6 +4188,8 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
         })
         mp.save(ignore_permissions=True)
         _mark_excess_item_mapped(new_batch_no, material_planning_name, row_name)
+        if old_batch and old_batch != new_batch_no:
+            _resync_excess_item_mapping(old_batch)
         # Reassignment is genuinely a per-row decision, so one entry per row here --
         # unlike Reserve, which is one decision covering however many rows.
         log_decision(
@@ -4220,6 +4281,8 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
         })
         mp.save(ignore_permissions=True)
         _mark_excess_item_mapped(new_batch_no, material_planning_name, target_row_name)
+        if old_batch and old_batch != new_batch_no:
+            _resync_excess_item_mapping(old_batch)
         log_decision(
             "Reassign Batch",
             reference_doctype="Material Planning",

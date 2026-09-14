@@ -639,3 +639,32 @@ preview → confirmation listing the three reserved rows → **Yes** → rows un
 moved to `PLT25-P25-L11025-W2000-SR001` and reserved again (checked in the database) →
 moved back the same way → rows byte-identical to before, every draft on the site
 identical to before.
+
+
+---
+
+## 10. Excess tracking review, 14 Sep 2026
+
+**When can excess be returned?** Any time once Excess Material Items has a row, no
+matter whether the Final (Manufacture) Stock Entry exists. The Final Stock Entry
+consumes only what the finished drawings need (`_consumption_for_completed`, capped at
+`drawing_planned_weight`), so any surplus stays at the supplier. Excess return is a
+Repack out of the supplier warehouse into stores, and it refuses with *"Not Enough Left
+to Return"* if the supplier stock has already gone. The plan cannot become Completed
+while any excess row is unresolved or weight is still unaccounted at the supplier, so
+completion never locks out a pending return.
+
+**Verified:** `_validate_selected_against_stock` on MIP-2026-00005, read-only. PLATE25
+0.140 → 1 piece books 1,328.125 Kg and PLATE8 2.087 → 3 pieces books 860.124 Kg. Both
+equal sent − planned, with the piece priced from the batch's own dimensions.
+
+**Fixed:**
+- `_resync_excess_item_mapping(batch_no)` in material_planning.py, called after the
+  save in `reassign_batch` (both branches) and `_apply_to_one_plan`. Virtual-excess
+  claims are left to `_release_virtual_excess_source`.
+- `refresh_mip_raw_materials` now uses its long-unused `old_rows_by_key` to carry
+  `transfer_excess_kg` forward when the batch is unchanged. Before this, MIP-2026-00004
+  went from 6 rows / 8.719 Kg to 0 on any rebuild.
+
+Tests: `verify_consolidate_batch_apply.py` §5d. All checks write inside a transaction
+and roll back.

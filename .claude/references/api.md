@@ -1,6 +1,6 @@
 # api — manufyxinvenzaerp
 
-_Generated: 2026-09-14 14:31:55_
+_Generated: 2026-09-14 14:51:08_
 
 All `@frappe.whitelist()` methods. Call from JS:
 `frappe.call({ method: 'manufyxinvenzaerp.<dotted.path>', args: {...} })`
@@ -118,14 +118,14 @@ All `@frappe.whitelist()` methods. Call from JS:
 | `unreserve_exact_match_batches` | 3783 |
 | `check_mapping_batch_availability` | 3834 |
 | `unreserve_batches` | 3895 |
-| `reassign_batch` | 4060 |
-| `make_production_plan` | 4363 |
-| `make_material_request` | 4434 |
-| `make_material_request_from_consolidate` | 4588 |
-| `update_so_difference_kg` | 4726 |
-| `auto_suggest_consolidate_dimensions` | 4756 |
-| `auto_purchase_from_mp` | 4844 |
-| `complete_batch_mapping` | 5050 |
+| `reassign_batch` | 4119 |
+| `make_production_plan` | 4426 |
+| `make_material_request` | 4497 |
+| `make_material_request_from_consolidate` | 4651 |
+| `update_so_difference_kg` | 4789 |
+| `auto_suggest_consolidate_dimensions` | 4819 |
+| `auto_purchase_from_mp` | 4907 |
+| `complete_batch_mapping` | 5113 |
 | `@frappe.validate_and_sanitize_search_inputs` | 944 |
 | `@frappe.validate_and_sanitize_search_inputs` | 998 |
 ## production_management/inspection.py
@@ -182,29 +182,29 @@ All `@frappe.whitelist()` methods. Call from JS:
 
 | Method | Line |
 |--------|------|
-| `refresh_weight_summary` | 1039 |
-| `get_mip_batch_plan_html` | 1215 |
-| `download_mip_batch_plan_pdf` | 1221 |
-| `get_mip_consolidate_plan_html` | 1360 |
-| `download_mip_consolidate_plan_pdf` | 1366 |
+| `refresh_weight_summary` | 1053 |
+| `get_mip_batch_plan_html` | 1229 |
+| `download_mip_batch_plan_pdf` | 1235 |
+| `get_mip_consolidate_plan_html` | 1374 |
+| `download_mip_consolidate_plan_pdf` | 1380 |
 | `check_mip_raw_materials_refreshable` | 175 |
 | `refresh_mip_raw_materials_manual` | 189 |
 | `refresh_mip_raw_materials` | 209 |
-| `save_transfer_draft` | 457 |
+| `save_transfer_draft` | 471 |
 | `create_from_subcontracting_order` | 50 |
-| `get_transfer_draft` | 506 |
+| `get_transfer_draft` | 520 |
 | `` | 69 |
 | `populate_from_production_plan` | 72 |
-| `unlink_excess_claim` | 839 |
+| `unlink_excess_claim` | 853 |
 ## subcontracting_management/material_issue_plan_batch_update.py
 
 | Method | Line |
 |--------|------|
-| `apply_consolidate_batch_update` | 1021 |
-| `get_batch_capacity` | 195 |
-| `preview_consolidate_batch_update` | 697 |
-| `get_consolidate_line_context` | 766 |
-| `get_candidate_batches` | 797 |
+| `apply_consolidate_batch_update` | 1029 |
+| `get_batch_capacity` | 196 |
+| `preview_consolidate_batch_update` | 698 |
+| `get_consolidate_line_context` | 767 |
+| `get_candidate_batches` | 798 |
 ## subcontracting_management/material_issue_plan_transfer.py
 
 | Method | Line |

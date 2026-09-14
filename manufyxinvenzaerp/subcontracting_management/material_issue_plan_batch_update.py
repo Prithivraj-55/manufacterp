@@ -52,6 +52,7 @@ from manufyxinvenzaerp.production_management.doctype.material_planning.material_
     _get_batch_reserved_by_others,
     _get_batch_total_stock,
     _mark_excess_item_mapped,
+    _resync_excess_item_mapping,
     _require_write,
     get_batch_item,
     reserve_batches,
@@ -872,6 +873,7 @@ def _apply_to_one_plan(mp_name, plan_writes, mip_name, progress=None):
 
     # 4 — apply, and log one audit row per member, mirroring reassign_batch.
     first_row_for_batch = {}
+    old_batches = set()
     for w in plan_writes:
         member = w.member
         if member.source_table == MATERIAL_MAPPING:
@@ -909,6 +911,8 @@ def _apply_to_one_plan(mp_name, plan_writes, mip_name, progress=None):
             planned_item = ""
 
         first_row_for_batch.setdefault(w.batch_no, member.source_row)
+        if old_batch and old_batch != w.batch_no:
+            old_batches.add(old_batch)
         mp.append("batch_change_log", {
             "material_issue_plan": mip_name or "",
             "source_table": member.source_table,
@@ -933,6 +937,10 @@ def _apply_to_one_plan(mp_name, plan_writes, mip_name, progress=None):
     # 6 — a batch recovered from someone's excess return records where it landed.
     for batch_no, row_name in first_row_for_batch.items():
         _mark_excess_item_mapped(batch_no, mp_name, row_name)
+    # ...and a batch the rows just LEFT must stop claiming them. See
+    # _resync_excess_item_mapping.
+    for batch_no in sorted(old_batches):
+        _resync_excess_item_mapping(batch_no)
 
     # 7/8 — re-reserve. Guarded exactly as reassign_batch guards it, including the
     # substring re-raise: a batch still awaiting inspection is a warning to carry

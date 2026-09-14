@@ -553,6 +553,28 @@ has moved when this happens. The dialog warns: *"This line has unfinished entrie
 from "Select Materials to Transfer" on … (not yet transferred). Changing the batch
 clears them — you will need to re-enter them in the transfer popup."*
 
+### 20.5a Excess after a reassignment
+
+A reassigned row reserves exactly its required Kg, so its planned excess becomes zero.
+The excess appears at **transfer**, when fractional Sec Nos are rounded up to whole
+pieces: the server books *Kg sent − Kg planned* for each item + batch line, and prices a
+piece at the **new batch's own** dimensions. That is the same figure the dialog's
+**Excess** column shows. On a split, each batch is booked separately.
+
+Two gaps were closed on 14 Sep 2026:
+
+- **"Reused by" pointer on excess-return batches.** When a batch that came from an
+  earlier excess return is reserved into a plan, its SCO Excess Material Item records
+  which row took it. Moving that row to another batch used to leave the pointer behind,
+  so the source plan still showed the off-cut as reused. It is now re-pointed to another
+  row still holding the batch, or cleared (`_resync_excess_item_mapping`), for both the
+  Consolidate Items and the per-row reassignment.
+- **Round-up excess on already-transferred rows.** Every rebuild of Raw Materials, which
+  every batch update ends with, used to blank `transfer_excess_kg` on rows transferred
+  earlier. Excess Material Items was never affected. The figure is now carried across
+  the rebuild while the row keeps the same batch. Rows that lost it before this fix
+  (e.g. MIP-2026-00006) are not restored.
+
 ### 20.6 Verified
 
 Against restored live data: a 3-row / 217.344 Kg line moved to another batch and back

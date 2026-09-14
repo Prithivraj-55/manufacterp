@@ -368,6 +368,20 @@ def refresh_mip_raw_materials(mip_name):
                 "is_unavailable": 1,
             })
 
+    # The rounding surplus a past transfer booked onto these rows (see
+    # _apply_transfer_excess_to_raw_materials) is history, not something the Material
+    # Planning can supply again -- so a rebuild used to wipe it, and every already-
+    # transferred row came back with a blank Excess column while Excess Material Items
+    # still held the Kg. Any rebuild did it: Refresh Raw Materials, and since Sep 2026
+    # every Consolidate Items batch update, which ends with a rebuild of the whole plan
+    # including lines it never touched. Carried forward only where the row still holds
+    # the SAME batch -- the surplus belongs to the transfer of that batch.
+    for new_row in (mip.raw_materials or []):
+        old = old_rows_by_key.get((new_row.source_table, new_row.source_row))
+        if (old and flt(old.get("transfer_excess_kg"))
+                and (old.batch_no or "") == (new_row.batch_no or "")):
+            new_row.transfer_excess_kg = flt(old.transfer_excess_kg, 3)
+
     mip.save(ignore_permissions=True)
     refresh_weight_summary(mip_name)
     return mip.name

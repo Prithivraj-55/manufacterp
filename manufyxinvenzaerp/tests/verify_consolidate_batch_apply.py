@@ -35,6 +35,8 @@ from manufyxinvenzaerp.subcontracting_management import material_issue_plan_batc
 
 checks = []
 
+MM_TABLE = "Material Planning Material Mapping"
+
 
 def check(label, got, want):
     ok = got == want
@@ -254,6 +256,66 @@ def run(live=0):
           'unfinished entries saved from \\"Select Materials to Transfer\\"' in src, True)
     check("confirmation popup names the unreserve step",
           "Yes, Unreserve and Reassign" in js and "Current reservation and new assignment" in js, True)
+
+    print()
+    print("=== 5d. Excess stays tracked through a reassignment ===")
+    # Both checks write and are rolled back straight after -- nothing here commits.
+    from manufyxinvenzaerp.production_management.doctype.material_planning.material_planning import (
+        _resync_excess_item_mapping,
+    )
+    from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
+        refresh_mip_raw_materials,
+    )
+
+    # (a) An excess-return batch reserved into a plan records which row took it. Moving
+    # that row off the batch must re-point the record, or clear it -- otherwise the
+    # source plan goes on showing its off-cut as reused.
+    mapped = frappe.db.sql("""
+        SELECT e.name AS excess_row, b.name AS batch_no, m.name AS mm_row
+        FROM `tabSCO Excess Material Item` e
+        JOIN `tabBatch` b ON b.custom_source_mip_excess_row = e.name
+        JOIN `tabMaterial Planning Material Mapping` m
+             ON m.name = e.mapped_row_name AND m.batch = b.name AND IFNULL(m.is_virtual_excess, 0) = 0
+        LIMIT 1
+    """, as_dict=True)
+    if not mapped:
+        print("  (no excess-return batch reserved into a plan on this site -- skipped)")
+    else:
+        mx = mapped[0]
+        ptr = lambda: tuple(frappe.db.get_value("SCO Excess Material Item", mx.excess_row,
+                                                ["mapped_material_planning", "mapped_row_name"]))
+        start = ptr()
+        _resync_excess_item_mapping(mx.batch_no)
+        check("row still on the batch: pointer unchanged", ptr(), start)
+        frappe.db.set_value(MM_TABLE, mx.mm_row, "batch", "", update_modified=False)
+        holders = frappe.get_all(MM_TABLE, filters={"batch": mx.batch_no}, pluck="name")
+        _resync_excess_item_mapping(mx.batch_no)
+        if holders:
+            check("row moved off, another holds it: re-pointed", ptr()[1] in holders, True)
+        else:
+            check("row moved off, nobody holds it: cleared", ptr(), ("", ""))
+        frappe.db.rollback()
+        check("(rolled back)", ptr(), start)
+
+    # (b) A rebuild of Raw Materials -- which every batch update ends with -- must keep
+    # the rounding surplus already booked onto transferred rows.
+    has_excess = frappe.db.sql("""
+        SELECT parent, COUNT(*) n, ROUND(SUM(transfer_excess_kg), 3) kg
+        FROM `tabMaterial Issue Plan Raw Material` WHERE transfer_excess_kg > 0
+        GROUP BY parent ORDER BY n DESC LIMIT 1
+    """, as_dict=True)
+    if not has_excess:
+        print("  (no transferred row carries round-up excess on this site -- skipped)")
+    else:
+        hx = has_excess[0]
+        refresh_mip_raw_materials(hx.parent)
+        after = frappe.db.sql("""
+            SELECT COUNT(*) n, ROUND(IFNULL(SUM(transfer_excess_kg), 0), 3) kg
+            FROM `tabMaterial Issue Plan Raw Material` WHERE parent = %s AND transfer_excess_kg > 0
+        """, hx.parent, as_dict=True)[0]
+        frappe.db.rollback()
+        check("%s: round-up excess survives a rebuild (%s rows, %s Kg)" % (hx.parent, hx.n, hx.kg),
+              (after.n, flt(after.kg, 3)), (hx.n, flt(hx.kg, 3)))
 
     print()
     print("=== 6. Live round trip (writes) ===")
