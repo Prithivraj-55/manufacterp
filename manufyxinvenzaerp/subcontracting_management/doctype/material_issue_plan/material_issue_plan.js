@@ -2544,7 +2544,7 @@ function _add_consolidate_update_batch_button(frm) {
 	// alongside it needs its own workaround for the same read-only grid; see below.
 	grid.add_custom_button(
 		frappe.utils.icon("edit", "xs") + " " + __("Update Batch"),
-		() => _show_consolidate_update_batch_dialog(frm),
+		() => _open_consolidate_update_batch(frm),
 		"top"
 	);
 	_setup_consolidate_row_buttons(frm, grid);
@@ -2587,7 +2587,7 @@ function _setup_consolidate_row_buttons(frm, grid) {
 			if (!btn) return;
 			e.preventDefault();
 			e.stopPropagation();
-			_show_consolidate_update_batch_dialog(frm, btn.getAttribute("data-row"));
+			_open_consolidate_update_batch(frm, btn.getAttribute("data-row"));
 		}, true);
 		grid.wrapper[0].__mfx_cb_row_click = true;
 	}
@@ -2597,9 +2597,32 @@ function _setup_consolidate_row_buttons(frm, grid) {
 // The same button inside the expanded row view, where Frappe does render the control.
 frappe.ui.form.on("Material Issue Plan Consolidate Item", {
 	update_batch_btn(frm, cdt, cdn) {
-		_show_consolidate_update_batch_dialog(frm, cdn);
+		_open_consolidate_update_batch(frm, cdn);
 	},
 });
+
+// Every Update Batch entry point comes through here. Once a transfer or any other
+// stock action exists on this plan the batch may not change (client decision,
+// 14 Sep 2026), and the user is told so before a dialog opens rather than after
+// filling it in. The server refuses the same case on preview and apply regardless.
+function _open_consolidate_update_batch(frm, preselect_row_name) {
+	frappe.call({
+		method: "manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan.check_mip_batch_change_allowed",
+		args: { mip_name: frm.doc.name },
+		callback(r) {
+			let res = r.message || {};
+			if (res.blocked) {
+				frappe.msgprint({
+					title: __("Batch Cannot Be Reassigned"),
+					indicator: "red",
+					message: res.message,
+				});
+				return;
+			}
+			_show_consolidate_update_batch_dialog(frm, preselect_row_name);
+		},
+	});
+}
 
 function _show_consolidate_update_batch_dialog(frm, preselect_row_name) {
 	let lines = (frm.doc.consolidate_items || []).filter((r) => !!r.batch_no);

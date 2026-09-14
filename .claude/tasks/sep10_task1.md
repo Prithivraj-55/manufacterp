@@ -666,5 +666,31 @@ equal sent − planned, with the piece priced from the batch's own dimensions.
   `transfer_excess_kg` forward when the batch is unchanged. Before this, MIP-2026-00004
   went from 6 rows / 8.719 Kg to 0 on any rebuild.
 
+**Correction:** an earlier note said MIP-2026-00006 had already lost this figure. It
+had not. Its transfer sent exactly what was reserved, so no round-up occurred, and its
+9,118.120 Kg of excess came from the consolidated excess tab, which never writes this
+column. Every "Round Up at Transfer" entry in the Decision Log (all on MIP-2026-00004)
+matches the rows exactly, so nothing needed restoring.
+
+## 11. Batch change blocked once stock has moved, 14 Sep 2026
+
+Client: once a transfer or any other action is made, a batch reassignment must be
+refused with a message saying so, because Raw Materials cannot be refreshed.
+
+- `_mip_stock_actions(mip)` in material_issue_plan.py lists every non-cancelled Stock
+  Entry (drafts too) linked by `custom_mip_ref`, `custom_sco_ref` / `subcontracting_order`,
+  or `custom_wo_ref` / `work_order`.
+- `_mip_batch_change_blocked_message` names each entry with its type and status.
+- `check_mip_batch_change_allowed` (whitelisted) is called by all three Update Batch
+  entry points in the dialog through `_open_consolidate_update_batch`.
+- Enforced in `_build_plan` (so both preview and apply) and in `reassign_batch` when
+  `material_issue_plan` is passed.
+- Wider than `_mip_refresh_blocked_message` (Refresh Raw Materials button), which sees
+  only submitted entries tagged to the SCO/WO. Left unchanged; that button's rule is a
+  separate decision.
+
+Live today: blocked on MIP-2026-00002, -00003, -00004, -00006, -00008, -00010, -00011.
+Tests: `verify_consolidate_batch_apply.py` §5e.
+
 Tests: `verify_consolidate_batch_apply.py` §5d. All checks write inside a transaction
 and roll back.

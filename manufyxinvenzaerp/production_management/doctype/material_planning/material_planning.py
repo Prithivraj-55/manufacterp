@@ -4136,6 +4136,18 @@ def reassign_batch(material_planning_name, source_table, row_name, new_batch_no,
     if source_table not in ("Material Planning Material Mapping", "Material Planning Available Raw Material"):
         frappe.throw(_("Unsupported source table for batch reassignment: {0}").format(source_table))
 
+    # From a Material Issue Plan, a batch may not change once any stock action has been
+    # made on that plan -- the reassignment ends by rebuilding its Raw Materials table.
+    # Material Planning's own grid (no material_issue_plan passed) is not affected.
+    if material_issue_plan:
+        from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
+            _mip_batch_change_blocked_message,
+        )
+        stock_block = _mip_batch_change_blocked_message(
+            frappe.get_doc("Material Issue Plan", material_issue_plan))
+        if stock_block:
+            frappe.throw(stock_block, title=_("Batch Cannot Be Reassigned"))
+
     new_item = get_batch_item(new_batch_no) if new_batch_no else None
     new_item_data = (
         frappe.db.get_value("Item", new_item, ["custom_unit_weight", "custom_parent_item_group"], as_dict=True) or {}

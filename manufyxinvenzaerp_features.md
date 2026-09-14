@@ -561,6 +561,20 @@ pieces: the server books *Kg sent − Kg planned* for each item + batch line, an
 piece at the **new batch's own** dimensions. That is the same figure the dialog's
 **Excess** column shows. On a split, each batch is booked separately.
 
+**No batch change once stock has moved (14 Sep 2026).** Once any Stock Entry exists
+against a Material Issue Plan, no batch on it can be reassigned. That covers a
+transfer, a CNC leg, an excess return, process loss or the final entry, and **drafts
+count too**. A reassignment ends by rebuilding the Raw Materials table, and that table
+must not be rebuilt under documents already created from it. Every Update Batch entry
+point checks first and shows *"The batch cannot be reassigned. These actions have
+already been performed on MIP-…: [entries]. Because of this the Raw Materials table
+cannot be refreshed, so the batch cannot be changed."* The server refuses the same case
+on preview, on apply, and on the per-row reassignment when called from the plan.
+Material Planning's own grid is not affected.
+
+This rule is wider than the Refresh Raw Materials button's older one, which only counts
+submitted entries tagged to the SCO or Work Order.
+
 Two gaps were closed on 14 Sep 2026:
 
 - **"Reused by" pointer on excess-return batches.** When a batch that came from an
@@ -572,8 +586,8 @@ Two gaps were closed on 14 Sep 2026:
 - **Round-up excess on already-transferred rows.** Every rebuild of Raw Materials, which
   every batch update ends with, used to blank `transfer_excess_kg` on rows transferred
   earlier. Excess Material Items was never affected. The figure is now carried across
-  the rebuild while the row keeps the same batch. Rows that lost it before this fix
-  (e.g. MIP-2026-00006) are not restored.
+  the rebuild while the row keeps the same batch. Checked against the Decision Log's
+  "Round Up at Transfer" entries: no plan on the site had lost this figure.
 
 ### 20.6 Verified
 

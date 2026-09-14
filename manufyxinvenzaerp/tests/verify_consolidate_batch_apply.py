@@ -146,7 +146,8 @@ def run(live=0):
             bu.apply_consolidate_batch_update(moved[0].mip, moved[0].crow, "[]", None)
             check("a transferred line is refused", False, True)
         except frappe.ValidationError as e:
-            check("a transferred line is refused", "already been transferred" in str(e), True)
+            check("a transferred line is refused",
+                  ("already been transferred" in str(e)) or ("cannot be reassigned" in str(e)), True)
 
     live_line = frappe.db.sql("""
         SELECT c.parent AS mip, c.name AS crow, c.item_code, c.batch_no, c.qty, c.source_rows
@@ -316,6 +317,74 @@ def run(live=0):
         frappe.db.rollback()
         check("%s: round-up excess survives a rebuild (%s rows, %s Kg)" % (hx.parent, hx.n, hx.kg),
               (after.n, flt(after.kg, 3)), (hx.n, flt(hx.kg, 3)))
+
+    print()
+    print("=== 5e. No batch change once any stock action exists on the plan ===")
+    from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
+        _mip_stock_actions, _mip_batch_change_blocked_message, check_mip_batch_change_allowed,
+    )
+    from manufyxinvenzaerp.production_management.doctype.material_planning.material_planning import (
+        reassign_batch,
+    )
+    plans = frappe.get_all("Material Issue Plan", pluck="name")
+    acted = [n for n in plans if _mip_stock_actions(frappe.get_doc("Material Issue Plan", n))]
+    clean = [n for n in plans if n not in acted
+             and frappe.db.exists("Material Issue Plan Consolidate Item", {"parent": n, "batch_no": ["!=", ""]})]
+    if not acted:
+        print("  (no plan with a stock action on this site -- skipped)")
+    else:
+        name = acted[0]
+        actions = _mip_stock_actions(frappe.get_doc("Material Issue Plan", name))
+        res = check_mip_batch_change_allowed(name)
+        check("%s is blocked" % name, res["blocked"], True)
+        check("and the message names every entry",
+              all(a.name in res["message"] for a in actions), True)
+        check("and says the Raw Materials table cannot be refreshed",
+              "Raw Materials table cannot be refreshed" in res["message"], True)
+
+        crow = frappe.db.get_value("Material Issue Plan Consolidate Item",
+                                   {"parent": name, "batch_no": ["!=", ""]}, "name")
+        if crow:
+            pv = bu.preview_consolidate_batch_update(name, crow, "[]")
+            check("preview refuses it", (pv["ok"], pv.get("stock_actions_block")), (False, True))
+            try:
+                bu.apply_consolidate_batch_update(name, crow, "[]", None)
+                check("apply refuses it", False, True)
+            except frappe.ValidationError as e:
+                check("apply refuses it", "cannot be reassigned" in str(e), True)
+
+        # The per-row path, when driven from this plan, is refused before it writes.
+        raw = frappe.db.get_value("Material Issue Plan Raw Material",
+                                  {"parent": name, "batch_no": ["!=", ""],
+                                   "source_table": ["in", [bu.MATERIAL_MAPPING, bu.AVAILABLE_RAW_MATERIAL]]},
+                                  ["material_planning", "source_table", "source_row", "batch_no"], as_dict=True)
+        if raw:
+            try:
+                reassign_batch(raw.material_planning, raw.source_table, raw.source_row, raw.batch_no,
+                               material_issue_plan=name)
+                check("per-row reassign from the plan refuses it", False, True)
+            except frappe.ValidationError as e:
+                check("per-row reassign from the plan refuses it", "cannot be reassigned" in str(e), True)
+            check("and wrote nothing", bool(frappe.db.transaction_writes), False)
+
+    # An excess return received with no supplier involved is tagged to the plan alone,
+    # which the older Refresh Raw Materials rule never saw.
+    plan_only = frappe.db.sql("""
+        SELECT se.custom_mip_ref AS mip FROM `tabStock Entry` se
+        JOIN `tabMaterial Issue Plan` m ON m.name = se.custom_mip_ref
+        WHERE se.docstatus < 2 AND IFNULL(se.custom_sco_ref, '') = ''
+          AND IFNULL(se.subcontracting_order, '') = '' AND IFNULL(m.subcontracting_order, '') = ''
+        LIMIT 1""", as_dict=True)
+    if plan_only:
+        check("%s (entry tagged to the plan only) is blocked too" % plan_only[0].mip,
+              check_mip_batch_change_allowed(plan_only[0].mip)["blocked"], True)
+    if clean:
+        check("%s (no stock action) is not blocked" % clean[0],
+              _mip_batch_change_blocked_message(frappe.get_doc("Material Issue Plan", clean[0])), None)
+
+    check("every Update Batch entry point asks first",
+          js.count("_open_consolidate_update_batch(frm") >= 3
+          and "check_mip_batch_change_allowed" in js, True)
 
     print()
     print("=== 6. Live round trip (writes) ===")

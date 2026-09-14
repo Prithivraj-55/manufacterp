@@ -470,6 +470,22 @@ def _build_plan(mip_name, consolidate_row_name, targets_json=None):
 
     blockers, warnings = [], []
 
+    # Refused before anything is priced: once a transfer or any other stock action exists
+    # on the plan, no line on it may change batch. Enforced here so the apply path, which
+    # goes through this same builder, can never get past it.
+    from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
+        _mip_batch_change_blocked_message,
+    )
+    stock_block = _mip_batch_change_blocked_message(mip)
+    if stock_block:
+        return frappe._dict({
+            "response": {"ok": False, "blockers": [stock_block], "warnings": [],
+                         "members": [], "material_plannings": [], "targets": [],
+                         "stock_actions_block": True},
+            "mip": mip, "key": key, "members": [], "warehouse": "",
+            "mp_names": [], "targets": [], "fill": None, "writes": [],
+        })
+
     if not members:
         blockers.append(_("This line no longer has any raw-material rows behind it. "
                           "Refresh Raw Materials and try again."))
@@ -1045,6 +1061,8 @@ def apply_consolidate_batch_update(mip_name, consolidate_row_name, targets_json,
     plan = _build_plan(mip_name, consolidate_row_name, targets_json)
     response = plan.response
 
+    if response.get("stock_actions_block"):
+        frappe.throw(response["blockers"][0], title=_("Batch Cannot Be Reassigned"))
     if not response.get("ok"):
         frappe.throw(
             "<br>• ".join([_("This reassignment cannot be applied:")]

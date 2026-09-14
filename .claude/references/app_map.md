@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-09-14 14:51:08_
+_Generated: 2026-09-14 15:03:26_
 
 ## Modules
 
@@ -904,6 +904,9 @@ _Total: 166_
   - create_from_subcontracting_order:
   - populate_from_production_plan:
   - _mip_refresh_blocked_message:
+  - _mip_stock_actions:
+  - _mip_batch_change_blocked_message:
+  - check_mip_batch_change_allowed:
   - check_mip_raw_materials_refreshable:
   - refresh_mip_raw_materials_manual:
   - refresh_mip_raw_materials:
@@ -1328,14 +1331,14 @@ Functions:
   - 406:_plan_hash:
   - 426:_member_flags:
   - 454:_build_plan:
-  - 698:preview_consolidate_batch_update:
-  - 703:_target_index_of:
-  - 712:_cross_table_conflicts:
-  - 767:get_consolidate_line_context:
-  - 798:get_candidate_batches:
-  - 834:_apply_to_one_plan:
-  - 990:_composed_failure:
-  - 1029:apply_consolidate_batch_update:
+  - 714:preview_consolidate_batch_update:
+  - 719:_target_index_of:
+  - 728:_cross_table_conflicts:
+  - 783:get_consolidate_line_context:
+  - 814:get_candidate_batches:
+  - 850:_apply_to_one_plan:
+  - 1006:_composed_failure:
+  - 1045:apply_consolidate_batch_update:
 
 ### subcontracting_management/material_issue_plan_transfer.py
 Functions:
@@ -1683,7 +1686,7 @@ Functions:
   - 47:_member:
   - 55:_target:
   - 60:run:
-  - 340:_round_trip:
+  - 409:_round_trip:
 
 ### tests/verify_consolidate_batch_reassign.py
 Functions:
@@ -2259,10 +2262,10 @@ Functions:
 - `production_plan_management/production_plan.py:886` — `make_material_request`
 - `material_request_management/material_request.py:11` — `get_mr_item_uom`
 - `subcontracting_management/material_issue_plan_batch_update.py:196` — `get_batch_capacity`
-- `subcontracting_management/material_issue_plan_batch_update.py:698` — `preview_consolidate_batch_update`
-- `subcontracting_management/material_issue_plan_batch_update.py:767` — `get_consolidate_line_context`
-- `subcontracting_management/material_issue_plan_batch_update.py:798` — `get_candidate_batches`
-- `subcontracting_management/material_issue_plan_batch_update.py:1029` — `apply_consolidate_batch_update`
+- `subcontracting_management/material_issue_plan_batch_update.py:714` — `preview_consolidate_batch_update`
+- `subcontracting_management/material_issue_plan_batch_update.py:783` — `get_consolidate_line_context`
+- `subcontracting_management/material_issue_plan_batch_update.py:814` — `get_candidate_batches`
+- `subcontracting_management/material_issue_plan_batch_update.py:1045` — `apply_consolidate_batch_update`
 - `subcontracting_management/material_issue_plan_transfer.py:258` — `get_mip_process_loss_state`
 - `subcontracting_management/material_issue_plan_transfer.py:331` — `create_mip_process_loss_entry`
 - `subcontracting_management/material_issue_plan_transfer.py:554` — `get_mip_pending_items`
@@ -2292,17 +2295,18 @@ Functions:
 - `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:50` — `create_from_subcontracting_order`
 - `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:69` — ``
 - `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:72` — `populate_from_production_plan`
-- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:175` — `check_mip_raw_materials_refreshable`
-- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:189` — `refresh_mip_raw_materials_manual`
-- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:209` — `refresh_mip_raw_materials`
-- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:471` — `save_transfer_draft`
-- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:520` — `get_transfer_draft`
-- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:853` — `unlink_excess_claim`
-- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:1053` — `refresh_weight_summary`
-- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:1229` — `get_mip_batch_plan_html`
-- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:1235` — `download_mip_batch_plan_pdf`
-- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:1374` — `get_mip_consolidate_plan_html`
-- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:1380` — `download_mip_consolidate_plan_pdf`
+- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:230` — `check_mip_batch_change_allowed`
+- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:238` — `check_mip_raw_materials_refreshable`
+- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:252` — `refresh_mip_raw_materials_manual`
+- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:272` — `refresh_mip_raw_materials`
+- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:534` — `save_transfer_draft`
+- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:583` — `get_transfer_draft`
+- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:916` — `unlink_excess_claim`
+- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:1116` — `refresh_weight_summary`
+- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:1292` — `get_mip_batch_plan_html`
+- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:1298` — `download_mip_batch_plan_pdf`
+- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:1437` — `get_mip_consolidate_plan_html`
+- `subcontracting_management/doctype/material_issue_plan/material_issue_plan.py:1443` — `download_mip_consolidate_plan_pdf`
 - `permissions_bulk.py:67` — `get_targets`
 - `permissions_bulk.py:92` — `get_role_state`
 - `permissions_bulk.py:144` — `apply_permissions`
@@ -2339,13 +2343,13 @@ Functions:
 - `production_management/doctype/material_planning/material_planning.py:3834` — `check_mapping_batch_availability`
 - `production_management/doctype/material_planning/material_planning.py:3895` — `unreserve_batches`
 - `production_management/doctype/material_planning/material_planning.py:4119` — `reassign_batch`
-- `production_management/doctype/material_planning/material_planning.py:4426` — `make_production_plan`
-- `production_management/doctype/material_planning/material_planning.py:4497` — `make_material_request`
-- `production_management/doctype/material_planning/material_planning.py:4651` — `make_material_request_from_consolidate`
-- `production_management/doctype/material_planning/material_planning.py:4789` — `update_so_difference_kg`
-- `production_management/doctype/material_planning/material_planning.py:4819` — `auto_suggest_consolidate_dimensions`
-- `production_management/doctype/material_planning/material_planning.py:4907` — `auto_purchase_from_mp`
-- `production_management/doctype/material_planning/material_planning.py:5113` — `complete_batch_mapping`
+- `production_management/doctype/material_planning/material_planning.py:4438` — `make_production_plan`
+- `production_management/doctype/material_planning/material_planning.py:4509` — `make_material_request`
+- `production_management/doctype/material_planning/material_planning.py:4663` — `make_material_request_from_consolidate`
+- `production_management/doctype/material_planning/material_planning.py:4801` — `update_so_difference_kg`
+- `production_management/doctype/material_planning/material_planning.py:4831` — `auto_suggest_consolidate_dimensions`
+- `production_management/doctype/material_planning/material_planning.py:4919` — `auto_purchase_from_mp`
+- `production_management/doctype/material_planning/material_planning.py:5125` — `complete_batch_mapping`
 - `production_management/doctype/cut_sheet/cut_sheet.py:390` — `suggest_w1_sec_qty`
 - `production_management/doctype/cut_sheet/cut_sheet.py:431` — `get_available_cut_sheets`
 - `production_management/doctype/cut_sheet/cut_sheet.py:457` — `get_cut_sheet_for_batch`

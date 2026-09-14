@@ -182,8 +182,11 @@ def run():
     else:
         res3 = bu.preview_consolidate_batch_update(moved[0].mip, moved[0].crow, "[]")
         check("refused", res3["ok"], False)
-        check("and names the transfer as the reason",
-              any("already been transferred" in b for b in res3["blockers"]), True)
+        # Since 14 Sep 2026 the whole plan is refused once any stock action exists on it,
+        # which a transferred line always implies -- that refusal comes first.
+        check("and names the stock action as the reason",
+              any(("already been transferred" in b) or ("cannot be reassigned" in b)
+                  for b in res3["blockers"]), True)
 
     print()
     print("=== 9. Nothing was written ===")

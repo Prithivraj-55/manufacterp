@@ -171,6 +171,69 @@ def _mip_refresh_blocked_message(mip):
     ).format(", ".join(se_names))
 
 
+def _mip_stock_actions(mip):
+    """Every Stock Entry made against this plan that is not cancelled -- drafts included.
+
+    Wider than _get_mip_transfer_stock_entry_names on purpose. That one answers "has
+    material physically left for the supplier" and only sees submitted entries tagged
+    to the SCO or Work Order. Changing a batch has to stop earlier: a CNC leg, an excess
+    return received with no supplier involved (tagged to the plan alone), a process-loss
+    or final entry, or a draft transfer waiting to be submitted were all built from the
+    reservations as they stand, and rebuilding Raw Materials under them leaves those
+    documents describing batches the plan no longer holds.
+    """
+    conditions = ["se.custom_mip_ref = %(mip)s"]
+    params = {"mip": mip.name}
+    if mip.get("subcontracting_order"):
+        conditions += ["se.custom_sco_ref = %(sco)s", "se.subcontracting_order = %(sco)s"]
+        params["sco"] = mip.subcontracting_order
+    if mip.get("work_order"):
+        conditions += ["se.custom_wo_ref = %(wo)s", "se.work_order = %(wo)s"]
+        params["wo"] = mip.work_order
+    return frappe.db.sql(
+        """
+        SELECT se.name, se.stock_entry_type, se.docstatus, se.posting_date
+        FROM `tabStock Entry` se
+        WHERE se.docstatus < 2 AND ({0})
+        ORDER BY se.posting_date, se.name
+        """.format(" OR ".join(conditions)),
+        params, as_dict=True,
+    )
+
+
+def _mip_batch_change_blocked_message(mip):
+    """Why a batch cannot be reassigned on this plan any more, or None if it can.
+
+    Client decision, 14 Sep 2026: once a transfer or any other stock action has been
+    made on a Material Issue Plan, reassigning a batch is refused outright -- the
+    reassignment ends by rebuilding the Raw Materials table, and that table must not be
+    rebuilt under documents already created from it.
+    """
+    actions = _mip_stock_actions(mip)
+    if not actions:
+        return None
+    lines = "".join(
+        "<li><b>{0}</b> — {1} ({2})</li>".format(
+            a.name, a.stock_entry_type or _("Stock Entry"),
+            _("Draft") if a.docstatus == 0 else _("Submitted"))
+        for a in actions
+    )
+    return _(
+        "<b>The batch cannot be reassigned.</b><br>"
+        "These actions have already been performed on {0}:<ul style='margin:6px 0 6px 18px'>{1}</ul>"
+        "Because of this the Raw Materials table cannot be refreshed, so the batch cannot be "
+        "changed. To change it, those entries would have to be cancelled first."
+    ).format(mip.name, lines)
+
+
+@frappe.whitelist()
+def check_mip_batch_change_allowed(mip_name):
+    """Pre-flight for the Update Batch buttons, so the user is told before the dialog opens."""
+    mip = frappe.get_doc("Material Issue Plan", mip_name)
+    message = _mip_batch_change_blocked_message(mip)
+    return {"blocked": bool(message), "message": message}
+
+
 @frappe.whitelist()
 def check_mip_raw_materials_refreshable(mip_name):
     """Live pre-flight check for the 'Refresh Raw Materials' button -- queries submitted
