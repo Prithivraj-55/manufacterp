@@ -807,7 +807,14 @@ def _consumed_qty_by_batch(doc):
 	enough not to have one. Cancelled bundles are included deliberately -- on cancel
 	that is the only record left of what moved."""
 	moved = {}
-	skip_rows = _cnc_sourced_rows(doc) | _downstream_sourced_rows(doc)
+	# A row moving stock between Storage Locations of ONE warehouse is not stock leaving
+	# it: the reservation is on the batch, and the batch is still where it was reserved.
+	# Counting it released the reservation (batch-wide when the entry has no Production
+	# Plan) and marked the plan rows transferred.
+	same_warehouse = {
+		row.name for row in doc.items if row.name and row.s_warehouse and row.s_warehouse == row.t_warehouse
+	}
+	skip_rows = _cnc_sourced_rows(doc) | _downstream_sourced_rows(doc) | same_warehouse
 	voucher_no = getattr(doc, "name", None)
 	if voucher_no:
 		conditions = ""

@@ -20,9 +20,12 @@
   "section_warehouses",
   "source_warehouse",
   "supplier_warehouse",
+  "supplier_storage_location",
   "cnc_warehouse",
+  "cnc_storage_location",
   "column_break_warehouses",
   "excess_return_warehouse",
+  "fg_storage_location",
   "section_weight_summary",
   "total_planned_weight_kg",
   "allocated_weight_kg",
@@ -154,11 +157,27 @@
    "options": "Warehouse"
   },
   {
+   "fieldname": "supplier_storage_location",
+   "label": "Supplier / WIP Storage Location",
+   "fieldtype": "Link",
+   "options": "Storage Location",
+   "depends_on": "eval:doc.supplier_warehouse",
+   "description": "Where transfers into the Supplier / WIP Warehouse are put. Required when that warehouse's type needs a Storage Location."
+  },
+  {
    "description": "Staging warehouse for CNC-process items before transfer to supplier/WIP.",
    "fieldname": "cnc_warehouse",
    "fieldtype": "Link",
    "label": "CNC Warehouse",
    "options": "Warehouse"
+  },
+  {
+   "fieldname": "cnc_storage_location",
+   "label": "CNC Storage Location",
+   "fieldtype": "Link",
+   "options": "Storage Location",
+   "depends_on": "eval:doc.cnc_warehouse",
+   "description": "Where transfers into the CNC Warehouse are put. Required when that warehouse's type needs a Storage Location."
   },
   {
    "fieldname": "column_break_warehouses",
@@ -170,6 +189,14 @@
    "fieldtype": "Link",
    "label": "Finished Goods Warehouse",
    "options": "Warehouse"
+  },
+  {
+   "fieldname": "fg_storage_location",
+   "label": "Finished Goods Storage Location",
+   "fieldtype": "Link",
+   "options": "Storage Location",
+   "depends_on": "eval:doc.excess_return_warehouse",
+   "description": "Where the finished good (Make Final Stock Entry) and returned excess are put. Required when the Finished Goods Warehouse's type needs a Storage Location."
   },
   {
    "fieldname": "section_weight_summary",

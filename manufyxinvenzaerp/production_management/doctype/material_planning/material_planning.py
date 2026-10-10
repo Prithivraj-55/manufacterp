@@ -166,6 +166,10 @@ class MaterialPlanning(Document):
         self._sync_batch_remarks()
         self._sync_cut_sheet_calc()
         self._warn_undersized_purchase_dimensions()
+        # Each reserved batch row shows the Storage Location the batch is in now, so the
+        # store knows where to pick it from. Read from the ledger on every save.
+        from manufyxinvenzaerp.stock_management.storage_location import stamp_reserved_locations
+        stamp_reserved_locations(self)
 
     def _validate_unique_dunos(self):
         """No two BOM Items rows may share a DUNO/Mark No.

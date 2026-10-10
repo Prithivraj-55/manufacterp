@@ -585,7 +585,10 @@ jobs:
                 rollback "clear-cache failed on $S"
               fi
               log "· $S: migrate"
-              bench --site "$S" migrate 2>&1 | tee -a "$LOG_FILE"
+              # Migrate draws a progress bar per app, thousands of lines a run; kept
+              # out of the log, which is meant to be read. PIPESTATUS[0] is still
+              # migrate's own exit code.
+              bench --site "$S" migrate 2>&1 | grep --line-buffered -v "Updating DocTypes for" | tee -a "$LOG_FILE"
               if [ ${PIPESTATUS[0]} -ne 0 ]; then
                 log "A failed migrate is the one case where the database may also need"
                 log "restoring — the schema may be part-changed. Read the commands below."

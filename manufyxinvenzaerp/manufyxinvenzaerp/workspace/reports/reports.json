@@ -1,0 +1,81 @@
+{
+ "charts": [],
+ "content": "[{\"id\": \"8c59b09c33\", \"type\": \"header\", \"data\": {\"text\": \"\\u003cspan class=\\\"h4\\\"\\u003e\\u003cb\\u003eStock\\u003c/b\\u003e\\u003c/span\\u003e\", \"col\": 12}}, {\"id\": \"00fc2c2677\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Manufyxinvenza Stock Balance\", \"col\": 3}}, {\"id\": \"83ed3f7034\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Inventory Report\", \"col\": 3}}, {\"id\": \"fa579ac406\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"0b8b8fa7f5\", \"type\": \"header\", \"data\": {\"text\": \"\\u003cspan class=\\\"h4\\\"\\u003e\\u003cb\\u003eProduction\\u003c/b\\u003e\\u003c/span\\u003e\", \"col\": 12}}, {\"id\": \"53fe145ef1\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Production Report\", \"col\": 3}}, {\"id\": \"8f7e74dac4\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Excess Material Return Report\", \"col\": 3}}, {\"id\": \"58755062e7\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"bb01a8ccd7\", \"type\": \"header\", \"data\": {\"text\": \"\\u003cspan class=\\\"h4\\\"\\u003e\\u003cb\\u003eQuality\\u003c/b\\u003e\\u003c/span\\u003e\", \"col\": 12}}, {\"id\": \"65b43c15be\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Inspection Status Report\", \"col\": 3}}, {\"id\": \"e43ddcfd64\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"785969ac8d\", \"type\": \"header\", \"data\": {\"text\": \"\\u003cspan class=\\\"h4\\\"\\u003e\\u003cb\\u003eFinance\\u003c/b\\u003e\\u003c/span\\u003e\", \"col\": 12}}, {\"id\": \"c9b0cb212e\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Customer Fund Usage\", \"col\": 3}}]",
+ "creation": "2026-10-10 12:03:08.622291",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "sheet",
+ "idx": 0,
+ "indicator_color": "green",
+ "is_hidden": 0,
+ "label": "Reports",
+ "link_type": "DocType",
+ "links": [],
+ "modified": "2026-10-10 12:20:54.826701",
+ "modified_by": "Administrator",
+ "module": "Manufyxinvenzaerp",
+ "name": "Reports",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 0.0,
+ "shortcuts": [
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "Manufyxinvenza Stock Balance",
+   "link_to": "Manufyxinvenza Stock Balance",
+   "report_ref_doctype": "Stock Ledger Entry",
+   "type": "Report"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "Inventory Report",
+   "link_to": "Inventory Report",
+   "report_ref_doctype": "Item",
+   "type": "Report"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "Production Report",
+   "link_to": "Production Report",
+   "report_ref_doctype": "Supplier Operation Entry",
+   "type": "Report"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "Excess Material Return Report",
+   "link_to": "Excess Material Return Report",
+   "report_ref_doctype": "Material Issue Plan",
+   "type": "Report"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "Inspection Status Report",
+   "link_to": "Inspection Status Report",
+   "report_ref_doctype": "Inspection Entry",
+   "type": "Report"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "Customer Fund Usage",
+   "link_to": "Customer Fund Usage",
+   "report_ref_doctype": "Payment Request",
+   "type": "Report"
+  }
+ ],
+ "standard": 1,
+ "title": "Reports",
+ "type": "Workspace"
+}

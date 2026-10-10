@@ -124,12 +124,12 @@
    "label": "Check stock without dimensions"
   },
   {
-   "description": "Filter stock check to this sub-location within the warehouse.",
+   "description": "Limit Check Stock Availability to batches in this Storage Location of the warehouse. Leave empty for the whole warehouse.",
    "fieldname": "store_location",
    "fieldtype": "Link",
    "hidden": 1,
-   "label": "Store Location",
-   "options": "Store Location"
+   "label": "Storage Location",
+   "options": "Storage Location"
   },
   {
    "fieldname": "column_break_settings",

@@ -1041,6 +1041,10 @@ def create_finished_goods_entry(sco_name, fg_weights_json=None):
         frappe.throw(_("No finished-good warehouse set. Set the warehouse on the "
                        "Subcontracting Order item (or the Finished Goods Warehouse on the "
                        "linked Material Issue Plan) first."))
+    if mip_ref:
+        # The finished good may not be put into a Storage-Location warehouse without one.
+        from manufyxinvenzaerp.stock_management.storage_location import require_mip_location
+        require_mip_location(frappe.get_doc("Material Issue Plan", mip_ref), fg_warehouse)
 
     # What the last operation has actually finished decides what this entry books.
     preview = get_final_stock_entry_preview(sco_name)

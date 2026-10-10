@@ -1059,7 +1059,8 @@ function _show_mip_stock_validation(rows) {
 		if (is_frac) fractional++;
 		html += "<tr>" +
 			'<td style="white-space:nowrap;">' + frappe.utils.escape_html(d.item_code) + "</td>" +
-			'<td style="word-break:break-all;">' + frappe.utils.escape_html(d.batch_no || "—") + "</td>" +
+			'<td style="word-break:break-all;">' + frappe.utils.escape_html(d.batch_no || "—") +
+				(d.storage_locations ? "<div class='text-muted' style='font-size:11px'>" + __("Location: {0}", [frappe.utils.escape_html(d.storage_locations)]) + "</div>" : "") + "</td>" +
 			'<td style="white-space:nowrap;">' + frappe.utils.escape_html(d.duno_mark_no || "—") + "</td>" +
 			'<td style="' + num + '">' + flt(d.qty, 3) + "</td>" +
 			'<td style="' + num + '">' + (is_frac
@@ -1396,7 +1397,8 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 			// Read-only: spec and grade belong to the Item (server: _add_spec_grade).
 			"<td>" + frappe.utils.escape_html(d.material_spec || "—") + "</td>" +
 			"<td>" + frappe.utils.escape_html(d.material_grade || "—") + "</td>" +
-			"<td style='word-break:break-all'>" + frappe.utils.escape_html(d.batch_no || "—") + "</td>" +
+			"<td style='word-break:break-all'>" + frappe.utils.escape_html(d.batch_no || "—") +
+				(d.storage_locations ? "<div class='text-muted' style='font-size:11px'>" + __("Location: {0}", [frappe.utils.escape_html(d.storage_locations)]) + "</div>" : "") + "</td>" +
 			"<td class='text-right' style='white-space:nowrap'>" + format_number(flt(d.planned_qty), null, 3) + "</td>" +
 			"<td class='text-right' style='white-space:nowrap'>" +
 				(done > 0 ? "<span style='color:#15803d'>" + format_number(done, null, 3) + "</span>" : "—") + "</td>" +
@@ -3706,3 +3708,48 @@ function _show_consolidate_update_batch_dialog(frm, preselect_row_name) {
 		}
 	}
 }
+
+// ── Storage Location for each warehouse this plan sends stock into ──────────────
+// Each picker lists only its own warehouse's locations, and is mandatory when that
+// warehouse's type needs a Storage Location (server: storage_location.validate_mip_locations).
+var MIP_LOCATION_FIELDS = [
+	["supplier_warehouse", "supplier_storage_location"],
+	["cnc_warehouse", "cnc_storage_location"],
+	["excess_return_warehouse", "fg_storage_location"],
+];
+
+function mip_refresh_location_reqd(frm) {
+	const warehouses = MIP_LOCATION_FIELDS.map(([wh]) => frm.doc[wh]).filter(Boolean);
+	if (!warehouses.length) return;
+	frappe.call({
+		method: "manufyxinvenzaerp.stock_management.storage_location.get_location_settings",
+		args: { warehouses },
+		callback(r) {
+			const applicable = r.message || {};
+			MIP_LOCATION_FIELDS.forEach(([wh, loc]) => {
+				frm.toggle_reqd(loc, !!(frm.doc[wh] && applicable[frm.doc[wh]]));
+			});
+		},
+	});
+}
+
+frappe.ui.form.on("Material Issue Plan", {
+	setup(frm) {
+		MIP_LOCATION_FIELDS.forEach(([wh, loc]) => {
+			frm.set_query(loc, () => ({ filters: { warehouse: frm.doc[wh] || "" } }));
+		});
+	},
+	refresh: mip_refresh_location_reqd,
+	supplier_warehouse(frm) {
+		frm.set_value("supplier_storage_location", null);
+		mip_refresh_location_reqd(frm);
+	},
+	cnc_warehouse(frm) {
+		frm.set_value("cnc_storage_location", null);
+		mip_refresh_location_reqd(frm);
+	},
+	excess_return_warehouse(frm) {
+		frm.set_value("fg_storage_location", null);
+		mip_refresh_location_reqd(frm);
+	},
+});

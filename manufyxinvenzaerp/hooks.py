@@ -18,16 +18,35 @@ after_migrate = "manufyxinvenzaerp.setup.after_migrate"
 
 # required_apps = []
 
-# Each item in the list will be shown as an app in the apps page
-# add_to_apps_screen = [
-# 	{
-# 		"name": "manufyxinvenzaerp",
-# 		"logo": "/assets/manufyxinvenzaerp/logo.png",
-# 		"title": "Manufyxinvenzaerp",
-# 		"route": "/manufyxinvenzaerp",
-# 		"has_permission": "manufyxinvenzaerp.api.permission.has_app_permission"
-# 	}
-# ]
+# The v16 desktop is built from this hook, so without it Manufyx has no tile and the
+# workspace is reachable only by URL. sequence_id 0.5 puts it ahead of ERPNext (1);
+# 0 would not work, as frappe reads it with `or 100`.
+add_to_apps_screen = [
+    {
+        "name": app_name,
+        "logo": "https://manufyx.co.in/wp-content/uploads/2024/11/MANUFIX-LOGO.svg",
+        "title": "Manufyx",
+        "route": "/desk/manufyx",
+        "has_permission": "manufyxinvenzaerp.apps_screen.has_app_permission",
+        "sequence_id": 0.5,
+    }
+]
+
+# Hides the India Compliance and FAC desktop tiles from everyone but System Managers.
+boot_session = "manufyxinvenzaerp.apps_screen.hide_admin_only_apps"
+
+# v16 navigation is ONE sidebar, the Manufyxinvenzaerp module's own, listing every section
+# (Masters, Sales, Manufacturing, ...) with its doctypes, next to the Manufyx workspace.
+# The app's other modules hold code only. Without this each would get a computed sidebar of
+# whatever doctypes it happens to contain and show up under the header's "Modules" menu.
+# Do not split the sections into sidebars of one module: v16 opens a workspace in the FIRST
+# shell of its module, so every section would land in the same one.
+code_only_modules = {
+    "Drawing Management": ["Manufyxinvenzaerp"],
+    "Production Management": ["Manufyxinvenzaerp"],
+    "Subcontracting Management": ["Manufyxinvenzaerp"],
+    "Accounts Management": ["Manufyxinvenzaerp"],
+}
 
 # Includes in <head>
 # ------------------
@@ -174,7 +193,10 @@ ignore_links_on_delete = ["Manufyx Decision Log"]
 
 doc_events = {
 	"Item": {
-		"validate": "manufyxinvenzaerp.item_management.item.validate_item",
+		"validate": [
+			"manufyxinvenzaerp.item_management.item.validate_item",
+			"manufyxinvenzaerp.stock_management.storage_location.validate_item_locations",
+		],
 	},
 	"Sales Order": {
 		"validate": "manufyxinvenzaerp.drawing_management.sales_order.recalculate_raw_material_qty",
@@ -187,11 +209,15 @@ doc_events = {
 		"before_submit": "manufyxinvenzaerp.purchase_order_management.purchase_order.before_submit_purchase_order",
 	},
 	"Purchase Receipt": {
+		"before_validate": "manufyxinvenzaerp.stock_management.storage_location.fill_locations",
 		"validate": [
 			"manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.validate_purchase_receipt",
 			"manufyxinvenzaerp.production_management.inspection.validate_purchase_receipt_inspection",
 		],
-		"before_submit": "manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.before_submit_purchase_receipt",
+		"before_submit": [
+			"manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.before_submit_purchase_receipt",
+			"manufyxinvenzaerp.stock_management.storage_location.validate_locations",
+		],
 		"on_submit": "manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.on_submit_purchase_receipt",
 	},
 	"Batch": {
@@ -222,6 +248,11 @@ doc_events = {
 	# standard ERPNext under the client's Phase 0.4 change request, and
 	# Subcontracting Order / Operation Entry do that work instead.
 	"Stock Entry": {
+		# Storage Location: filled before ERPNext validates (a row split per location then
+		# gets its quantities recomputed like any other), enforced on submit -- see
+		# stock_management/storage_location.py.
+		"before_validate": "manufyxinvenzaerp.stock_management.storage_location.fill_locations",
+		"before_submit": "manufyxinvenzaerp.stock_management.storage_location.validate_locations",
 		# fg_stock handles the finished-goods rows (sep14 FG plan); the existing
 		# handlers skip them (not row.is_finished_item) and run first.
 		"validate": [
@@ -231,10 +262,12 @@ doc_events = {
 		"on_submit": [
 			"manufyxinvenzaerp.production_management.stock_entry.on_submit_stock_entry",
 			"manufyxinvenzaerp.production_management.fg_stock.on_fg_stock_entry_change",
+			"manufyxinvenzaerp.stock_management.storage_location.refresh_reserved_locations",
 		],
 		"on_cancel": [
 			"manufyxinvenzaerp.production_management.stock_entry.on_cancel_stock_entry",
 			"manufyxinvenzaerp.production_management.fg_stock.on_fg_stock_entry_change",
+			"manufyxinvenzaerp.stock_management.storage_location.refresh_reserved_locations",
 		],
 	},
 	# Blocked site-wide (sep14 FG plan, D21): corrections go through Material
@@ -244,7 +277,13 @@ doc_events = {
 	},
 	# Finished goods delivered and invoiced by the piece (sep14 FG plan, A5 / A6).
 	"Delivery Note": {
-		"validate": "manufyxinvenzaerp.selling_management.delivery_note.validate_delivery_note",
+		# Locations filled AFTER validate_delivery_note, which is what puts the finished-goods
+		# batches on the rows; the location is read from the batch.
+		"validate": [
+			"manufyxinvenzaerp.selling_management.delivery_note.validate_delivery_note",
+			"manufyxinvenzaerp.stock_management.storage_location.fill_locations",
+		],
+		"before_submit": "manufyxinvenzaerp.stock_management.storage_location.validate_locations",
 		"on_submit": "manufyxinvenzaerp.selling_management.delivery_note.on_submit_delivery_note",
 		"on_cancel": "manufyxinvenzaerp.selling_management.delivery_note.on_cancel_delivery_note",
 	},

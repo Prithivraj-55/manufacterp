@@ -20,6 +20,7 @@ import math
 from frappe.utils import cint, flt
 
 from manufyxinvenzaerp.utils.decision_log import log_decision
+from manufyxinvenzaerp.stock_management.storage_location import require_mip_location
 from manufyxinvenzaerp.subcontracting_management.subcontracting import _get_mp_reserved_batches
 from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
     _clear_transfer_draft,
@@ -865,7 +866,24 @@ def get_mip_pending_items(mip_name):
     result.sort(key=lambda r: (r["item_code"], r.get("batch_no") or ""))
 
     _add_spec_grade(result)
+    _add_storage_locations(result, source_warehouse)
     return result
+
+
+def _add_storage_locations(rows, warehouse):
+    """Where each line's batch is in the warehouse it leaves, as "A-1" or "A-1: 50, A-2: 20",
+    so the store picks it from the right place. Empty outside Storage-Location warehouses."""
+    from manufyxinvenzaerp.stock_management.storage_location import (
+        batch_locations, describe_stock, location_applicable,
+    )
+    if not rows or not location_applicable(warehouse):
+        return
+    stock = batch_locations(warehouse, [r.get("batch_no") for r in rows])
+    for row in rows:
+        held = {loc: qty for loc, qty in (stock.get(row.get("batch_no")) or {}).items() if loc}
+        row["storage_locations"] = (
+            next(iter(held)) if len(held) == 1 else describe_stock(held) if held else ""
+        )
 
 
 def _add_spec_grade(rows):
@@ -1963,6 +1981,7 @@ def create_mip_transfer_entry(mip_name):
     _ensure_mip_editable(mip)
     _ensure_cnc_routing(mip)
     ctx = get_target_context(mip)
+    require_mip_location(mip, ctx.primary_warehouse)
     pending = get_mip_pending_items(mip_name)
     if not pending:
         frappe.throw(_("No reserved batches pending transfer. Ensure batches are reserved in the linked Material Planning documents."))
@@ -2035,6 +2054,7 @@ def create_mip_partial_transfer(mip_name, selected_items_json, transfer_type, ex
     else:
         t_warehouse = ctx.primary_warehouse
         se_type = ctx.primary_se_type
+    require_mip_location(mip, t_warehouse)
 
     _validate_selected_against_stock(mip, selected)
     _validate_return_na(selected, excess_plan)
@@ -2140,6 +2160,7 @@ def get_mip_cnc_pending_items(mip_name):
         # this leg has always done without it.
         row["available_nos"] = _available_nos(row, _line_kg_per_piece(row)[0])
     _add_spec_grade(result)
+    _add_storage_locations(result, mip.cnc_warehouse)
     return result
 
 
@@ -2159,6 +2180,7 @@ def create_mip_cnc_partial_forward(mip_name, selected_items_json):
     ctx = get_target_context(mip)
     if not mip.cnc_warehouse:
         frappe.throw(_("No CNC Warehouse set on this Material Issue Plan."))
+    require_mip_location(mip, ctx.primary_warehouse)
 
     pending_by_key = {
         (p["item_code"], p.get("batch_no") or ""): p for p in get_mip_cnc_pending_items(mip_name)
@@ -2292,6 +2314,7 @@ def create_mip_cnc_forward_entry(mip_name):
     cnc_warehouse = mip.cnc_warehouse
     if not cnc_warehouse:
         frappe.throw(_("No CNC Warehouse set on this Material Issue Plan."))
+    require_mip_location(mip, ctx.primary_warehouse)
 
     sent_rows, already = _cnc_sent_and_forwarded(mip_name, cnc_warehouse, ctx.primary_warehouse)
     if not sent_rows:
@@ -2489,6 +2512,7 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
     _ensure_mip_editable(mip)
     if not mip.excess_return_warehouse:
         frappe.throw(_("Please set the Finished Goods Warehouse on this Material Issue Plan first."))
+    require_mip_location(mip, mip.excess_return_warehouse)
 
     overrides = {o.get("name"): o for o in _json.loads(rows_json)} if rows_json else {}
     # Several sizes for one off-cut become several rows before anything else runs,

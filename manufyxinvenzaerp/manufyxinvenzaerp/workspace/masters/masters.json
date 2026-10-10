@@ -1,0 +1,169 @@
+{
+ "charts": [],
+ "content": "[{\"id\": \"c9a854370a\", \"type\": \"header\", \"data\": {\"text\": \"\\u003cspan class=\\\"h4\\\"\\u003e\\u003cb\\u003eItem\\u003c/b\\u003e\\u003c/span\\u003e\", \"col\": 12}}, {\"id\": \"e02c8f7b7f\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Item\", \"col\": 3}}, {\"id\": \"6052077b20\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Item Group\", \"col\": 3}}, {\"id\": \"f30e8c7281\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Batch\", \"col\": 3}}, {\"id\": \"e074792bf8\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Price List\", \"col\": 3}}, {\"id\": \"0caf926df7\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Item Price\", \"col\": 3}}, {\"id\": \"8f5498f8a1\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"42af5e3874\", \"type\": \"header\", \"data\": {\"text\": \"\\u003cspan class=\\\"h4\\\"\\u003e\\u003cb\\u003eParty\\u003c/b\\u003e\\u003c/span\\u003e\", \"col\": 12}}, {\"id\": \"250ba60a63\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Customer\", \"col\": 3}}, {\"id\": \"56622c0234\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Supplier\", \"col\": 3}}, {\"id\": \"3c43dabd55\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"8c52db3888\", \"type\": \"header\", \"data\": {\"text\": \"\\u003cspan class=\\\"h4\\\"\\u003e\\u003cb\\u003eMaterial\\u003c/b\\u003e\\u003c/span\\u003e\", \"col\": 12}}, {\"id\": \"410c2e0387\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Material Spec\", \"col\": 3}}, {\"id\": \"c3e2f2b5ee\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Material Grade\", \"col\": 3}}, {\"id\": \"4a8f7c201c\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"UOM\", \"col\": 3}}, {\"id\": \"c79b24e793\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"958c76c98c\", \"type\": \"header\", \"data\": {\"text\": \"\\u003cspan class=\\\"h4\\\"\\u003e\\u003cb\\u003eManufacturing Masters\\u003c/b\\u003e\\u003c/span\\u003e\", \"col\": 12}}, {\"id\": \"b3eb2360ea\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Nature of Work\", \"col\": 3}}, {\"id\": \"2867e923b2\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Job Nature\", \"col\": 3}}, {\"id\": \"a9e81979c4\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Rate Schedule\", \"col\": 3}}, {\"id\": \"270e5af626\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Contractor\", \"col\": 3}}, {\"id\": \"faf9d4a8d2\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"22c0f063b5\", \"type\": \"header\", \"data\": {\"text\": \"\\u003cspan class=\\\"h4\\\"\\u003e\\u003cb\\u003eLocations\\u003c/b\\u003e\\u003c/span\\u003e\", \"col\": 12}}, {\"id\": \"5daa526b49\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Warehouse\", \"col\": 3}}, {\"id\": \"01d1bee298\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Storage Location\", \"col\": 3}}, {\"id\": \"8a03285b03\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Store Location\", \"col\": 3}}]",
+ "creation": "2026-10-10 11:52:29.884033",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "boxes",
+ "idx": 0,
+ "indicator_color": "green",
+ "is_hidden": 0,
+ "label": "Masters",
+ "link_type": "DocType",
+ "links": [],
+ "modified": "2026-10-10 12:20:54.801797",
+ "modified_by": "Administrator",
+ "module": "Manufyxinvenzaerp",
+ "name": "Masters",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 0.0,
+ "shortcuts": [
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Item",
+   "link_to": "Item",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Item Group",
+   "link_to": "Item Group",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Batch",
+   "link_to": "Batch",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Price List",
+   "link_to": "Price List",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Item Price",
+   "link_to": "Item Price",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Customer",
+   "link_to": "Customer",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Supplier",
+   "link_to": "Supplier",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Material Spec",
+   "link_to": "Material Spec",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Material Grade",
+   "link_to": "Material Grade",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "UOM",
+   "link_to": "UOM",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Nature of Work",
+   "link_to": "Nature of Work",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Job Nature",
+   "link_to": "Job Nature",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Rate Schedule",
+   "link_to": "Rate Schedule",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Contractor",
+   "link_to": "Contractor",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Warehouse",
+   "link_to": "Warehouse",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Storage Location",
+   "link_to": "Storage Location",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Store Location",
+   "link_to": "Store Location",
+   "stats_filter": "[]",
+   "type": "DocType"
+  }
+ ],
+ "standard": 1,
+ "title": "Masters",
+ "type": "Workspace"
+}

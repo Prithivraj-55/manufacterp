@@ -18,7 +18,7 @@ def execute(filters=None):
 	columns = get_columns()
 	item_map = get_item_details()
 	batch_map = get_batch_details()
-	iwb_map = get_item_warehouse_batch_map(filters, float_precision)
+	iwb_map, received_map = get_item_warehouse_batch_map(filters, float_precision)
 
 	# Apply item_group filter to batch items by restricting the map
 	if filters.get("item_group"):
@@ -36,17 +36,19 @@ def execute(filters=None):
 	# ── Batch items ──────────────────────────────────────────────────────────
 	for item in sorted(iwb_map):
 		for wh in sorted(iwb_map[item]):
-			for batch in sorted(iwb_map[item][wh]):
-				qty_dict = iwb_map[item][wh][batch]
+			for batch, location in sorted(iwb_map[item][wh]):
+				qty_dict = iwb_map[item][wh][(batch, location)]
 				if flt(qty_dict.bal_qty, float_precision) <= 0:
 					continue
 
 				item_details = item_map.get(item, frappe._dict())
 				batch_details = batch_map.get(batch, frappe._dict())
 
-				# Proportional available sec qty: scale batch's sec qty by remaining fraction
+				# Proportional available sec qty: scale batch's sec qty by remaining fraction.
+				# Against what the batch received in the WAREHOUSE, not in this Storage
+				# Location: a location holding half the batch holds half its pieces.
 				batch_sec_qty = flt(batch_details.get("custom_sec_qty", 0))
-				received_qty = flt(qty_dict.get("received_qty", 0))
+				received_qty = flt(received_map.get((item, wh, batch), 0))
 				if received_qty > 0 and batch_sec_qty > 0:
 					available_sec_qty = flt(
 						batch_sec_qty * (qty_dict.bal_qty / received_qty), float_precision
@@ -59,6 +61,7 @@ def execute(filters=None):
 					"item_name": item_details.get("item_name", ""),
 					"description": item_details.get("description", ""),
 					"warehouse": wh,
+					"storage_location": location,
 					"batch_no": batch,
 					"available_qty": flt(qty_dict.bal_qty, float_precision),
 					"uom": item_details.get("stock_uom", ""),
@@ -83,6 +86,7 @@ def execute(filters=None):
 			"item_name": item_details.get("item_name", ""),
 			"description": item_details.get("description", ""),
 			"warehouse": nb["warehouse"],
+			"storage_location": nb.get("storage_location") or "",
 			"batch_no": "",
 			"available_qty": flt(nb["bal_qty"], float_precision),
 			"uom": item_details.get("stock_uom", ""),
@@ -106,11 +110,19 @@ def execute(filters=None):
 	non_batch_pairs = [(row["item_code"], row["warehouse"]) for row in data if not row["batch_no"]]
 	nb_res_map = get_non_batch_reservations_map(non_batch_pairs)
 
+	# A reservation is on the batch, not on a Storage Location. Where one warehouse holds
+	# the batch in several locations, it is shared out over them, largest first, instead of
+	# being shown in full on each -- which would read as twice the reservation.
+	reserved_left = {}
+	data.sort(key=lambda r: (r["item_code"], r["warehouse"], r["batch_no"] or "", -flt(r["available_qty"])))
 	for row in data:
 		if row["batch_no"]:
 			res = res_map.get(row["batch_no"])
 			if res:
-				reserved_qty = flt(res["reserved_qty"], float_precision)
+				key = (row["warehouse"], row["batch_no"])
+				left = reserved_left.setdefault(key, flt(res["reserved_qty"], float_precision))
+				reserved_qty = flt(min(left, row["available_qty"]), float_precision)
+				reserved_left[key] = flt(left - reserved_qty, float_precision)
 				row["reserved_qty"] = reserved_qty
 				row["free_qty"] = flt(max(0.0, row["available_qty"] - reserved_qty), float_precision)
 				row["reserved_mp"] = res["reserved_mp"]
@@ -159,6 +171,13 @@ def get_columns():
 			"fieldtype": "Link",
 			"options": "Warehouse",
 			"width": 130,
+		},
+		{
+			"label": _("Storage Location"),
+			"fieldname": "storage_location",
+			"fieldtype": "Link",
+			"options": "Storage Location",
+			"width": 110,
 		},
 		{
 			"label": _("Batch"),
@@ -336,7 +355,9 @@ def _get_sle_via_batch_no(filters):
 		frappe.qb.from_(sle)
 		.select(
 			sle.item_code,
+			sle.voucher_no,
 			sle.warehouse,
+			sle.storage_location,
 			sle.batch_no,
 			fn.Sum(sle.actual_qty).as_("actual_qty"),
 		)
@@ -346,7 +367,7 @@ def _get_sle_via_batch_no(filters):
 			& (sle.batch_no.isnotnull())
 			& (sle.batch_no != "")
 		)
-		.groupby(sle.voucher_no, sle.batch_no, sle.item_code, sle.warehouse)
+		.groupby(sle.voucher_no, sle.batch_no, sle.item_code, sle.warehouse, sle.storage_location)
 	)
 
 	query = apply_warehouse_filter(query, sle, filters)
@@ -372,7 +393,9 @@ def _get_sle_via_batch_bundle(filters):
 		.on(batch_package.parent == sle.serial_and_batch_bundle)
 		.select(
 			sle.item_code,
+			sle.voucher_no,
 			sle.warehouse,
+			sle.storage_location,
 			batch_package.batch_no,
 			fn.Sum(batch_package.qty).as_("actual_qty"),
 		)
@@ -381,7 +404,7 @@ def _get_sle_via_batch_bundle(filters):
 			& (sle.is_cancelled == 0)
 			& (sle.has_batch_no == 1)
 		)
-		.groupby(sle.voucher_no, sle.item_code, sle.warehouse, batch_package.batch_no)
+		.groupby(sle.voucher_no, sle.item_code, sle.warehouse, batch_package.batch_no, sle.storage_location)
 	)
 
 	query = apply_warehouse_filter(query, sle, filters)
@@ -400,22 +423,34 @@ def _get_sle_via_batch_bundle(filters):
 
 
 def get_item_warehouse_batch_map(filters, float_precision):
+	"""{item: {warehouse: {(batch, storage_location): balance}}}, plus what each batch
+	received per warehouse -- the base its Sec Qty is shared out on."""
 	sle = get_stock_ledger_entries(filters)
 	iwb_map = {}
+	received_map = {}
+	# Each voucher's net movement of a batch in a warehouse. A move between Storage
+	# Locations of one warehouse nets to nothing, so it is not counted as received.
+	voucher_net = {}
 
 	for d in sle:
+		key = (d.batch_no, d.storage_location or "")
 		iwb_map.setdefault(d.item_code, {}).setdefault(d.warehouse, {}).setdefault(
-			d.batch_no,
-			frappe._dict({"bal_qty": 0.0, "received_qty": 0.0}),
+			key,
+			frappe._dict({"bal_qty": 0.0}),
 		)
-		qty_dict = iwb_map[d.item_code][d.warehouse][d.batch_no]
+		qty_dict = iwb_map[d.item_code][d.warehouse][key]
 		qty_dict.bal_qty = flt(qty_dict.bal_qty, float_precision) + flt(d.actual_qty, float_precision)
-		if flt(d.actual_qty) > 0:
-			qty_dict.received_qty = (
-				flt(qty_dict.received_qty, float_precision) + flt(d.actual_qty, float_precision)
+		net_key = (d.voucher_no, d.item_code, d.warehouse, d.batch_no)
+		voucher_net[net_key] = flt(voucher_net.get(net_key, 0)) + flt(d.actual_qty)
+
+	for (_voucher, item_code, warehouse, batch_no), qty in voucher_net.items():
+		if flt(qty, float_precision) > 0:
+			received_key = (item_code, warehouse, batch_no)
+			received_map[received_key] = flt(received_map.get(received_key, 0), float_precision) + flt(
+				qty, float_precision
 			)
 
-	return iwb_map
+	return iwb_map, received_map
 
 
 def get_item_details():
@@ -452,15 +487,19 @@ def get_non_batch_stock(filters, float_precision):
 	if filters.get("item_group"):
 		conditions.append("i.item_group = %(item_group)s")
 		values["item_group"] = filters["item_group"]
+	if filters.get("storage_location"):
+		conditions.append("sle.storage_location = %(storage_location)s")
+		values["storage_location"] = filters["storage_location"]
 
 	where_clause = " AND ".join(conditions)
 	return frappe.db.sql(
 		f"""
-		SELECT sle.item_code, sle.warehouse, COALESCE(SUM(sle.actual_qty), 0) AS bal_qty
+		SELECT sle.item_code, sle.warehouse, IFNULL(sle.storage_location, '') AS storage_location,
+			COALESCE(SUM(sle.actual_qty), 0) AS bal_qty
 		FROM `tabStock Ledger Entry` sle
 		INNER JOIN `tabItem` i ON i.name = sle.item_code
 		WHERE {where_clause}
-		GROUP BY sle.item_code, sle.warehouse
+		GROUP BY sle.item_code, sle.warehouse, IFNULL(sle.storage_location, '')
 		HAVING COALESCE(SUM(sle.actual_qty), 0) > 0
 		""",
 		values,
