@@ -197,6 +197,18 @@ frappe.ui.form.on("Production Plan Item", {
 				frappe.model.set_value(cdt, cdn, "custom_rate_schedule", current || ""),
 		});
 	},
+	custom_painting_rate_schedule(frm, cdt, cdn) {
+		let row = locals[cdt][cdn];
+		window.mfx_confirm_rate_schedule_change({
+			kind: "painting",
+			drawing: row.custom_drawing,
+			new_schedule: row.custom_painting_rate_schedule,
+			source_doctype: "Production Plan Item",
+			source_name: row.name,
+			on_decline: (current) =>
+				frappe.model.set_value(cdt, cdn, "custom_painting_rate_schedule", current || ""),
+		});
+	},
 });
 
 // Planned Qty (Kg) = Cust Weight (Total) x Qty (Nos) / drawing Nos, for display

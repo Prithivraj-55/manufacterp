@@ -34,6 +34,7 @@ def validate_item(doc, method):
     validate_uom_configuration(doc)
     validate_batch_configuration(doc)
     validate_fg_configuration(doc)
+    validate_scrap_configuration(doc)
     validate_batch_prefix_not_fg(doc)
     validate_batch_prefix(doc)
     validate_locked_fields(doc)
@@ -90,6 +91,28 @@ def validate_uom_configuration(doc):
                 ).format(parent_group),
                 title=_("Secondary UOM Warning"),
             )
+
+
+def validate_scrap_configuration(doc):
+    """A scrap item (Is Scrap) is weighed and sold by the Kg: a stock item, no batch,
+    no secondary UOM. The Material Issue Plan's Return Excess Entry offers only these,
+    and receives them as plain Kg rows -- a batch or a piece count would have nothing
+    to fill it with."""
+    if not doc.get("custom_is_scrap"):
+        return
+    problems = []
+    if not doc.is_stock_item:
+        problems.append(_("Maintain Stock must be ticked"))
+    if doc.has_batch_no:
+        problems.append(_("Has Batch No must be off"))
+    if doc.stock_uom != "Kg":
+        problems.append(_("Default Unit of Measure must be Kg (it is {0})").format(doc.stock_uom or "-"))
+    if problems:
+        frappe.throw(
+            _("Scrap item {0} is set up wrongly:").format(frappe.bold(doc.name or doc.item_code))
+            + "<ul><li>" + "</li><li>".join(problems) + "</li></ul>",
+            title=_("Scrap Item"),
+        )
 
 
 def validate_batch_configuration(doc):

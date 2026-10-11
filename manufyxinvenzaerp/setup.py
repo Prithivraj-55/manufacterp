@@ -2498,7 +2498,7 @@ def create_rate_schedule_sync_fields():
         ("custom_rs_details", "Details", "Data", "details"),
         ("custom_rs_work_content", "Work Content", "Data", "work_content"),
         ("custom_rs_job_reference", "Job Reference", "Data", "job_reference"),
-        ("custom_rs_rate_per_kg", "Rate/KG", "Currency", "rate_per_kg"),
+        ("custom_rs_rate_per_kg", "Fabrication Rate/KG", "Currency", "rate_per_kg"),
     ]
 
     bom_fields = [
@@ -2571,11 +2571,59 @@ def create_rate_schedule_sync_fields():
         },
         {
             "fieldname": "custom_rs_rate_per_kg",
-            "label": "Rate/KG",
+            "label": "Fabrication Rate/KG",
             "fieldtype": "Currency",
             "fetch_from": "custom_rate_schedule.rate_per_kg",
             "read_only": 1,
             "insert_after": "custom_rs_job_nature",
+            "allow_on_submit": 1,
+        },
+    ]
+
+    # The second schedule (Painting) is the link and its Rate/KG only -- the client
+    # asked for nothing more of it. The existing schedule above keeps its fieldname
+    # and becomes "Fabrication" by label alone, so every value already on a site
+    # stays where it is. rate_schedule_sync.py keeps both in step.
+    bom_fields[1]["label"] = "Fabrication Rate Schedule"
+    bom_fields[0]["label"] = "Rate Schedules"
+    bom_fields += [
+        {
+            "fieldname": "custom_painting_rate_schedule",
+            "label": "Painting Rate Schedule",
+            "fieldtype": "Link",
+            "options": "Rate Schedule",
+            "insert_after": "custom_rs_type",
+            "allow_on_submit": 1,
+            "description": "Changing this updates the Drawing and every other document that follows it.",
+        },
+        {
+            "fieldname": "custom_prs_rate_per_kg",
+            "label": "Painting Rate/KG",
+            "fieldtype": "Currency",
+            "fetch_from": "custom_painting_rate_schedule.rate_per_kg",
+            "read_only": 1,
+            "insert_after": "custom_rs_rate_per_kg",
+            "allow_on_submit": 1,
+        },
+    ]
+    pp_item_fields[0]["label"] = "Fabrication Rate Schedule"
+    pp_item_fields += [
+        {
+            "fieldname": "custom_painting_rate_schedule",
+            "label": "Painting Rate Schedule",
+            "fieldtype": "Link",
+            "options": "Rate Schedule",
+            "insert_after": "custom_rs_rate_per_kg",
+            "allow_on_submit": 1,
+            "description": "Changing this updates the Drawing and its BOM.",
+        },
+        {
+            "fieldname": "custom_prs_rate_per_kg",
+            "label": "Painting Rate/KG",
+            "fieldtype": "Currency",
+            "fetch_from": "custom_painting_rate_schedule.rate_per_kg",
+            "read_only": 1,
+            "insert_after": "custom_painting_rate_schedule",
             "allow_on_submit": 1,
         },
     ]
@@ -4084,6 +4132,10 @@ def layout_production_plan_item_grid():
         "custom_customer_weight_kg": 1,
         "custom_rate_schedule": 1,
         "custom_rs_rate_per_kg": 1,
+        # Painting beside Fabrication (client, Oct 2026). v16 shows every in_list_view
+        # column and scrolls, so this widens the grid rather than dropping a column.
+        "custom_painting_rate_schedule": 1,
+        "custom_prs_rate_per_kg": 1,
         "sales_order": 1,
     }
     for fieldname, columns in widths.items():
@@ -4601,12 +4653,33 @@ def create_stock_entry_custom_fields():
                                    "Material Issue Plan, alongside custom_sco_ref/custom_wo_ref "
                                    "so existing weight rollups keep working unchanged.",
                 },
+                # Slip numbers typed in the Material Issue Plan popups (client, Oct 2026):
+                # MRS and Cutting Plan on the RM-to-supplier and CNC-to-supplier
+                # transfers, Return Slip on the excess return. Plain fields on the entry,
+                # so they stay editable on the draft until it is submitted.
                 {
                     "fieldname": "custom_mrs_number",
                     "fieldtype": "Data",
-                    "label": "MRS Number",
+                    "label": "MRS No.",
                     "insert_after": "custom_mip_ref",
-                    "depends_on": "eval:doc.subcontracting_order",
+                    "depends_on": "eval:doc.subcontracting_order || doc.custom_mip_ref",
+                    "description": "Material Request Slip No. Filled from the Material Issue Plan transfer popup; editable until submit.",
+                },
+                {
+                    "fieldname": "custom_cutting_plan_no",
+                    "fieldtype": "Data",
+                    "label": "Cutting Plan No.",
+                    "insert_after": "custom_mrs_number",
+                    "depends_on": "eval:doc.subcontracting_order || doc.custom_mip_ref",
+                    "description": "Filled from the Material Issue Plan transfer popup; editable until submit.",
+                },
+                {
+                    "fieldname": "custom_return_slip_no",
+                    "fieldtype": "Data",
+                    "label": "Return Slip No.",
+                    "insert_after": "custom_cutting_plan_no",
+                    "depends_on": "eval:doc.custom_mip_ref",
+                    "description": "Filled from the Material Issue Plan excess return popup; editable until submit.",
                 },
                 # Consumable Entry -- an entry issuing consumables (welding rods,
                 # paint, gas) against a job rather than moving the job's own steel.
@@ -5337,6 +5410,10 @@ function render_soe_summary(frm) {
                     + "<td class='text-right' style='" + diff_color + "'>" + format_number(diff, null, 3) + "</td>"
                     + "<td class='text-center'>" + submitted + "</td>"
                     + "<td class='text-center'><button class='btn btn-xs btn-default sco-drw-btn' data-idx='" + idx + "' title='View Drawings'>&#128366;</button></td>"
+                    + "<td class='text-center'>" + ((d.supplier || d.contractor)
+                        ? "<button class='btn btn-xs btn-default sco-print-btn' data-idx='" + idx + "' title='Print for this Supplier/Contractor'>"
+                          + "&#128424;</button>"
+                        : "") + "</td>"
                     + "</tr>";
             }).join("");
             var html = transfer_gap_banner(frm)
@@ -5353,6 +5430,7 @@ function render_soe_summary(frm) {
                 + "<th class='text-right'>Difference NOS</th>"
                 + "<th class='text-center' style='width:110px'>Entry</th>"
                 + "<th class='text-center' style='width:70px'>Drawings</th>"
+                + "<th class='text-center' style='width:50px'>Print</th>"
                 + "</tr></thead><tbody>" + body + "</tbody></table>"
                 + "<div class='text-muted' style='margin-top:6px;font-size:11px'>"
                 + "Op-1 Available = Transferred (Kg). Op-2+ Available = what is still left to consume, "
@@ -5364,6 +5442,107 @@ function render_soe_summary(frm) {
                 var idx = parseInt($(this).data("idx"), 10);
                 show_drawing_popup(rows[idx]);
             });
+            $w.find(".sco-print-btn").on("click", function() {
+                var idx = parseInt($(this).data("idx"), 10);
+                print_contractor_sheet(frm, rows, rows[idx].supplier || rows[idx].contractor);
+            });
+        }
+    });
+}
+
+// Contractor-wise issue sheet (client, Oct 2026): everything one Supplier/Contractor
+// is given on this Job Work Order -- the operations assigned to them and the drawings
+// they work on -- printed from the browser. No rates, by request; signatures at the foot.
+function print_contractor_sheet(frm, rows, party) {
+    var esc = frappe.utils.escape_html;
+    var ops = rows.filter(function(d) { return (d.supplier || d.contractor) === party; });
+    var kg_by_drawing = {};
+    (frm.doc.custom_drawing_items || []).forEach(function(d) {
+        kg_by_drawing[d.drawing] = flt(d.qty_to_manufacture_kg);
+    });
+    // The drawings this party works on, once each, in the order the operations list them.
+    var drawings = [], seen = {};
+    ops.forEach(function(op) {
+        (op.drawing_details || []).forEach(function(d) {
+            if (seen[d.drawing]) return;
+            seen[d.drawing] = 1;
+            drawings.push(d);
+        });
+    });
+
+    // Sales Order and customer come from the drawings themselves: the order's own
+    // drawing rows do not always carry them.
+    frappe.call({
+        method: "frappe.client.get_list",
+        args: { doctype: "Drawing", filters: { name: ["in", drawings.map(function(d) { return d.drawing; })] },
+                fields: ["name", "sales_order", "customer_name"], limit_page_length: 0 },
+        callback: function(r) {
+            var uniq = function(f) {
+                return Array.from(new Set((r.message || []).map(function(d) { return d[f]; }).filter(Boolean)));
+            };
+            var sales_orders = uniq("sales_order");
+            var customers = uniq("customer_name");
+            var td = "style='border:1px solid #999;padding:4px 6px'";
+            var tdr = "style='border:1px solid #999;padding:4px 6px;text-align:right'";
+            var info = [
+                ["Job Work Order", frm.doc.name],
+                ["Date", frappe.datetime.str_to_user(frm.doc.transaction_date)],
+                ["Production Plan", frm.doc.custom_production_plan || ""],
+                ["Sales Order", sales_orders.join(", ")],
+                ["Customer", customers.join(", ")],
+                ["Supplier / Contractor", party],
+            ].map(function(kv) {
+                return "<tr><td " + td + "><b>" + kv[0] + "</b></td><td " + td + ">" + esc(kv[1] || "") + "</td></tr>";
+            }).join("");
+            var op_rows = ops.map(function(op) {
+                return "<tr><td " + td + ">" + esc(String(op.sequence_id || "")) + "</td><td " + td + ">"
+                    + esc(op.operation || "") + "</td><td " + td + ">" + esc(op.name) + "</td><td " + tdr + ">"
+                    + format_number(flt(op.total_qty_to_mfg), null, 3) + "</td></tr>";
+            }).join("");
+            var nos = 0, kg = 0;
+            var drw_rows = drawings.map(function(d) {
+                var w = kg_by_drawing[d.drawing] || flt(d.planned_weight_kg);
+                nos += flt(d.qty_to_manufacture);
+                kg += w;
+                return "<tr><td " + td + ">" + esc(d.drawing || "") + "</td><td " + td + ">"
+                    + esc(d.customer_drawing_number || "") + "</td><td " + td + ">" + esc(d.duno_mark_no || "")
+                    + "</td><td " + tdr + ">" + format_number(flt(d.qty_to_manufacture), null, 3)
+                    + "</td><td " + tdr + ">" + format_number(w, null, 3) + "</td></tr>";
+            }).join("");
+            var table = function(head, body, foot) {
+                return "<table style='border-collapse:collapse;width:100%;margin:6px 0 14px;font-size:12px'>"
+                    + "<thead><tr>" + head.map(function(h) {
+                        return "<th style='border:1px solid #999;padding:4px 6px;background:#eee;text-align:left'>" + h + "</th>";
+                    }).join("") + "</tr></thead><tbody>" + body + "</tbody>" + (foot || "") + "</table>";
+            };
+            var sign = function(label) {
+                return "<div style='flex:1;text-align:center'><div style='border-top:1px solid #333;margin:0 18px;padding-top:4px'>"
+                    + label + "</div></div>";
+            };
+            var html = "<!doctype html><html><head><meta charset='utf-8'><title>" + esc(frm.doc.name + " - " + party)
+                + "</title></head><body style='font-family:Arial,sans-serif;margin:24px'>"
+                + "<h3 style='margin:0'>" + esc(frm.doc.company || "") + "</h3>"
+                + "<h4 style='margin:4px 0 12px'>Job Work Order - Contractor Issue Sheet</h4>"
+                + "<table style='border-collapse:collapse;font-size:12px;margin-bottom:14px'>" + info + "</table>"
+                + "<b>Operations</b>"
+                + table(["Seq", "Operation", "Operation Entry", "Qty to Make (Nos)"], op_rows)
+                + "<b>Drawings</b>"
+                + table(["Drawing", "Customer Drawing No", "DUNO / Mark No", "Nos", "Kg"], drw_rows,
+                    "<tfoot><tr><td " + td + " colspan='3'><b>Total</b></td><td " + tdr + "><b>"
+                    + format_number(nos, null, 3) + "</b></td><td " + tdr + "><b>" + format_number(kg, null, 3)
+                    + "</b></td></tr></tfoot>")
+                + "<div style='display:flex;margin-top:70px;font-size:12px'>"
+                + sign("Prepared By") + sign("Issued By") + sign("Received By (Supplier / Contractor)")
+                + "</div></body></html>";
+            var w = window.open("", "_blank");
+            if (!w) {
+                frappe.msgprint(__("Allow pop-ups for this site to print."));
+                return;
+            }
+            w.document.write(html);
+            w.document.close();
+            w.focus();
+            w.print();
         }
     });
 }
@@ -5480,44 +5659,46 @@ frappe.ui.form.on("SOE Consumption Log", {
 \t}
 });
 
+// Status is set by the system (Open -> In Progress from the Consumption Log), so it is
+// read-only. Completing is the one human decision left, and it is a button: run the
+// same checks the submit will (tolerance prompt included), confirm, then mark
+// Completed and submit in one step. The standard Submit is not offered.
+function _mfx_mark_complete(frm) {
+    if (frm.doc.docstatus !== 0 || frm.is_new() || frm._mfx_completing) return;
+    var previous = frm.doc.status;
+    function restore_status() {
+        frm._mfx_completing = false;
+        if (frm.doc.status !== previous) frm.set_value("status", previous);
+    }
+    frm._mfx_completing = true;
+    frappe.call({
+        method: "manufyxinvenzaerp.subcontracting_management.subcontracting.check_soe_completion_before_confirm",
+        args: { doc: frm.doc },
+        freeze: true,
+        freeze_message: __("Validating operation…"),
+        callback: function(r) {
+            if (!r.message || !r.message.ready) { restore_status(); return; }
+            frappe.confirm(
+                __("Mark as complete and submit the Operation Entry?<br><br>Submitting passes its finished quantity to the next operation. It cannot be cancelled on its own afterwards — only by cancelling the whole Job Work Order."),
+                function() {
+                    frm.doc.status = "Completed";
+                    // Submit directly: savesubmit() would ask for a second confirmation.
+                    frm.save("Submit", function() { frm._mfx_completing = false; }, null, restore_status);
+                },
+                restore_status
+            );
+        },
+        error: restore_status,
+    });
+}
+
 frappe.ui.form.on("Supplier Operation Entry", {
-\tstatus: function(frm) {
-\t\tif (frm.doc.status !== "Completed") {
-\t\t\tfrm.__mfx_prev_status = frm.doc.status;
-\t\t\treturn;
-\t\t}
-\t\tif (frm.doc.docstatus !== 0 || frm.is_new()) return;
-\t\tif (frm._mfx_completing) return;
-
-\t\tvar previous = frm.__mfx_prev_status ||
-\t\t\t((frm.doc.consumption_log || []).length ? "In Progress" : "Open");
-\t\tfunction restore_status() {
-\t\t\tfrm._mfx_completing = false;
-\t\t\tfrm.set_value("status", previous);
-\t\t}
-\t\tfrm._mfx_completing = true;
-\t\tfrappe.call({
-\t\t\tmethod: "manufyxinvenzaerp.subcontracting_management.subcontracting.check_soe_completion_before_confirm",
-\t\t\targs: { doc: frm.doc },
-\t\t\tfreeze: true,
-\t\t\tfreeze_message: __("Validating operation…"),
-\t\t\tcallback: function(r) {
-\t\t\t\tif (!r.message || !r.message.ready) { restore_status(); return; }
-\t\t\t\tfrappe.confirm(
-\t\t\t\t\t__("Mark as complete and submit the Operation Entry?<br><br>Submitting passes its finished quantity to the next operation. It cannot be cancelled on its own afterwards — only by cancelling the whole Job Work Order."),
-\t\t\t\t\tfunction() {
-\t\t\t\t\t\t// Submit directly: savesubmit() would ask for a second confirmation.
-\t\t\t\t\t\tfrm.save("Submit", function() { frm._mfx_completing = false; }, null, restore_status);
-\t\t\t\t\t},
-\t\t\t\t\trestore_status
-\t\t\t\t);
-\t\t\t},
-\t\t\terror: restore_status,
-\t\t});
-\t},
-
 \trefresh: function(frm) {
-\t\tif (frm.doc.status !== "Completed") frm.__mfx_prev_status = frm.doc.status;
+\t\tif (frm.doc.docstatus === 0 && !frm.is_new()) {
+\t\t\tfrm.page.set_primary_action(__("Mark as Complete"), function() { _mfx_mark_complete(frm); });
+\t\t\t// v16's es-button ignores btn-success, so the colour is set directly.
+\t\t\tfrm.page.btn_primary.css({ "background-color": "#16a34a", "border-color": "#16a34a", "color": "#fff" });
+\t\t}
 \t\t_sync_drawing_nos(frm);
 \t\t// Filter drawing link in log to only drawings present in this SOE
 \t\tvar valid_drawings = (frm.doc.drawing_details || []).map(function(r) {

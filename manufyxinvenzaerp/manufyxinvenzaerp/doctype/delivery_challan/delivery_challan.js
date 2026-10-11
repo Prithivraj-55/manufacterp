@@ -180,13 +180,14 @@ function dc_add_print_buttons(frm) {
 		});
 	});
 
-	frm.add_custom_button(
-		frappe.utils.icon("file", "xs") + " " + __("PDF"),
+	// Plain-text label: v16 escapes button labels (see mfx_with_icon).
+	mfx_with_icon(frm.add_custom_button(
+		__("PDF"),
 		function () {
 			open_url_post(
 				"/api/method/manufyxinvenzaerp.manufyxinvenzaerp.doctype.delivery_challan.delivery_challan.download_delivery_challan_pdf",
 				{ name: frm.doc.name }
 			);
 		}
-	);
+	), "file");
 }

@@ -28,6 +28,10 @@ class MaterialIssuePlan(Document):
         excess-return sync so a freshly-suggested row gets picked up in the
         same save. Also mirrors each row's batch Remarks (Phase 6.3)."""
         _assert_claimed_excess_unchanged(self)
+        # Off-cut and scrap come back to the Excess Return Warehouse (client, Oct 2026) --
+        # by default the raw-material store they left from, never the finished goods one.
+        if not self.get("excess_material_warehouse"):
+            self.excess_material_warehouse = self.source_warehouse or ""
         # A warehouse this plan sends stock into, whose type needs a Storage Location, has one.
         from manufyxinvenzaerp.stock_management.storage_location import validate_mip_locations
         validate_mip_locations(self)
@@ -1243,6 +1247,7 @@ def _sync_excess_return_totals(mip):
     mip.returned_weight_kg = flt(sum(
         flt(row.qty) for row in (mip.excess_return_items or []) if row.stock_entry_created
     ), 3)
+    mip.scrap_returned_kg = flt(sum(flt(row.qty) for row in (mip.get("scrap_return_items") or [])), 3)
 
     # What the job's own finished-goods entry consumed. Read from the entry rather
     # than assumed from the transfer: the whole point is that they are not the same

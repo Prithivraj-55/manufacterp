@@ -316,8 +316,9 @@
    "fieldname": "store_location",
    "fieldtype": "Link",
    "label": "Store Location",
-   "options": "Store Location",
-   "read_only": 1
+   "options": "Storage Location",
+   "read_only": 1,
+   "hidden": 1
   },
   {
    "fieldname": "section_cut_sheet",

@@ -1,6 +1,6 @@
 # doctypes — manufyxinvenzaerp
 
-_Generated: 2026-09-30 23:34:00_
+_Generated: 2026-10-11 09:55:23_
 
 ## drawing
 
@@ -244,6 +244,17 @@ _Generated: 2026-09-30 23:34:00_
 
 ---
 
+## item_storage_location
+
+| Key | Value |
+|-----|-------|
+| Module | manufyxinvenzaerp |
+| Path | `manufyxinvenzaerp/doctype/item_storage_location` |
+| Controller | `manufyxinvenzaerp/doctype/item_storage_location/item_storage_location.py` |
+| Client script | none |
+
+---
+
 ## manufyxinvenza_settings
 
 | Key | Value |
@@ -367,10 +378,10 @@ _Generated: 2026-09-30 23:34:00_
 | ` _autofill_total_qty_to_check` | no |
 | ` _set_inspection_complete_date` | no |
 | ` before_submit` | no |
-| ` _result_rows` | no |
 | ` _row_label` | no |
-| ` _validate_row_feedback` | no |
-| ` _derive_header_result` | no |
+| ` _derive_rework_remarks` | no |
+| ` _quantities` | no |
+| ` _set_partly_completed` | no |
 | ` _validate_scalar_result` | no |
 | ` _validate_soe_items` | no |
 | ` _validate_pr_items` | no |
@@ -650,7 +661,7 @@ _Generated: 2026-09-30 23:34:00_
 | Module | production_management |
 | Path | `production_management/doctype/storage_location` |
 | Controller | `production_management/doctype/storage_location/storage_location.py` |
-| Client script | none |
+| Client script | `production_management/doctype/storage_location/storage_location.js` |
 
 ---
 
@@ -755,6 +766,17 @@ _Generated: 2026-09-30 23:34:00_
 | Module | subcontracting_management |
 | Path | `subcontracting_management/doctype/material_issue_plan_raw_material` |
 | Controller | `subcontracting_management/doctype/material_issue_plan_raw_material/material_issue_plan_raw_material.py` |
+| Client script | none |
+
+---
+
+## mip_scrap_return_item
+
+| Key | Value |
+|-----|-------|
+| Module | subcontracting_management |
+| Path | `subcontracting_management/doctype/mip_scrap_return_item` |
+| Controller | `subcontracting_management/doctype/mip_scrap_return_item/mip_scrap_return_item.py` |
 | Client script | none |
 
 ---

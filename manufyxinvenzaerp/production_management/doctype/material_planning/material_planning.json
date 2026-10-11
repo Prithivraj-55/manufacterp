@@ -103,7 +103,9 @@
    "label": "Production Plan",
    "no_copy": 1,
    "options": "Production Plan",
-   "read_only": 1
+   "read_only": 1,
+   "hidden": 1,
+   "description": "Back-link once written by make_production_plan (no longer offered). Hidden: plans now link to Material Planning, not the other way round."
   },
   {
    "fieldname": "section_production_settings",

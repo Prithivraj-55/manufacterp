@@ -178,6 +178,7 @@ override_doctype_class = {
     "BOM": "manufyxinvenzaerp.drawing_management.bom_class_override.BOM",
     "Subcontracting Order": "manufyxinvenzaerp.subcontracting_management.overrides.CustomSubcontractingOrder",
     "Stock Entry": "manufyxinvenzaerp.subcontracting_management.overrides.CustomStockEntry",
+    "Packing Slip": "manufyxinvenzaerp.selling_management.packing_slip.PackingSlip",
 }
 
 # A decision log entry must never stop the document it describes from being deleted.
@@ -203,6 +204,9 @@ doc_events = {
 		# A submitted order skips validate, and the Drawing List stays editable after
 		# submit (allow_on_submit), so the lock on drawn rows has to run here as well.
 		"before_update_after_submit": "manufyxinvenzaerp.drawing_management.sales_order.lock_drawn_rows",
+		# Nature of Work / Rate Schedules edited on a drawn row reach the Drawing.
+		"on_update": "manufyxinvenzaerp.drawing_management.rate_schedule_sync.on_update_sales_order",
+		"on_update_after_submit": "manufyxinvenzaerp.drawing_management.rate_schedule_sync.on_update_sales_order",
 	},
 	"Purchase Order": {
 		"validate": "manufyxinvenzaerp.purchase_order_management.purchase_order.validate_purchase_order",
@@ -213,6 +217,8 @@ doc_events = {
 		"validate": [
 			"manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.validate_purchase_receipt",
 			"manufyxinvenzaerp.production_management.inspection.validate_purchase_receipt_inspection",
+			# Locations that are filled in are checked on every save; blanks on submit.
+			"manufyxinvenzaerp.stock_management.storage_location.check_locations",
 		],
 		"before_submit": [
 			"manufyxinvenzaerp.purchase_receipt_management.purchase_receipt.before_submit_purchase_receipt",
@@ -258,6 +264,7 @@ doc_events = {
 		"validate": [
 			"manufyxinvenzaerp.production_management.stock_entry.validate_stock_entry",
 			"manufyxinvenzaerp.production_management.fg_stock.validate_fg_stock_entry_rows",
+			"manufyxinvenzaerp.stock_management.storage_location.check_locations",
 		],
 		"on_submit": [
 			"manufyxinvenzaerp.production_management.stock_entry.on_submit_stock_entry",
@@ -282,6 +289,7 @@ doc_events = {
 		"validate": [
 			"manufyxinvenzaerp.selling_management.delivery_note.validate_delivery_note",
 			"manufyxinvenzaerp.stock_management.storage_location.fill_locations",
+			"manufyxinvenzaerp.stock_management.storage_location.check_locations",
 		],
 		"before_submit": "manufyxinvenzaerp.stock_management.storage_location.validate_locations",
 		"on_submit": "manufyxinvenzaerp.selling_management.delivery_note.on_submit_delivery_note",
@@ -329,7 +337,10 @@ doc_events = {
 		"on_cancel": "manufyxinvenzaerp.production_plan_management.production_plan.unlink_production_plan_on_trash",
 	},
 	"Drawing": {
-		"on_update": "manufyxinvenzaerp.drawing_management.rate_schedule_sync.on_update_drawing",
+		"on_update": [
+			"manufyxinvenzaerp.drawing_management.rate_schedule_sync.on_update_drawing",
+			"manufyxinvenzaerp.drawing_management.rate_schedule_sync.sync_nature_of_work_to_sales_order",
+		],
 		"on_update_after_submit": "manufyxinvenzaerp.drawing_management.rate_schedule_sync.on_update_drawing",
 	},
 	"Inspection Entry": {
@@ -404,6 +415,7 @@ override_whitelisted_methods = {
 	"erpnext.selling.doctype.sales_order.sales_order.make_delivery_note": "manufyxinvenzaerp.selling_management.mapping.make_delivery_note",
 	"erpnext.selling.doctype.sales_order.sales_order.make_sales_invoice": "manufyxinvenzaerp.selling_management.mapping.make_sales_invoice_from_so",
 	"erpnext.stock.doctype.delivery_note.delivery_note.make_sales_invoice": "manufyxinvenzaerp.selling_management.mapping.make_sales_invoice_from_dn",
+	"erpnext.stock.doctype.delivery_note.delivery_note.make_packing_slip": "manufyxinvenzaerp.selling_management.packing_slip.make_packing_slip",
 }
 #
 # override_whitelisted_methods = {

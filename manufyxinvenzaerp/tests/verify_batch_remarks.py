@@ -64,7 +64,6 @@ def run():
     entry_name = insp.create_inspection_entry("Purchase Receipt", pr.name)
     entry = frappe.get_doc("Inspection Entry", entry_name)
     entry.status = "Completed"
-    entry.feedback = "Ok"
     entry.items[0].accept_qty = entry.items[0].qty
     entry.items[0].remarks = "Surface finish slightly rough, accepted with note"
     entry.save(ignore_permissions=True)

@@ -159,6 +159,7 @@ def create_bom_from_drawing(drawing_name):
     # stay blank until somebody typed the schedule it already implicitly has. The
     # fetch_from fields (custom_rs_*) fill themselves in on insert.
     bom.custom_rate_schedule = drawing.rate_schedule or ""
+    bom.custom_painting_rate_schedule = drawing.get("painting_rate_schedule") or ""
     bom.project = drawing.project or ""
     bom.company = company
     bom.currency = (

@@ -34,6 +34,7 @@
   "excess_weight_kg",
   "used_in_fg_weight_kg",
   "returned_weight_kg",
+  "scrap_returned_kg",
   "process_loss_weight_kg",
   "process_loss_reason",
   "loss_weight_kg",
@@ -46,11 +47,18 @@
   "consolidate_html",
   "consolidate_items",
   "tab_excess_return",
+  "section_excess_return_to",
+  "excess_material_warehouse",
+  "column_break_excess_return_to",
+  "excess_material_storage_location",
+  "section_excess_items",
   "excess_return_items",
   "section_excess_return_totals",
   "excess_return_total_kg",
   "column_break_excess_return",
-  "excess_return_total_nos"
+  "excess_return_total_nos",
+  "section_scrap_returned",
+  "scrap_return_items"
  ],
  "fields": [
   {
@@ -184,7 +192,7 @@
    "fieldtype": "Column Break"
   },
   {
-   "description": "Warehouse that receives both the finished good (Make Final Stock Entry) and unconsumed/off-cut material (Return Excess Entry).",
+   "description": "Warehouse that receives the finished good (Make Final Stock Entry). Returned excess goes to the Excess Return Warehouse on the Excess Material Return tab.",
    "fieldname": "excess_return_warehouse",
    "fieldtype": "Link",
    "label": "Finished Goods Warehouse",
@@ -196,7 +204,7 @@
    "fieldtype": "Link",
    "options": "Storage Location",
    "depends_on": "eval:doc.excess_return_warehouse",
-   "description": "Where the finished good (Make Final Stock Entry) and returned excess are put. Required when the Finished Goods Warehouse's type needs a Storage Location."
+   "description": "Where the finished good (Make Final Stock Entry) is put. Required when the Finished Goods Warehouse's type needs a Storage Location."
   },
   {
    "fieldname": "section_weight_summary",
@@ -355,6 +363,55 @@
    "fieldtype": "Float",
    "label": "Total Return NOS",
    "read_only": 1
+  },
+  {
+   "fieldname": "section_excess_return_to",
+   "fieldtype": "Section Break",
+   "label": "Return To"
+  },
+  {
+   "fieldname": "excess_material_warehouse",
+   "fieldtype": "Link",
+   "label": "Excess Return Warehouse",
+   "options": "Warehouse",
+   "description": "Where returned excess and scrap are received. The Return Excess Entry popup starts from this and can be changed there."
+  },
+  {
+   "fieldname": "column_break_excess_return_to",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "excess_material_storage_location",
+   "fieldtype": "Link",
+   "label": "Excess Return Storage Location",
+   "options": "Storage Location",
+   "depends_on": "eval:doc.excess_material_warehouse",
+   "description": "Required when the Excess Return Warehouse's type needs a Storage Location."
+  },
+  {
+   "fieldname": "section_excess_items",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "section_scrap_returned",
+   "fieldtype": "Section Break",
+   "label": "Scrap Returned"
+  },
+  {
+   "fieldname": "scrap_return_items",
+   "fieldtype": "Table",
+   "label": "Scrap Returned",
+   "options": "MIP Scrap Return Item",
+   "read_only": 1,
+   "description": "Scrap brought back from the supplier through Return Excess Entry. Each row's Kg is taken out of this job's material at the supplier, so it is never counted twice."
+  },
+  {
+   "fieldname": "scrap_returned_kg",
+   "fieldtype": "Float",
+   "label": "Scrap Returned (Kg)",
+   "precision": "3",
+   "read_only": 1,
+   "description": "Scrap brought back with Return Excess Entry. Lowers what is left to write off as Process Loss."
   }
  ],
  "is_submittable": 0,

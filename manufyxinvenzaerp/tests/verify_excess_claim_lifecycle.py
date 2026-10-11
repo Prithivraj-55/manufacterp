@@ -101,6 +101,7 @@ def run():
     mip = frappe.new_doc("Material Issue Plan")
     mip.company, mip.posting_date = ctx.company, today()
     mip.production_plan, mip.excess_return_warehouse = pp.name, ctx.warehouse
+    mip.excess_material_warehouse = ctx.warehouse  # where the off-cut comes back (Oct 2026)
     mip.insert(ignore_permissions=True)
     populate_from_production_plan(mip.name)
 
@@ -264,6 +265,7 @@ def run():
     mip2 = frappe.new_doc("Material Issue Plan")
     mip2.company, mip2.posting_date = ctx.company, today()
     mip2.production_plan, mip2.excess_return_warehouse = pp2.name, ctx.warehouse
+    mip2.excess_material_warehouse = ctx.warehouse
     mip2.insert(ignore_permissions=True)
     populate_from_production_plan(mip2.name)
     frappe.db.commit()

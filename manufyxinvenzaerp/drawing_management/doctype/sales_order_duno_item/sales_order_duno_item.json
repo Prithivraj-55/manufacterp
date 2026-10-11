@@ -8,6 +8,7 @@
   "assembly_group",
   "item",
   "item_name",
+  "description",
   "duno_mark_no",
   "drawing_number",
   "total_quantity",
@@ -16,6 +17,7 @@
   "calculated_weight",
   "nature_of_work",
   "rate_schedule",
+  "painting_rate_schedule",
   "difference_kg",
   "drawing",
   "section_break_actions",
@@ -104,7 +106,7 @@
    "fieldname": "rate_schedule",
    "fieldtype": "Link",
    "in_list_view": 0,
-   "label": "Rate Schedule",
+   "label": "Fabrication Rate Schedule",
    "options": "Rate Schedule"
   },
   {
@@ -154,6 +156,18 @@
    "fieldtype": "Check",
    "in_list_view": 1,
    "label": "Create BOM"
+  },
+  {
+   "fieldname": "painting_rate_schedule",
+   "fieldtype": "Link",
+   "in_list_view": 0,
+   "label": "Painting Rate Schedule",
+   "options": "Rate Schedule"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
   }
  ],
  "istable": 1,

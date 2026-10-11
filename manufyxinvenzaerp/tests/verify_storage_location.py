@@ -7,8 +7,8 @@ added by stock_management/storage_location.py, checked here end to end:
 
   * a warehouse whose Warehouse Type has "Storage Location Applicable" refuses a
     submit without a location; any other warehouse does not care;
-  * inward, the location must be one the item may use there (its own table, or the
-    warehouse's locations when it lists none), and the item's default is filled in;
+  * inward, the location must be one the item lists for that warehouse (none listed,
+    none allowed), and the item's default is filled in;
   * outward, the location must hold the batch -- the message says where it is;
   * a batch spread over two locations is split into one row per location;
   * a Repack back into the same warehouse (cut-sheet remnant) keeps the source location;
@@ -117,21 +117,32 @@ def run():
         made.append(draft)
         check("two locations, no default: left blank on save", draft.items[0].to_storage_location, None)
         check("submit refused without a location", _throws(draft.submit, "mandatory"), True)
+        # Only what the Item lists (Oct 2026): nothing listed, nothing offered or allowed.
+        check("item lists none: nothing allowed", sl.allowed_locations(ITEM, wh), [])
+        check("item lists none: picker is empty",
+              sl.inward_location_query("Storage Location", "", "name", 0, 20,
+                                       {"item_code": ITEM, "warehouse": wh}), [])
+        check("item lists none: a keyed-in location is refused on save", _throws(lambda: _se(
+            company, "Material Receipt", [{"qty": 5, "t_warehouse": wh, "to_storage_location": L1}],
+            submit=False), "Storage Locations table"), True)
 
         _set_item_locations([{"warehouse": wh, "storage_location": L1, "is_default": 1}])
         first = _se(company, "Material Receipt", [{"qty": 30, "t_warehouse": wh}])
         made.append(first)
         check("item default filled in", first.items[0].to_storage_location, L1)
+        check("picker offers only what the item lists",
+              [r[0] for r in sl.inward_location_query("Storage Location", "", "name", 0, 20,
+                                                      {"item_code": ITEM, "warehouse": wh})], [L1])
         sle_loc = frappe.db.get_value("Stock Ledger Entry",
                                       {"voucher_no": first.name, "is_cancelled": 0}, "storage_location")
         check("ledger entry carries it", sle_loc, L1)
         batch = frappe.db.get_value("Stock Entry Detail", first.items[0].name, "batch_no") or \
             sl.row_batches(frappe.get_doc("Stock Entry", first.name).items[0], 30).popitem()[0]
 
-        bad = _se(company, "Material Receipt", [{"qty": 5, "t_warehouse": wh, "to_storage_location": L2}],
-                  submit=False)
-        made.append(bad)
-        check("a location the item does not list is refused", _throws(bad.submit, "cannot hold"), True)
+        # Checked on SAVE since Oct 2026 (check_locations), not only on submit.
+        check("a location the item does not list is refused on save", _throws(lambda: _se(
+            company, "Material Receipt", [{"qty": 5, "t_warehouse": wh, "to_storage_location": L2}],
+            submit=False), "cannot hold"), True)
 
         print()
         print("=== move between locations of one warehouse ===")
@@ -154,12 +165,15 @@ def run():
 
         print()
         print("=== outward from the wrong location ===")
-        wrong = _se(company, "Material Issue", [{
+        check("refused on save, naming where it is", _throws(lambda: _se(company, "Material Issue", [{
             "qty": 5, "s_warehouse": wh, "batch_no": batch, "use_serial_batch_fields": 1,
             "storage_location": L1,
+        }], submit=False), L2), True)
+        blank = _se(company, "Material Issue", [{
+            "qty": 5, "s_warehouse": wh, "batch_no": batch, "use_serial_batch_fields": 1,
         }], submit=False)
-        made.append(wrong)
-        check("refused, naming where it is", _throws(wrong.submit, L2), True)
+        made.append(blank)
+        check("a blank location still saves (filled from where the batch is)", blank.items[0].storage_location, L2)
 
         print()
         print("=== a batch spread over two locations is split ===")

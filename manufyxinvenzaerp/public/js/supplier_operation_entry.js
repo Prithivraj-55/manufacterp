@@ -1,11 +1,11 @@
 frappe.ui.form.on("Supplier Operation Entry", {
 	refresh(frm) {
 		// SOE Inspection Item is shared with the Inspection Entry, where each drawing
-		// gets its Feedback and Rework Remarks. Here the table only lists what is
-		// waiting for inspection, so those two columns are not shown.
+		// gets its Rework Remarks. Here the table only lists what is waiting for
+		// inspection, so that column is not shown.
 		const grid = frm.fields_dict.inspection_items && frm.fields_dict.inspection_items.grid;
 		if (grid && !grid.__mfx_result_cols_hidden) {
-			["feedback", "rework_remarks"].forEach((f) => grid.update_docfield_property(f, "hidden", 1));
+			["rework_remarks"].forEach((f) => grid.update_docfield_property(f, "hidden", 1));
 			grid.__mfx_result_cols_hidden = true;
 			grid.reset_grid();
 		}

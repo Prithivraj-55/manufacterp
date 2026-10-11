@@ -486,8 +486,8 @@ frappe.ui.form.on("Material Planning", {
 			// Item (client change request Phase 2.4): Consolidate Item is now the
 			// purchasing-facing table, deduped by item_code across every drawing.
 			if (frm.fields_dict["consolidate_items"]) {
-				frm.fields_dict["consolidate_items"].grid.add_custom_button(
-					frappe.utils.icon("buying", "xs") + " " + __("Create Material Request"),
+				mfx_grid_button(frm.fields_dict["consolidate_items"].grid, "buying",
+					__("Create Material Request"),
 					function () { _show_consolidate_material_request_dialog(frm); }
 				);
 				// "Update & Map Exact Matches" — moved here from Unavailable Items
@@ -495,8 +495,8 @@ frappe.ui.form.on("Material Planning", {
 				// covered by an active Material Request, drop the row and re-check
 				// stock against the underlying Unavailable Item rows, updating
 				// Available Raw Materials / Material Mapping accordingly.
-				frm.fields_dict["consolidate_items"].grid.add_custom_button(
-					frappe.utils.icon("tick", "xs") + " " + __("Update & Map Exact Matches"),
+				mfx_grid_button(frm.fields_dict["consolidate_items"].grid, "tick",
+					__("Update & Map Exact Matches"),
 					function () { _update_exact_match_from_consolidate(frm); }
 				);
 			}
@@ -2758,8 +2758,8 @@ function _add_reservation_buttons(frm) {
 	// dimensions). For a receipt whose own allocation on submit did not map, or a plan
 	// re-checked since. Nothing is reserved; the rows are reserved as usual after.
 	if (frm.doc.docstatus === 0 && !frm.is_new()) {
-		grid.add_custom_button(
-			frappe.utils.icon("download", "xs") + " " + __("Allocate from Purchase Receipt"),
+		mfx_grid_button(grid, "download",
+			__("Allocate from Purchase Receipt"),
 			function () {
 				if (frm.is_dirty()) {
 					frappe.msgprint(__("Save the Material Planning first."));
@@ -2819,8 +2819,8 @@ function _add_reservation_buttons(frm) {
 		);
 	}
 
-	grid.add_custom_button(
-		frappe.utils.icon("lock", "xs") + " " + __("Reserve"),
+	mfx_grid_button(grid, "lock",
+		__("Reserve"),
 		function () {
 			let has_batch = (frm.doc.material_mapping || []).some(
 				r => r.batch && !r.is_reserved && !r.fully_transferred && (flt(r.transferred_qty || 0) < flt(r.qty || 0) - 0.001)
@@ -2887,8 +2887,8 @@ function _add_reservation_buttons(frm) {
 		}
 	);
 
-	grid.add_custom_button(
-		frappe.utils.icon("unlock", "xs") + " " + __("Unreserve"),
+	mfx_grid_button(grid, "unlock",
+		__("Unreserve"),
 		function () {
 			let reserved = (frm.doc.material_mapping || []).filter(r => r.is_reserved);
 			if (!reserved.length) {
@@ -2933,8 +2933,8 @@ function _add_reservation_buttons(frm) {
 		}
 	);
 
-	grid.add_custom_button(
-		frappe.utils.icon("refresh", "xs") + " " + __("Excess Material Mapping"),
+	mfx_grid_button(grid, "refresh",
+		__("Excess Material Mapping"),
 		function () { _show_excess_material_mapping_dialog(frm); }
 	);
 }
@@ -3530,8 +3530,8 @@ function _add_exact_match_reservation_buttons(frm) {
 	let grid = frm.fields_dict["available_raw_materials"] && frm.fields_dict["available_raw_materials"].grid;
 	if (!grid) return;
 
-	grid.add_custom_button(
-		frappe.utils.icon("lock", "xs") + " " + __("Reserve"),
+	mfx_grid_button(grid, "lock",
+		__("Reserve"),
 		function () {
 			let has_unreserved = (frm.doc.available_raw_materials || []).some(
 				r => !r.is_reserved && !r.fully_transferred && (flt(r.transferred_qty || 0) < flt(r.required_qty || 0) - 0.001)
@@ -3590,8 +3590,8 @@ function _add_exact_match_reservation_buttons(frm) {
 		}
 	);
 
-	grid.add_custom_button(
-		frappe.utils.icon("unlock", "xs") + " " + __("Unreserve"),
+	mfx_grid_button(grid, "unlock",
+		__("Unreserve"),
 		function () {
 			let reserved = (frm.doc.available_raw_materials || []).filter(r => r.is_reserved);
 			if (!reserved.length) {
@@ -3636,8 +3636,8 @@ function _add_exact_match_reservation_buttons(frm) {
 		}
 	);
 
-	grid.add_custom_button(
-		frappe.utils.icon("edit", "xs") + " " + __("Reassign Batch"),
+	mfx_grid_button(grid, "edit",
+		__("Reassign Batch"),
 		function () {
 			_show_exact_match_reassign_dialog(frm);
 		}

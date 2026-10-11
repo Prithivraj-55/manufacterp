@@ -40,7 +40,13 @@ MIP_LOCATION_FIELDS = (
 	("supplier_warehouse", "supplier_storage_location"),
 	("cnc_warehouse", "cnc_storage_location"),
 	("excess_return_warehouse", "fg_storage_location"),
+	("excess_material_warehouse", "excess_material_storage_location"),
 )
+
+# Location fields a plan may be saved without. The Excess Return location is only needed
+# on the day something comes back, and the return popup asks for it then -- requiring it
+# on every save would block plans that may never return anything.
+OPTIONAL_UNTIL_USED = ("excess_material_storage_location",)
 
 
 # ── Masters ──────────────────────────────────────────────────────────────────────
@@ -75,11 +81,10 @@ def _item_rows(item_code, warehouse):
 
 
 def allowed_locations(item_code, warehouse):
-	"""Locations `item_code` may be put in inside `warehouse`."""
-	rows = _item_rows(item_code, warehouse)
-	if rows:
-		return [r.storage_location for r in rows]
-	return warehouse_locations(warehouse)
+	"""Locations `item_code` may be put in inside `warehouse`: the ones its Item lists,
+	and nothing else (client, Oct 2026). An item listing none for a warehouse has no
+	allowed location there until its Storage Locations table says where it goes."""
+	return [r.storage_location for r in _item_rows(item_code, warehouse)]
 
 
 def default_location(item_code, warehouse):
@@ -322,6 +327,21 @@ def _repack_source_location(doc, move):
 	return None
 
 
+def _system_placed(doc, move, location):
+	"""Inward rows whose location the system chose, exempt from the item's own list.
+
+	A Material Issue Plan entry goes where the plan (or its return popup) says -- its WIP,
+	CNC, finished-goods or excess-return location, picked deliberately for the job -- and a
+	same-warehouse Repack (cut-sheet remnant) goes back where its batch came from. Holding
+	those to each item's list would stop a running job's transfers until every raw
+	material listed the WIP location; the item list governs what people key in."""
+	if doc.doctype != "Stock Entry":
+		return False
+	if doc.get("custom_mip_ref"):
+		return frappe.get_cached_value("Storage Location", location, "warehouse") == move.warehouse
+	return location == _repack_source_location(doc, move)
+
+
 def _mip_locations(doc):
 	"""{warehouse: location} the Material Issue Plan behind this entry names for its warehouses."""
 	mip_name = doc.get("custom_mip_ref") if doc.doctype == "Stock Entry" else None
@@ -391,7 +411,18 @@ def _split_row_by_location(doc, row, move, stock):
 # ── Enforcing (before_submit) ────────────────────────────────────────────────────
 
 
-def validate_locations(doc, method=None):
+def check_locations(doc, method=None):
+	"""On save: every location that IS filled in must fit -- allowed for the item going
+	in, holding the stock going out (client, Oct 2026: "on save need to validate stock").
+
+	A blank one is let through here and refused on submit (validate_locations): the app
+	saves its own drafts (Material Issue Plan transfers, Final entries) before anyone
+	has picked a location, and those must stay saveable."""
+	if doc.docstatus == 0:
+		validate_locations(doc, require=False)
+
+
+def validate_locations(doc, method=None, require=True):
 	"""Refuse to submit unless every movement in a location-managed warehouse names a
 	location it may use -- and, going out, one that holds the stock."""
 	demand = defaultdict(float)
@@ -401,6 +432,8 @@ def validate_locations(doc, method=None):
 		row, location = move.row, move.row.get(move.field)
 		label = frappe.get_meta(row.doctype).get_label(move.field)
 		if not location:
+			if not require:
+				continue
 			frappe.throw(
 				_("Row #{0}: {1} is mandatory for {2}, because its Warehouse Type needs a Storage Location.").format(
 					row.idx, frappe.bold(label), frappe.bold(move.warehouse)
@@ -408,6 +441,8 @@ def validate_locations(doc, method=None):
 				title=_("Storage Location Missing"),
 			)
 		if move.inward:
+			if _system_placed(doc, move, location):
+				continue
 			allowed = allowed_locations(row.item_code, move.warehouse)
 			if location not in allowed:
 				frappe.throw(
@@ -416,7 +451,10 @@ def validate_locations(doc, method=None):
 						frappe.bold(location),
 						frappe.bold(row.item_code),
 						frappe.bold(move.warehouse),
-						", ".join(allowed) or _("none -- add Storage Locations for this warehouse"),
+						", ".join(allowed)
+						or _("none -- add {0}'s locations to the Item's Storage Locations table").format(
+							move.warehouse
+						),
 					),
 					title=_("Storage Location Not Allowed"),
 				)
@@ -589,6 +627,9 @@ def validate_mip_locations(mip):
 		choices = warehouse_locations(warehouse)
 		if len(choices) == 1:
 			mip.set(loc_field, choices[0])
+		elif loc_field in OPTIONAL_UNTIL_USED:
+			# Asked for when it is used: the return popup refuses to receive without one.
+			continue
 		elif not mip.is_new():
 			frappe.throw(
 				_("{0} is mandatory: {1} needs a Storage Location for everything put into it.").format(

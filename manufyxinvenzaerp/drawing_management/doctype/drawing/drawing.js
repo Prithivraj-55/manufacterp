@@ -180,6 +180,10 @@ frappe.ui.form.on("Drawing", {
 		});
 	},
 
+	painting_rate_schedule(frm) {
+		if (!frm.doc.painting_rate_schedule) frm.set_value("prs_rate_per_kg", 0);
+	},
+
 	sales_order(frm) {
 		if (!frm.doc.sales_order) {
 			frm.set_value("project", "");
