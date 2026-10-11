@@ -8,7 +8,7 @@ from frappe.utils import flt
 
 def execute(filters=None):
 	filters = filters or {}
-	columns = get_columns()
+	columns = get_columns(filters)
 	data = get_data(filters)
 	return columns, data
 
@@ -127,6 +127,22 @@ def get_data(filters):
 	for b in bin_rows:
 		closing_map[b.item_code] = closing_map.get(b.item_code, 0) + flt(b.actual_qty)
 
+	# On hand in one Storage Location, from the ledger (Bin has no location).
+	location_map = {}
+	if filters.get("storage_location"):
+		for row in frappe.db.sql(
+			"""
+			SELECT item_code, SUM(actual_qty) AS qty
+			FROM `tabStock Ledger Entry`
+			WHERE is_cancelled = 0 AND storage_location = %(storage_location)s
+				{item}
+			GROUP BY item_code
+			""".format(item="AND item_code = %(item_code)s" if filters.get("item_code") else ""),
+			{"storage_location": filters["storage_location"], "item_code": filters.get("item_code")},
+			as_dict=True,
+		):
+			location_map[row.item_code] = flt(row.qty, 3)
+
 	data = []
 	for item_code, sales_order in sorted(keys):
 		item = item_data.get(item_code, frappe._dict())
@@ -146,14 +162,15 @@ def get_data(filters):
 			"pending_receipt_qty": flt(ordered - received, 3),
 			"issued_qty": issued,
 			"closing_stock_qty": flt(closing_map.get(item_code, 0), 3),
+			"location_stock_qty": location_map.get(item_code, 0.0),
 			"uom": item.get("stock_uom") or "",
 		})
 
 	return data
 
 
-def get_columns():
-	return [
+def get_columns(filters=None):
+	columns = [
 		{"label": _("Item Code"), "fieldname": "item_code", "fieldtype": "Link", "options": "Item", "width": 130},
 		{"label": _("Item Name"), "fieldname": "item_name", "fieldtype": "Data", "width": 160},
 		{"label": _("Item Group"), "fieldname": "item_group", "fieldtype": "Link", "options": "Item Group", "width": 110},
@@ -167,3 +184,9 @@ def get_columns():
 		{"label": _("Closing Stock (Overall)"), "fieldname": "closing_stock_qty", "fieldtype": "Float", "width": 140},
 		{"label": _("UOM"), "fieldname": "uom", "fieldtype": "Link", "options": "UOM", "width": 80},
 	]
+	if (filters or {}).get("storage_location"):
+		columns.insert(-1, {
+			"label": _("Closing Stock ({0})").format(filters["storage_location"]),
+			"fieldname": "location_stock_qty", "fieldtype": "Float", "width": 150,
+		})
+	return columns

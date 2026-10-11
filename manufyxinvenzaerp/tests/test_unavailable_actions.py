@@ -4,6 +4,8 @@ from unittest.mock import patch
 
 import frappe
 
+from manufyxinvenzaerp.tests.fixtures import ensure_test_item_group
+
 from manufyxinvenzaerp.production_management.doctype.material_planning.material_planning import (
     move_to_exact_match,
 )
@@ -50,6 +52,7 @@ def _ensure_batch_items():
                 "item_code": item_code,
                 "item_name": row["item_name"],
                 "stock_uom": row["uom"],
+                "item_group": ensure_test_item_group(),
                 "has_batch_no": 1,
                 "is_stock_item": 1,
                 "is_sales_item": 0,

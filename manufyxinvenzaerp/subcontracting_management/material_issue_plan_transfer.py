@@ -20,6 +20,7 @@ import math
 from frappe.utils import cint, flt
 
 from manufyxinvenzaerp.utils.decision_log import log_decision
+from manufyxinvenzaerp.stock_management.storage_location import location_applicable, require_mip_location
 from manufyxinvenzaerp.subcontracting_management.subcontracting import _get_mp_reserved_batches
 from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (
     _clear_transfer_draft,
@@ -245,6 +246,15 @@ def _tag_stock_entry(se_dict, mip_name, ctx):
     return se_dict
 
 
+def _slip_numbers(**slips):
+    """The paper slip numbers typed in a popup, keyed by their Stock Entry field.
+
+    All optional (client, Oct 2026): a blank box sets nothing, so the field stays
+    free to be typed on the draft before it is submitted.
+    """
+    return {field: str(value).strip() for field, value in slips.items() if value and str(value).strip()}
+
+
 @frappe.whitelist()
 def submit_mip_transfer_entry(mip_name, stock_entry_name):
     """Submit a transfer draft from its Material Issue Plan creation dialog."""
@@ -358,6 +368,7 @@ def get_mip_process_loss_state(mip_name):
         "used_in_fg": flt(mip.used_in_fg_weight_kg, 3),
         "planned_return": planned_return,
         "returned": returned,
+        "scrap_returned": flt(sum(flt(r.qty) for r in (mip.get("scrap_return_items") or [])), 3),
         "remaining": remaining,
         "pending_return": pending,
         "pending_return_kg": flt(sum(p["qty"] for p in pending), 3),
@@ -522,7 +533,7 @@ def _job_stock_at_supplier(mip):
     return {(r.item_code, r.batch_no): flt(r.qty, 3) for r in rows}
 
 
-def _excess_return_source_rows(mip, in_rows):
+def _excess_return_source_rows(mip, in_rows, available=None):
     """The 'out' half of the return: what to take from the supplier for each off-cut.
 
     An excess row carries no batch on purpose -- an off-cut comes back as one shape
@@ -535,7 +546,8 @@ def _excess_return_source_rows(mip, in_rows):
     difference is either already consumed or already returned, and pretending
     otherwise is how the counts drifted in the first place.
     """
-    available = _job_stock_at_supplier(mip)
+    if available is None:
+        available = _job_stock_at_supplier(mip)
     out_rows, shortfalls = [], []
 
     for item in in_rows:
@@ -563,6 +575,7 @@ def _excess_return_source_rows(mip, in_rows):
                 # try to move a whole plate that is no longer there.
                 "batch_no": key[1] or None,
                 "use_serial_batch_fields": 1 if key[1] else 0,
+                "_feeds": item_code,
             })
             available[key] = flt(have - take, 3)
             wanted = flt(wanted - take, 3)
@@ -865,7 +878,24 @@ def get_mip_pending_items(mip_name):
     result.sort(key=lambda r: (r["item_code"], r.get("batch_no") or ""))
 
     _add_spec_grade(result)
+    _add_storage_locations(result, source_warehouse)
     return result
+
+
+def _add_storage_locations(rows, warehouse):
+    """Where each line's batch is in the warehouse it leaves, as "A-1" or "A-1: 50, A-2: 20",
+    so the store picks it from the right place. Empty outside Storage-Location warehouses."""
+    from manufyxinvenzaerp.stock_management.storage_location import (
+        batch_locations, describe_stock, location_applicable,
+    )
+    if not rows or not location_applicable(warehouse):
+        return
+    stock = batch_locations(warehouse, [r.get("batch_no") for r in rows])
+    for row in rows:
+        held = {loc: qty for loc, qty in (stock.get(row.get("batch_no")) or {}).items() if loc}
+        row["storage_locations"] = (
+            next(iter(held)) if len(held) == 1 else describe_stock(held) if held else ""
+        )
 
 
 def _add_spec_grade(rows):
@@ -1963,6 +1993,7 @@ def create_mip_transfer_entry(mip_name):
     _ensure_mip_editable(mip)
     _ensure_cnc_routing(mip)
     ctx = get_target_context(mip)
+    require_mip_location(mip, ctx.primary_warehouse)
     pending = get_mip_pending_items(mip_name)
     if not pending:
         frappe.throw(_("No reserved batches pending transfer. Ensure batches are reserved in the linked Material Planning documents."))
@@ -1997,7 +2028,8 @@ def create_mip_transfer_entry(mip_name):
 
 
 @frappe.whitelist()
-def create_mip_partial_transfer(mip_name, selected_items_json, transfer_type, excess_plan_json=None):
+def create_mip_partial_transfer(mip_name, selected_items_json, transfer_type, excess_plan_json=None,
+                                mrs_number=None, cutting_plan_no=None):
     """Create a draft Stock Entry for the caller-selected raw-material items.
 
     transfer_type: "primary" -> Send to Subcontractor/Material Transfer to the
@@ -2035,6 +2067,7 @@ def create_mip_partial_transfer(mip_name, selected_items_json, transfer_type, ex
     else:
         t_warehouse = ctx.primary_warehouse
         se_type = ctx.primary_se_type
+    require_mip_location(mip, t_warehouse)
 
     _validate_selected_against_stock(mip, selected)
     _validate_return_na(selected, excess_plan)
@@ -2067,6 +2100,9 @@ def create_mip_partial_transfer(mip_name, selected_items_json, transfer_type, ex
         "stock_entry_type": se_type,
         "company": ctx.company,
         "items": se_items,
+        # Slips go with material leaving for the supplier; the leg into CNC has none.
+        **(_slip_numbers(custom_mrs_number=mrs_number, custom_cutting_plan_no=cutting_plan_no)
+           if transfer_type != "cnc" else {}),
     }, mip_name, ctx))
     frappe.db.commit()
     se.insert(ignore_permissions=True)
@@ -2140,11 +2176,12 @@ def get_mip_cnc_pending_items(mip_name):
         # this leg has always done without it.
         row["available_nos"] = _available_nos(row, _line_kg_per_piece(row)[0])
     _add_spec_grade(result)
+    _add_storage_locations(result, mip.cnc_warehouse)
     return result
 
 
 @frappe.whitelist()
-def create_mip_cnc_partial_forward(mip_name, selected_items_json):
+def create_mip_cnc_partial_forward(mip_name, selected_items_json, mrs_number=None, cutting_plan_no=None):
     """Forward a caller-selected subset out of the CNC warehouse -- the partial
     counterpart to create_mip_cnc_forward_entry, so a CNC batch can be released to
     the supplier in stages as machining finishes rather than all at once. This
@@ -2159,6 +2196,7 @@ def create_mip_cnc_partial_forward(mip_name, selected_items_json):
     ctx = get_target_context(mip)
     if not mip.cnc_warehouse:
         frappe.throw(_("No CNC Warehouse set on this Material Issue Plan."))
+    require_mip_location(mip, ctx.primary_warehouse)
 
     pending_by_key = {
         (p["item_code"], p.get("batch_no") or ""): p for p in get_mip_cnc_pending_items(mip_name)
@@ -2219,6 +2257,7 @@ def create_mip_cnc_partial_forward(mip_name, selected_items_json):
         "stock_entry_type": "Material Transfer",
         "company": ctx.company,
         "items": se_items,
+        **_slip_numbers(custom_mrs_number=mrs_number, custom_cutting_plan_no=cutting_plan_no),
     }, mip_name, ctx))
     frappe.db.commit()
     se.insert(ignore_permissions=True)
@@ -2292,6 +2331,7 @@ def create_mip_cnc_forward_entry(mip_name):
     cnc_warehouse = mip.cnc_warehouse
     if not cnc_warehouse:
         frappe.throw(_("No CNC Warehouse set on this Material Issue Plan."))
+    require_mip_location(mip, ctx.primary_warehouse)
 
     sent_rows, already = _cnc_sent_and_forwarded(mip_name, cnc_warehouse, ctx.primary_warehouse)
     if not sent_rows:
@@ -2349,16 +2389,23 @@ def _override_changes_dimensions(excess_row, override, group):
     )
 
 
-def _set_excess_repack_rates(se):
-    """Value each returned item from the matching material leaving the supplier.
+def _set_excess_repack_rates(se, feeds=None):
+    """Value each returned item from the material leaving the supplier for it.
 
     ERPNext requires a manual basic rate for every incoming row when a Repack
     receives more than one distinct item. Use its own outgoing rate calculation
-    (including batch valuation), then allocate each item's actual source cost
-    over the weight returned for that item. Zero-valued source stock stays zero.
+    (including batch valuation), then allocate each group's actual source cost
+    over the weight returned for that group. Zero-valued source stock stays zero.
+
+    `feeds`, index-aligned with se.items, names the group each row belongs to: an
+    off-cut is costed from its own item leaving the supplier, a scrap line from the
+    rows taken out for it. Without it, the group is the item code.
     """
+    feeds = feeds or [None] * len(se.items)
+    group = {id(row): (feed or row.item_code) for row, feed in zip(se.items, feeds)}
+    key = lambda row: group[id(row)]
     incoming = [r for r in se.items if r.t_warehouse and not r.s_warehouse]
-    if len({r.item_code for r in incoming}) <= 1:
+    if len({key(r) for r in incoming}) <= 1:
         return
 
     se.validate_posting_time()
@@ -2369,18 +2416,18 @@ def _set_excess_repack_rates(se):
     source_cost = {}
     for row in se.items:
         if row.s_warehouse and not row.t_warehouse:
-            source_cost[row.item_code] = source_cost.get(row.item_code, 0) + flt(row.basic_amount)
+            source_cost[key(row)] = source_cost.get(key(row), 0) + flt(row.basic_amount)
 
     incoming_qty = {}
     for row in incoming:
-        incoming_qty[row.item_code] = incoming_qty.get(row.item_code, 0) + flt(row.transfer_qty)
+        incoming_qty[key(row)] = incoming_qty.get(key(row), 0) + flt(row.transfer_qty)
 
     for row in incoming:
-        if row.item_code not in source_cost or not incoming_qty[row.item_code]:
+        if key(row) not in source_cost or not incoming_qty[key(row)]:
             frappe.throw(_("Cannot value excess return item {0}: no matching supplier material cost was found.")
                          .format(row.item_code))
         row.set_basic_rate_manually = 1
-        row.basic_rate = source_cost[row.item_code] / incoming_qty[row.item_code]
+        row.basic_rate = source_cost[key(row)] / incoming_qty[key(row)]
         row.basic_amount = flt(row.transfer_qty * row.basic_rate, row.precision("basic_amount"))
 
 
@@ -2453,7 +2500,8 @@ def _split_extra_dimensions(mip, overrides):
 
 
 @frappe.whitelist()
-def create_mip_excess_return_entry(mip_name, rows_json=None):
+def create_mip_excess_return_entry(mip_name, rows_json=None, warehouse=None, storage_location=None,
+                                   return_slip_no=None, scrap_json=None):
     """Receive unconsumed/off-cut material back into stock as fresh Material
     Receipt stock (new batches, new dimensions) from mip.excess_return_items.
 
@@ -2487,8 +2535,10 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
     """
     mip = frappe.get_doc("Material Issue Plan", mip_name)
     _ensure_mip_editable(mip)
-    if not mip.excess_return_warehouse:
-        frappe.throw(_("Please set the Finished Goods Warehouse on this Material Issue Plan first."))
+    # Where the excess comes back to (client, Oct 2026): the popup's choice, else the
+    # plan's own Excess Return Warehouse -- no longer the Finished Goods Warehouse.
+    target_wh, target_loc = _excess_return_target(mip, warehouse, storage_location)
+    scrap_rows = _scrap_return_rows(mip, scrap_json)
 
     overrides = {o.get("name"): o for o in _json.loads(rows_json)} if rows_json else {}
     # Several sizes for one off-cut become several rows before anything else runs,
@@ -2561,7 +2611,8 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
             "item_code": r.item_code,
             "qty": qty,
             "uom": r.get("uom") or frappe.db.get_value("Item", r.item_code, "stock_uom") or "Kg",
-            "t_warehouse": mip.excess_return_warehouse,
+            "t_warehouse": target_wh,
+            "to_storage_location": target_loc,
             "custom_parent_item_group": r.get("parent_item_group") or "",
             "custom_unit_weight": flt(r.get("unit_weight"), 4),
             "custom_sec_qty": flt(r.get("sec_qty"), 3),
@@ -2576,7 +2627,7 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
             "custom_source_mip_excess_row": r.name,
         })
 
-    if not se_items:
+    if not se_items and not scrap_rows:
         frappe.throw(_("No new off-cut items to process. All rows already have a Stock Entry created, "
                        "or no rows with Weight (Kg) > 0 exist."))
 
@@ -2604,10 +2655,18 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
     # cannot arise there either: the final Stock Entry consumes from the supplier
     # warehouse, and there isn't one.
     supplier_tracked = bool(mip.supplier_warehouse and mip.subcontracting_order)
+    if scrap_rows and not supplier_tracked:
+        frappe.throw(_("Scrap can only be returned from the supplier: this plan has no Supplier / WIP "
+                       "Warehouse and Job Work Order to take it out of."))
 
-    out_rows, shortfalls = (
-        _excess_return_source_rows(mip, se_items) if supplier_tracked else ([], [])
-    )
+    out_rows, shortfalls = [], []
+    if supplier_tracked:
+        available = _job_stock_at_supplier(mip)
+        out_rows, shortfalls = _excess_return_source_rows(mip, se_items, available)
+        # Scrap after the off-cuts, so each off-cut first takes its own item.
+        scrap_out, scrap_short = _scrap_source_rows(mip, scrap_rows, available)
+        out_rows += scrap_out
+        shortfalls += scrap_short
     if shortfalls:
         frappe.throw(
             _("There is not enough of this material left at {0} to return:<br><br>{1}<br><br>"
@@ -2617,16 +2676,22 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
             title=_("Not Enough Left to Return"),
         )
 
+    for row in se_items:
+        row["_feeds"] = row["item_code"]
+    items = out_rows + se_items + scrap_rows
+    # Which incoming group each row costs or receives -- read by the rate split.
+    feeds = [row.pop("_feeds", None) for row in items]
     se = frappe.get_doc({
         "doctype": "Stock Entry",
         "stock_entry_type": "Repack" if out_rows else "Material Receipt",
         "company": mip.company,
         "custom_mip_ref": mip_name,
         "custom_sco_ref": mip.subcontracting_order or None,
-        "items": out_rows + se_items,
+        "items": items,
+        **_slip_numbers(custom_return_slip_no=return_slip_no),
     })
     if out_rows:
-        _set_excess_repack_rates(se)
+        _set_excess_repack_rates(se, feeds)
     frappe.db.commit()
     se.insert(ignore_permissions=True)
 
@@ -2638,7 +2703,115 @@ def create_mip_excess_return_entry(mip_name, rows_json=None):
     for r in mip.excess_return_items:
         if r.name in new_row_names:
             r.stock_entry_created = 1
+    for row in scrap_rows:
+        mip.append("scrap_return_items", {
+            "item_code": row["item_code"],
+            "qty": row["qty"],
+            "warehouse": row["t_warehouse"],
+            "storage_location": row.get("to_storage_location"),
+            "stock_entry": se.name,
+        })
 
     mip.save(ignore_permissions=True)
 
     return se.name
+
+
+def _location_for(warehouse, location, label):
+    """The Storage Location to receive into `warehouse`: checked against the warehouse,
+    and required when its type needs one."""
+    if location:
+        if frappe.get_cached_value("Storage Location", location, "warehouse") != warehouse:
+            frappe.throw(_("{0}: Storage Location {1} is not in {2}.").format(
+                label, frappe.bold(location), frappe.bold(warehouse)))
+        return location
+    if location_applicable(warehouse):
+        frappe.throw(_("{0}: {1} needs a Storage Location for everything put into it.").format(
+            label, frappe.bold(warehouse)), title=_("Storage Location Missing"))
+    return None
+
+
+def _excess_return_target(mip, warehouse=None, storage_location=None):
+    """(warehouse, location) the returned excess is received into.
+
+    The popup's own choice wins; otherwise the plan's Excess Return Warehouse with its
+    location. A location typed in the popup only belongs to the warehouse typed with it."""
+    target_wh = warehouse or mip.get("excess_material_warehouse")
+    if not target_wh:
+        frappe.throw(_("Set the Excess Return Warehouse on this Material Issue Plan "
+                       "(Excess Material Return tab), or choose one in the return popup."))
+    location = storage_location
+    if not location and target_wh == mip.get("excess_material_warehouse"):
+        location = mip.get("excess_material_storage_location")
+    return target_wh, _location_for(target_wh, location, _("Excess Return"))
+
+
+def _scrap_return_rows(mip, scrap_json):
+    """The scrap lines typed in the return popup, as incoming Stock Entry rows.
+
+    A scrap item (Item -> Is Scrap) is non-batch and weighed in Kg only: no pieces, no
+    dimensions. Each line names its own warehouse, and its Storage Location where the
+    warehouse needs one."""
+    lines = _json.loads(scrap_json) if isinstance(scrap_json, str) else (scrap_json or [])
+    rows = []
+    for n, line in enumerate(lines, 1):
+        item_code, qty = (line.get("item_code") or "").strip(), flt(line.get("qty"), 3)
+        if not item_code and qty <= 0:
+            continue
+        label = _("Scrap row {0}").format(n)
+        if not item_code:
+            frappe.throw(_("{0}: choose a scrap item.").format(label))
+        item = frappe.get_cached_value("Item", item_code, ["custom_is_scrap", "has_batch_no", "stock_uom"],
+                                       as_dict=True)
+        if not item or not item.custom_is_scrap:
+            frappe.throw(_("{0}: {1} is not a scrap item (Item → Is Scrap).").format(label, frappe.bold(item_code)))
+        if item.has_batch_no:
+            frappe.throw(_("{0}: scrap item {1} must not be batch-tracked.").format(label, frappe.bold(item_code)))
+        if qty <= 0:
+            frappe.throw(_("{0}: enter the weight (Kg) of {1}.").format(label, frappe.bold(item_code)))
+        warehouse = line.get("warehouse")
+        if not warehouse:
+            frappe.throw(_("{0}: choose the warehouse {1} goes to.").format(label, frappe.bold(item_code)))
+        rows.append({
+            "item_code": item_code,
+            "qty": qty,
+            "uom": item.stock_uom or "Kg",
+            "t_warehouse": warehouse,
+            "to_storage_location": _location_for(warehouse, line.get("storage_location"), label),
+            "_feeds": "scrap::" + item_code,
+        })
+    return rows
+
+
+def _scrap_source_rows(mip, scrap_rows, available):
+    """The 'out' half for scrap: its Kg leaves this job's material at the supplier.
+
+    Scrap is what is left of the raw material, so the same kilos must stop counting at
+    the supplier or they would be counted twice -- once there (and later written off as
+    Process Loss), once in the scrap yard. Taken from the job's largest remaining batch
+    first, across whatever items are still there. Same (rows, shortfalls) contract as
+    _excess_return_source_rows, drawing on the same `available` it has already netted."""
+    out_rows, shortfalls = [], []
+    for scrap in scrap_rows:
+        wanted = requested = flt(scrap["qty"], 3)
+        for key, have in sorted(((k, v) for k, v in available.items() if v > 0), key=lambda kv: -kv[1]):
+            if wanted <= 0.001:
+                break
+            take = flt(min(wanted, have), 3)
+            if take <= 0:
+                continue
+            out_rows.append({
+                "item_code": key[0],
+                "qty": take,
+                "uom": frappe.get_cached_value("Item", key[0], "stock_uom") or "Kg",
+                "s_warehouse": mip.supplier_warehouse,
+                "batch_no": key[1] or None,
+                "use_serial_batch_fields": 1 if key[1] else 0,
+                "_feeds": scrap["_feeds"],
+            })
+            available[key] = flt(have - take, 3)
+            wanted = flt(wanted - take, 3)
+        if wanted > 0.001:
+            shortfalls.append(_("Scrap {0}: {1} Kg requested, {2} Kg of this job's material left, {3} Kg short")
+                              .format(scrap["item_code"], requested, flt(requested - wanted, 3), flt(wanted, 3)))
+    return out_rows, shortfalls

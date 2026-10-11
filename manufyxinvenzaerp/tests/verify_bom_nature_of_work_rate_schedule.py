@@ -65,20 +65,25 @@ def run():
     rows = _template_headers()
     header = list(rows[0])
     check("Nature of Work column present", "Nature of Work" in header, True)
-    check("Rate Schedule column present", "Rate Schedule" in header, True)
+    check("Fabrication Rate Schedule column present", "Fabrication Rate Schedule" in header, True)
+    check("Painting Rate Schedule column present", "Painting Rate Schedule" in header, True)
     sample = rows[1]
     check("sample row is pre-filled from the real masters",
-          (sample[header.index("Nature of Work")], sample[header.index("Rate Schedule")]),
+          (sample[header.index("Nature of Work")], sample[header.index("Fabrication Rate Schedule")]),
           (real_now, real_rs))
 
     print()
     print("=== parser reads them off the sheet ===")
-    body = [
-        # Cust Weight (per Nos), Cust Weight (Total): the template carries both since
-        # the sep14 FG plan, and this row is laid out against the template's header.
-        ["Structural Assembly", "CDN-T5", "DM-T5", "FG-T5", 1, 100.0, 100.0,
-         real_now, real_rs, "1", "MAT-T5", "A36", 0, 0, 3000, 1],
-    ]
+    # Laid out by header name, so the row follows the template whatever its order.
+    values = {
+        "Assembly Group": "Structural Assembly", "Customer Drawing Number": "CDN-T5",
+        "DUNO/Mark No": "DM-T5", "FG Item": "FG-T5", "Total Qty": 1,
+        "Cust Weight (per Nos)": 100.0, "Cust Weight (Total)": 100.0,
+        "Nature of Work": real_now, "Fabrication Rate Schedule": real_rs,
+        "Item No": "1", "Material Code": "MAT-T5", "Grade": "A36", "Thickness": 0, "Width": 0,
+        "Length": 3000, "Reqd Raw Material Qty": 1,
+    }
+    body = [[values.get(h, "") for h in header]]
     parsed = _parse_sheet([header] + body)
     d = parsed.get("CDN-T5") or {}
     check("nature_of_work parsed", d.get("nature_of_work"), real_now)

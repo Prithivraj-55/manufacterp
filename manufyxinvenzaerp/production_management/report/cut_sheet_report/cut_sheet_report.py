@@ -75,6 +75,18 @@ def get_data(filters):
 	):
 		holders.setdefault(c.cut_sheet_ref, []).append(c)
 
+	# Where each plate is: the Storage Location holding its batch in the sheet's warehouse.
+	from manufyxinvenzaerp.stock_management.storage_location import batch_locations, main_location
+
+	by_warehouse = {}
+	for s in sheets:
+		by_warehouse.setdefault(s.warehouse, set()).add(s.batch_no)
+	locations = {
+		(warehouse, batch): main_location(held)
+		for warehouse, batches in by_warehouse.items()
+		for batch, held in batch_locations(warehouse, batches).items()
+	}
+
 	today = getdate(nowdate())
 	data = []
 	for s in sheets:
@@ -107,6 +119,7 @@ def get_data(filters):
 			"parent_item_group": s.parent_item_group,
 			"batch_no": s.batch_no,
 			"warehouse": s.warehouse,
+			"storage_location": locations.get((s.warehouse, s.batch_no)) or "",
 			"created_on": getdate(s.creation),
 			"age_days": (today - getdate(s.creation)).days,
 			"sheet_length": flt(s.sheet_length),
@@ -146,6 +159,7 @@ def get_columns():
 		{"label": _("Item Name"), "fieldname": "item_name", "fieldtype": "Data", "width": 160},
 		{"label": _("Item Group"), "fieldname": "parent_item_group", "fieldtype": "Data", "width": 100},
 		{"label": _("Warehouse"), "fieldname": "warehouse", "fieldtype": "Link", "options": "Warehouse", "width": 140},
+		{"label": _("Storage Location"), "fieldname": "storage_location", "fieldtype": "Link", "options": "Storage Location", "width": 110},
 		{"label": _("Created"), "fieldname": "created_on", "fieldtype": "Date", "width": 100},
 		{"label": _("Age (days)"), "fieldname": "age_days", "fieldtype": "Int", "width": 90},
 

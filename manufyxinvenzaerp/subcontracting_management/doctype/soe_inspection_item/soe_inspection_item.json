@@ -10,7 +10,6 @@
   "qty_nos",
   "accept_qty",
   "reject_qty",
-  "feedback",
   "rework_remarks"
  ],
  "fields": [
@@ -54,14 +53,6 @@
    "label": "Rejected Qty",
    "read_only": 1,
    "description": "Auto-calculated: Completed Qty minus Accepted Qty.",
-   "columns": 1
-  },
-  {
-   "fieldname": "feedback",
-   "fieldtype": "Select",
-   "label": "Feedback",
-   "options": "\nOk\nNot Ok",
-   "in_list_view": 1,
    "columns": 1
   },
   {

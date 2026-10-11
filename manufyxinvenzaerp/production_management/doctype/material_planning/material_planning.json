@@ -103,7 +103,9 @@
    "label": "Production Plan",
    "no_copy": 1,
    "options": "Production Plan",
-   "read_only": 1
+   "read_only": 1,
+   "hidden": 1,
+   "description": "Back-link once written by make_production_plan (no longer offered). Hidden: plans now link to Material Planning, not the other way round."
   },
   {
    "fieldname": "section_production_settings",
@@ -124,12 +126,12 @@
    "label": "Check stock without dimensions"
   },
   {
-   "description": "Filter stock check to this sub-location within the warehouse.",
+   "description": "Limit Check Stock Availability to batches in this Storage Location of the warehouse. Leave empty for the whole warehouse.",
    "fieldname": "store_location",
    "fieldtype": "Link",
    "hidden": 1,
-   "label": "Store Location",
-   "options": "Store Location"
+   "label": "Storage Location",
+   "options": "Storage Location"
   },
   {
    "fieldname": "column_break_settings",

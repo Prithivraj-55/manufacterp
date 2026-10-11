@@ -17,18 +17,14 @@
   "work_order",
   "subcontracting_order",
   "production_plan",
-  "column_break_party",
   "sales_order",
   "customer",
   "supplier",
   "contractor",
-  "section_break_status",
+  "column_break_status",
   "status",
   "inspection_complete_date",
-  "column_break_status",
   "overall_remarks",
-  "column_break_feedback",
-  "feedback",
   "section_break_remarks",
   "rework_remarks",
   "section_break_result",
@@ -129,10 +125,6 @@
    "read_only": 1
   },
   {
-   "fieldname": "column_break_party",
-   "fieldtype": "Column Break"
-  },
-  {
    "fieldname": "sales_order",
    "fieldtype": "Link",
    "label": "Sales Order",
@@ -163,18 +155,15 @@
    "depends_on": "eval:doc.contractor"
   },
   {
-   "fieldname": "section_break_status",
-   "fieldtype": "Section Break",
-   "label": "Result"
-  },
-  {
    "fieldname": "status",
    "fieldtype": "Select",
    "label": "Status",
-   "options": "\nOpen\nWorking\nCompleted",
+   "options": "\nOpen\nWorking\nPartly Completed\nCompleted",
    "default": "Open",
    "reqd": 1,
-   "in_list_view": 1
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "description": "Partly Completed is set on save when part of the quantity is cleared. Choosing Completed submits the entry."
   },
   {
    "fieldname": "inspection_complete_date",
@@ -192,18 +181,6 @@
    "fieldname": "overall_remarks",
    "fieldtype": "Small Text",
    "label": "Overall Remarks"
-  },
-  {
-   "fieldname": "column_break_feedback",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "feedback",
-   "fieldtype": "Select",
-   "label": "Feedback",
-   "options": "\nOk\nNot Ok",
-   "mandatory_depends_on": "eval:doc.status==\"Completed\" && doc.source_doctype==\"Job Card\"",
-   "depends_on": "eval:doc.source_doctype==\"Job Card\""
   },
   {
    "fieldname": "section_break_remarks",

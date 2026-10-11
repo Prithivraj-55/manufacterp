@@ -63,17 +63,53 @@ _PP_ITEM_DETAIL_MAP = {
     "custom_rs_rate_per_kg": "rate_per_kg",
 }
 
-# The field holding the link, per doctype.
-_LINK_FIELD = {
-    "Drawing": "rate_schedule",
-    "BOM": "custom_rate_schedule",
-    "Production Plan Item": "custom_rate_schedule",
+# A drawing carries two schedules (client, Oct 2026): Fabrication -- the original
+# field, renamed by label only so existing values stay put -- and Painting, which
+# mirrors only its Rate/KG. Each kind travels on its own: editing one never touches
+# the other. Everything below takes a `kind` and reads its fields from here.
+FABRICATION, PAINTING = "fabrication", "painting"
+KINDS = (FABRICATION, PAINTING)
+
+# The field holding the link, per kind and doctype.
+#
+# The Sales Order's Drawing List row is the fourth place (client, Oct 2026): it is where
+# the BOM sheet is loaded, and a rate typed there must reach the Drawing it made.
+_LINK_FIELDS = {
+    FABRICATION: {
+        "Drawing": "rate_schedule",
+        "BOM": "custom_rate_schedule",
+        "Production Plan Item": "custom_rate_schedule",
+        "Sales Order DUNO Item": "rate_schedule",
+    },
+    PAINTING: {
+        "Drawing": "painting_rate_schedule",
+        "BOM": "custom_painting_rate_schedule",
+        "Production Plan Item": "custom_painting_rate_schedule",
+        "Sales Order DUNO Item": "painting_rate_schedule",
+    },
 }
-_DETAIL_MAP = {
-    "Drawing": _DRAWING_DETAIL_MAP,
-    "BOM": _BOM_DETAIL_MAP,
-    "Production Plan Item": _PP_ITEM_DETAIL_MAP,
+_DETAIL_MAPS = {
+    FABRICATION: {
+        "Drawing": _DRAWING_DETAIL_MAP,
+        "BOM": _BOM_DETAIL_MAP,
+        "Production Plan Item": _PP_ITEM_DETAIL_MAP,
+        "Sales Order DUNO Item": {},
+    },
+    PAINTING: {
+        "Drawing": {"prs_rate_per_kg": "rate_per_kg"},
+        "BOM": {"custom_prs_rate_per_kg": "rate_per_kg"},
+        "Production Plan Item": {"custom_prs_rate_per_kg": "rate_per_kg"},
+        "Sales Order DUNO Item": {},
+    },
 }
+
+# Child rows have no form of their own; they are named and routed by their parent.
+_PARENT_OF = {"Production Plan Item": "Production Plan", "Sales Order DUNO Item": "Sales Order"}
+_TITLES = {FABRICATION: "Fabrication Rate Schedule", PAINTING: "Painting Rate Schedule"}
+
+
+def link_field(doctype, kind=FABRICATION):
+    return _LINK_FIELDS[kind][doctype]
 
 
 def _schedule_details(schedule):
@@ -103,10 +139,10 @@ def _empty_value(doctype, fieldname):
     return 0 if df and df.fieldtype in _NUMERIC_FIELDTYPES else ""
 
 
-def _values_for(doctype, schedule, details):
+def _values_for(doctype, schedule, details, kind=FABRICATION):
     """The full set of column writes for one target: the link plus its display copies."""
-    values = {_LINK_FIELD[doctype]: schedule or ""}
-    for fieldname, source in _DETAIL_MAP[doctype].items():
+    values = {link_field(doctype, kind): schedule or ""}
+    for fieldname, source in _DETAIL_MAPS[kind][doctype].items():
         if schedule:
             values[fieldname] = details.get(source) or _empty_value(doctype, fieldname)
         else:
@@ -114,7 +150,7 @@ def _values_for(doctype, schedule, details):
     return values
 
 
-def _targets(drawing, exclude=None):
+def _targets(drawing, exclude=None, kind=FABRICATION):
     """Every document quoting this drawing, as (doctype, name, current_schedule).
 
     Cancelled documents are left out: they are a historical record of what was
@@ -126,23 +162,34 @@ def _targets(drawing, exclude=None):
     """
     rows = []
     if drawing:
-        rows.append(("Drawing", drawing, frappe.db.get_value("Drawing", drawing, "rate_schedule")))
+        rows.append(("Drawing", drawing,
+                     frappe.db.get_value("Drawing", drawing, link_field("Drawing", kind))))
 
+    bom_field = link_field("BOM", kind)
     for bom in frappe.get_all(
         "BOM",
         filters={"custom_drawing": drawing, "docstatus": ["!=", 2]},
-        fields=["name", "custom_rate_schedule"],
+        fields=["name", bom_field],
     ):
-        rows.append(("BOM", bom.name, bom.custom_rate_schedule))
+        rows.append(("BOM", bom.name, bom.get(bom_field)))
 
     # Child rows are queried directly: going through the parent Production Plan
     # would mean loading whole plans (up to 500 rows each) to reach one row.
+    pp_field = link_field("Production Plan Item", kind)
     for row in frappe.get_all(
         "Production Plan Item",
         filters={"custom_drawing": drawing, "docstatus": ["!=", 2]},
-        fields=["name", "parent", "custom_rate_schedule"],
+        fields=["name", "parent", pp_field],
     ):
-        rows.append(("Production Plan Item", row.name, row.custom_rate_schedule))
+        rows.append(("Production Plan Item", row.name, row.get(pp_field)))
+
+    so_field = link_field("Sales Order DUNO Item", kind)
+    for row in frappe.get_all(
+        "Sales Order DUNO Item",
+        filters={"drawing": drawing, "docstatus": ["!=", 2]},
+        fields=["name", "parent", so_field],
+    ):
+        rows.append(("Sales Order DUNO Item", row.name, row.get(so_field)))
 
     if exclude:
         rows = [r for r in rows if (r[0], r[1]) != tuple(exclude)]
@@ -150,7 +197,8 @@ def _targets(drawing, exclude=None):
 
 
 @frappe.whitelist()
-def get_rate_schedule_conflict(drawing, new_schedule, source_doctype=None, source_name=None):
+def get_rate_schedule_conflict(drawing, new_schedule, source_doctype=None, source_name=None,
+                               kind=FABRICATION):
     """Does this change overwrite a schedule the drawing already had?
 
     Called from the form BEFORE the change is accepted, so the user is asked the
@@ -163,8 +211,10 @@ def get_rate_schedule_conflict(drawing, new_schedule, source_doctype=None, sourc
     if not drawing:
         return {"conflict": False, "current": None, "target_count": 0}
 
-    current = frappe.db.get_value("Drawing", drawing, "rate_schedule")
-    targets = _targets(drawing, exclude=(source_doctype, source_name) if source_doctype else None)
+    kind = kind if kind in KINDS else FABRICATION
+    current = frappe.db.get_value("Drawing", drawing, link_field("Drawing", kind))
+    targets = _targets(drawing, exclude=(source_doctype, source_name) if source_doctype else None,
+                       kind=kind)
     return {
         "conflict": bool(current) and current != (new_schedule or ""),
         "current": current,
@@ -174,7 +224,7 @@ def get_rate_schedule_conflict(drawing, new_schedule, source_doctype=None, sourc
     }
 
 
-def propagate(drawing, schedule, source_doctype=None, source_name=None):
+def propagate(drawing, schedule, source_doctype=None, source_name=None, kind=FABRICATION):
     """Write `schedule` onto every document quoting `drawing`, skipping the source.
 
     Returns {"updated": [...], "unchanged": n} -- `updated` names the documents that
@@ -189,17 +239,17 @@ def propagate(drawing, schedule, source_doctype=None, source_name=None):
     details = _schedule_details(schedule)
     updated, unchanged = [], 0
 
-    for doctype, name, current in _targets(drawing, exclude=(source_doctype, source_name)):
+    for doctype, name, current in _targets(drawing, exclude=(source_doctype, source_name), kind=kind):
         if (current or "") == schedule:
             unchanged += 1
             continue
         frappe.db.set_value(
-            doctype, name, _values_for(doctype, schedule, details), update_modified=False
+            doctype, name, _values_for(doctype, schedule, details, kind), update_modified=False
         )
         label = name
-        if doctype == "Production Plan Item":
-            # A child row's name is a hash nobody can act on. Name the plan instead.
-            parent = frappe.db.get_value("Production Plan Item", name, "parent")
+        if doctype in _PARENT_OF:
+            # A child row's name is a hash nobody can act on. Name its document instead.
+            parent = frappe.db.get_value(doctype, name, "parent")
             label = parent or name
         updated.append({"doctype": doctype, "name": name, "label": label})
 
@@ -223,12 +273,10 @@ def _route(doctype, name):
     routed to its PARENT plan -- linking to the row's own route opens nothing.
     The route itself comes from Frappe (/desk/... on v16), never hard-coded.
     """
-    if doctype == "Production Plan Item":
-        doctype = "Production Plan"
-    return frappe.utils.get_absolute_url(doctype, name)
+    return frappe.utils.get_absolute_url(_PARENT_OF.get(doctype, doctype), name)
 
 
-def announce(result, schedule):
+def announce(result, schedule, kind=FABRICATION):
     """Tell the user which documents were rewritten -- or that none needed to be.
 
     Deliberately a msgprint rather than a silent success: this is the one action in
@@ -246,17 +294,17 @@ def announce(result, schedule):
             # is both what to show and what to route to.
             route=_route(u["doctype"], u["label"]),
             label=frappe.utils.escape_html(u["label"]),
-            doctype=_("Production Plan") if u["doctype"] == "Production Plan Item" else u["doctype"],
+            doctype=_(_PARENT_OF.get(u["doctype"], u["doctype"])),
         )
         for u in updated
     )
 
     frappe.msgprint(
-        _("Rate Schedule set to <b>{0}</b>. Updated in these documents:").format(
-            frappe.utils.escape_html(schedule or _("(none)"))
+        _("{0} set to <b>{1}</b>. Updated in these documents:").format(
+            _(_TITLES[kind]), frappe.utils.escape_html(schedule or _("(none)"))
         )
         + '<ul style="margin:8px 0 0 18px">{0}</ul>'.format(items),
-        title=_("Rate Schedule Updated"),
+        title=_("{0} Updated").format(_(_TITLES[kind])),
         indicator="green",
     )
 
@@ -298,18 +346,21 @@ def seed_production_plan_rows(doc, method=None):
     silently write a rate onto a submitted document as a side effect of saving an
     unrelated plan.
     """
-    seeded = set()
+    seeded = set()   # (row name, kind)
     for row in (doc.get("po_items") or []):
         drawing = row.get("custom_drawing")
-        if not drawing or row.get("custom_rate_schedule"):
+        if not drawing:
             continue
-        schedule = frappe.db.get_value("Drawing", drawing, "rate_schedule")
-        if not schedule:
-            continue
-        details = _schedule_details(schedule)
-        for fieldname, value in _values_for("Production Plan Item", schedule, details).items():
-            row.set(fieldname, value)
-        seeded.add(row.name)
+        for kind in KINDS:
+            if row.get(link_field("Production Plan Item", kind)):
+                continue
+            schedule = frappe.db.get_value("Drawing", drawing, link_field("Drawing", kind))
+            if not schedule:
+                continue
+            details = _schedule_details(schedule)
+            for fieldname, value in _values_for("Production Plan Item", schedule, details, kind).items():
+                row.set(fieldname, value)
+            seeded.add((row.name, kind))
 
     doc.flags.rate_schedule_seeded_rows = seeded
 
@@ -329,13 +380,15 @@ def _is_insert(doc):
 
 
 def _sync_if_edited(doc, drawing, source_doctype):
-    if _is_insert(doc):
+    if _is_insert(doc) or not drawing:
         return
-    if not drawing or not doc.has_value_changed(_LINK_FIELD[source_doctype]):
-        return
-    schedule = doc.get(_LINK_FIELD[source_doctype]) or ""
-    result = propagate(drawing, schedule, source_doctype, doc.name)
-    announce(result, schedule)
+    for kind in KINDS:
+        fieldname = link_field(source_doctype, kind)
+        if not doc.has_value_changed(fieldname):
+            continue
+        schedule = doc.get(fieldname) or ""
+        result = propagate(drawing, schedule, source_doctype, doc.name, kind)
+        announce(result, schedule, kind)
 
 
 def on_update_drawing(doc, method=None):
@@ -364,33 +417,85 @@ def on_update_production_plan(doc, method=None):
     before = doc.get_doc_before_save()
     if before is None:
         return
-    previous = {
-        r.name: (r.get("custom_rate_schedule") or "")
-        for r in (before.get("po_items") or [])
-    }
-
     seeded = doc.flags.get("rate_schedule_seeded_rows") or set()
 
-    merged, schedules = [], set()
-    for row in (doc.get("po_items") or []):
-        drawing = row.get("custom_drawing")
-        if not drawing:
-            continue
-        # Filled in by seed_production_plan_rows from the drawing's own schedule --
-        # copying it straight back out again is not an edit.
-        if row.name in seeded:
-            continue
-        schedule = row.get("custom_rate_schedule") or ""
-        # A row absent from the pre-save copy is newly added and was not seeded,
-        # which means somebody typed a schedule into it -- that should travel.
-        if previous.get(row.name, "") == schedule:
-            continue
-        result = propagate(drawing, schedule, "Production Plan Item", row.name)
-        merged.extend(result.get("updated") or [])
-        schedules.add(schedule)
+    for kind in KINDS:
+        fieldname = link_field("Production Plan Item", kind)
+        previous = {r.name: (r.get(fieldname) or "") for r in (before.get("po_items") or [])}
 
-    if merged:
-        # Several drawings re-rated in one save can legitimately point at different
-        # schedules; naming one of them in the header would be a lie.
-        label = schedules.pop() if len(schedules) == 1 else _("the selected schedules")
-        announce({"updated": merged}, label)
+        merged, schedules = [], set()
+        for row in (doc.get("po_items") or []):
+            drawing = row.get("custom_drawing")
+            if not drawing:
+                continue
+            # Filled in by seed_production_plan_rows from the drawing's own schedule --
+            # copying it straight back out again is not an edit.
+            if (row.name, kind) in seeded:
+                continue
+            schedule = row.get(fieldname) or ""
+            # A row absent from the pre-save copy is newly added and was not seeded,
+            # which means somebody typed a schedule into it -- that should travel.
+            if previous.get(row.name, "") == schedule:
+                continue
+            result = propagate(drawing, schedule, "Production Plan Item", row.name, kind)
+            merged.extend(result.get("updated") or [])
+            schedules.add(schedule)
+
+        if merged:
+            # Several drawings re-rated in one save can legitimately point at different
+            # schedules; naming one of them in the header would be a lie.
+            label = schedules.pop() if len(schedules) == 1 else _("the selected schedules")
+            announce({"updated": merged}, label, kind)
+
+
+def on_update_sales_order(doc, method=None):
+    """Sales Order Drawing List rows -> their Drawings (and the Drawings' BOMs and plans).
+
+    Same rule as everywhere above: only a value EDITED in this save travels, compared
+    row by row with the order as it was saved. A row with no Drawing yet has nothing to
+    reach; its values are copied when the Drawing is created.
+    """
+    before = doc.get_doc_before_save()
+    if before is None:
+        return
+    saved = {r.name: r for r in (before.get("custom_duno_items") or [])}
+    rows = [(r, saved.get(r.name)) for r in (doc.get("custom_duno_items") or []) if r.get("drawing")]
+
+    for kind in KINDS:
+        fieldname = link_field("Sales Order DUNO Item", kind)
+        merged, schedules = [], set()
+        for row, old in rows:
+            schedule = row.get(fieldname) or ""
+            if old is None or (old.get(fieldname) or "") == schedule:
+                continue
+            result = propagate(row.drawing, schedule, "Sales Order DUNO Item", row.name, kind)
+            merged.extend(result.get("updated") or [])
+            schedules.add(schedule)
+        if merged:
+            label = schedules.pop() if len(schedules) == 1 else _("the selected schedules")
+            announce({"updated": merged}, label, kind)
+
+    changed = [(row.drawing, row.get("nature_of_work") or "") for row, old in rows
+               if old is not None and (old.get("nature_of_work") or "") != (row.get("nature_of_work") or "")]
+    for drawing, value in changed:
+        if frappe.db.get_value("Drawing", drawing, "docstatus") != 2:
+            frappe.db.set_value("Drawing", drawing, "nature_of_work", value, update_modified=False)
+    if changed:
+        frappe.msgprint(
+            _("Nature of Work updated on Drawing(s): {0}").format(", ".join(d for d, _v in changed)),
+            title=_("Nature of Work Updated"), indicator="green",
+        )
+
+
+def sync_nature_of_work_to_sales_order(doc, method=None):
+    """Drawing -> its Sales Order row: Nature of Work edited on the Drawing is shown on
+    the order's Drawing List too. Only on an actual edit, like the rate schedules."""
+    if _is_insert(doc) or not doc.has_value_changed("nature_of_work"):
+        return
+    frappe.db.set_value(
+        "Sales Order DUNO Item",
+        {"drawing": doc.name, "docstatus": ["!=", 2]},
+        "nature_of_work",
+        doc.get("nature_of_work") or "",
+        update_modified=False,
+    )

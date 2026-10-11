@@ -33,12 +33,14 @@
   "section_rate_schedule",
   "type",
   "rate_schedule",
+  "painting_rate_schedule",
   "column_break_rs",
   "rs_job_nature",
   "rs_details",
   "rs_work_content",
   "rs_job_reference",
   "rs_rate_per_kg",
+  "prs_rate_per_kg",
   "tab_materials",
   "items",
   "section_items_view",
@@ -197,7 +199,8 @@
    "fieldname": "fg_description",
    "fieldtype": "Small Text",
    "label": "FG Description",
-   "read_only": 1
+   "read_only": 1,
+   "description": "From the BOM sheet's Description column when imported, else the FG Item's description."
   },
   {
    "fieldname": "column_break_fg",
@@ -218,7 +221,7 @@
   {
    "fieldname": "section_rate_schedule",
    "fieldtype": "Section Break",
-   "label": "Rate Schedule"
+   "label": "Rate Schedules"
   },
   {
    "allow_on_submit": 1,
@@ -231,7 +234,7 @@
    "allow_on_submit": 1,
    "fieldname": "rate_schedule",
    "fieldtype": "Link",
-   "label": "Rate Schedule",
+   "label": "Fabrication Rate Schedule",
    "options": "Rate Schedule"
   },
   {
@@ -277,7 +280,7 @@
    "fieldname": "rs_rate_per_kg",
    "fieldtype": "Currency",
    "fetch_from": "rate_schedule.rate_per_kg",
-   "label": "Rate/KG",
+   "label": "Fabrication Rate/KG",
    "read_only": 1
   },
   {
@@ -353,6 +356,21 @@
    "no_copy": 1,
    "options": "Drawing",
    "print_hide": 1,
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "painting_rate_schedule",
+   "fieldtype": "Link",
+   "label": "Painting Rate Schedule",
+   "options": "Rate Schedule"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "prs_rate_per_kg",
+   "fieldtype": "Currency",
+   "fetch_from": "painting_rate_schedule.rate_per_kg",
+   "label": "Painting Rate/KG",
    "read_only": 1
   }
  ],

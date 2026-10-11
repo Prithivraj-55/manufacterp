@@ -111,7 +111,14 @@ def _parse_excel(file_path):
                 # verify_raw_materials. Rejecting at parse time would abort the whole
                 # file over one bad cell and say nothing about where it was.
                 "nature_of_work": _sstr(_get(row, "nature of work", "nature_of_work")),
-                "rate_schedule": _sstr(_get(row, "rate schedule", "rate_schedule")),
+                # "Rate Schedule" is what sheets called it before Painting was added.
+                "rate_schedule": _sstr(_get(row, "fabrication rate schedule", "rate schedule",
+                                            "rate_schedule")),
+                "painting_rate_schedule": _sstr(_get(row, "painting rate schedule",
+                                                     "painting_rate_schedule")),
+                # The customer's own wording for the drawing ("Beam"). Optional; the
+                # Drawing falls back to the FG Item's description without it.
+                "description": _sstr(_get(row, "description")),
                 "items": [],
             }
 
@@ -284,7 +291,7 @@ def parse_bom_excel(so_name):
         "creation", "modified", "modified_by", "owner", "docstatus",
         "assembly_group", "item", "item_name", "duno_mark_no", "drawing_number",
         "total_quantity", "weight_per_pcs", "total_weight", "calculated_weight",
-        "nature_of_work", "rate_schedule",
+        "nature_of_work", "rate_schedule", "painting_rate_schedule", "description",
         "create_drawing", "submit_drawing", "mark_final_revision", "create_bom",
     ]
     t1_values = []
@@ -299,6 +306,7 @@ def parse_bom_excel(so_name):
             d["total_quantity"], flt(d.get("weight_per_pcs"), 3), flt(d["total_weight"], 3),
             calc_weight_by_cdn.get(cdn, 0.0),
             d.get("nature_of_work") or "", d.get("rate_schedule") or "",
+            d.get("painting_rate_schedule") or "", d.get("description") or "",
             1, 1, 1, 1,
         ))
         t1_idx += 1
@@ -430,7 +438,8 @@ def create_drawings_from_import(so_name, batch_start=0, batch_size=30):
     # Lightweight SQL — never load the full SO doc with all child tables
     all_pending = frappe.db.sql(
         """SELECT name, drawing_number, item, duno_mark_no, total_quantity, total_weight
-           , weight_per_pcs, nature_of_work, rate_schedule
+           , weight_per_pcs, nature_of_work, rate_schedule, painting_rate_schedule
+           , description
            FROM `tabSales Order DUNO Item`
            WHERE parent = %s AND create_drawing = 1
              AND (drawing IS NULL OR drawing = '')
@@ -514,7 +523,7 @@ def create_drawings_from_import(so_name, batch_start=0, batch_size=30):
                 "cust_po_no": so_hdr.get("po_no"),
                 "fg_item_code": dr.item or "",
                 "fg_item_name": item_data.get("item_name") or "",
-                "fg_description": item_data.get("description") or "",
+                "fg_description": dr.get("description") or item_data.get("description") or "",
                 "no_of_qty_to_manufacture": flt(dr.total_quantity),
                 "duno_mark_no": dr.duno_mark_no or "",
                 "customer_drawing_number": cdn or "",
@@ -528,6 +537,7 @@ def create_drawings_from_import(so_name, batch_start=0, batch_size=30):
                 # Links here.
                 "nature_of_work": dr.get("nature_of_work") or "",
                 "rate_schedule": dr.get("rate_schedule") or "",
+                "painting_rate_schedule": dr.get("painting_rate_schedule") or "",
                 # Type belongs to the Rate Schedule, so it is read from there rather
                 # than carried in the sheet -- one less column to keep in step, and it
                 # cannot contradict the schedule it describes. On the form Type is the
@@ -778,8 +788,9 @@ def _check_drawing_masters(so):
     for r in rows:
         if r.get("nature_of_work"):
             wanted["Nature of Work"].add(r.nature_of_work)
-        if r.get("rate_schedule"):
-            wanted["Rate Schedule"].add(r.rate_schedule)
+        for fieldname in ("rate_schedule", "painting_rate_schedule"):
+            if r.get(fieldname):
+                wanted["Rate Schedule"].add(r.get(fieldname))
 
     existing = {
         doctype: set(frappe.get_all(doctype, filters={"name": ["in", list(names)]}, pluck="name"))
@@ -791,7 +802,8 @@ def _check_drawing_masters(so):
     for r in rows:
         label = r.get("drawing_number") or r.get("duno_mark_no") or "?"
         for doctype, fieldname in (("Nature of Work", "nature_of_work"),
-                                   ("Rate Schedule", "rate_schedule")):
+                                   ("Rate Schedule", "rate_schedule"),
+                                   ("Rate Schedule", "painting_rate_schedule")):
             value = r.get(fieldname)
             if value and value not in existing[doctype]:
                 issues.append(_at(DRAWING_LIST, r.idx,
@@ -1282,12 +1294,17 @@ def download_bom_template():
     # Customer weight is two columns (sep14 plan §4.2): one piece, and all Total Qty
     # pieces. Verify Raw Materials checks per Nos x Total Qty = Total, so the sample
     # below is a set that passes: 5 Nos x 50 Kg = 250 Kg.
+    #
+    # Column ORDER is the client's own sheet ("updated BOM manufact new.xlsx", Oct 2026),
+    # with our three extra columns slotted in: Nature of Work and the two Rate Schedules
+    # after FG Item, Material Spec before Grade. The import reads by header name, so
+    # order is presentation only -- older sheets in the old order still load.
     headers = [
-        "Assembly Group", "Customer Drawing Number", "DUNO/Mark No",
-        "FG Item", "Total Qty", "Cust Weight (per Nos)", "Cust Weight (Total)",
-        "Nature of Work", "Rate Schedule",
-        "Item No", "Material Code", "Material Spec", "Grade", "Thickness", "Width", "Length",
-        "Reqd Raw Material Qty",
+        "Assembly Group", "Customer Drawing Number", "Description", "FG Item",
+        "Nature of Work", "Fabrication Rate Schedule", "Painting Rate Schedule",
+        "DUNO/Mark No", "Item No", "Material Code", "Thickness", "Width", "Length",
+        "Reqd Raw Material Qty", "Material Spec", "Grade", "Total Qty",
+        "Cust Weight (per Nos)", "Cust Weight (Total)",
     ]
     ws.append(headers)
 
@@ -1308,15 +1325,17 @@ def download_bom_template():
 
     # Sample row 1 — drawing CDN-001, item 1
     ws.append([
-        "Structural Assembly", "CDN-001", "DM-001", "FG-ITEM-001", 5, 50.0, 250.0,
-        sample_now, sample_rs,
-        "1", "MAT-STRUCT-001", sample_spec, sample_grade, 0, 0, 3000, 2,
+        "Structural Assembly", "CDN-001", "Beam", "FG-ITEM-001",
+        sample_now, sample_rs, sample_rs,
+        "DM-001", "1", "MAT-STRUCT-001", 0, 0, 3000, 2,
+        sample_spec, sample_grade, 5, 50.0, 250.0,
     ])
     # Sample row 2 — same drawing CDN-001, item 2 (same header columns repeated)
     ws.append([
-        "Structural Assembly", "CDN-001", "DM-001", "FG-ITEM-001", 5, 50.0, 250.0,
-        sample_now, sample_rs,
-        "2", "MAT-PLATE-001", sample_spec, sample_grade, 10, 200, 1500, 1,
+        "Structural Assembly", "CDN-001", "Beam", "FG-ITEM-001",
+        sample_now, sample_rs, sample_rs,
+        "DM-001", "2", "MAT-PLATE-001", 10, 200, 1500, 1,
+        sample_spec, sample_grade, 5, 50.0, 250.0,
     ])
 
     output = io.BytesIO()

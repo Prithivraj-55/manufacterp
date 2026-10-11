@@ -463,8 +463,8 @@ function _add_view_all_raw_materials_button(frm) {
 	// from the toolbar people are already using, and -- the same trap
 	// _add_update_batch_button documents -- Frappe hides .grid-footer entirely
 	// once every row fits on one page, which silently takes the button with it.
-	grid.add_custom_button(
-		frappe.utils.icon("view", "xs") + " " + __("View All"),
+	mfx_grid_button(grid, "view",
+		__("View All"),
 		() => _show_mip_raw_materials_popup(frm),
 		"top"
 	);
@@ -565,8 +565,8 @@ function _add_update_batch_button(frm) {
 	// (.grid-buttons, inside .grid-footer) — Frappe hides .grid-footer
 	// entirely for a read-only grid once every row fits on one page, which
 	// would silently hide this button too if it lived in the bottom toolbar.
-	grid.add_custom_button(
-		frappe.utils.icon("edit", "xs") + " " + __("Update Batch"),
+	mfx_grid_button(grid, "edit",
+		__("Update Batch"),
 		() => _show_update_batch_dialog(frm),
 		"top"
 	);
@@ -753,6 +753,9 @@ function _show_process_loss_dialog(frm, s) {
 		`<tr><td>${__("Transferred to supplier")}</td><td style="text-align:right">${money(s.transferred)} Kg</td></tr>` +
 		`<tr><td>${__("Used in Final Stock Entry")}</td><td style="text-align:right">${money(s.used_in_fg)} Kg</td></tr>` +
 		`<tr><td>${__("Excess actually returned")}</td><td style="text-align:right">${money(s.returned)} Kg</td></tr>` +
+		(flt(s.scrap_returned) > 0
+			? `<tr><td>${__("Scrap returned")}</td><td style="text-align:right">${money(s.scrap_returned)} Kg</td></tr>`
+			: "") +
 		`<tr style="font-weight:700;background:#fff5f5"><td>${__("Still at the supplier — to write off")}</td>` +
 		`<td style="text-align:right;color:#c62828">${money(s.remaining)} Kg</td></tr>` +
 		// Part of the above, not in addition to it: off-cut marked "Return NA" at
@@ -1059,7 +1062,8 @@ function _show_mip_stock_validation(rows) {
 		if (is_frac) fractional++;
 		html += "<tr>" +
 			'<td style="white-space:nowrap;">' + frappe.utils.escape_html(d.item_code) + "</td>" +
-			'<td style="word-break:break-all;">' + frappe.utils.escape_html(d.batch_no || "—") + "</td>" +
+			'<td style="word-break:break-all;">' + frappe.utils.escape_html(d.batch_no || "—") +
+				(d.storage_locations ? "<div class='text-muted' style='font-size:11px'>" + __("Location: {0}", [frappe.utils.escape_html(d.storage_locations)]) + "</div>" : "") + "</td>" +
 			'<td style="white-space:nowrap;">' + frappe.utils.escape_html(d.duno_mark_no || "—") + "</td>" +
 			'<td style="' + num + '">' + flt(d.qty, 3) + "</td>" +
 			'<td style="' + num + '">' + (is_frac
@@ -1396,7 +1400,8 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 			// Read-only: spec and grade belong to the Item (server: _add_spec_grade).
 			"<td>" + frappe.utils.escape_html(d.material_spec || "—") + "</td>" +
 			"<td>" + frappe.utils.escape_html(d.material_grade || "—") + "</td>" +
-			"<td style='word-break:break-all'>" + frappe.utils.escape_html(d.batch_no || "—") + "</td>" +
+			"<td style='word-break:break-all'>" + frappe.utils.escape_html(d.batch_no || "—") +
+				(d.storage_locations ? "<div class='text-muted' style='font-size:11px'>" + __("Location: {0}", [frappe.utils.escape_html(d.storage_locations)]) + "</div>" : "") + "</td>" +
 			"<td class='text-right' style='white-space:nowrap'>" + format_number(flt(d.planned_qty), null, 3) + "</td>" +
 			"<td class='text-right' style='white-space:nowrap'>" +
 				(done > 0 ? "<span style='color:#15803d'>" + format_number(done, null, 3) + "</span>" : "—") + "</td>" +
@@ -1967,7 +1972,14 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 		title: is_cnc_fwd ? __("Select Materials — CNC to Supplier/WIP")
 			: transfer_type === "cnc" ? __("Select Materials — To CNC Warehouse") : __("Select Materials to Transfer"),
 		size: "extra-large",
-		fields: [{ fieldtype: "HTML", fieldname: "content" }],
+		// MRS and Cutting Plan slips go with material leaving for the supplier, so
+		// the leg into CNC does not ask. Both optional; editable on the draft entry.
+		fields: (transfer_type === "cnc" ? [] : [
+			{ fieldtype: "Data", fieldname: "mrs_number", label: __("MRS No.") },
+			{ fieldtype: "Column Break" },
+			{ fieldtype: "Data", fieldname: "cutting_plan_no", label: __("Cutting Plan No.") },
+			{ fieldtype: "Section Break" },
+		]).concat([{ fieldtype: "HTML", fieldname: "content" }]),
 		primary_action_label: __("Transfer Selected"),
 		secondary_action_label: __("Save and Close"),
 		// Parks whatever has been typed and closes, without validating any of it --
@@ -2123,6 +2135,10 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 
 	function _do_transfer(selected) {
 		{
+			var slips = transfer_type === "cnc" ? {} : {
+				mrs_number: dlg.get_value("mrs_number") || "",
+				cutting_plan_no: dlg.get_value("cutting_plan_no") || "",
+			};
 			dlg.hide();
 			// The CNC leg draws from the CNC warehouse, not the source warehouse, so
 			// it has its own endpoint and its own pending/validation basis.
@@ -2130,7 +2146,7 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 				method: is_cnc_fwd
 					? "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.create_mip_cnc_partial_forward"
 					: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.create_mip_partial_transfer",
-				args: is_cnc_fwd
+				args: $.extend(is_cnc_fwd
 					? { mip_name: frm.doc.name, selected_items_json: JSON.stringify(selected) }
 					: {
 						mip_name: frm.doc.name,
@@ -2140,7 +2156,7 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 						// when nothing was entered, and the server falls back to its
 						// own placeholder shape exactly as before.
 						excess_plan_json: JSON.stringify(dlg._excess_plan || {}),
-					},
+					}, slips),
 				freeze: true,
 				freeze_message: __("Creating transfer entry…"),
 				callback: function(r) {
@@ -2180,9 +2196,11 @@ function _show_mip_transfer_popup(frm, pending_items, transfer_type) {
 // ── Excess Material Return ───────────────────────────────────────────────────
 
 function _render_excess_action_btn(frm) {
-	if (frm.is_new() || !frm.doc.excess_return_warehouse) return;
-	if (!(frm.doc.excess_return_items || []).length) return;
-	if (frm.is_dirty()) return;
+	if (frm.is_new() || frm.is_dirty()) return;
+	// Off-cut rows to bring back, or -- with none -- scrap, which can only come from a
+	// job that sent material to a supplier.
+	let has_excess = (frm.doc.excess_return_items || []).length;
+	if (!has_excess && !(frm.doc.supplier_warehouse && frm.doc.subcontracting_order)) return;
 
 	frm.add_custom_button(__("Return Excess Entry"), function() {
 		_show_return_excess_dialog(frm);
@@ -2206,11 +2224,8 @@ function _show_return_excess_dialog(frm) {
 		return $main.closest("tbody").find("tr._rex_extra[data-for='" + $main.data("name") + "']");
 	}
 
+	// With no off-cut pending the popup still opens: scrap can be returned on its own.
 	let rows = (frm.doc.excess_return_items || []).filter((r) => !r.stock_entry_created && flt(r.qty) > 0);
-	if (!rows.length) {
-		frappe.msgprint(__("No pending excess return rows to process. All rows already have a Stock Entry created, or no rows with Weight (Kg) > 0 exist."));
-		return;
-	}
 
 	function _is_dim_driven(g) { return g === "Structurals" || g === "Plates"; }
 
@@ -2269,7 +2284,9 @@ function _show_return_excess_dialog(frm) {
 	}).join("");
 
 	let th = "padding:6px 8px;background:#f4f5f7;border-bottom:2px solid #d1d8dd;font-weight:600;font-size:11px;white-space:nowrap;";
-	let table_html = `<div class="text-muted" style="font-size:12px;margin-bottom:10px">
+	let table_html = !rows.length
+		? `<div class="text-muted" style="font-size:12px;margin-bottom:10px">${__("No off-cut is waiting to come back. Scrap can still be returned below.")}</div>`
+		: `<div class="text-muted" style="font-size:12px;margin-bottom:10px">
 			${__("Measure the off-cut going back. Qty is calculated from the dimensions for Structurals and Plates — for anything else, type the weight directly.")}
 			<br>${__("Width is used by Plates only, and Thickness is the batch's own and cannot be changed: a cut alters Length and Width, never Thickness.")}
 		</div>
@@ -2288,10 +2305,60 @@ function _show_return_excess_dialog(frm) {
 		<tbody>${rows_html}</tbody>
 	</table></div>`;
 
-	let dialog = new frappe.ui.Dialog({
+	// Where it comes back to (client, Oct 2026): the plan's Excess Return Warehouse,
+	// changeable here for this one entry. Scrap lines name their own warehouse.
+	let location_query = (wh_field) => () => ({ filters: { warehouse: dialog.get_value(wh_field) || "" } });
+	// var, not let: a field's onchange can fire while the dialog is still being built.
+	var dialog = new frappe.ui.Dialog({
 		title: __("Return Excess Entry — Review Qty & Reason"),
 		size: "extra-large",
-		fields: [{ fieldtype: "HTML", fieldname: "rows_html", options: table_html }],
+		fields: [
+			{
+				fieldtype: "Link", fieldname: "warehouse", label: __("Excess Return Warehouse"),
+				options: "Warehouse", reqd: rows.length ? 1 : 0,
+				default: frm.doc.excess_material_warehouse || "",
+				onchange() {
+					if (!dialog) return;
+					let wh = dialog.get_value("warehouse");
+					let keep = wh && wh === frm.doc.excess_material_warehouse ? frm.doc.excess_material_storage_location : "";
+					if (dialog.get_value("storage_location") !== keep) dialog.set_value("storage_location", keep || "");
+					_rex_toggle_location_reqd();
+				},
+			},
+			{ fieldtype: "Column Break" },
+			{
+				fieldtype: "Link", fieldname: "storage_location", label: __("Storage Location"),
+				options: "Storage Location", default: frm.doc.excess_material_storage_location || "",
+				get_query: location_query("warehouse"),
+			},
+			{ fieldtype: "Column Break" },
+			{ fieldtype: "Data", fieldname: "return_slip_no", label: __("Return Slip No.") },
+			{ fieldtype: "Section Break" },
+			{ fieldtype: "HTML", fieldname: "rows_html", options: table_html },
+			{ fieldtype: "Section Break" },
+			{
+				fieldtype: "Table", fieldname: "scrap", label: __("Scrap"),
+				description: __("Weighed scrap coming back with this entry. Its Kg is taken out of this job's material at the supplier, so it is not counted twice."),
+				cannot_add_rows: false, in_place_edit: true, data: [],
+				fields: [
+					{
+						fieldtype: "Link", fieldname: "item_code", label: __("Scrap Item"), options: "Item",
+						in_list_view: 1, columns: 3,
+						get_query: () => ({ filters: { custom_is_scrap: 1, disabled: 0 } }),
+					},
+					{ fieldtype: "Float", fieldname: "qty", label: __("Weight (Kg)"), in_list_view: 1, columns: 2, precision: 3 },
+					{
+						fieldtype: "Link", fieldname: "warehouse", label: __("Warehouse"), options: "Warehouse",
+						in_list_view: 1, columns: 2,
+					},
+					{
+						fieldtype: "Link", fieldname: "storage_location", label: __("Storage Location"),
+						options: "Storage Location", in_list_view: 1, columns: 2,
+						get_query: (row) => ({ filters: { warehouse: (row && row.warehouse) || "" } }),
+					},
+				],
+			},
+		],
 		primary_action_label: __("Create Return Entry"),
 		primary_action() {
 			let payload = [];
@@ -2359,13 +2426,42 @@ function _show_return_excess_dialog(frm) {
 				});
 				return;
 			}
+			let scrap = (dialog.get_value("scrap") || [])
+				.filter((r) => r.item_code || flt(r.qty) > 0)
+				.map((r) => ({ item_code: r.item_code || "", qty: flt(r.qty), warehouse: r.warehouse || "",
+					storage_location: r.storage_location || "" }));
+			let scrap_bad = scrap.filter((r) => !r.item_code || r.qty <= 0 || !r.warehouse);
+			if (scrap_bad.length) {
+				frappe.msgprint({
+					title: __("Scrap Incomplete"),
+					message: __("Every scrap row needs a Scrap Item, its Weight (Kg) and a Warehouse."),
+					indicator: "orange",
+				});
+				return;
+			}
+			if (!payload.length && !scrap.length) {
+				frappe.msgprint(__("Nothing to return: no off-cut is pending and no scrap was entered."));
+				return;
+			}
+			let target = dialog.get_value("warehouse");
+			let lines = [];
+			if (payload.length) lines.push(__("Excess will be received into {0}.", [frappe.utils.escape_html(target)]));
+			if (scrap.length) lines.push(__("{0} Kg of scrap will be received, taken out of this job's material at the supplier.",
+				[format_number(scrap.reduce((t, r) => t + r.qty, 0), null, 3)]));
 			frappe.confirm(
-				__("This material will be received into the Finished Goods Warehouse ({0}). Continue?", [frappe.utils.escape_html(frm.doc.excess_return_warehouse)]),
+				lines.join("<br>") + "<br>" + __("Continue?"),
 				function () {
 					dialog.hide();
 					frappe.call({
 						method: "manufyxinvenzaerp.subcontracting_management.material_issue_plan_transfer.create_mip_excess_return_entry",
-						args: { mip_name: frm.doc.name, rows_json: JSON.stringify(payload) },
+						args: {
+							mip_name: frm.doc.name,
+							rows_json: JSON.stringify(payload),
+							warehouse: target || "",
+							storage_location: dialog.get_value("storage_location") || "",
+							return_slip_no: dialog.get_value("return_slip_no") || "",
+							scrap_json: JSON.stringify(scrap),
+						},
 						freeze: true,
 						freeze_message: __("Creating return entry…"),
 						callback(r) {
@@ -2459,7 +2555,19 @@ function _show_return_excess_dialog(frm) {
 		if (_is_dim_driven($(this).data("group"))) _rex_refresh_item($(this));
 	});
 
+	// The location is mandatory only where the warehouse's type needs one; the server
+	// checks the same on create, this just says so up front.
+	function _rex_toggle_location_reqd() {
+		let wh = dialog.get_value("warehouse");
+		if (!wh) return dialog.set_df_property("storage_location", "reqd", 0);
+		frappe.call({
+			method: "manufyxinvenzaerp.stock_management.storage_location.get_location_settings",
+			args: { warehouses: [wh] },
+			callback(r) { dialog.set_df_property("storage_location", "reqd", (r.message || {})[wh] ? 1 : 0); },
+		});
+	}
 	dialog.show();
+	_rex_toggle_location_reqd();
 }
 
 // Weight auto-calc for excess_return_items — SCO Excess Material Item is a shared
@@ -3097,8 +3205,8 @@ function _add_consolidate_update_batch_button(frm) {
 	// and Frappe hides .grid-footer entirely for a read-only grid whose rows all fit on
 	// one page -- which would take a bottom-toolbar button with it. The per-row button
 	// alongside it needs its own workaround for the same read-only grid; see below.
-	grid.add_custom_button(
-		frappe.utils.icon("edit", "xs") + " " + __("Update Batch"),
+	mfx_grid_button(grid, "edit",
+		__("Update Batch"),
 		() => _open_consolidate_update_batch(frm),
 		"top"
 	);
@@ -3706,3 +3814,55 @@ function _show_consolidate_update_batch_dialog(frm, preselect_row_name) {
 		}
 	}
 }
+
+// ── Storage Location for each warehouse this plan sends stock into ──────────────
+// Each picker lists only its own warehouse's locations, and is mandatory when that
+// warehouse's type needs a Storage Location (server: storage_location.validate_mip_locations).
+var MIP_LOCATION_FIELDS = [
+	["supplier_warehouse", "supplier_storage_location"],
+	["cnc_warehouse", "cnc_storage_location"],
+	["excess_return_warehouse", "fg_storage_location"],
+	["excess_material_warehouse", "excess_material_storage_location"],
+];
+
+function mip_refresh_location_reqd(frm) {
+	const warehouses = MIP_LOCATION_FIELDS.map(([wh]) => frm.doc[wh]).filter(Boolean);
+	if (!warehouses.length) return;
+	frappe.call({
+		method: "manufyxinvenzaerp.stock_management.storage_location.get_location_settings",
+		args: { warehouses },
+		callback(r) {
+			const applicable = r.message || {};
+			MIP_LOCATION_FIELDS.forEach(([wh, loc]) => {
+				// The Excess Return location is asked for by the return popup instead.
+				if (loc === "excess_material_storage_location") return;
+				frm.toggle_reqd(loc, !!(frm.doc[wh] && applicable[frm.doc[wh]]));
+			});
+		},
+	});
+}
+
+frappe.ui.form.on("Material Issue Plan", {
+	setup(frm) {
+		MIP_LOCATION_FIELDS.forEach(([wh, loc]) => {
+			frm.set_query(loc, () => ({ filters: { warehouse: frm.doc[wh] || "" } }));
+		});
+	},
+	refresh: mip_refresh_location_reqd,
+	supplier_warehouse(frm) {
+		frm.set_value("supplier_storage_location", null);
+		mip_refresh_location_reqd(frm);
+	},
+	cnc_warehouse(frm) {
+		frm.set_value("cnc_storage_location", null);
+		mip_refresh_location_reqd(frm);
+	},
+	excess_return_warehouse(frm) {
+		frm.set_value("fg_storage_location", null);
+		mip_refresh_location_reqd(frm);
+	},
+	excess_material_warehouse(frm) {
+		frm.set_value("excess_material_storage_location", null);
+		mip_refresh_location_reqd(frm);
+	},
+});

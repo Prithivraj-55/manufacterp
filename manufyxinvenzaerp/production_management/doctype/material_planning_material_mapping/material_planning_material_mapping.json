@@ -85,7 +85,8 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Item No",
-   "read_only": 1
+   "read_only": 1,
+   "width": "90"
   },
   {
    "fieldname": "sales_order",
@@ -103,7 +104,8 @@
    "options": "Item",
    "read_only": 1,
    "reqd": 1,
-   "search_index": 1
+   "search_index": 1,
+   "width": "220"
   },
   {
    "fetch_from": "item_code.custom_material_spec",
@@ -146,7 +148,8 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "DUNO/Mark No",
-   "read_only": 1
+   "read_only": 1,
+   "width": "110"
   },
   {
    "columns": 1,
@@ -154,7 +157,8 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Cust Drawing No",
-   "read_only": 1
+   "read_only": 1,
+   "width": "220"
   },
   {
    "fieldname": "col_break_1",
@@ -166,7 +170,8 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Required Qty",
-   "read_only": 1
+   "read_only": 1,
+   "width": "120"
   },
   {
    "fieldname": "uom",
@@ -181,7 +186,8 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Required NOS",
-   "read_only": 1
+   "read_only": 1,
+   "width": "120"
   },
   {
    "fieldname": "sec_uom",
@@ -236,7 +242,8 @@
    "in_list_view": 1,
    "label": "Assign Batch",
    "options": "Batch",
-   "search_index": 1
+   "search_index": 1,
+   "width": "230"
   },
   {
    "description": "Synced from the batch's own Batch Remarks on every save (client change request Phase 6.3) -- not a fetch_from field, since this row's batch is set server-side (dialogs / reassign_batch), which never triggers Frappe's client-only fetch_from auto-populate.",
@@ -247,7 +254,7 @@
   },
   {
    "default": "0",
-   "description": "One batch shared across several rows. Reserves the exact Required Qty in Kg, and NOS becomes that weight expressed in pieces — fractional (e.g. 2.5). On a Cut Sheet row the piece is W1, so the fraction is of the CUT piece, not the whole plate. Untick it to enter a whole piece count yourself; the weight then follows, and anything above the Required Qty is excess.",
+   "description": "One batch shared across several rows. Reserves the exact Required Qty in Kg, and NOS becomes that weight expressed in pieces \u2014 fractional (e.g. 2.5). On a Cut Sheet row the piece is W1, so the fraction is of the CUT piece, not the whole plate. Untick it to enter a whole piece count yourself; the weight then follows, and anything above the Required Qty is excess.",
    "fieldname": "reserve_without_dimensions",
    "fieldtype": "Check",
    "label": "Reserve stock without dimensions"
@@ -258,7 +265,8 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Status",
-   "read_only": 1
+   "read_only": 1,
+   "width": "140"
   },
   {
    "fieldname": "planned_item",
@@ -314,7 +322,8 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "NOS",
-   "read_only_depends_on": "eval:doc.reserve_without_dimensions"
+   "read_only_depends_on": "eval:doc.reserve_without_dimensions",
+   "width": "90"
   },
   {
    "columns": 1,
@@ -322,7 +331,8 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Calc Qty (Kg)",
-   "read_only": 1
+   "read_only": 1,
+   "width": "130"
   },
   {
    "fieldname": "excess_qty",
@@ -331,14 +341,16 @@
    "read_only": 1,
    "in_list_view": 1,
    "precision": "3",
-   "description": "Calc Qty minus Required Qty for this row — what this batch gives beyond what the row needs."
+   "description": "Calc Qty minus Required Qty for this row \u2014 what this batch gives beyond what the row needs.",
+   "width": "110"
   },
   {
    "default": "0",
    "fieldname": "cnc_process",
    "fieldtype": "Check",
    "in_list_view": 1,
-   "label": "CNC Process"
+   "label": "CNC Process",
+   "width": "100"
   },
   {
    "fieldname": "col_break_batch_stock",
@@ -376,7 +388,8 @@
    "fieldname": "unreserve_btn",
    "fieldtype": "Button",
    "in_list_view": 1,
-   "label": "Unreserve"
+   "label": "Unreserve",
+   "width": "120"
   },
   {
    "fieldname": "reserved_qty",
@@ -416,8 +429,9 @@
    "fieldname": "store_location",
    "fieldtype": "Link",
    "label": "Store Location",
-   "options": "Store Location",
-   "read_only": 1
+   "options": "Storage Location",
+   "read_only": 1,
+   "hidden": 1
   },
   {
    "columns": 1,
@@ -426,7 +440,8 @@
    "in_list_view": 1,
    "label": "Purchase Receipt",
    "options": "Purchase Receipt",
-   "read_only": 1
+   "read_only": 1,
+   "width": "170"
   },
   {
    "fieldname": "section_cut_sheet",
@@ -539,7 +554,7 @@
    "fieldtype": "Check",
    "label": "Excess Material",
    "depends_on": "eval:!doc.batch",
-   "description": "Fill this requirement from another job's left-over material instead of buying new. Only for rows with no batch of their own — excess is a promise against a specific off-cut, not stock in your warehouse."
+   "description": "Fill this requirement from another job's left-over material instead of buying new. Only for rows with no batch of their own \u2014 excess is a promise against a specific off-cut, not stock in your warehouse."
   },
   {
    "fieldname": "select_excess_item_btn",

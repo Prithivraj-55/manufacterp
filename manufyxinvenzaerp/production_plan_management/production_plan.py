@@ -48,20 +48,11 @@ def get_sbb_available_qty(item_code, warehouse, dimensions, location=None):
 	`storage_location` field -- confirmed live via `DESCRIBE tabStock Ledger
 	Entry` to be the only location-shaped column that actually exists on SLE,
 	linked to the "Storage Location" doctype (the real, widely-wired ERPNext
-	Inventory Dimension -- 32 Link fields across the app). Material Planning's
-	own `store_location` field (the argument's usual caller) links to a
-	*different* doctype, "Store Location", which has zero records and zero
-	Material Planning documents that have ever set it in this site's real
-	data -- i.e. this location-filtering feature has never actually been
-	exercised in practice. Before this fix, passing a location value here
-	produced a hard `OperationalError: Unknown column
-	'tabStock Ledger Entry.store_location'` (confirmed live), since that
-	column has never existed -- this was silently masked only because the
-	feature has never been used. This fix stops the crash by querying the
-	column that actually exists; it does NOT resolve the deeper product
-	question of whether Material Planning's `store_location` field should
-	instead link to "Storage Location" so this filter is ever meaningfully
-	populated -- that needs a business decision, not a code fix.
+	Inventory Dimension). Material Planning's `store_location` field used to
+	link a different, never-used doctype ("Store Location"), so this filter was
+	never exercised; since 2026-10-10 it links Storage Location, and a plan can
+	limit Check Stock Availability to one location of its warehouse. See
+	stock_management/storage_location.py.
 
 	Flow when location is given:
 	  SLE (item + warehouse + storage_location) → SBB → SBE → aggregate by batch_no
@@ -169,7 +160,7 @@ def get_sbb_available_qty(item_code, warehouse, dimensions, location=None):
 def get_sbb_batches_bulk(item_codes, warehouse, location=None):
 	"""Batched variant of get_sbb_available_qty -- fetches every batch-level
 	stock entry for a *set* of items in one warehouse (optionally filtered by
-	Store Location) via 3 queries total, instead of 3 queries per item_code
+	Storage Location) via 3 queries total, instead of 3 queries per item_code
 	(Report 4 Finding D-02). Unlike get_sbb_available_qty, this does NOT
 	filter by dimensions -- callers apply the same per-row dimension match
 	get_sbb_available_qty performs itself, via match_batches_by_dimension()

@@ -28,6 +28,13 @@ class MaterialIssuePlan(Document):
         excess-return sync so a freshly-suggested row gets picked up in the
         same save. Also mirrors each row's batch Remarks (Phase 6.3)."""
         _assert_claimed_excess_unchanged(self)
+        # Off-cut and scrap come back to the Excess Return Warehouse (client, Oct 2026) --
+        # by default the raw-material store they left from, never the finished goods one.
+        if not self.get("excess_material_warehouse"):
+            self.excess_material_warehouse = self.source_warehouse or ""
+        # A warehouse this plan sends stock into, whose type needs a Storage Location, has one.
+        from manufyxinvenzaerp.stock_management.storage_location import validate_mip_locations
+        validate_mip_locations(self)
         _sync_excess_return_totals(self)
         _sync_batch_remarks(self)
         _sync_excess_availability(self)
@@ -1240,6 +1247,7 @@ def _sync_excess_return_totals(mip):
     mip.returned_weight_kg = flt(sum(
         flt(row.qty) for row in (mip.excess_return_items or []) if row.stock_entry_created
     ), 3)
+    mip.scrap_returned_kg = flt(sum(flt(row.qty) for row in (mip.get("scrap_return_items") or [])), 3)
 
     # What the job's own finished-goods entry consumed. Read from the entry rather
     # than assumed from the transfer: the whole point is that they are not the same
@@ -1648,6 +1656,21 @@ def _render_mip_batch_plan_html(mip):
         })
     rows.sort(key=lambda x: (not x["duno"], x["duno"], x["item_code"]))
 
+    # Where to pick each batch from in the source warehouse (Storage Location), under the
+    # batch number -- nothing when the warehouse does not use locations.
+    from manufyxinvenzaerp.stock_management.storage_location import (
+        batch_locations, describe_stock, location_applicable,
+    )
+    held_by_batch = {}
+    if location_applicable(mip.source_warehouse):
+        stock = batch_locations(mip.source_warehouse, [r.batch_no for r in mip.raw_materials or []])
+        held_by_batch = {
+            batch: {loc: qty for loc, qty in locs.items() if loc} for batch, locs in stock.items()
+        }
+    for r in rows:
+        held = held_by_batch.get(r["batch_no"]) or {}
+        r["location"] = next(iter(held)) if len(held) == 1 else (describe_stock(held) if held else "")
+
     posting_date = frappe.utils.formatdate(mip.posting_date) if mip.posting_date else ""
 
     row_html = "".join("""
@@ -1656,7 +1679,7 @@ def _render_mip_batch_plan_html(mip):
             <td>{cdn}</td>
             <td>{item_code}<br><span class="item-name">{item_name}</span></td>
             <td class="num">{planned_kg}</td>
-            <td>{batch_no}</td>
+            <td>{batch_no}{location}</td>
             <td>{dims}</td>
             <td class="num">{sec_qty} {sec_uom}</td>
             <td class="num">{batch_weight_kg}</td>
@@ -1668,6 +1691,8 @@ def _render_mip_batch_plan_html(mip):
         item_name=frappe.utils.escape_html(r["item_name"]),
         planned_kg=r["planned_kg"],
         batch_no=frappe.utils.escape_html(r["batch_no"]),
+        location=('<br><span class="item-name">{0}: {1}</span>'.format(
+            _("Location"), frappe.utils.escape_html(r["location"])) if r["location"] else ""),
         dims=frappe.utils.escape_html(r["dims"]),
         sec_qty=r["sec_qty"],
         sec_uom=frappe.utils.escape_html(r["sec_uom"]),

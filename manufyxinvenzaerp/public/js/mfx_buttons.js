@@ -116,9 +116,8 @@ function mfx_paint_group(frm, group_label, tone) {
 
 // ── Child-table grid toolbars ────────────────────────────────────────────────
 
-// Grid buttons are keyed by the label they were added with, and that key usually
-// carries an icon prefix (frappe.utils.icon(...) + " " + __("View All")) -- so
-// match on the label CONTAINING the text, never on equality.
+// Grid buttons are keyed by the label they were added with (plain text since v16,
+// see mfx_grid_button) -- match on the label CONTAINING the text, never on equality.
 //
 // `tones` is {tone: [substrings]}, e.g. {primary: ["Reserve"], alt: ["Unreserve"]}.
 // A button matching nothing is left grey on purpose: Download/Upload sit on these
@@ -166,6 +165,25 @@ function mfx_paint_el($el, tone) {
 	_mfx_apply($el, tone);
 }
 
+// ── Buttons with an icon ─────────────────────────────────────────────────────
+
+// v16 renders every button label as TEXT (frappe.ui.button escapes it), so the old
+// habit of passing frappe.utils.icon(...) + " " + label printed the raw <svg> markup
+// on the button. The label stays plain text -- it is also the key grid.custom_buttons
+// and mfx_paint_grid look the button up by -- and the icon is added as an element.
+function mfx_with_icon($btn, icon) {
+	if ($btn && $btn.length && icon && !$btn.find("svg.mfx-btn-icon").length) {
+		$btn.prepend($(frappe.utils.icon(icon, "xs")).addClass("mfx-btn-icon").css("margin-right", "4px"));
+	}
+	return $btn;
+}
+
+function mfx_grid_button(grid, icon, label, click, position) {
+	return mfx_with_icon(grid.add_custom_button(label, click, position), icon);
+}
+
+window.mfx_with_icon = mfx_with_icon;
+window.mfx_grid_button = mfx_grid_button;
 window.mfx_inject_button_style = mfx_inject_button_style;
 window.mfx_paint_button = mfx_paint_button;
 window.mfx_paint_group = mfx_paint_group;

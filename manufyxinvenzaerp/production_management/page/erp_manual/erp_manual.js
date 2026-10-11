@@ -64,6 +64,20 @@
 // plan's worked example; the few sentences elsewhere that described the old single
 // customer weight (the sheet headers, Update Customer Weight, the Production Plan's
 // quantity columns) were brought in line, and the two new settings are under Settings.
+//
+// Then: the client's October 2026 list. The BOM sheet follows the client's own column
+// order and reads Description; the Rate Schedule became two -- Fabrication (the old one,
+// renamed) and Painting -- syncing across Drawing, BOM, Production Plan and the Sales
+// Order's Drawing List, with Nature of Work following the Sales Order row to its
+// Drawing; the transfer popups take MRS No. and Cutting Plan No.; the excess return
+// goes to its own Excess Return Warehouse with a Return Slip No. and brings scrap back
+// (Item -> Is Scrap) out of the job's material at the supplier; the Job Work Order
+// prints contractor-wise from each operation row; the Operation Entry completes from a
+// Mark as Complete button with Status read-only; Inspection Entry lost Ok / Not Ok and
+// gained Partly Completed; a Packing Slip counts pieces with Net Weight per piece; and
+// Storage Locations became per item only (nothing listed, nothing allowed), checked on
+// every save.
+
 
 frappe.pages["erp-manual"].on_page_load = function (wrapper) {
 	let page = frappe.ui.make_app_page({
@@ -142,8 +156,9 @@ const ERP_MANUAL_SALES_ORDER_CHILDREN = [
 			"<a href='/assets/manufyxinvenzaerp/files/Sample_BOM_Sheet.xlsx' download " +
 			"style='font-weight:600'>Sample BOM Sheet (filled)</a> — a real 22-drawing sheet with " +
 			"100 raw-material rows, showing how the header columns repeat down every row of a drawing.",
-			"<b>Column headers must match.</b> The importer finds columns by name, not position, so you may reorder them — but a renamed or missing header is simply not read. Assembly Group, Customer Drawing Number, DUNO/Mark No, FG Item, Total Qty, Cust Weight (per Nos), Cust Weight (Total), Nature of Work, Rate Schedule, Item No, Material Code, Grade, Thickness, Width, Length, Reqd Raw Material Qty.",
-			"<b>One row per raw material, not per drawing.</b> A drawing needing three materials takes three rows, and its header columns (drawing number, DUNO, FG item, quantities, Nature of Work, Rate Schedule) repeat identically on all three. The importer groups them by Customer Drawing Number.",
+			"<b>Column headers must match.</b> The importer finds columns by name, not position, so you may reorder them — but a renamed or missing header is simply not read. The template follows the client's own sheet: Assembly Group, Customer Drawing Number, Description, FG Item, Nature of Work, Fabrication Rate Schedule, Painting Rate Schedule, DUNO/Mark No, Item No, Material Code, Thickness, Width, Length, Reqd Raw Material Qty, Material Spec, Grade, Total Qty, Cust Weight (per Nos), Cust Weight (Total). A sheet still headed <b>Rate Schedule</b> is read as the Fabrication one.",
+			"<b>Description</b> is the customer's own name for the drawing (Beam, Column…). It becomes the Drawing's FG Description; left blank, the FG Item's description is used as before.",
+			"<b>One row per raw material, not per drawing.</b> A drawing needing three materials takes three rows, and its header columns (drawing number, Description, DUNO, FG item, quantities, Nature of Work, both Rate Schedules) repeat identically on all three. The importer groups them by Customer Drawing Number.",
 		],
 		buttons: [
 			{ name: "Download Template", note: "An empty sheet with the right headers. Only shown before a file is attached." },
@@ -170,7 +185,7 @@ const ERP_MANUAL_SALES_ORDER_CHILDREN = [
 			{ name: "Reqd Raw Material Qty", note: "Must be more than zero, for every group. This is the NOS (pieces) the formula multiplies by — a blank column produces a row weighing nothing." },
 			{ name: "Calculated weight", note: "The last check: the row's Kg is recalculated from its current dimensions and the Item master's Unit Weight. Zero is refused, and a figure that no longer agrees with what was staged means the Item master changed after the upload — load the sheet again." },
 			{ name: "Nature of Work", note: "Must already exist in the Nature of Work master. Checked by name exactly as typed." },
-			{ name: "Rate Schedule", note: "Must already exist in the Rate Schedule master — e.g. RS- O/S-001 A. Checked by name; there is no format rule, so your numbering can change freely." },
+			{ name: "Fabrication / Painting Rate Schedule", note: "Each must already exist in the Rate Schedule master — e.g. RS- O/S-001 A. Both link to the same master, checked by name; there is no format rule, so your numbering can change freely." },
 			{ name: "Grade", note: "Must already exist in the <b>Material Grade</b> master — e.g. IS2062. Checked by name exactly as typed, so watch the spacing: IS2062 and IS 2062 are two different grades. A blank Grade is allowed only for groups other than Structurals and Plates, where it is mandatory. Create a missing one from the Material Masters card on the Manufyx workspace, or correct the sheet and load it again." },
 			{ name: "Material Spec", note: "Column beside Grade. <b>Mandatory, together with Grade, on every Structurals and Plates row</b> — Verify lists each row missing either. Optional for other groups (Nuts and Bolts and the rest). When filled it must already exist in the <b>Material Spec</b> master, checked by name exactly as typed." },
 			{ name: "Spec and Grade against the Item", note: "A filled-in Material Spec or Grade must be the one on that Material Code's <b>Item</b>. If it is not, Verify stops and lists each row: DUNO, Material Code, what the sheet asks for and what the Item has — <i>this material spec or grade is not in the Item master</i>. Create or correct the Item, set it as the Material Code, and Verify again. This matters because spec and grade travel from the Item onto Material Planning, Material Request, PO and PR: a sheet asking for E350 against an E250 Item would otherwise plan and buy E250. A blank spec or grade in the sheet is not checked." },
@@ -201,7 +216,7 @@ const ERP_MANUAL_SALES_ORDER_CHILDREN = [
 			"<b>Load Items warns about unused columns too</b>, as soon as the sheet is read, so you can see it against the file still in front of you. Only this step blocks.",
 			"<b>Why unknown values still reach this screen.</b> The importer stages rows with a direct insert that skips link checking, on purpose — so a wrong Rate Schedule lands in the table and can be reported <i>against the drawing it came from</i>. Rejecting during the upload would abort the whole file over one cell and tell you nothing about where it was.",
 			"<b>Rows whose Drawing already exists are not re-checked.</b> They are locked at that point and the check skips them, so correcting the sheet for a later drawing can never fail an order that is already part-built.",
-			"<b>Blank is allowed</b> for Nature of Work and Rate Schedule. Neither is mandatory on a Drawing, and older imports predate both columns.",
+			"<b>Blank is allowed</b> for Nature of Work and both Rate Schedules. None is mandatory on a Drawing, and older imports predate these columns. They can be filled on the Sales Order's Drawing List afterwards — see Rates and Costing under BOM.",
 		],
 		buttons: [
 			{ name: "Verify Raw Materials", note: "Runs every check above. Passing sets the order's verified flag; failing lists each problem <b>led by the row it is on</b> — <i>Raw Materials row 100 · …</i> or <i>Drawing List row 22 · …</i> — followed by the drawing, Material Code and Item No. The table is named because both are on this order and row 22 of one is not row 22 of the other." },
@@ -535,10 +550,11 @@ const ERP_MANUAL_BOM_CHILDREN = [
 			{ name: "Rate Of Materials Based On", note: "Set to Valuation Rate. Each row is priced at the item's valuation at the moment the BOM is built." },
 			{ name: "Raw Material Cost / Total Cost", note: "The estimate that follows from those rates." },
 			{ name: "Operating Cost", note: "Zero — see Operations above." },
-			{ name: "Rate Schedule (section)", note: "The job-work rate this drawing is charged at. The <b>Rate Schedule</b> link is editable; Type, Job Nature, Details, Work Content, Job Reference and Rate/KG below it are filled from the schedule and read-only — the rate itself is edited on the Rate Schedule master, never here. Editable after submit, because a rate is usually revisited long after the BOM is submitted." },
+			{ name: "Rate Schedules (section)", note: "Two job-work rates for this drawing: <b>Fabrication Rate Schedule</b> (the original field, renamed — existing values kept) and <b>Painting Rate Schedule</b>. Both links are editable and both point at the same Rate Schedule master. Fabrication shows Type, Job Nature, Details, Work Content, Job Reference and Rate/KG; Painting shows only its <b>Painting Rate/KG</b>. All read-only — the rate itself is edited on the Rate Schedule master, never here. Editable after submit, because a rate is usually revisited long after the BOM is submitted." },
 		],
 		notes: [
-			"<b>The Rate Schedule is shared between three documents.</b> It belongs to the DRAWING, and the same schedule is shown on the drawing itself, on its BOM, and on every Production Plan row quoting it. Change it in any one of the three and the other two follow, because all three point at the same drawing. A popup afterwards lists every document that was updated, each as a link.",
+			"<b>Each Rate Schedule is shared between four places.</b> It belongs to the DRAWING, and the same schedule is shown on the drawing itself, on its BOM, on every Production Plan row quoting it, and on the Sales Order's Drawing List row it came from. Change it in any one and the others follow. Fabrication and Painting travel separately — changing one never touches the other. A popup afterwards lists every document that was updated, each as a link.",
+			"<b>Nature of Work follows too.</b> Set or change it on a Sales Order Drawing List row whose Drawing already exists and the Drawing is updated; change it on a draft Drawing and its Sales Order row follows.",
 			"<b>You are asked before overwriting.</b> Set a schedule here that differs from the drawing's and you get the drawing's current schedule, and how many documents follow it, before anything changes. Decline and the field returns to the drawing's value.",
 			"<b>Only the choice of schedule travels — never the rate.</b> Editing Rate/KG is done on the Rate Schedule master, where it is versioned in the Price Change Log. Nothing on a Drawing, BOM or Production Plan can change a rate.",
 			"<b>A BOM made from a drawing already carries its schedule.</b> Older BOMs, created before this existed, start blank and stay blank until somebody sets one — a blank is left alone rather than filled in automatically, so nothing is written onto a submitted document behind your back.",
@@ -568,7 +584,7 @@ const ERP_MANUAL_ITEM_CHILDREN = [
 		title: "Custom Fields",
 		kicker: "What was added and why",
 		purpose:
-			"Seven custom fields added to the Item master. Together they say what the material " +
+			"Nine custom fields added to the Item master. Together they say what the material " +
 			"is, classify the item, " +
 			"configure its UOM pair, set the weight constant the Kg formula needs, control " +
 			"how batches are named at receipt, and flag whether an incoming batch must pass " +
@@ -641,6 +657,21 @@ const ERP_MANUAL_ITEM_CHILDREN = [
 					"inspection workflow — batches received cannot be reserved in Material Planning " +
 					"until the linked Inspection Entry is Completed. " +
 					"Leave it unticked for items you receive without an incoming-QC step.",
+			},
+			{
+				name: "Is Scrap",
+				note: "Marks an item as scrap sold by weight — Steel Scrap, Aluminium Scrap, as many as you need. " +
+					"Only these are offered in the Scrap rows of a Material Issue Plan's <b>Return Excess Entry</b>. " +
+					"A scrap item must be a stock item, <b>not batch-tracked</b>, in <b>Kg</b> — no pieces, no dimensions; " +
+					"saving one set up otherwise is refused with the list of what to fix.",
+			},
+			{
+				name: "Storage Locations (Inventory tab)",
+				note: "Where this item may be stored: one row per warehouse and location, with one <b>Default</b> per warehouse. " +
+					"<b>Only what is listed here is allowed.</b> An item that lists nothing for a warehouse has no location there — " +
+					"its inward picker is empty and a receipt naming a location is refused until a row is added. " +
+					"The default (or the only listed location) fills in by itself on a receipt. " +
+					"On the Inventory tab this table sits right after Stock Levels, followed by Serial Nos / Batches.",
 			},
 		],
 		notes: [
@@ -1524,7 +1555,8 @@ const ERP_MANUAL_JOB_WORK_ORDER_CHILDREN = [
 			{ name: "Open MIP", note: "Opens this job's Material Issue Plan. Sits on its own, before the Create group, because it goes to a document that already exists rather than making a new one. It only appears once there is an MIP to open. The Material Issue Plan carries the matching <b>Open Job Work Order</b> button back the other way." },
 			{ name: "Material Issue Plan (under Create) — removed", note: "No longer offered. The plan is created together with the order by <b>Job work order &amp; MIP</b> on the Production Plan, so by the time you are looking at this toolbar there is already one to open — use <b>Open MIP</b>. The two sat side by side doing nearly the same thing, and the one that could create was the one that read like a fresh start." },
 			{ name: "Supplier Operation Entries (under Create)", note: "Creates any still-missing Supplier Operation Entry in the chain — normally already done automatically by “Job work order & MIP”." },
-		],
+				{ name: "Print (🖨 on each operation row)", note: "On the Operations tab, at the end of every row with a Supplier or Contractor. Prints that party's <b>Contractor Issue Sheet</b> in the browser's print window: Job Work Order and date, Production Plan, Sales Order, Customer, every operation assigned to that party, and the drawing table (Drawing, Customer Drawing No, DUNO/Mark No, Nos, Kg) with totals, and signature lines for Prepared By, Issued By and Received By. No rates are printed." },
+			],
 		notes: [
 			"“Job work order” is a display name only — underneath, it's still the same Subcontracting Order doctype; it just reads as “Job work order” everywhere in the UI.",
 			"The old separate “Work Order / Subcontract PO” create option under Production Plan is disabled — use “Job work order & MIP” there instead.",
@@ -1552,16 +1584,18 @@ const ERP_MANUAL_SOE_CHILDREN = [
 		],
 		steps: [
 			"Logging Nos against a drawing in Consumption Log auto-advances Status from Open to In Progress, and — when Inspection Mandatory is off — immediately updates that drawing's Completed Qty.",
-			"Status must be set to Completed before a Supplier Operation Entry can be submitted, and every earlier operation in the sequence must already be submitted too.",
+			"<b>Status is read-only</b> — Open and In Progress are set for you. Completing is the one decision left, and it is the green <b>Mark as Complete</b> button at the top of a saved draft; the standard Submit is not offered. Every earlier operation in the sequence must already be submitted.",
 			"Completed is only accepted when the operation really is finished: every drawing must have reached the quantity this operation was given — its own Qty to Manufacture on operation 1, whatever the previous operation handed over from operation 2 on. A drawing that received nothing from the operation before it blocks Completed too, because there is nothing there to have finished.",
-			"Setting Status to Completed asks “Mark this operation Completed and submit it?” — answering Yes saves and submits in one step, so there is no separate Submit click. Answering No puts the Status back where it was.",
+			"<b>Mark as Complete</b> first runs the same checks the submit will (the weight-tolerance notice included), then asks “Mark as complete and submit the Operation Entry?” — Yes sets Completed and submits in one step; No leaves everything as it was.",
 		],
 		buttons: [
-			{ name: "Add Pending Drawing to Log", note: "A direct button (not inside a group). Fills Consumption Log with one row per drawing for the quantity not yet logged: an empty log gets every drawing in full; with 3 of 5 already logged it adds one new row of 2; a drawing already fully logged is skipped, so clicking again adds nothing twice. For quick testing or data entry, not a normal production step — which is why it only appears when <b>Auto Purchase from Material Planning</b> is ticked in Manufyxinvenza Settings, the same switch that reveals the Auto Purchase section on Material Planning. Leave that off on a live site and this button is not there at all." },
+				{ name: "Mark as Complete", note: "Green, top right, on a saved draft. Checks, confirms, sets Status to Completed and submits. Shown only while the entry is a draft." },
+				{ name: "Add Pending Drawing to Log", note: "A direct button (not inside a group). Fills Consumption Log with one row per drawing for the quantity not yet logged: an empty log gets every drawing in full; with 3 of 5 already logged it adds one new row of 2; a drawing already fully logged is skipped, so clicking again adds nothing twice. For quick testing or data entry, not a normal production step — which is why it only appears when <b>Auto Purchase from Material Planning</b> is ticked in Manufyxinvenza Settings, the same switch that reveals the Auto Purchase section on Material Planning. Leave that off on a live site and this button is not there at all." },
 		],
 		notes: [
 			"If Inspection Mandatory is ticked for this operation, Consumption Log no longer completes anything directly — see Inspection for what happens instead. On such an operation Completed also needs the inspection <i>cleared</i>: no round may still be Pending, and since the quantity comes from Accepted Qty, an operation cannot be closed on pieces QC has not passed.",
 			"<b>A Supplier Operation Entry cannot be cancelled on its own.</b> The Job work order's Operations tab, the next operation's Available to Consume and the Drawing Items' completion all report from submitted entries, so a cancelled one leaves the order quoting a quantity nothing accounts for. To undo an operation, cancel the Job work order — that takes the whole chain together and leaves nothing pointing at a cancelled document.",
+			"<b>The Operation Entry list</b> shows the full Job Work Order number, Operation, Supplier and Contractor, with the entry's own Status (Open / In Progress / Completed) as its coloured indicator. Work Order is no longer listed.",
 			"Amending an entry that was cancelled before this rule existed works normally, and the amendment starts at Open rather than Completed: the cancelled document's Status copies across but its finished quantities do not, so re-enter the Consumption Log before completing it again.",
 		],
 	},
@@ -1579,14 +1613,14 @@ const ERP_MANUAL_INSPECTION_CHILDREN = [
 			"the next operation, or into a Final Stock Entry, without QC sign-off.",
 		fields: [
 			{ name: "Inspection Items (on the Supplier Operation Entry)", note: "One row per drawing, auto-showing what's been logged in Consumption Log but not yet accepted. Recalculates itself on every save — nothing to maintain by hand, and it never shows more than the drawing's real Qty to Manufacture, however many times something is re-logged." },
-			{ name: "Inspection Entry — header", note: "Three columns: the source and round, the work references, and the parties (Sales Order, Customer, Supplier — or <b>Contractor</b> for an internal operation). Below them Status (Open/Working/Completed), Inspection Complete Date and Overall Remarks." },
-			{ name: "Feedback and Rework Remarks — per row", note: "Each drawing row has its own <b>Feedback</b> (Ok / Not Ok) and <b>Rework Remarks</b>. Ok means nothing on that row is rejected, Not Ok means something is. Rework Remarks is mandatory on any row with a Rejected Qty. There is no Feedback or Rework Remarks to fill on the header any more: the entry's overall result is worked out from the rows (Not Ok if any row is Not Ok) and is what the Inspection Status report shows. Entries made before 2026-09-23 had their header Feedback copied onto every row, and their Rework Remarks onto the rejected rows. A Job Card inspection has no rows and keeps both on the header." },
+			{ name: "Inspection Entry — header", note: "Three columns: the source and round, the work references, and the parties (Sales Order, Customer, Supplier — or <b>Contractor</b> for an internal operation). The third column holds the result: Status, Inspection Complete Date and Overall Remarks." },
+				{ name: "Status", note: "<b>Open → Working → Partly Completed → Completed</b>. <b>Partly Completed</b> is set on save, never chosen: part of the quantity is accepted, not all of it — and it shows in the list. Choosing <b>Completed</b> is the inspector's call, and it submits the entry." },
+			{ name: "Rework Remarks — per row", note: "Mandatory on any row with a Rejected Qty, and summarised onto the header. <b>Ok / Not Ok has been removed</b> (Oct 2026) from the rows and the header, with its checks: the result is read from the Accepted and Rejected quantities." },
 			{ name: "Inspection Items (on the Inspection Entry)", note: "One row per drawing, copied in from the source Supplier Operation Entry: Completed Qty (frozen at creation), Accepted Qty (you enter), Rejected Qty (auto = Completed − Accepted)." },
 		],
 		steps: [
 			"Click the dark <b>Create Inspection</b> button above the Consumption Log on the Supplier Operation Entry (save it first). The popup asks for the <b>Inspection Call Date</b> (today by default) and lists the drawings that will be inspected with their Completed NOS — whatever is pending in Inspection Items. <b>Create</b> logs the call and creates the Inspection Entry in one step; if the entry cannot be created, no call is logged either. The button is hidden while an inspection is still open — use <b>Inspection → View Inspection Entry</b> for that one, or the <b>Connections</b> tab, which lists every Inspection Entry of the operation.",
-			"Enter Accepted Qty per drawing row — Rejected Qty fills in automatically. Then set that row's Feedback, and its Rework Remarks when anything is rejected.",
-			"Every row needs Feedback before Status can be Completed — trying to complete without it names the rows still missing it and reverts Status.",
+			"Enter Accepted Qty per drawing row — Rejected Qty fills in automatically — and Rework Remarks when anything is rejected. Save: with part of the quantity accepted the status reads Partly Completed.",
 			"Set Status to Completed and save — you're asked to confirm (“cannot be edited once submitted”); confirming saves AND submits in one action, there is no separate manual Submit step.",
 			"On submit, each row's Accepted Qty is added onto that drawing's Completed Qty on the Supplier Operation Entry — this is what lets the next operation proceed. Rejected Qty isn't written anywhere; it simply reappears in the Supplier Operation Entry's own Inspection Items table the moment it's logged again in Consumption Log, ready for another round.",
 		],
@@ -1666,7 +1700,7 @@ const ERP_MANUAL_INSPECTION_CHILDREN = [
 		steps: [
 			"On the Purchase Receipt, click <b>Create Inspection</b> and set the call date. The receipt is still in draft at this point — that is the intended order.",
 			"Create the Inspection Entry from the logged call. It arrives prefilled with one row per inspection-required line.",
-			"Record Accepted Qty and Rejected Qty per line, set each line's Feedback (Ok when nothing is rejected, Not Ok otherwise), add remarks, set Status to Completed and submit.",
+			"Record Accepted Qty and Rejected Qty per line, add remarks, set Status to Completed and submit.",
 			"The results are written back onto the receipt rows, and the receipt's Inspection Status becomes Completed.",
 			"Submit the Purchase Receipt. Batches are created at that point, not before — so nothing enters stock ahead of its QC result.",
 		],
@@ -1743,7 +1777,8 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 			{ name: "Source Warehouse", note: "Where the reserved stock is now — normally Stores. Defaults from the Production Plan's Raw Material Warehouse." },
 			{ name: "Supplier / WIP Warehouse", note: "The destination. For a supplier job this is the Job Worker's own warehouse, resolved automatically once a Job Worker is set on the Subcontracting Order. For an internal job there is no supplier, so this is entered by hand and is the ONLY place the WIP warehouse is recorded." },
 			{ name: "CNC Warehouse", note: "Required if any row is flagged CNC Process. Material goes here first and is forwarded on afterwards." },
-			{ name: "Finished Goods Warehouse", note: "Receives both the finished item (Make Final Stock Entry) and returned off-cuts (Return Excess Entry). Neither button works until it is set." },
+			{ name: "Finished Goods Warehouse", note: "Receives the finished item (Make Final Stock Entry). It no longer receives returned off-cuts." },
+			{ name: "Excess Return Warehouse / Storage Location", note: "On the Excess Material Return tab. Where returned off-cut and scrap come in. Defaults to the Source (RM) warehouse; the Return Excess Entry popup starts from it and can change it for that one entry. The location is asked for in the popup when the warehouse needs one — the plan itself saves without it." },
 		],
 		notes: [
 			"A blank Supplier/WIP Warehouse blocks every transfer and quietly breaks the weight tracking back on the Subcontracting Order — if a transfer button does nothing useful, check here first.",
@@ -1765,6 +1800,7 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 			{ name: "Transferred", note: "What has already gone, across earlier partial transfers. Re-open the popup after a partial transfer and this is how you see where you stand." },
 			{ name: "In Stock", note: "What the batch physically holds in the source warehouse right now. Zero usually means the Purchase Receipt has not been made yet — the row is planned and reserved, but the steel is not in the building." },
 			{ name: "NOS", note: "Editable. The hint below it reads e.g. “7.92 (Plan) · or 8 whole” so you can see the planned fraction and the nearest whole-piece figure together." },
+			{ name: "MRS No. / Cutting Plan No.", note: "At the top of the <b>Raw material to transfer</b> and <b>CNC to Supplier</b> popups (not on To CNC Warehouse). Both optional. They are written onto the Stock Entry the popup creates, where they can still be corrected until it is submitted." },
 			{ name: "Transfer Qty (Kg)", note: "Read-only, derived from NOS. It is not editable on purpose: a hand-typed weight that disagreed with the piece count would ship a Stock Entry whose NOS and weight contradict each other, and consumption downstream is driven by NOS." },
 		],
 		steps: [
@@ -1923,7 +1959,8 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 		fields: [
 			{ name: "Used in FG (Kg)", note: "How much the job really used. Not how much you sent. You send whole pieces — a 5 metre bar to make a 340 mm part — but only the 340 mm belongs to the job. The rest is still yours." },
 			{ name: "Actual Excess Returned (Kg)", note: "How much really came back. It is often not what you planned, because the off-cut gets measured again on the way back. You planned 1,500 Kg at 150×50; it came back as 1,450 Kg at 140×50." },
-			{ name: "Process Loss — Not Returned (Kg)", note: "Sent, minus used, minus returned. This is real stock still sitting in the supplier's warehouse in your name. It stays there until you write it off." },
+			{ name: "Scrap Returned (Kg)", note: "Scrap brought back with Return Excess Entry. Its Kg left the supplier's warehouse with it, so it is no longer there to be written off." },
+			{ name: "Process Loss — Not Returned (Kg)", note: "Sent, minus used, minus returned, minus scrap. This is real stock still sitting in the supplier's warehouse in your name. It stays there until you write it off." },
 			{ name: "Process Loss Reason", note: "What the supplier told you happened to it. You must type something — a write-off with no reason is not a reason." },
 			{ name: "Process Loss Warning Above (%)", note: "In Manufyxinvenza Settings, 5% to start. If the loss is bigger than this share of what you sent, the screen warns you: this is too much to be cutting loss. It only warns — you can still go ahead." },
 		],
@@ -1964,7 +2001,7 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 		],
 		notes: [
 			"<b>Billed to Consume has been removed.</b> It used to mean “this off-cut is never coming back” — it stayed at the supplier and the final Stock Entry swallowed it. Anything that does not come back is Process Loss now, and you say why. One change to note: with the old tick the cost went onto the job. As Process Loss it goes to the write-off account instead.",
-			"Every kilo has to land somewhere: <b>Sent = Used in FG + Returned + Process Loss</b>. The plan will not close until those add up. And it checks the real stock in the warehouse, not the numbers on the screen — so it cannot be fooled by a stale figure.",
+			"Every kilo has to land somewhere: <b>Sent = Used in FG + Returned + Scrap + Process Loss</b> — 100 Kg sent, 90 in the finished goods, 5 returned as off-cut, 4 as scrap leaves 1 Kg to write off. The plan will not close until those add up. And it checks the real stock in the warehouse, not the numbers on the screen — so it cannot be fooled by a stale figure.",
 		],
 	},
 	{
@@ -2017,7 +2054,8 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 			},
 		],
 		notes: [
-			"Return Excess Entry creates one Material Receipt for every unreturned row, into the Finished Goods Warehouse, and the batches it creates are traceable back to the off-cut they came from.",
+			"<b>Return Excess Entry</b> opens a popup: <b>Excess Return Warehouse</b> and <b>Storage Location</b> (from the plan, changeable), an optional <b>Return Slip No.</b> (saved on the Stock Entry), the off-cut rows to measure, and a <b>Scrap</b> table. It creates one Repack that takes the material out of the supplier's warehouse and receives it back — the off-cut as new batches traceable to the row they came from.",
+			"<b>Scrap.</b> Add as many rows as needed: a scrap item (Item → Is Scrap), its Kg, warehouse, and Storage Location where needed — no pieces, no dimensions. The Kg is taken out of this job's material still at the supplier, largest batch first, so the same steel is never counted twice; asking for more than is left is refused. Each scrap line is valued at the cost of what left for it, listed under <b>Scrap Returned</b> on this tab, and lowers what remains for Process Loss. The popup opens with only the Scrap table when no off-cut is pending.",
 		],
 	},
 	{
@@ -2052,7 +2090,7 @@ const ERP_MANUAL_MATERIAL_ISSUE_PLAN_CHILDREN = [
 			{ name: "Select Materials to Transfer", note: "The main transfer popup. Source → Supplier/WIP. It opens nearly full-width, and each line shows the item's <b>Material Spec</b> and <b>Material Grade</b> (read-only, from the Item). If the plan has no Supplier / WIP Warehouse (and neither has its Subcontracting Order), the popup says \"Supplier / Work in Progress Warehouse is not set\" — set it in the Warehouses section first. <b>Available NOS</b> sits beside <b>In Stock</b> (Kg): the same stock in pieces, at the piece weight the popup already uses to turn NOS into Kg. A remnant shows as it is — 3.600 means three whole pieces and part of a fourth. A dash means there is no piece weight to divide by. Raise a fractional NOS to whole pieces here: the weight of a piece comes from the batch's own size (1 piece of a 12000 × 1500 × 16 plate = 2,260.8 Kg), not from dividing the plan's rounded fraction, and the extra weight is booked as excess to return. <b>In Stock</b> is what the batch physically holds; any part reserved for other drawings or plans is shown under it and cannot be taken. If there is not enough, the message spells out the whole sum — pieces × Kg per piece, in stock, what each other drawing holds, what is available to this plan, how much is short, and the most whole pieces the batch can give. Taking stock that other rows were planned against (assigned but not reserved) is allowed, with a warning naming them." },
 			{ name: "To CNC Warehouse", note: "First leg for CNC-flagged rows. Only appears when a CNC Warehouse is set." },
 			{ name: "CNC to Supplier/WIP", note: "Second leg. Only appears once material has physically arrived at CNC." },
-			{ name: "Return Excess Entry", note: "Review quantities and enter a mandatory reason per row, then the return Stock Entry is created into the Finished Goods Warehouse. <b>One off-cut coming back as several sizes:</b> the duplicate icon at the end of a Structurals or Plates row adds another line under it asking only for Length, Width (Plates) and NOS, with its Kg worked out. Add as many as needed, × removes one. Under the item, <b>Planned</b> (the row's Weight when the dialog opened), <b>Returning</b> (all its lines added up) and the <b>Difference</b> update as you type — amber when less comes back than planned, red when more. Each line becomes its own excess row and its own new batch. There is no duplicate icon on a weight-only row or on a row another plan has claimed, which must come back as claimed." },
+			{ name: "Return Excess Entry", note: "Review quantities and enter a mandatory reason per row, then the return Stock Entry is created into the <b>Excess Return Warehouse</b> (chosen in the popup, with an optional Return Slip No.), along with any Scrap rows. <b>One off-cut coming back as several sizes:</b> the duplicate icon at the end of a Structurals or Plates row adds another line under it asking only for Length, Width (Plates) and NOS, with its Kg worked out. Add as many as needed, × removes one. Under the item, <b>Planned</b> (the row's Weight when the dialog opened), <b>Returning</b> (all its lines added up) and the <b>Difference</b> update as you type — amber when less comes back than planned, red when more. Each line becomes its own excess row and its own new batch. There is no duplicate icon on a weight-only row or on a row another plan has claimed, which must come back as claimed." },
 			{ name: "Make Final Stock Entry", note: "Draft Manufacture entry for the finished goods. Appears once the final operation exists, and needs at least one completed piece on it. Books only the drawings that operation has finished, and consumes only their share of the raw material. <b>It refuses while any raw material is still waiting to be transferred</b>, naming the Kg and how much of it is CNC material that has not reached the CNC warehouse. Booking finished goods ahead of the transfer produces a product heavier than the steel that made it — a negative Loss (Kg) on the finished rows, which is not a loss but an impossibility." },
 			{ name: "Download → Batch wise PDF", note: "A shareable batch plan — DUNO/Mark No, Customer Drawing No, planned Kg, batch details and NOS — for the production or supplier team. One line per drawing requirement, so a plate cut for fourteen drawings appears fourteen times." },
 			{ name: "Download → Consolidate item wise PDF", note: "The same transfer seen from the store's side: one line per item + batch, with the DUNOs it covers named on the line. Item, batch, L×W×T, NOS, Reqd Kg, Issued Kg, Pending Kg, merged row count, and a totals row. CNC rows are flagged, because that material goes to the CNC warehouse first. This is the sheet to pick against — nobody pulls stock fourteen times for one plate." },
@@ -2340,7 +2378,7 @@ const ERP_MANUAL_PROCUREMENT_CHILDREN = [
 		fields: [
 			{ name: "Supplier Invoice Weight / Weighment Weight", note: "What the supplier's paperwork claims, and what the weighbridge actually read. Recorded side by side so a discrepancy is visible at receipt rather than discovered later." },
 			{ name: "Total Weight (Kg)", note: "Read-only, the received total." },
-			{ name: "Target / Source / Rejected Storage Location", note: "Per-row physical location within the warehouse. Rejected Storage Location is where QC-failed material is put aside." },
+			{ name: "Target / Source / Rejected Storage Location", note: "Per-row physical location within the warehouse. Mandatory (on submit) where the warehouse's Warehouse Type has <b>Storage Location Applicable</b>. The picker lists <b>only the locations the Item lists</b> for that warehouse (Item → Inventory → Storage Locations); an item listing none offers nothing. Its default fills in by itself. Every location that is filled in is checked <b>on save</b>. Rejected Storage Location is where QC-failed material is put aside." },
 			{ name: "Inspection Status / Inspection Call Log", note: "Present when any item on the receipt has <b>Inspection Required</b> ticked on its Item master. Covered in full under Inspection." },
 			{ name: "Inspection Accepted Qty / Rejected Qty / Remarks", note: "Read-only per row, written back when the Inspection Entry for this receipt is submitted." },
 			{ name: "Length / Width / Thickness / NOS / Sec UOM", note: "Same as everywhere else in the chain — and these are the values that land on the batch, so they need to describe what actually turned up, not what was ordered." },
@@ -2385,15 +2423,15 @@ const ERP_MANUAL_REFERENCE_CHILDREN = [
 			{ name: "Production Plan", note: "Standard ERPNext plan statuses. What matters here is submission: <b>Job work order &amp; MIP</b> only appears once the plan is submitted." },
 			{ name: "Job work order", note: "<b>Open → Working → Completed</b>. Open on submit; Working once any operation has quantity logged; Completed when every operation is submitted <i>and</i> the Material Issue Plan's Final Stock Entry is submitted. Re-derived on each of those events rather than latched, so cancelling the Final Stock Entry returns it to Working. (ERPNext's own receipt-driven statuses — Partially Received, Material Transferred — are unreachable here: a plan-driven job work order has no Subcontracting Receipt and no Raw Materials Supplied table, which is why every order used to sit on Open for its whole life.)" },
 			{ name: "Material Issue Plan", note: "<b>Open → In Progress → Completed</b>. In Progress from the first partial transfer; Completed when every row has been fully issued." },
-			{ name: "Supplier Operation Entry", note: "<b>Open → In Progress → Completed</b>. Logging any quantity in the Consumption Log moves it to In Progress. Completed is only accepted when every drawing has reached the quantity this operation was given and no inspection round is still Pending; setting it asks for confirmation and then submits. Every earlier operation in the sequence must already be submitted." },
-			{ name: "Inspection Entry", note: "<b>Open → Working → Completed</b>, plus <b>Feedback: Ok / Not Ok</b> on every row (on the header for a Job Card). Every row needs Feedback before Status can be set to Completed. Saving as Completed also submits, after a confirmation prompt." },
+			{ name: "Supplier Operation Entry", note: "<b>Open → In Progress → Completed</b>, read-only. Logging any quantity in the Consumption Log moves it to In Progress. <b>Mark as Complete</b> sets Completed — only when every drawing has reached the quantity this operation was given and no inspection round is still Pending — and submits after a confirmation. Every earlier operation in the sequence must already be submitted." },
+			{ name: "Inspection Entry", note: "<b>Open → Working → Partly Completed → Completed</b>. Partly Completed is set on save when part of the quantity is accepted. Choosing Completed submits, after a confirmation prompt. No Ok / Not Ok." },
 			{ name: "Inspection Status (on Supplier Operation Entry and Purchase Receipt)", note: "<b>Open → Working → Completed</b>. Not set by hand — it mirrors the status of the Inspection Entry that answered the latest round when that entry is submitted." },
 			{ name: "Inspection Call Log — Round Status", note: "<b>Pending → Completed</b>, per round. Pending until that round's Inspection Entry is submitted." },
 			{ name: "Cut Sheet", note: "<b>Draft → Active → Fully Allocated → Consumed</b>. Active once the cutting plan is set, Fully Allocated when every piece on the sheet has been claimed by a job, Consumed once the material has actually moved." },
 			{ name: "Delivery Challan (Gate Pass)", note: "<b>Draft → Material Out → Partially Returned / Overdue → Returned</b>, with <b>Material In</b> for a Return Entry. Derived, never chosen. Overdue outranks Partially Returned so anything past its return date still reads Overdue; Returned outranks Overdue, so a late but complete return clears the flag. Cancelling a Return Entry reopens its source." },
 		],
 		notes: [
-			"Statuses on this app's own documents are driven by what has happened to them, not chosen from a dropdown — the two exceptions are Supplier Operation Entry, where the operator marks Completed before submitting, and Inspection Entry, where the inspector sets the status and the Feedback.",
+			"Statuses on this app's own documents are driven by what has happened to them, not chosen from a dropdown — the two exceptions are Supplier Operation Entry, where the operator presses Mark as Complete, and Inspection Entry, where the inspector chooses Completed.",
 		],
 	},
 	{
@@ -2815,7 +2853,8 @@ const ERP_MANUAL_FINISHED_GOODS_CHILDREN = [
 		fields: [
 			{ name: "Refused on a finished-goods row", note: "No batch; a batch of another Sales Order, or one tied to no order; part pieces; more Nos than the batch holds in the warehouse; more Nos on one Sales Order line than it still has to deliver." },
 			{ name: "Delivered NOS", note: "On the Sales Order line, net of returns. Recounted on every submit and cancel." },
-		],
+				{ name: "Source Storage Location", note: "Shown in the items grid. Its picker lists only the locations holding that item — or the row's batch — with the quantity in each, and it is filled for you when one location holds it. A location without enough stock is refused on save, naming where the stock actually is." },
+			],
 		buttons: [
 			{ name: "Get FG Batches", note: "On a draft Delivery Note with finished-goods rows. Adds one row per ticked drawing batch." },
 			{ name: "Delivery Note (pending Nos)", note: "On the Sales Order, under Create. ERPNext decides “fully delivered” by Kg, and weighed pieces are often heavier than ordered, so the Kg can run out while pieces are still to go — ERPNext then hides its own Delivery Note button. This one appears while any line still has Nos pending, and offers those lines." },
@@ -2823,6 +2862,23 @@ const ERP_MANUAL_FINISHED_GOODS_CHILDREN = [
 		],
 		notes: [
 			"<b>Heavier pieces and ERPNext's allowance.</b> If the delivered Kg goes over the ordered Kg, ERPNext refuses the Delivery Note unless its over-delivery allowance allows it. That allowance is 0% on this site until it is set (Stock Settings, or on the item). The Nos are always capped at what was ordered; the Kg limit is ERPNext's alone.",
+		],
+	},
+	{
+		id: "fg-packing-slip",
+		title: "Packing Slip",
+		kicker: "Pieces packed, weight follows",
+		purpose:
+			"Made from a draft Delivery Note (<b>Create → Packing Slip</b>). Each row counts " +
+			"<b>pieces</b>: Qty is the Delivery Note row's Nos and Net Weight is the Kg of one piece, " +
+			"so the header <b>Net Weight</b> — Qty × Net Weight, added up — comes out at the Delivery " +
+			"Note's Kg. Also under Sales in the sidebar.",
+		fields: [
+			{ name: "Qty / Net Weight", note: "Filled from the Delivery Note row: Nos, and Kg ÷ Nos. Pack fewer pieces on a slip and the Kg follows." },
+			{ name: "Delivery Note Qty Packed", note: "Read-only, per row: what this row packs in the Delivery Note's own unit (Kg). This — not the piece count — is what adds up into the Delivery Note's Packed Qty, so the Delivery Note still submits once everything is packed." },
+		],
+		notes: [
+			"A slip cannot pack more Kg than is still unpacked on its Delivery Note row; the last slip takes exactly what is left, so the total lands on the Delivery Note's Kg to the gram.",
 		],
 	},
 	{

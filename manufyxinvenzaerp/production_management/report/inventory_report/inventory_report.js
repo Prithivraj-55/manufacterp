@@ -22,6 +22,12 @@ frappe.query_reports["Inventory Report"] = {
 			options: "Item",
 		},
 		{
+			fieldname: "storage_location",
+			label: __("Storage Location"),
+			fieldtype: "Link",
+			options: "Storage Location",
+		},
+		{
 			fieldname: "company",
 			label: __("Company"),
 			fieldtype: "Link",

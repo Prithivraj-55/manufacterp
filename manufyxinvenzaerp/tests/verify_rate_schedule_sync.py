@@ -194,7 +194,7 @@ def run():
         check("the blank row was seeded from the drawing",
               seeded_row.custom_rate_schedule, drawing_rs)
         check("and was recorded as seeded, not edited",
-              pp_rows[0].name in plan.flags.rate_schedule_seeded_rows, True)
+              (pp_rows[0].name, "fabrication") in plan.flags.rate_schedule_seeded_rows, True)
 
     frappe.db.rollback()
     print()

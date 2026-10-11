@@ -64,7 +64,9 @@ def run():
     # "top" argument anywhere in it is unambiguous -- and does not depend on how
     # the arguments happen to be spread across lines.
     body = add_view_all.group(0) if add_view_all else ""
-    check("it adds exactly one grid button", body.count("add_custom_button("), 1)
+    # mfx_grid_button(grid, icon, label, ...) since v16 escapes labels (no HTML icon).
+    check("it adds exactly one grid button",
+          body.count("add_custom_button(") + body.count("mfx_grid_button("), 1)
     check("and places it in the 'top' toolbar", '"top"' in body, True)
     check("Update Batch is still 'top' too",
           bool(re.search(r'__\("Update Batch"\).*?"top"', mip_js, re.S)), True)

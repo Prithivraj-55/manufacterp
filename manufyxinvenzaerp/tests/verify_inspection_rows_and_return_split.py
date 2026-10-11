@@ -7,8 +7,9 @@ inspection results.
   2. Operation Entry: Create Inspection is a form button with a date popup; one call
      logs the round and creates the entry. Weight Summary in two columns, status and
      call date hidden, Inspection Entry under Connections.
-  3. Inspection Entry: Feedback on every row (both tables), Rework Remarks on drawing
-     rows, mandatory with a rejection. The header values are derived from the rows.
+  3. Inspection Entry: Rework Remarks on drawing rows, mandatory with a rejection, and
+     derived onto the header. No Ok / Not Ok (removed Oct 2026); Partly Completed is
+     read off the quantities.
      Header in three columns, Contractor beside Supplier.
 
 Everything runs inside ONE transaction that is rolled back (frappe.db.commit is a
@@ -164,12 +165,14 @@ def _soe_create_inspection():
 
 def _entry_rules(entry):
     print("\n=== 3. Inspection Entry: per-row results ===")
+    # Ok / Not Ok was removed on the client's request (Oct 2026): the result is read
+    # from the quantities, and Partly Completed says when only part is cleared.
     f = _meta_fields("SOE Inspection Item")
-    check("drawing rows: Feedback + Rework Remarks in the grid",
-          (f["feedback"].in_list_view, f["rework_remarks"].in_list_view), (1, 1))
+    check("drawing rows: no Feedback, Rework Remarks in the grid",
+          ("feedback" in f, f["rework_remarks"].in_list_view), (False, 1))
     check("Rework Remarks mandatory with a rejection", f["rework_remarks"].mandatory_depends_on, "eval:doc.reject_qty>0")
     g = _meta_fields("Inspection Entry Item")
-    check("item rows: Feedback in the grid", g["feedback"].in_list_view, 1)
+    check("item rows: no Feedback", "feedback" in g, False)
     for dt in ("SOE Inspection Item", "Inspection Entry Item"):
         width = sum(flt(x.columns) or 2 for x in frappe.get_meta(dt).fields if x.in_list_view and not x.hidden)
         check("%s grid fits 11 columns" % dt, width <= 11, True)
@@ -177,11 +180,11 @@ def _entry_rules(entry):
     h = _meta_fields("Inspection Entry")
     check("header: Contractor added", h["contractor"].options, "Contractor")
     order = [x.fieldname for x in frappe.get_meta("Inspection Entry").fields]
-    top = order[: order.index("section_break_status")]
+    top = order[: order.index("section_break_remarks")]
     check("header in three columns", sum(1 for x in top if h[x].fieldtype == "Column Break"), 2)
-    check("header Feedback / Rework Remarks only for a Job Card",
-          (h["feedback"].depends_on, h["section_break_remarks"].depends_on),
-          ('eval:doc.source_doctype=="Job Card"', 'eval:doc.source_doctype=="Job Card"'))
+    check("header: no Feedback; Rework Remarks only for a Job Card",
+          ("feedback" in h, h["section_break_remarks"].depends_on),
+          (False, 'eval:doc.source_doctype=="Job Card"'))
 
     if not entry:
         print("  SKIP live row rules (no entry created above)")
@@ -189,36 +192,22 @@ def _entry_rules(entry):
     entry.__dict__.pop("__islocal", None)
     r0 = entry.soe_items[0]
 
-    r0.accept_qty, r0.feedback = 1, "Ok"          # 1 of 2 rejected, yet Ok
-    check("row Ok with a rejection -> refused", _throws(entry.validate, "cannot be ok"), True)
     for r in entry.soe_items:
-        r.accept_qty, r.feedback, r.rework_remarks = 2, "Not Ok", ""
-    check("row Not Ok with nothing rejected -> refused", _throws(entry.validate, "cannot be not ok"), True)
-    r0.accept_qty, r0.feedback = 1, "Not Ok"
-    for r in entry.soe_items[1:]:
-        r.feedback = "Ok"
+        r.accept_qty, r.rework_remarks = 2, ""
+    r0.accept_qty = 1
     check("rejection without Rework Remarks -> refused", _throws(entry.validate, "rework remarks"), True)
     r0.rework_remarks = "weld bead uneven"
+    entry.status = "Working"
     entry.validate()
-    check("header Feedback derived: Not Ok when a row is Not Ok", entry.feedback, "Not Ok")
+    check("part cleared -> Partly Completed", entry.status, "Partly Completed")
     check("header Rework Remarks derived from the rows",
           entry.rework_remarks, "%s: weld bead uneven" % (r0.customer_drawing_number or r0.drawing))
-
-    entry.status = "Completed"
-    entry.soe_items[-1].feedback = ""
-    check("submit refused while a row has no Feedback", _throws(entry.before_submit, "feedback"), True)
-    r0.accept_qty, r0.feedback = 2, ""
-    for r in entry.soe_items:
-        r.accept_qty = 2
-    entry.soe_items[0].feedback = "Ok"
+    r0.accept_qty = 2
     entry.validate()
-    check("header blank until every row has Feedback",
-          entry.feedback if len(entry.soe_items) > 1 else "", "")
-    for r in entry.soe_items:
-        r.feedback = "Ok"
-    entry.validate()
-    check("header Ok once every row is Ok", entry.feedback, "Ok")
+    check("all cleared -> Working until the inspector completes it", entry.status, "Working")
     check("and no Rework Remarks without a rejection", entry.rework_remarks, "")
+    entry.status = "Working"
+    check("submit refused unless Completed", _throws(entry.before_submit, "completed"), True)
 
 
 def _patch():

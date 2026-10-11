@@ -1488,3 +1488,39 @@ if the client wants to see it exercised directly.
 
 **Key files touched**: `production_management/doctype/material_planning/material_planning.js`,
 `production_management/doctype/material_planning/material_planning.py`. No schema change.
+
+---
+
+## October 2026 client list (v16, branch `v16_fixes`)
+
+Questions and the client's answers: `~/Downloads/Client requirements - questions (10 Oct 2026).docx`.
+End-to-end check: `tests/verify_client_requirements_oct.py` (63 checks, runs in a rolled-back
+transaction). Screens: `tests/ui_audit.py` (Playwright, run outside bench).
+
+| # | Requirement | Status | Decision / where |
+|---|---|---|---|
+| 1 | BOM template in the client's column order | 🔧 | Client's 15 columns in order; Nature of Work + Fabrication/Painting after FG Item, Material Spec before Grade. Description imported into Drawing FG Description. Old "Rate Schedule" header still read. `so_drawing_import.py` |
+| 2 | PR Location | 🔧 | No header field (client: per row from the item master). Rows offer only the Item's own Storage Locations; none listed → none allowed. Checked on save. `storage_location.py` |
+| 3 | MRS No. / Cutting Plan No. | 🔧 | Optional, RM→supplier, partial, CNC→supplier popups (not RM→CNC). On the Stock Entry, editable until submit. |
+| 4 | Fabrication / Painting Rate Schedule | 🔧 | Same master, no category. Painting = link + Rate/KG only. Existing field renamed Fabrication. Syncs Drawing ↔ BOM ↔ PP row ↔ SO Drawing List row; Nature of Work SO row ↔ Drawing. `rate_schedule_sync.py` |
+| 5 | JWO contractor-wise print | 🔧 | No separate tab (client): 🖨 per operation row → browser print, signatures, no rates. SCO_OPS_SCRIPT in setup.py |
+| 6 | Inspection on front page | — | Already in workspace |
+| 7 | Inspection Entry layout / Ok-Not Ok / Partly Completed | 🔧 | 3rd column Status/Date/Remarks; Ok/Not Ok removed everywhere; Partly Completed automatic + list indicator |
+| 8 | Operation Entry list | 🔧 | Full JWO number (widened column), Operation, Supplier, Contractor; status as indicator; Work Order removed |
+| 9 | Operation Entry Mark as Complete | 🔧 | Green button, existing checks + confirm, Status read-only, standard Submit hidden |
+| 10 | Delivery Note in workspace | — | Already there |
+| 11 | Packing Slip | 🔧 | Standard Net Weight (no rename); Qty = Nos, Net Weight = Kg/Nos; DN packed qty kept in Kg via `custom_dn_qty`. Added to Sales sidebar. `selling_management/packing_slip.py` |
+| 12 | Sales Invoice FG description | — | Not now (client) |
+| 13 | Excess return warehouse / Return Slip No. | 🔧 | MIP Excess Return Warehouse + Location (default Source warehouse, patch for existing plans; location required in the popup only). Return Slip No. on the Stock Entry |
+| 14 | Scrap | 🔧 | Item → Is Scrap (many scrap items); multi-row Scrap table in the return popup; Kg leaves the job's supplier stock (no double count); logged on the MIP, lowers Process Loss |
+
+Follow-ups done in the same session: v16 escaped-HTML button labels fixed (13 buttons, `mfx_grid_button`);
+Material Planning Production Plan field hidden; Material Mapping column widths; Item Inventory tab
+order; Storage Location read-only next to Warehouse on MP Available Raw Materials / Material
+Mapping; Source/Target Storage Location columns on Delivery Note and Stock Entry grids.
+
+Known open: `verify_partial_transfer_reservation` / `verify_cut_sheet_new_batch` fixtures receive into
+Stores without a location (Stores now requires one); `verify_fg_final_stock_entry`,
+`verify_reservation_release_on_transfer`, `verify_fg_end_to_end`, `verify_fg_sales_order`,
+`verify_status_mirror`, `verify_create_operation_and_inspection_gate` fail on the code before
+this work too.

@@ -12,7 +12,6 @@
   "column_break_result",
   "accept_qty",
   "reject_qty",
-  "feedback",
   "remarks"
  ],
  "fields": [
@@ -68,14 +67,6 @@
    "in_list_view": 1,
    "label": "Rejected Qty",
    "read_only": 1,
-   "columns": 1
-  },
-  {
-   "fieldname": "feedback",
-   "fieldtype": "Select",
-   "label": "Feedback",
-   "options": "\nOk\nNot Ok",
-   "in_list_view": 1,
    "columns": 1
   },
   {

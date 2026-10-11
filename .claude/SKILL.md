@@ -243,7 +243,12 @@ manufyxinvenzaerp/
   DUNO`; that switch must never gate the two throws.
 - **Rate Schedule propagates only on an actual EDIT, never on disagreement.**
   `rate_schedule_sync.py` keeps one drawing's schedule the same on the Drawing, its
-  BOM and every Production Plan row quoting it, in all three directions. Every hook
+  BOM, every Production Plan row quoting it and its Sales Order Drawing List row, in
+  every direction. Since Oct 2026 there are TWO kinds, keyed by `kind`: **Fabrication**
+  (the original `rate_schedule` / `custom_rate_schedule` fields, renamed by label only)
+  and **Painting** (`painting_rate_schedule` / `custom_painting_rate_schedule`, link +
+  Rate/KG only). `_LINK_FIELDS` / `_DETAIL_MAPS` map kind × doctype; a kind travels on
+  its own. Nature of Work rides the same hooks (SO row → Drawing, draft Drawing → SO row). Every hook
   gates on `has_value_changed` and returns early on insert. Reconciling "documents
   that disagree" instead sounds tidier and is destructive: every BOM and plan created
   before the feature carries a blank, so the first unrelated save of one would push
@@ -263,6 +268,43 @@ manufyxinvenzaerp/
   (`_add_io_buttons` in material_planning.js), so hiding a column there also drops it from
   the download. `layout_*_grid` in setup.py still set the widths deliberately; the
   "budget" reasoning in their docstrings describes v15.
+  **Column width is in pixels on v16**: `grid.js get_column_width` takes DocField
+  `width` first, else `columns` mapped 1→60px, 2→100px … (`LEGACY_COLSIZE_TO_PX`). A grid
+  of `columns: 1` fields is a row of 60px slivers — set `width` (e.g. Material Planning
+  Material Mapping) and let the grid scroll sideways.
+- **Storage Location: only what the Item lists, checked on every save.**
+  `stock_management/storage_location.py`. Mandatory per warehouse via Warehouse Type
+  `custom_storage_location_applicable` (never the Inventory Dimension's own `reqd`).
+  `allowed_locations` = the Item's Storage Locations rows for that warehouse and NOTHING
+  else (client, Oct 2026) — an item listing none has no allowed location there.
+  `check_locations` (validate) refuses a filled-in location that does not fit; a BLANK one
+  is refused only on submit (`validate_locations`), because the app saves its own drafts
+  first. Exempt from the item list (`_system_placed`): Stock Entries carrying
+  `custom_mip_ref` (the plan/popup chose the location) and a same-warehouse Repack back to
+  the batch's own location. The MIP's `excess_material_storage_location` is
+  `OPTIONAL_UNTIL_USED` — required by the return popup, not on every plan save.
+- **Packing Slip counts pieces, the Delivery Note counts Kg — `custom_dn_qty` bridges them.**
+  `selling_management/packing_slip.py` overrides the class and `make_packing_slip`: Qty =
+  the DN row's Nos, Net Weight = Kg per piece, and `status_updater.source_field` is
+  `custom_dn_qty` (Kg packed). ERPNext's own source (`qty`) would put Nos into the DN's
+  `packed_qty`, and `DeliveryNote.validate_packed_qty` then refuses every submit.
+- **Scrap leaves the supplier with the excess return, never from nowhere.** Scrap items are
+  Item → `custom_is_scrap` (non-batch, Kg). `create_mip_excess_return_entry` takes scrap Kg
+  out of the job's remaining supplier stock (largest batch first, after the off-cuts took
+  their own item) in the same Repack, so Process Loss (ledger-based) shrinks by it.
+  `_set_excess_repack_rates(se, feeds)` costs each incoming group from the out rows that
+  fed it — keyed by item for off-cuts, `scrap::<item>` for scrap.
+- **Inspection Entry has no Ok / Not Ok** (removed Oct 2026, fields gone from all three
+  doctypes; DB columns kept). `_set_partly_completed` derives Partly Completed on save from
+  accepted vs total; Completed stays the inspector's choice and submits.
+- **Item's Inventory tab order is a `field_order` Property Setter** (`custom/item.json`,
+  `Item-main-field_order`), built from the live order with Storage Locations and Serial
+  Nos / Batches moved up. After an ERPNext upgrade, fields it does not list are placed by
+  ERPNext's own order.
+- **Repeated `bench migrate` can hit `QueueOverloaded` (650 jobs).** Each migrate re-syncs
+  ~340 Property Setters and every replacement enqueues `delete_dynamic_links`. The worker
+  drains it; wait (`bench --site … show-pending-jobs`) and migrate again — do not clear the
+  queue.
 - **`cannot_add_rows` is NOT a DocField property (v15.116 and v16 both).** Grep
   `docfield.json` — it is not there. It exists only as a runtime flag the browser reads
   off the grid object (`grid.js`: `this.cannot_add_rows || (this.df && this.df.cannot_add_rows)`),
@@ -280,6 +322,14 @@ manufyxinvenzaerp/
   fails silently for an unknown name. `eye` and `filetype` are **not** in the set
   (verified against the injected sprite, 179 symbols); `view`, `file`, `add`, `search`,
   `check`, `refresh`, `tick`, `move`, `edit` are.
+- **Button labels are plain text on v16 -- never HTML.** `frappe.ui.button` escapes the
+  label, so `frappe.utils.icon("edit", "xs") + " " + __("Update Batch")` printed the raw
+  `<svg …>` markup on 13 buttons after the migration. Pass the text alone and add the icon
+  with `mfx_grid_button(grid, icon, label, click, position)` or
+  `mfx_with_icon(frm.add_custom_button(label, …), icon)` (`public/js/mfx_buttons.js`).
+  `tests/ui_audit.py` (Playwright, run outside bench) opens every customised screen and
+  reports raw markup, clipped/empty buttons, missing icons and JS errors -- run it after
+  any desk upgrade.
 - **Button colour is a shared system, not per-file CSS.** `public/js/mfx_buttons.js`
   (in the app bundle) defines four tones and `window.mfx_paint_*` helpers. Blue = the
   next step forward; **outlined blue = reads and reports, writes nothing** (Check

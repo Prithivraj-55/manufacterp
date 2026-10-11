@@ -47,6 +47,7 @@ def run():
     mip.posting_date = today()
     mip.production_plan = pp.name
     mip.excess_return_warehouse = ctx.warehouse
+    mip.excess_material_warehouse = ctx.warehouse  # where the off-cut comes back (Oct 2026)
     mip.append("excess_return_items", {
         "item_code": item, "parent_item_group": "Structurals",
         "length": 3000, "sec_qty": 1, "qty": 30, "uom": "Kg",

@@ -21,13 +21,15 @@ window.mfx_confirm_rate_schedule_change = function (opts) {
 			new_schedule: opts.new_schedule || "",
 			source_doctype: opts.source_doctype,
 			source_name: opts.source_name,
+			kind: opts.kind || "fabrication",
 		},
 		callback(r) {
 			let d = r.message || {};
 			if (!d.conflict) return;
 			frappe.confirm(
-				__("Drawing <b>{0}</b> already uses Rate Schedule <b>{1}</b>.", [
+				__("Drawing <b>{0}</b> already uses {1} <b>{2}</b>.", [
 					frappe.utils.escape_html(d.drawing),
+					opts.kind === "painting" ? __("Painting Rate Schedule") : __("Fabrication Rate Schedule"),
 					frappe.utils.escape_html(d.current),
 				]) +
 				"<br><br>" +

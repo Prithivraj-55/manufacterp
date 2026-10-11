@@ -80,12 +80,14 @@ def run():
 	print("entry.status field present:", "status" in entry.as_dict())
 	print("entry.items:", [(r.item_code, r.qty, r.accept_qty, r.reject_qty) for r in entry.items])
 	entry.status = "Working"  # deliberately still in progress, despite a partial reject
-	entry.feedback = "Not Ok"
 	entry.overall_remarks = "round 1 overall remarks"
 	entry.items[0].accept_qty = 7
 	entry.items[0].remarks = "test partial reject"
 	entry.save(ignore_permissions=True)
 	print("after save, reject_qty auto-calc =", entry.items[0].reject_qty)
+	print("after save, status (7 of 10 cleared) =", entry.status)
+	assert entry.status == "Partly Completed", entry.status
+	entry.status = "Completed"
 	entry.submit()
 	print("entry submitted, inspection_complete_date =", entry.inspection_complete_date)
 
@@ -109,7 +111,6 @@ def run():
 	entry2_name = insp.create_inspection_entry("Purchase Receipt", pr.name)
 	entry2 = frappe.get_doc("Inspection Entry", entry2_name)
 	entry2.status = "Completed"
-	entry2.feedback = "Ok"
 	entry2.items[0].accept_qty = entry2.items[0].qty
 	entry2.save(ignore_permissions=True)
 	print("round 2 reject_qty =", entry2.items[0].reject_qty)

@@ -30,4 +30,14 @@ frappe.ui.form.on("BOM", {
 			on_decline: (current) => frm.set_value("custom_rate_schedule", current || ""),
 		});
 	},
+	custom_painting_rate_schedule(frm) {
+		mfx_confirm_rate_schedule_change({
+			kind: "painting",
+			drawing: frm.doc.custom_drawing,
+			new_schedule: frm.doc.custom_painting_rate_schedule,
+			source_doctype: "BOM",
+			source_name: frm.doc.name,
+			on_decline: (current) => frm.set_value("custom_painting_rate_schedule", current || ""),
+		});
+	},
 });

@@ -96,6 +96,7 @@ def run():
     mip.posting_date = today()
     mip.production_plan = pp.name
     mip.excess_return_warehouse = ctx.warehouse
+    mip.excess_material_warehouse = ctx.warehouse  # where the off-cut comes back (Oct 2026)
     mip.insert(ignore_permissions=True)
 
     from manufyxinvenzaerp.subcontracting_management.doctype.material_issue_plan.material_issue_plan import (

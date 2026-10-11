@@ -17,25 +17,13 @@ frappe.ui.form.on("Inspection Entry", {
 	},
 
 	// Marking Status as Completed is the one action that finalizes an Inspection
-	// Entry — there is no separate manual Submit step. Feedback must already be
-	// entered (revert + tell the user otherwise); only then confirm and
-	// save-and-submit in one shot. Declining the confirm also reverts Status.
+	// Entry — there is no separate manual Submit step: confirm, then save-and-submit
+	// in one shot. Declining the confirm reverts Status. Partly Completed is not
+	// picked here; the server sets it on save from the cleared quantity.
 	status(frm) {
 		if (frm.doc.docstatus !== 0) return;
 
 		if (frm.doc.status === "Completed") {
-			// Operation and receipt inspections carry Feedback per row; a Job Card
-			// inspection has no rows and keeps it on the header.
-			const rows = frm.doc.source_doctype === "Supplier Operation Entry" ? frm.doc.soe_items
-				: frm.doc.source_doctype === "Purchase Receipt" ? frm.doc.items : null;
-			const missing = rows ? (rows || []).filter((r) => !r.feedback).map((r) => r.idx) : [];
-			if (rows ? missing.length : !frm.doc.feedback) {
-				frappe.msgprint(rows
-					? __("Enter Feedback on every row to complete it (rows {0}).", [missing.join(", ")])
-					: __("Enter Feedback to complete it."));
-				frm.set_value("status", frm.__insp_prev_status || "Working");
-				return;
-			}
 			frappe.confirm(
 				__("Mark this Inspection as Complete and Submit? Once submitted, it cannot be edited."),
 				function () {

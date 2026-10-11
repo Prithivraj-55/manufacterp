@@ -649,6 +649,30 @@
    "property_type": "Check",
    "row_name": null,
    "value": "0"
+  },
+  {
+   "creation": "2026-10-10 23:30:00.000000",
+   "doc_type": "Delivery Note Item",
+   "doctype_or_field": "DocField",
+   "field_name": "storage_location",
+   "modified": "2026-10-10 23:30:00.000000",
+   "name": "Delivery Note Item-storage_location-in_list_view",
+   "property": "in_list_view",
+   "property_type": "Check",
+   "row_name": null,
+   "value": "1"
+  },
+  {
+   "creation": "2026-10-10 23:30:00.000000",
+   "doc_type": "Delivery Note Item",
+   "doctype_or_field": "DocField",
+   "field_name": "storage_location",
+   "modified": "2026-10-10 23:30:00.000000",
+   "name": "Delivery Note Item-storage_location-width",
+   "property": "width",
+   "property_type": "Data",
+   "row_name": null,
+   "value": "130"
   }
  ],
  "sync_on_migrate": 1

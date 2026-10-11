@@ -74,7 +74,7 @@ def get_data(filters):
 		"Material Issue Plan",
 		filters=mip_filters,
 		fields=["name", "company", "posting_date", "subcontracting_order",
-				"excess_return_warehouse", "production_plan"],
+				"excess_return_warehouse", "fg_storage_location", "production_plan"],
 	)
 	mip_map = {m.name: m for m in mips}
 	if not mip_map:
@@ -150,6 +150,7 @@ def get_data(filters):
 			"subcontracting_order": mip.subcontracting_order,
 			"supplier": sco.get("supplier"),
 			"excess_return_warehouse": mip.excess_return_warehouse,
+			"fg_storage_location": mip.fg_storage_location,
 			"item_code": r.item_code,
 			"item_name": r.item_name,
 			"parent_item_group": r.parent_item_group,
@@ -190,6 +191,7 @@ def get_columns():
 		{"label": _("Subcontracting Order"), "fieldname": "subcontracting_order", "fieldtype": "Link", "options": "Subcontracting Order", "width": 150},
 		{"label": _("Supplier"), "fieldname": "supplier", "fieldtype": "Link", "options": "Supplier", "width": 140},
 		{"label": _("Finished Goods Warehouse"), "fieldname": "excess_return_warehouse", "fieldtype": "Link", "options": "Warehouse", "width": 160},
+		{"label": _("Storage Location"), "fieldname": "fg_storage_location", "fieldtype": "Link", "options": "Storage Location", "width": 120},
 		{"label": _("Item Code"), "fieldname": "item_code", "fieldtype": "Link", "options": "Item", "width": 130},
 		{"label": _("Item Name"), "fieldname": "item_name", "fieldtype": "Data", "width": 160},
 		{"label": _("Item Group"), "fieldname": "parent_item_group", "fieldtype": "Data", "width": 100},

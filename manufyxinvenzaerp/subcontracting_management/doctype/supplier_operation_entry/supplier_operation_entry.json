@@ -47,7 +47,7 @@
   {
    "fieldname": "work_order",
    "fieldtype": "Link",
-   "in_list_view": 1,
+   "in_list_view": 0,
    "label": "Work Order",
    "options": "Work Order",
    "read_only": 1
@@ -55,10 +55,11 @@
   {
    "fieldname": "subcontracting_order",
    "fieldtype": "Link",
-   "label": "Subcontracting Order",
+   "label": "Job Work Order",
    "options": "Subcontracting Order",
    "reqd": 1,
-   "read_only": 1
+   "read_only": 1,
+   "in_list_view": 1
   },
   {
    "fieldname": "production_plan",
@@ -99,7 +100,8 @@
    "fieldtype": "Link",
    "label": "Supplier",
    "options": "Supplier",
-   "read_only": 1
+   "read_only": 1,
+   "in_list_view": 1
   },
   {
    "fieldname": "contractor",
@@ -107,7 +109,8 @@
    "options": "Contractor",
    "label": "Contractor",
    "read_only": 1,
-   "description": "Who carries out this operation when it is an Internal Jobcard -- taken from the Production Plan's Process Planning row, as Supplier is on a Subcontractor one."
+   "description": "Who carries out this operation when it is an Internal Jobcard -- taken from the Production Plan's Process Planning row, as Supplier is on a Subcontractor one.",
+   "in_list_view": 1
   },
   {
    "fieldname": "supplier_warehouse",
@@ -121,7 +124,10 @@
    "fieldtype": "Select",
    "label": "Status",
    "options": "Open\nIn Progress\nCompleted",
-   "default": "Open"
+   "default": "Open",
+   "read_only": 1,
+   "in_list_view": 0,
+   "description": "Set automatically. Use Mark as Complete to complete and submit."
   },
   {
    "fieldname": "section_break_summary",
