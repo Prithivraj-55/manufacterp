@@ -1,7 +1,8 @@
 ---
 name: project1-manufyxinvenzaerp
 description: >
-  Load this skill whenever the user mentions: manufyxinvenzaerp, manufact site,
+  Load this skill whenever the user mentions: manufyxinvenzaerp, manufact / manufactv16 site,
+  "read manufact",
   drawing_management, item_management, material_request_management,
   production_management, production_plan_management, purchase_order_management,
   purchase_receipt_management, subcontracting_management, rfq_management,
@@ -15,9 +16,9 @@ description: >
 
 | Key         | Value                                                    |
 |-------------|----------------------------------------------------------|
-| Bench       | frappe-bench11 (v16) — frappe-bench1 is the v15 reference |
-| Site        | manufactv16 (copy of live, migrated) — manufact on bench1 |
-| App         | manufyxinvenzaerp (branch `v16-migration`)               |
+| Bench       | /home/craft/frappe-bench11 (v16)                         |
+| Site        | manufactv16 — the one working site (copy of live; emails muted, scheduler paused). Reset to masters + opening stock on 2026-10-18 — see the last section of `client_change_request_progress.md` |
+| App         | manufyxinvenzaerp (branch `v16_fixes`)                   |
 | App root    | apps/manufyxinvenzaerp/                                  |
 | Python pkg  | apps/manufyxinvenzaerp/manufyxinvenzaerp/                |
 | Frappe      | v16 (version-16)                                         |
@@ -29,6 +30,22 @@ description: >
 **Read `.claude/references/app_map.md` before doing anything else.**
 It is the single source of truth for file paths, method names, and module layout
 and is regenerated automatically on each git commit.
+
+**"Read manufact" means:** read the `manufactv16` site (its `site_config.json` and
+installed apps), then this file, `manufyxinvenzaerp_features.md` and the
+`.claude/references/` docs — all of the app's customization documentation — before
+starting work.
+
+## Every customization made in chat goes into these docs
+
+A change is not finished until it is written down here, in the same session:
+
+| What changed | Update |
+|---|---|
+| A feature or behaviour the client will see | `manufyxinvenzaerp_features.md` — a new or amended numbered section: what, why, key files, test |
+| A rule, trap or convention the next developer must know | `SKILL.md` → Coding conventions |
+| An item from a client change list | `.claude/references/client_change_request_progress.md` — its status row |
+| Doctypes, hooks, whitelisted methods, file layout | run `.claude/update_skill.sh` (regenerates `app_map.md`, `doctypes.md`, `hooks.md`, `api.md`) |
 
 ## Safety rule — never delete without asking first
 
@@ -51,6 +68,7 @@ Ask first, every time, going forward.)
 | File                                | Read when …                                                                       |
 |-------------------------------------|-----------------------------------------------------------------------------------|
 | `.claude/references/app_map.md`     | Any task — always read first; contains full file inventory and method index       |
+| `manufyxinvenzaerp_features.md`     | Any task — what every feature does and why, by numbered section                   |
 | `.claude/references/doctypes.md`    | Adding/changing a doctype, controller, or child table                             |
 | `.claude/references/hooks.md`       | Touching doc_events, override_doctype_class, or app lifecycle hooks               |
 | `.claude/references/api.md`         | Adding or calling a `@frappe.whitelist()` method; checking existing API surface   |
@@ -133,7 +151,7 @@ manufyxinvenzaerp/
                               #   end calls is actually whitelisted, after a lost
                               #   decorator shipped a broken Reserve button to live.
     └── verify_*.py           #   86 standalone checks, each with a run() called
-                              #   directly: `bench --site manufact execute
+                              #   directly: `bench --site manufactv16 execute
                               #   manufyxinvenzaerp.tests.<name>.run`
                               #   They print OK/FAIL per assertion and finish with
                               #   "ALL n CHECKS PASSED". Each one opens with WHY it
@@ -215,13 +233,12 @@ manufyxinvenzaerp/
   change request, then deleted outright on 2026-08-20 (1,827 lines). Subcontracting Order and
   Operation Entry do that work instead. Do not re-add anything to those two doctypes without
   checking why they were reverted.
-- **`bom_class_override.py` is a thin subclass of ERPNext's BOM — keep it thin.** It was a
-  full 1,655-line copy of v15's `bom.py`, which would not even import on v16 (`BOM Scrap Item`
-  became `BOM Secondary Item`; `get_operating_cost_per_unit` was removed). It now overrides
-  only five methods — `before_insert`, `set_bom_material_details`, `manage_default_bom`,
+- **`bom_class_override.py` is a thin subclass of ERPNext's BOM — keep it thin.** It
+  overrides only five methods — `before_insert`, `set_bom_material_details`, `manage_default_bom`,
   `calculate_rm_cost`, `get_exploded_items` — each ERPNext v16's own method with our change
   marked `manufyx:`. On an ERPNext upgrade, re-copy those five from the new `bom.py` and
-  re-apply the marked lines; never copy the whole file again. ERPNext's module-level
+  re-apply the marked lines; never copy the whole file — a full copy breaks on the first
+  core rename (e.g. `BOM Secondary Item`). ERPNext's module-level
   functions (`get_children`, `item_query`, …) are re-exported from ERPNext at the top so any
   old dotted path still resolves; the BOM form itself calls ERPNext's copies.
 - **DUNO/Mark No is unique only WITHIN a Sales Order, and a plan must not break that.**
@@ -256,22 +273,39 @@ manufyxinvenzaerp/
   nothing connecting the loss to the save. Writes go through `db_set`, which is also
   what stops the three-way sync recursing — and avoids re-running BOM costing as a
   side effect of correcting a label. `verify_rate_schedule_sync.py` check 4 is that case.
-- **v16 removed the child-table grid's 11-column budget — every `in_list_view` column
-  now renders.** v15's `grid.js setup_visible_columns` stopped at the first column that
-  pushed the running width past 11 and silently dropped it and everything after it (why
-  Purchase Receipt once showed no Accepted Warehouse). v16 deleted that line: all
-  `in_list_view` columns show, and a grid wider than 10 gets a horizontal scrollbar
-  (`grid_row.js`). So grids that were silently truncated on v15 are now WIDER — e.g.
-  Sales Order DUNO Item 5 → 15 columns, Material Planning Unavailable Item 5 → 15, Purchase
-  Order Item 6 → 12. To hide a column, turn its `in_list_view` off — but mind that
+- **Every `in_list_view` column of a child-table grid renders — there is no column
+  budget.** A grid wider than 10 gets a horizontal scrollbar (`grid_row.js`); e.g. Sales
+  Order DUNO Item shows 15 columns, Material Planning Unavailable Item 15, Purchase Order
+  Item 12. To hide a column, turn its `in_list_view` off — but mind that
   Material Planning's CSV **Download** picks its columns by `in_list_view`
   (`_add_io_buttons` in material_planning.js), so hiding a column there also drops it from
   the download. `layout_*_grid` in setup.py still set the widths deliberately; the
-  "budget" reasoning in their docstrings describes v15.
+  "11-column budget" reasoning in their docstrings is out of date.
   **Column width is in pixels on v16**: `grid.js get_column_width` takes DocField
   `width` first, else `columns` mapped 1→60px, 2→100px … (`LEGACY_COLSIZE_TO_PX`). A grid
   of `columns: 1` fields is a row of 60px slivers — set `width` (e.g. Material Planning
   Material Mapping) and let the grid scroll sideways.
+- **Desk navigation: the single sectioned sidebar, as on live (commit 11ddb90).** Manufyx has its
+  own desktop tile (`add_to_apps_screen`, route `/desk/manufyx`) and the `Manufyxinvenzaerp`
+  sidebar holds every section as Section Breaks; India Compliance / FAC tiles are hidden from
+  non-System-Managers (`apps_screen.hide_admin_only_apps`). The user confirmed this is what they
+  want (2026-10-11). A per-section rail and mounting Manufyx on ERPNext's rail were tried and
+  rejected the same day — do not propose either again. A new doctype or report goes into that
+  one sidebar and the Manufyx workspace.
+  Sidebar/workspace JSON whose database row is newer than the file is skipped by migrate; force
+  it with `frappe.modules.import_file.import_file_by_path(path, force=True)`.
+- **Warehouses / Storage Locations (since 2026-10-18):** RM Store (A1), RM Yard (A2–A20), Consumables
+  Store (C1–C10), Maintenance Store (M1–M10), all Warehouse Type `Storage Location Applicable`.
+  `Stores - MIPL` no longer exists (renamed RM Yard).
+- **No warehouse name is ever written into code or tests** (2026-10-18). Read it from configuration:
+  stock/RM warehouse = Stock Settings → Default Warehouse; WIP / FG = **Company** → Default WIP /
+  Finished Goods Warehouse (v16 moved them off Manufacturing Settings — its leftover Singles rows read
+  NULL); a Job Worker's warehouse = the Warehouse whose **Job Worker** (`custom_job_worker`, Link
+  Supplier) is that supplier (`overrides.resolve_supplier_warehouse`, which used to build
+  `"<Supplier> - <Abbr>"`). Tests use `tests/warehouses.py` (`stock_warehouse`, `wip_warehouse`,
+  `fg_warehouse`, `job_worker_warehouse`); mocks use `"_Test Mock Warehouse"`. Storage Locations are
+  not seeded either — `setup_storage_location` only registers the Inventory Dimension (seeding A-1/A-2
+  with no warehouse broke migrate once `warehouse` became mandatory).
 - **Storage Location: only what the Item lists, checked on every save.**
   `stock_management/storage_location.py`. Mandatory per warehouse via Warehouse Type
   `custom_storage_location_applicable` (never the Inventory Dimension's own `reqd`).
@@ -305,7 +339,7 @@ manufyxinvenzaerp/
   ~340 Property Setters and every replacement enqueues `delete_dynamic_links`. The worker
   drains it; wait (`bench --site … show-pending-jobs`) and migrate again — do not clear the
   queue.
-- **`cannot_add_rows` is NOT a DocField property (v15.116 and v16 both).** Grep
+- **`cannot_add_rows` is NOT a DocField property.** Grep
   `docfield.json` — it is not there. It exists only as a runtime flag the browser reads
   off the grid object (`grid.js`: `this.cannot_add_rows || (this.df && this.df.cannot_add_rows)`),
   so a doctype sync discards the key and the JSON alone does nothing. Set it on the
@@ -408,14 +442,11 @@ manufyxinvenzaerp/
   through a redirect (full page reload). Build links with `frappe.utils.get_form_link(doctype,
   name)` in JS and `frappe.utils.get_absolute_url` / `get_url_to_form` in Python; workspace
   shortcuts to reports use `type: "Report"`, not a URL.
-- **v16 validates Link fields that v15 silently let through.** v15's
-  `base_document.get_invalid_links` skipped the check whenever the Link had `fetch_from`
-  dependents (`item_code` → Material Spec/Grade, DUNO `item` → `item_name`, …) and the
-  target did not exist. v16 checks it, so a row pointing at a missing Item now fails the
-  save with "Could not find Row #N: …". The BOM-sheet import stages rows with a raw INSERT
-  and only WARNS about FG / material codes missing from the Item master — on v16 the Sales
-  Order will not save again until those items exist. Live data had no such dangling links
-  at migration (2026-09-30).
+- **Every Link field is validated, including those with `fetch_from` dependents**
+  (`item_code` → Material Spec/Grade, DUNO `item` → `item_name`, …). A row pointing at a
+  missing Item fails the save with "Could not find Row #N: …". The BOM-sheet import stages
+  rows with a raw INSERT and only WARNS about FG / material codes missing from the Item
+  master — the Sales Order will not save again until those items exist.
 - **India Compliance's own custom fields are NOT ours to export.** Customize Form's export
   takes every custom field on a doctype, and 468 IC fields (module GST India / Income Tax
   India / Audit Trail) had ended up in our `custom/*.json`, rewriting IC's definitions with
@@ -426,24 +457,19 @@ manufyxinvenzaerp/
 - **v16's own stock reservation stays off Production Plan and Job Work Order.**
   `setup.hide_v16_stock_reservation_on_pp_and_sco` hides their `reserve_stock` box —
   Material Planning owns reservations, and a second system would lock the same batches.
-- **`frappe.get_doc` takes (doctype, name) only on v16** — it is a singledispatch
-  function; a third positional argument (v15 ignored it) raises TypeError.
+- **`frappe.get_doc` takes (doctype, name) only** — it is a singledispatch
+  function; a third positional argument raises TypeError.
 - **No scheduler_events** are registered (all commented out in hooks.py).
 
-## This bench does not hot-reload
+## Reloading code on this bench
 
-`bench start` runs the web server with Werkzeug's auto-reloader enabled, and it does
-not work here -- touching a file leaves the serving child process untouched. Verified,
-not assumed: `touch` on a controller, then watch the child PID stay put.
+`bench start` (honcho) runs the web server with Werkzeug's auto-reloader, and on
+frappe-bench11 it works: saving a Python file restarts the child `frappe serve` (verified
+2026-10-10). `bench restart` is a no-op here -- it is for supervisor/systemd.
 
-So **a code change has no effect on the local site until `bench start` is restarted**
-(Ctrl+C in that terminal, then `bench start`). `bench restart` is a no-op on this bench
--- it is for supervisor/systemd, and this runs under honcho.
-
-This costs real time when it is forgotten: a fix lands, the screen keeps showing the old
-behaviour, and the obvious conclusion is that the fix was wrong. Two separate bugs were
-re-reported that way. Check the serving process's start time against the file's mtime
-before doubting the code:
+If a fix seems to have no effect, check the serving child's start time against the
+file's mtime before doubting the code -- a stale server has twice made a correct fix look
+wrong. If the child is older than the file, Ctrl+C and `bench start` again:
 
 ```bash
 ps -eo pid,lstart,cmd | grep "frappe serve" | grep -v grep
@@ -468,7 +494,7 @@ two the wrong way round costs the same hour as forgetting the reloader.
 ## Batch quantities do not live in the ledger's batch_no
 
 `Stock Ledger Entry.batch_no` is empty for anything received through a Purchase Receipt:
-Frappe (v15 and v16) records the batch in a **Serial and Batch Bundle** instead, and only some
+Frappe records the batch in a **Serial and Batch Bundle** instead, and only some
 flows (Stock Entry rows written with `use_serial_batch_fields`) fill the column in.
 
 So `SUM(actual_qty) ... GROUP BY batch_no` silently reports **zero for exactly the
@@ -490,37 +516,37 @@ Note the second form: passing `warehouse=None` returns a LIST, not a number, so
 ## Quick bench commands
 
 ```bash
-# Run from /home/craft/frappe-bench1/
+# Run from /home/craft/frappe-bench11/ with Node 24 (the shell default is Node 20)
+export PATH=$HOME/.nvm/versions/node/v24.15.0/bin:$PATH
 
 # Apply DB migrations after code changes
-bench --site manufact migrate
+bench --site manufactv16 migrate
 
 # Clear redis + file cache
-bench --site manufact clear-cache
+bench --site manufactv16 clear-cache
 
 # Build JS/CSS assets
 bench build --app manufyxinvenzaerp
 
-# Restart workers and web server
-bench restart
+# Restart: Ctrl+C the `bench start` terminal and start it again (`bench restart` is a no-op here)
 
 # Re-export ONE doctype's customizations after changing its fields in the UI.
 # There is no export-fixtures step any more — see "Custom Field / Property Setter".
-bench --site manufact console
+bench --site manufactv16 console
 >>> from frappe.modules.utils import export_customizations
 >>> export_customizations("Production Management", "Material Planning", sync_on_migrate=True)
 
 # Run app tests
-bench --site manufact run-tests --app manufyxinvenzaerp
+bench --site manufactv16 run-tests --app manufyxinvenzaerp
 
 # Run a single test file
-bench --site manufact run-tests --module manufyxinvenzaerp.tests.test_material_planning
+bench --site manufactv16 run-tests --module manufyxinvenzaerp.tests.test_material_planning
+
+# Run one standalone check
+bench --site manufactv16 execute manufyxinvenzaerp.tests.<verify_name>.run
 
 # Console / REPL
-bench --site manufact console
-
-# Reseed sample data helper
-bench --site manufact execute manufyxinvenzaerp.sample_data.create_sample_data
+bench --site manufactv16 console
 ```
 
 ## Deployment and CI

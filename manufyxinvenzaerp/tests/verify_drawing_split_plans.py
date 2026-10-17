@@ -231,8 +231,8 @@ def _scenario():
         mt._batch_free_qty = real_free
 
     print("\n=== 8. the reserved basis is unchanged for other callers ===")
-    reserved = _get_mp_reserved_batches(MP, "Stores - MIPL", None, duno_filter={DUNO})
-    held = _get_mp_reserved_batches(MP, "Stores - MIPL", None, duno_filter={DUNO}, basis="held")
+    reserved = _get_mp_reserved_batches(MP, frappe.db.get_value("Material Planning", MP, "for_warehouse"), None, duno_filter={DUNO})
+    held = _get_mp_reserved_batches(MP, frappe.db.get_value("Material Planning", MP, "for_warehouse"), None, duno_filter={DUNO}, basis="held")
     check("default basis: what is still reserved", flt(sum(x["qty"] for x in reserved if x["batch_no"] == BATCH), 3), 2563.549)
     check("held basis: what the row was given", flt(sum(x["qty"] for x in held if x["batch_no"] == BATCH), 3), TOTAL_KG)
     return mip_a, mip_b

@@ -34,12 +34,13 @@ Run: bench --site manufact execute manufyxinvenzaerp.tests.verify_fg_sales_invoi
 
 import frappe
 from frappe.utils import add_days, flt, nowdate
+from manufyxinvenzaerp.tests.warehouses import fg_warehouse
 
 checks = []
 _submitted = []  # (doctype, name), cancelled in reverse at the end
 
 COMPANY = "Manufyx Invenza Private Limited"
-WAREHOUSE = "Finished Goods - MIPL"
+WAREHOUSE = fg_warehouse()
 CUSTOMER = "ZZFG-A6 Customer"
 FG_ITEM = "ZZFG-A6-FG"
 BATCH = "ZZFG-A6-BATCH"

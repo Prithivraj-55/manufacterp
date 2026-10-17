@@ -39,11 +39,12 @@ import frappe
 from frappe.utils import add_days, flt, nowdate
 
 from manufyxinvenzaerp.production_management import fg_stock
+from manufyxinvenzaerp.tests.warehouses import fg_warehouse
 
 checks = []
 
 COMPANY = "Manufyx Invenza Private Limited"
-WAREHOUSE = "Finished Goods - MIPL"
+WAREHOUSE = fg_warehouse()
 CUSTOMER = "ZZFG-A5 Customer"
 FG_ITEM = "ZZFG-A5-FG"
 NON_FG_ITEM = "Bolt-M16X85"  # borrowed read-only: only put on a Sales Order

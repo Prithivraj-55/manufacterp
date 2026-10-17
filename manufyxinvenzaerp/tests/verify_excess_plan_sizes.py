@@ -17,6 +17,7 @@ import json
 
 import frappe
 from frappe.utils import flt
+from manufyxinvenzaerp.tests.warehouses import stock_warehouse
 
 checks = []
 
@@ -59,7 +60,7 @@ def _book(plan):
         _log_consolidated_excess,
     )
     mip = frappe.new_doc("Material Issue Plan")
-    mip.source_warehouse = "Stores - MIPL"
+    mip.source_warehouse = stock_warehouse()
     mip.save = lambda *a, **k: None
     _log_consolidated_excess(mip, [_line()], plan)
     return mip.excess_return_items
@@ -120,7 +121,7 @@ def _return_na():
         return
     mip = frappe.new_doc("Material Issue Plan")
     mip.name = MIP  # the log entry points at a real plan; everything is rolled back
-    mip.source_warehouse = "Stores - MIPL"
+    mip.source_warehouse = stock_warehouse()
     mip.save = lambda *a, **k: None
     plan = {"ISA100": {"return_na": 1}}
     before = frappe.db.count("Manufyx Decision Log", {"action": "Return NA at Transfer", "reference_name": MIP})

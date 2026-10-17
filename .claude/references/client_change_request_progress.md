@@ -1524,3 +1524,69 @@ Stores without a location (Stores now requires one); `verify_fg_final_stock_entr
 `verify_reservation_release_on_transfer`, `verify_fg_end_to_end`, `verify_fg_sales_order`,
 `verify_status_mirror`, `verify_create_operation_and_inspection_gate` fail on the code before
 this work too.
+
+---
+
+## Site data reset for go-live — manufactv16, 18 Oct 2026
+
+Source: live dump `20261018_000002-erp_manufyx_co_in` restored onto manufactv16 and migrated.
+Client sheets: `~/Downloads/Storage Location.xlsx`, `~/Downloads/Rate Schedule Final.xlsx`.
+Backups taken before each step: `sites/manufactv16/private/backups/20261018_001222-*` (old local DB)
+and `20261018_002541-*` (restored live, before the reset).
+
+**Transactions removed — kept only the Item master, all other masters, and the opening stock entry
+`MAT-STE-00001`** (Material Receipt dated 2026-04-01, 51 rows, 280,191.003 Kg, ₹1,40,09,550.15; its 51
+SLE, 2 GL, 49 bundles and 49 batches). Deleted with their child tables, ledgers, timeline rows and
+attachments: Sales Order, Purchase Order, Material Request, Purchase Receipt, Delivery Note, Packing
+Slip, the other 42 Stock Entries, Subcontracting Order, Production Plan, BOM, Repost Item Valuation,
+Process Deferred Accounting / Subscription, 184 bundles, 84 batches, Drawing, Material Planning,
+Material Issue Plan, Supplier Operation Entry, Cut Sheet, Inspection Entry, Delivery Challan, Manufyx
+Decision Log. Bins rebuilt from the ledger (v16's `repost_stock` only queues a Repost Item Valuation —
+with the scheduler paused it does nothing, so bins were set directly). Batch `custom_sec_qty` reset to
+the opening entry's Nos. Naming series of every deleted doctype reset to 0 (`MAT-STE-` to 1).
+
+**Warehouses** (user chose: keep system + supplier warehouses):
+- `Stores - MIPL` **renamed** to `RM Yard - MIPL` — the opening stock, its ledger, bins, all 68 Item
+  Defaults and Stock Settings' default warehouse moved with it.
+- New: `RM Store - MIPL`, `Consumables Store - MIPL`, `Maintenance Store - MIPL` (sheet spells it
+  "Maintanence").
+- All four have the new Warehouse Type **Storage Location Applicable** (`custom_storage_location_applicable` = 1).
+- Kept: Work In Progress, Finished Goods, Goods In Transit, CNC, Kavi Contractor, INTERNATIONAL STEEL PRO.
+  Deleted: the duplicate `Work in Progress - MIPL_1 - MIPL`.
+
+**Storage Locations**: A1 (RM Store); A2–A20 (RM Yard); C1–C10 (Consumables); M1–M10 (Maintenance).
+Old locations holding opening stock were **renamed 1:1** (user's choice): B-1→A2, B-2→A3, B-3→A4,
+B-5→A5, CNC→A6, CNCSET→A7. A-1 and A-2 (empty) deleted. Move stock to its real place with a
+same-warehouse Material Transfer.
+
+**Rate Schedules**: both old ones deleted (RS-001 @ ₹5, RS- O/S-001 A @ ₹7); 48 loaded from the sheet
+(32 In-House → Type Inhouse, 16 Out Sourcing → Outsource). Job Description split as the old RS-001
+was: Job Nature / Details / Job Reference; "Nature of works" → Work Content; sheet text kept as
+typed. 16 Job Natures created; spelling variants of one category share a Job Nature (Double angel →
+Double angle, Chennel Box → Channel box, Build-up Beam → Builtup Beam, HANDRAILS → HANDRAIL).
+
+**Code follow-up — done the same day**: no warehouse name is hard-coded any more (features §27). Tests
+read warehouses via `tests/warehouses.py`. Tests that receive into RM Yard still need a Storage Location
+on every inward row, and data-dependent checks (e.g. `verify_fg_masters` 1b expects FINGOODS001 to
+have transactions) now fail on the reset site.
+
+### Open questions (user will answer later)
+
+Storage Location sheet:
+1. "Maintanence Store" created as **Maintenance Store** — OK?
+2. RM Store has only A1, RM Yard A2–A20 — correct?
+3. All four warehouses make a location mandatory (done) — correct?
+4. A2–A7 are the renamed B-1…CNCSET, not physical positions — move the opening stock to real places.
+5. **No Item lists a Storage Location yet** — with the item-only rule every inward entry into these four
+   warehouses is refused. Need an item → location list or a rule (e.g. RM items A1–A20, consumables
+   C1–C10, maintenance M1–M10). No consumable / maintenance items exist yet.
+
+Rate Schedule sheet:
+6. **RS-011 is in the sheet twice** (Build-up Collum ₹6.5 and HANDRAILS ₹12) — HANDRAILS **not loaded**
+   until it has its own number.
+7. RS-005: description says "Rs.3.5", rate column 4 — loaded at 4.
+8. RS-008B "Up to 1MT" ₹6 = RS-008 "Up to 0.5MT" ₹6 — typo?
+9. RS-11B / RS-11C (vs RS-011…) and "RS- O/S-200" with a space — kept as typed; tidy?
+10. RS Ref (Fabrication / Blasting & Painting / Painting) has no field — the Painting Rate Schedule
+    picker on Drawing lists Fabrication schedules too. Add a Category field and filter by it?
+11. Spellings kept as typed: Collum, Turss, Paiting, Cussets, Assembley, Pannel, Braket's — correct them?

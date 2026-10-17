@@ -1,5 +1,5 @@
 # Manufyxinvenzaerp — Implemented Features
-**App:** manufyxinvenzaerp | **Platform:** Frappe v15 / ERPNext v15 | **Site:** manufact
+**App:** manufyxinvenzaerp | **Platform:** Frappe v16 / ERPNext v16 | **Site:** manufactv16
 **Date:** 2026-07-16
 
 ---
@@ -104,7 +104,7 @@ The largest and most complex module. Drives all raw material identification, sto
 - Accounts for reservations made by other Material Planning documents (cross-MP awareness).
 
 ### 4.3 Batch Dimension Matching (SBB/SBE)
-- Batch availability is queried via `Serial and Batch Bundle` / `Serial and Batch Entry` tables (Frappe v15).
+- Batch availability is queried via `Serial and Batch Bundle` / `Serial and Batch Entry` tables.
 - Only batches whose `Length`, `Width`, `Thickness` exactly match the required dimensions are considered an exact match.
 
 ### 4.4 Material Mapping — Alternate/Different-Dimension Batch Assignment
@@ -1048,3 +1048,26 @@ group and unit weight onto the plan rows for both tables. Test
 - **The "Row" column** in the reassignment dialog was the Material Issue Plan's index shown
   beside the plan's name — MIP rows 1/7/11 are MP rows 16/22/26. Both are shown now, with
   the customer drawing. Test `verify_consolidate_row_identity`.
+
+## 27. No hard-coded warehouse names (2026-10-18)
+
+Live renamed Stores to RM Yard, and everything that spelled a warehouse's name broke. Warehouses
+are now always read from configuration.
+
+- **Job Worker Warehouse.** Warehouse has a new **Job Worker** field (`custom_job_worker`, Link
+  Supplier, `manufyxinvenzaerp/custom/warehouse.json`). `overrides.resolve_supplier_warehouse(supplier,
+  company)` returns the company's warehouse linked to that job worker. It used to build the name as
+  `"<Job Worker> - <Company Abbr>"`. A Job Work Order whose job worker has no linked warehouse now
+  stops with *"No warehouse of … is linked to Job Worker …"*, rather than a mandatory error on a hidden
+  field. Patch `v16.link_job_worker_warehouses` links the warehouses made under the old convention
+  (INTERNATIONAL STEEL PRO on this site). It syncs the custom field first, because migrate runs
+  patches before it syncs `custom/*.json`.
+- **Storage Locations are no longer seeded.** `setup.setup_storage_location` used to create A-1 and
+  A-2 with no warehouse. Once `warehouse` became mandatory, every migrate failed on them.
+- **Tests** read warehouses through `tests/warehouses.py`. That means Stock Settings → Default
+  Warehouse, Company → Default WIP / FG Warehouse and the Job Worker link. Each helper fails naming the
+  setting when it is blank. This site's Company now has Default WIP = Work In Progress - MIPL and
+  Default FG = Finished Goods - MIPL.
+- Not changed: `sample_data.py` *creates* its own sample warehouses, so it names them. Labels and
+  comments mentioning "Stores" describe the flow, not a warehouse.
+

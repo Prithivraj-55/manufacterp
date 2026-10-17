@@ -81,7 +81,7 @@ def run():
             FROM `tabStock Entry Detail` sed JOIN `tabStock Entry` se ON se.name = sed.parent
             WHERE (se.custom_sco_ref = %(sco)s OR se.subcontracting_order = %(sco)s)
               AND se.docstatus = 1""",
-            {"wh": "INTERNATIONAL STEEL PRO - MIPL", "sco": sco_name})[0][0], 3)
+            {"wh": sco.supplier_warehouse, "sco": sco_name})[0][0], 3)
         check("Transferred Weight is what the ledger holds",
               flt(sco.custom_transferred_weight_kg, 3), moved)
         check("Excess is transferred less planned",

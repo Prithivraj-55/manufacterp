@@ -26,12 +26,13 @@ Run: bench --site manufact execute manufyxinvenzaerp.tests.verify_mp_stock_witho
 
 import frappe
 from frappe.utils import flt
+from manufyxinvenzaerp.tests.warehouses import stock_warehouse
 
 checks = []
 
 ITEM = "ISMB250"   # Structurals, 37.3 Kg/m -- read only
 UW = 37.3
-WH = "Stores - MIPL"
+WH = stock_warehouse()
 
 
 def check(label, got, want):

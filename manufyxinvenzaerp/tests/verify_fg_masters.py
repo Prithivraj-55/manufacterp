@@ -22,6 +22,7 @@ import frappe
 
 from manufyxinvenzaerp.item_management.item import validate_item
 from manufyxinvenzaerp.stock_management.stock_reconciliation import BLOCKED_MESSAGE
+from manufyxinvenzaerp.tests.warehouses import company_of, stock_warehouse
 
 checks = []
 
@@ -108,13 +109,13 @@ def _stock_reconciliation():
     print("=== 3. Stock Reconciliation is blocked ===")
     check("server message is the agreed wording", BLOCKED_MESSAGE, EXPECTED_MESSAGE)
 
-    company = frappe.db.get_value("Warehouse", "Stores - MIPL", "company")
+    company = company_of(stock_warehouse())
     item = "ZZFG-RM-NUT" if frappe.db.exists("Item", "ZZFG-RM-NUT") else "Nut-M20"
     for purpose in ("Stock Reconciliation", "Opening Stock"):
         before = frappe.db.count("Stock Reconciliation")
         sr = frappe.get_doc({
             "doctype": "Stock Reconciliation", "company": company, "purpose": purpose,
-            "items": [{"item_code": item, "warehouse": "Stores - MIPL", "qty": 5,
+            "items": [{"item_code": item, "warehouse": stock_warehouse(), "qty": 5,
                        "valuation_rate": 10}],
         })
         if purpose == "Opening Stock":

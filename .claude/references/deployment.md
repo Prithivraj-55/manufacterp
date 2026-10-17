@@ -3,11 +3,12 @@
 ## Local (this bench)
 
 ```bash
-cd /home/craft/frappe-bench1
-bench --site manufact migrate          # apply schema + sync custom/*.json
-bench --site manufact clear-cache
+cd /home/craft/frappe-bench11
+export PATH=$HOME/.nvm/versions/node/v24.15.0/bin:$PATH   # v16 needs Node 24
+bench --site manufactv16 migrate          # apply schema + sync custom/*.json
+bench --site manufactv16 clear-cache
 bench build --app manufyxinvenzaerp
-bench restart
+# then Ctrl+C and re-run `bench start` if the server did not reload (`bench restart` is a no-op here)
 ```
 
 A migrate takes about 70 seconds and prints one "Updating customizations for <doctype>"
@@ -23,7 +24,7 @@ are synced by Frappe on every migrate.
 To re-export one doctype after changing its fields in the UI:
 
 ```bash
-bench --site manufact console
+bench --site manufactv16 console
 >>> from frappe.modules.utils import export_customizations
 >>> export_customizations("Production Management", "Material Planning", sync_on_migrate=True)
 ```
@@ -116,7 +117,8 @@ bench --site erp.manufyx.co.in restore <path in deploy-backups>
 
 ## Live server
 
-- Bench: `/home/manufyxv15/frappe-bench`
+- Bench: `~/frappe-v16` on the THIRVUSOFT server (v16; moved there 2026-10-10/11)
 - Site: `erp.manufyx.co.in`
+- CI deploy (`main.yml`) is paused until its SSH keys point to this server
 - Deploy logs: `frappe-bench/Auto-deploy-logs/` (last 20)
 - Pre-deploy backups: `frappe-bench/deploy-backups/` (last 10)

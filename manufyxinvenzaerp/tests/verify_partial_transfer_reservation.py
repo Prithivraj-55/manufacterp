@@ -26,6 +26,7 @@ Run: bench --site manufact execute manufyxinvenzaerp.tests.verify_partial_transf
 
 import frappe
 from frappe.utils import flt
+from manufyxinvenzaerp.tests.warehouses import stock_warehouse
 
 checks = []
 
@@ -41,10 +42,7 @@ def check(label, got, want):
 
 
 def _warehouse():
-    for name in ("Stores - MIPL", "Work In Progress - MIPL"):
-        if frappe.db.exists("Warehouse", name):
-            return name
-    return frappe.get_all("Warehouse", filters={"is_group": 0}, pluck="name")[0]
+    return stock_warehouse()
 
 
 def _entry(se_type, company, rows):

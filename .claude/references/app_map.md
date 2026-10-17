@@ -1,6 +1,6 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-10-11 09:55:23_
+_Generated: 2026-10-18 00:55:48_
 
 ## Modules
 
@@ -27,7 +27,7 @@ _Generated: 2026-10-11 09:55:23_
 
 ## Python files
 
-_Total: 385_
+_Total: 387_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -97,6 +97,7 @@ _Total: 385_
 - patches/__init__.py
 - patches/v16/default_mip_excess_return_warehouse.py
 - patches/v16/__init__.py
+- patches/v16/link_job_worker_warehouses.py
 - patches/v16/restore_india_compliance_custom_fields.py
 - patches/v1/backfill_drawing_rate_schedule_type.py
 - patches/v1/backfill_duno_calculated_weight.py
@@ -407,6 +408,7 @@ _Total: 385_
 - tests/verify_wo_jc_standard2.py
 - tests/verify_wo_jc_standard.py
 - tests/verify_work_type_any_order.py
+- tests/warehouses.py
 - tests/zz_tmp_admin_sid.py
 - tests/zz_tmp_find_mip.py
 - tests/zz_tmp_q.py
@@ -458,7 +460,7 @@ _Total: 36_
 
 ## JSON files
 
-_Total: 177_
+_Total: 178_
 
 - accounts_management/custom/payment_entry.json
 - accounts_management/custom/payment_request.json
@@ -560,6 +562,7 @@ _Total: 177_
 - manufyxinvenzaerp/custom/terms_and_conditions.json
 - manufyxinvenzaerp/custom/timesheet.json
 - manufyxinvenzaerp/custom/user.json
+- manufyxinvenzaerp/custom/warehouse.json
 - manufyxinvenzaerp/custom/warehouse_type.json
 - manufyxinvenzaerp/custom/warranty_claim.json
 - manufyxinvenzaerp/doctype/delivery_challan/delivery_challan.json
@@ -1593,55 +1596,55 @@ Functions:
   - 1704:after_migrate:
   - 1776:clear_item_default_boms:
   - 1802:setup_storage_location:
-  - 1824:seed_material_grades:
-  - 1859:prepare_material_spec_link:
-  - 1893:create_item_client_script:
-  - 1909:create_item_custom_fields:
-  - 2011:create_purchase_order_custom_fields:
-  - 2135:hide_purchase_order_weight_fields:
-  - 2149:create_purchase_order_client_script:
-  - 2165:create_purchase_receipt_custom_fields:
-  - 2367:layout_purchase_receipt_item_grid:
-  - 2439:layout_stock_entry_detail_grid:
-  - 2474:create_rate_schedule_sync_fields:
-  - 2638:create_batch_custom_fields:
-  - 2827:create_purchase_receipt_client_script:
-  - 2843:create_material_request_custom_fields:
-  - 2986:create_material_request_client_script:
-  - 3002:create_rfq_custom_fields:
-  - 3096:create_rfq_client_script:
-  - 3112:create_sq_custom_fields:
-  - 3209:create_sq_client_script:
-  - 3225:create_bom_custom_fields:
-  - 3383:create_so_custom_fields:
-  - 3519:create_so_client_script:
-  - 3540:create_so_delivery_plan_fields:
-  - 3749:create_so_delivery_plan_script:
-  - 3765:create_bom_client_script:
-  - 3785:create_production_plan_custom_fields:
-  - 4103:layout_production_plan_item_grid:
-  - 4169:create_production_plan_client_script:
-  - 4442:create_stock_entry_custom_fields:
-  - 4724:hide_duplicate_sco_field:
-  - 4751:create_stock_entry_client_script:
-  - 4788:create_doctype_label_translations:
-  - 4811:remove_sco_purchase_order_mandatory:
-  - 4822:hide_v16_stock_reservation_on_pp_and_sco:
-  - 4851:add_sco_working_status:
-  - 4889:hide_sco_job_worker_warehouse:
-  - 4918:hide_sco_unused_tabs:
-  - 4944:hide_sco_amount_fields:
-  - 4972:make_sco_job_worker_conditional:
-  - 5007:create_sco_custom_fields:
-  - 5867:create_sco_client_script:
-  - 5883:create_sco_ops_client_script:
-  - 5899:create_soe_client_script:
-  - 5915:create_manufacturing_settings_custom_fields:
-  - 5954:create_material_planning_auto_purchase_fields:
-  - 6017:create_payment_request_custom_fields:
-  - 6099:create_fg_sales_custom_fields:
-  - 6204:create_fg_property_setters:
-  - 6243:set_fg_settings_defaults:
+  - 1820:seed_material_grades:
+  - 1855:prepare_material_spec_link:
+  - 1889:create_item_client_script:
+  - 1905:create_item_custom_fields:
+  - 2007:create_purchase_order_custom_fields:
+  - 2131:hide_purchase_order_weight_fields:
+  - 2145:create_purchase_order_client_script:
+  - 2161:create_purchase_receipt_custom_fields:
+  - 2363:layout_purchase_receipt_item_grid:
+  - 2435:layout_stock_entry_detail_grid:
+  - 2470:create_rate_schedule_sync_fields:
+  - 2634:create_batch_custom_fields:
+  - 2823:create_purchase_receipt_client_script:
+  - 2839:create_material_request_custom_fields:
+  - 2982:create_material_request_client_script:
+  - 2998:create_rfq_custom_fields:
+  - 3092:create_rfq_client_script:
+  - 3108:create_sq_custom_fields:
+  - 3205:create_sq_client_script:
+  - 3221:create_bom_custom_fields:
+  - 3379:create_so_custom_fields:
+  - 3515:create_so_client_script:
+  - 3536:create_so_delivery_plan_fields:
+  - 3745:create_so_delivery_plan_script:
+  - 3761:create_bom_client_script:
+  - 3781:create_production_plan_custom_fields:
+  - 4099:layout_production_plan_item_grid:
+  - 4165:create_production_plan_client_script:
+  - 4438:create_stock_entry_custom_fields:
+  - 4720:hide_duplicate_sco_field:
+  - 4747:create_stock_entry_client_script:
+  - 4784:create_doctype_label_translations:
+  - 4807:remove_sco_purchase_order_mandatory:
+  - 4818:hide_v16_stock_reservation_on_pp_and_sco:
+  - 4847:add_sco_working_status:
+  - 4885:hide_sco_job_worker_warehouse:
+  - 4914:hide_sco_unused_tabs:
+  - 4940:hide_sco_amount_fields:
+  - 4968:make_sco_job_worker_conditional:
+  - 5003:create_sco_custom_fields:
+  - 5863:create_sco_client_script:
+  - 5879:create_sco_ops_client_script:
+  - 5895:create_soe_client_script:
+  - 5911:create_manufacturing_settings_custom_fields:
+  - 5950:create_material_planning_auto_purchase_fields:
+  - 6013:create_payment_request_custom_fields:
+  - 6095:create_fg_sales_custom_fields:
+  - 6200:create_fg_property_setters:
+  - 6239:set_fg_settings_defaults:
 
 ### sq_management/supplier_quotation.py
 Functions:
@@ -1779,9 +1782,9 @@ Functions:
 Functions:
   - 11:_is_pp_flow_sco:
   - 18:resolve_supplier_warehouse:
-  - 38:_any_operation_started:
-  - 59:_final_stock_entry_submitted:
-  - 69:refresh_sco_status:
+  - 41:_any_operation_started:
+  - 62:_final_stock_entry_submitted:
+  - 72:refresh_sco_status:
 
 ### subcontracting_management/subcontracting.py
 Functions:
@@ -2002,11 +2005,11 @@ Functions:
 
 ### tests/verify_batch_receipt_line_match.py
 Functions:
-  - 39:check:
-  - 45:_warehouse:
-  - 52:_receipt:
-  - 67:_batches_of:
-  - 76:run:
+  - 40:check:
+  - 46:_warehouse:
+  - 50:_receipt:
+  - 65:_batches_of:
+  - 74:run:
 
 ### tests/verify_batch_remark_isolation.py
 Functions:
@@ -2235,14 +2238,14 @@ Functions:
 
 ### tests/verify_cut_sheet_new_batch.py
 Functions:
-  - 50:check:
-  - 56:_company:
-  - 70:_warehouse:
-  - 80:_ensure_item:
-  - 105:_stock:
-  - 109:_dims:
-  - 116:_make_entry:
-  - 126:run:
+  - 52:check:
+  - 58:_company:
+  - 72:_warehouse:
+  - 79:_ensure_item:
+  - 104:_stock:
+  - 108:_dims:
+  - 115:_make_entry:
+  - 125:run:
 
 ### tests/verify_cutsheet_status_and_load_fixes.py
 Functions:
@@ -2364,16 +2367,16 @@ Functions:
 
 ### tests/verify_excess_plan_sizes.py
 Functions:
-  - 26:check:
-  - 32:run:
-  - 50:_line:
-  - 57:_book:
-  - 68:_booking:
-  - 112:_return_na:
-  - 165:_refused:
-  - 173:_return_na_limit:
-  - 199:_draft:
-  - 227:_client:
+  - 27:check:
+  - 33:run:
+  - 51:_line:
+  - 58:_book:
+  - 69:_booking:
+  - 113:_return_na:
+  - 166:_refused:
+  - 174:_return_na_limit:
+  - 200:_draft:
+  - 228:_client:
 
 ### tests/verify_excess_return_and_process_loss.py
 Functions:
@@ -2415,44 +2418,44 @@ Functions:
 
 ### tests/verify_fg_delivery_note.py
 Functions:
-  - 52:check:
-  - 58:raises:
-  - 75:_name:
-  - 79:_ins:
-  - 87:_masters:
-  - 101:_make_so:
-  - 115:_batch:
-  - 128:_receive:
-  - 144:_state:
-  - 151:_delivered:
-  - 155:_fg_rows:
-  - 159:_dn_from_so:
-  - 176:run:
-  - 210:_run:
-  - 385:_heavier_pieces:
-  - 457:_dn_from_so_line:
+  - 53:check:
+  - 59:raises:
+  - 76:_name:
+  - 80:_ins:
+  - 88:_masters:
+  - 102:_make_so:
+  - 116:_batch:
+  - 129:_receive:
+  - 145:_state:
+  - 152:_delivered:
+  - 156:_fg_rows:
+  - 160:_dn_from_so:
+  - 177:run:
+  - 211:_run:
+  - 386:_heavier_pieces:
+  - 458:_dn_from_so_line:
 
 ### tests/verify_fg_end_to_end.py
 Functions:
-  - 80:check:
-  - 86:refused:
-  - 99:_name:
-  - 104:_ins:
-  - 162:_masters:
-  - 189:_sheet:
-  - 224:_batch_state:
-  - 233:_so_line:
-  - 237:_fg_rows:
-  - 244:_sales_order_to_bom:
-  - 321:_plan:
-  - 342:_job_work_order:
-  - 362:_material_at_supplier:
-  - 395:_final_stock_entry:
-  - 419:_delivery:
-  - 442:_run:
-  - 545:_report:
-  - 563:_series_snapshot:
-  - 567:run:
+  - 81:check:
+  - 87:refused:
+  - 100:_name:
+  - 105:_ins:
+  - 163:_masters:
+  - 190:_sheet:
+  - 225:_batch_state:
+  - 234:_so_line:
+  - 238:_fg_rows:
+  - 245:_sales_order_to_bom:
+  - 322:_plan:
+  - 343:_job_work_order:
+  - 363:_material_at_supplier:
+  - 396:_final_stock_entry:
+  - 420:_delivery:
+  - 443:_run:
+  - 546:_report:
+  - 564:_series_snapshot:
+  - 568:run:
 
 ### tests/verify_fg_entry_leaves_excess.py
 Functions:
@@ -2463,16 +2466,16 @@ Functions:
 
 ### tests/verify_fg_final_stock_entry.py
 Functions:
-  - 44:check:
-  - 50:raises:
-  - 65:_pick_sco:
-  - 79:_make_item:
-  - 90:_settings:
-  - 95:_fg_row:
-  - 99:_entry:
-  - 110:_state:
-  - 120:run:
-  - 151:_run:
+  - 45:check:
+  - 51:raises:
+  - 66:_pick_sco:
+  - 80:_make_item:
+  - 91:_settings:
+  - 96:_fg_row:
+  - 100:_entry:
+  - 111:_state:
+  - 121:run:
+  - 152:_run:
 
 ### tests/verify_fg_item_form_defaults.py
 Functions:
@@ -2489,14 +2492,14 @@ Functions:
 
 ### tests/verify_fg_masters.py
 Functions:
-  - 35:check:
-  - 41:_refused:
-  - 51:_new_item:
-  - 58:_fg:
-  - 65:_fg_item_rule:
-  - 93:_prefix_guard:
-  - 106:_stock_reconciliation:
-  - 141:run:
+  - 36:check:
+  - 42:_refused:
+  - 52:_new_item:
+  - 59:_fg:
+  - 66:_fg_item_rule:
+  - 94:_prefix_guard:
+  - 107:_stock_reconciliation:
+  - 142:run:
 
 ### tests/verify_fg_planning_nos_kg.py
 Functions:
@@ -2510,19 +2513,19 @@ Functions:
 
 ### tests/verify_fg_sales_invoice.py
 Functions:
-  - 49:check:
-  - 55:_refused:
-  - 75:_ins:
-  - 80:_submit:
-  - 86:_cancel:
-  - 97:_ensure_masters:
-  - 117:_make_so:
-  - 132:_billed:
-  - 136:_fg_rows:
-  - 146:_so_cases:
-  - 264:_receive_fg:
-  - 279:_dn_cases:
-  - 340:run:
+  - 50:check:
+  - 56:_refused:
+  - 76:_ins:
+  - 81:_submit:
+  - 87:_cancel:
+  - 98:_ensure_masters:
+  - 118:_make_so:
+  - 133:_billed:
+  - 137:_fg_rows:
+  - 147:_so_cases:
+  - 265:_receive_fg:
+  - 280:_dn_cases:
+  - 341:run:
 
 ### tests/verify_fg_sales_order.py
 Functions:
@@ -2549,28 +2552,28 @@ Functions:
 
 ### tests/verify_fg_stock_movements.py
 Functions:
-  - 52:check:
-  - 60:_company:
-  - 64:_ensure_item:
-  - 80:_setup_items:
-  - 96:_batch_nos:
-  - 100:_batch_kg:
-  - 115:_item_qty:
-  - 127:_row:
-  - 139:_entry:
-  - 152:_cancel:
-  - 156:_cancel_leftovers:
-  - 167:_plate_move:
-  - 184:_plate_cases:
-  - 225:_nut_kg:
-  - 229:_nut_move:
-  - 242:_nut_cases:
-  - 266:_fg_ready:
-  - 277:_ensure_fg_batch:
-  - 290:_fg_state:
-  - 297:_fg_move:
-  - 309:_fg_cases:
-  - 347:run:
+  - 53:check:
+  - 61:_company:
+  - 65:_ensure_item:
+  - 81:_setup_items:
+  - 97:_batch_nos:
+  - 101:_batch_kg:
+  - 116:_item_qty:
+  - 128:_row:
+  - 140:_entry:
+  - 153:_cancel:
+  - 157:_cancel_leftovers:
+  - 168:_plate_move:
+  - 185:_plate_cases:
+  - 226:_nut_kg:
+  - 230:_nut_move:
+  - 243:_nut_cases:
+  - 267:_fg_ready:
+  - 278:_ensure_fg_batch:
+  - 291:_fg_state:
+  - 298:_fg_move:
+  - 310:_fg_cases:
+  - 348:run:
 
 ### tests/verify_grid_and_tab_layout.py
 Functions:
@@ -2678,13 +2681,13 @@ Functions:
 
 ### tests/verify_mp_batch_dust.py
 Functions:
-  - 30:check:
-  - 36:_batch:
-  - 41:_unit:
-  - 55:_check:
-  - 85:_allocation:
-  - 105:_old_rule_reproduces:
-  - 122:run:
+  - 31:check:
+  - 37:_batch:
+  - 42:_unit:
+  - 56:_check:
+  - 86:_allocation:
+  - 106:_old_rule_reproduces:
+  - 123:run:
 
 ### tests/verify_mp_cnc_process_editable.py
 Functions:
@@ -2706,15 +2709,15 @@ Functions:
 
 ### tests/verify_mp_stock_without_dimensions.py
 Functions:
-  - 37:check:
-  - 43:piece:
-  - 47:batch:
-  - 52:req:
-  - 61:_check:
-  - 80:arm_view:
-  - 85:part_a:
-  - 148:part_b:
-  - 240:run:
+  - 38:check:
+  - 44:piece:
+  - 48:batch:
+  - 53:req:
+  - 62:_check:
+  - 81:arm_view:
+  - 86:part_a:
+  - 149:part_b:
+  - 241:run:
 
 ### tests/verify_mp_view_all_filters.py
 Functions:
@@ -2770,21 +2773,21 @@ Functions:
 
 ### tests/verify_partial_transfer_reservation.py
 Functions:
-  - 37:check:
-  - 43:_warehouse:
-  - 50:_entry:
-  - 60:_held:
-  - 65:run:
+  - 38:check:
+  - 44:_warehouse:
+  - 48:_entry:
+  - 58:_held:
+  - 63:run:
 
 ### tests/verify_partial_transfer_settling.py
 Functions:
-  - 29:check:
-  - 35:run:
-  - 51:_mp:
-  - 61:_status_of:
-  - 67:_status:
-  - 87:_check_mapping:
-  - 103:_tolerance:
+  - 30:check:
+  - 36:run:
+  - 52:_mp:
+  - 62:_status_of:
+  - 68:_status:
+  - 88:_check_mapping:
+  - 104:_tolerance:
 
 ### tests/verify_per_row_unreserve.py
 Functions:
@@ -3040,6 +3043,16 @@ Functions:
   - 33:_plan:
   - 44:_throws:
   - 52:run:
+
+### tests/warehouses.py
+Functions:
+  - 12:_setting:
+  - 19:stock_warehouse:
+  - 24:_company_default:
+  - 32:wip_warehouse:
+  - 37:fg_warehouse:
+  - 42:job_worker_warehouse:
+  - 53:company_of:
 
 ### tests/zz_tmp_admin_sid.py
 Functions:

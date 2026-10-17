@@ -30,11 +30,12 @@ Run: bench --site manufact execute manufyxinvenzaerp.tests.verify_fg_stock_movem
 
 import frappe
 from frappe.utils import flt
+from manufyxinvenzaerp.tests.warehouses import stock_warehouse, wip_warehouse
 
 checks = []
 
-STORES = "Stores - MIPL"
-WIP = "Work In Progress - MIPL"
+STORES = stock_warehouse()
+WIP = wip_warehouse()
 
 PLATE = "ZZFG-RM-PLATE"
 PLATE_PREFIX = "ZZFGPL"

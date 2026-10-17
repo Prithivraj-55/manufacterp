@@ -34,11 +34,12 @@ from manufyxinvenzaerp.subcontracting_management.subcontracting import (
     create_finished_goods_entry,
     get_final_stock_entry_preview,
 )
+from manufyxinvenzaerp.tests.warehouses import stock_warehouse
 
 checks = []
 
 FG_ITEM = "ZZFG-A4-FG"
-STORES = "Stores - MIPL"
+STORES = stock_warehouse()
 
 
 def check(label, got, want):

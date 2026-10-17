@@ -1800,16 +1800,12 @@ def clear_item_default_boms():
 
 
 def setup_storage_location():
-    """Create Storage Location records A-1 and A-2, then register as an Inventory Dimension."""
-    # 1. Seed master records
-    for loc in ["A-1", "A-2"]:
-        if not frappe.db.exists("Storage Location", loc):
-            frappe.get_doc({
-                "doctype": "Storage Location",
-                "name": loc,
-            }).insert(ignore_permissions=True)
+    """Register Storage Location as an Inventory Dimension.
 
-    # 2. Register as an Inventory Dimension (creates custom fields on all stock doctypes)
+    No location records are seeded: each belongs to one warehouse (`warehouse` is
+    mandatory) and the client sets them up per site. A seeded name had no warehouse, so
+    once the field became mandatory every migrate failed re-creating it."""
+    # Register as an Inventory Dimension (creates custom fields on all stock doctypes)
     if not frappe.db.exists("Inventory Dimension", "Storage Location"):
         frappe.get_doc({
             "doctype": "Inventory Dimension",

@@ -6,7 +6,7 @@ with manual code review and validation before each commit.
 
 # manufyxinvenzaerp
 
-A production-grade custom Frappe/ERPNext application (v15) built for manufacturing operations. It extends ERPNext's core procurement, production, and subcontracting workflows with custom doctypes, deep hook integrations, and a batch/secondary-quantity tracking system.
+A production-grade custom Frappe/ERPNext application (v16) built for manufacturing operations. It extends ERPNext's core procurement, production, and subcontracting workflows with custom doctypes, deep hook integrations, and a batch/secondary-quantity tracking system.
 
 ---
 
@@ -379,7 +379,7 @@ Custom fields and property setters are **no longer fixture-based** (changed 2026
 Regenerate a doctype's file after changing its custom fields/property setters in the UI:
 
 ```bash
-bench --site manufact console
+bench --site manufactv16 console
 >>> from frappe.modules.utils import export_customizations
 >>> export_customizations(module="Production Management", doctype="Material Planning", sync_on_migrate=True)
 ```
@@ -407,13 +407,13 @@ Tests live in `tests/` and use Frappe's pytest integration (`bench run-tests`).
 Run all tests:
 
 ```bash
-bench --site manufact run-tests --app manufyxinvenzaerp
+bench --site manufactv16 run-tests --app manufyxinvenzaerp
 ```
 
 Run a single file:
 
 ```bash
-bench --site manufact run-tests --module manufyxinvenzaerp.tests.test_material_planning
+bench --site manufactv16 run-tests --module manufyxinvenzaerp.tests.test_material_planning
 ```
 
 **CI gate (added 2026-07-16):** `.github/workflows/main.yml` now runs a `test` job — a fresh site, `bench run-tests --app manufyxinvenzaerp` — that the production `deploy` job depends on (`needs: test`). Previously the pipeline had no test-execution step at all; a failing test could not block a deploy. If `test` fails, `deploy` is skipped entirely and production is left untouched.
@@ -439,10 +439,10 @@ bench --site your-site migrate
 
 ```bash
 # Apply DB migrations after code changes
-bench --site manufact migrate
+bench --site manufactv16 migrate
 
 # Clear cache
-bench --site manufact clear-cache
+bench --site manufactv16 clear-cache
 
 # Build JS/CSS assets
 bench build --app manufyxinvenzaerp
@@ -451,10 +451,10 @@ bench build --app manufyxinvenzaerp
 bench restart
 
 # Run all tests
-bench --site manufact run-tests --app manufyxinvenzaerp
+bench --site manufactv16 run-tests --app manufyxinvenzaerp
 
 # Open console / REPL
-bench --site manufact console
+bench --site manufactv16 console
 ```
 
 ---
