@@ -1071,3 +1071,59 @@ are now always read from configuration.
 - Not changed: `sample_data.py` *creates* its own sample warehouses, so it names them. Labels and
   comments mentioning "Stores" describe the flow, not a warehouse.
 
+
+## 28. Rate Schedule Category (2026-10-20)
+
+- New Select field **Category** on Rate Schedule (Fabrication / Blasting & Painting / Painting), right
+  after Type, with a list-view filter. It is **for reference only**. The client asked that nothing
+  filter on it: the Fabrication and Painting Rate Schedule pickers on Drawing, BOM, Production Plan and
+  Sales Order still list every schedule. Not mandatory, so older schedules without one still save.
+- manufactv16's 48 schedules were filled from their Job Nature: Blasting & Painting → 6,
+  Painting → 4, everything else Fabrication → 38. There's no patch, because live gets the same
+  load when its data is reset.
+
+## 29. Data Works page — one-time go-live data reset (2026-10-20)
+
+Desk page **Data Works** (`/desk/data-works`, System Manager). It repeats on the live server what was
+done by hand on manufactv16 on 18–20 Oct. It is meant to be used once and then removed in a later commit.
+
+- **Guards:** System Manager only, and every button asks for the site name. There is no site_config switch
+  (removed on request), so after a deploy the page is live; it must be removed in the next commit.
+- **Buttons:** Back up now · Delete transactions and test data · Create warehouses and storage locations ·
+  Create rate schedules · Run everything (backup + the three steps). Each shows a preview of what it will
+  do, then asks for the site name. The work runs as a background job on the `long` queue, and the page
+  follows `sites/<site>/private/data_works.log`. State is in `data_works_status.json`. One backup is
+  taken, by Run everything or the Back up button. There is no maintenance mode.
+- **Transactions step:**
+  - Ledgers cleared by SQL: Stock Ledger Entry, GL Entry, Payment Ledger Entry, Bin, Repost Item Valuation,
+    Stock Reservation Entry.
+  - Documents deleted (with children, comments, versions and attachments): Packing Slip, Delivery Note,
+    Delivery Challan, Supplier Operation Entry, Material Issue Plan, Inspection Entry, Cut Sheet, Material
+    Planning, Subcontracting Order, Stock Entry, Purchase Receipt, Purchase Order, Material Request,
+    Production Plan, BOM, Drawing, Sales Order, Process Deferred Accounting, Process Subscription, Manufyx
+    Decision Log, Serial and Batch Bundle, Batch.
+  - Test masters deleted: Items, Suppliers, Customers whose name starts with `ZZ` or `Test`, and Projects whose
+    project name does (list in `setup.json`). The preview lists them first.
+  - Naming series of everything deleted restart at 1.
+  - Kept: the item master and every other master.
+- **Warehouses step:** renames whatever Stock Settings → Default Warehouse is today to `RM Yard`, creates
+  RM Store, Consumables Store and Maintenance Store, gives all four the Warehouse Type *Storage Location
+  Applicable* (created if missing), deletes the duplicate `Work in Progress - MIPL_1`, sets the Company's
+  default WIP and FG warehouses, deletes every Storage Location and creates A1 (RM Store), A2–A20 (RM Yard),
+  C1–C10 and M1–M10. System and job-worker warehouses stay.
+- **Rate schedules step:** deletes all Rate Schedules and Job Natures, then loads 17 Job Natures and 48 Rate
+  Schedules (Category filled in) from `data/rate_schedules.json`.
+- **Where the data lives:** `manufyxinvenzaerp/data_works/data/setup.json` (warehouses, location ranges, test
+  prefixes, the doctype lists) and `rate_schedules.json`. Warehouse names stay out of `engine.py`; see §27.
+  The engine finds the warehouse to rename through Stock Settings.
+- **Gotchas found while building it:**
+  - Frappe refuses to delete a submitted document even with `force`, so each is marked cancelled first (the
+    ledgers are already gone).
+  - `delete_doc` queues one cleanup job per document, which overloads the queue (600 jobs, no worker
+    locally). The engine queues nothing during the delete loops and runs `delete_dynamic_links` inline.
+  - Naming-series keys are saved to `data_works_series.json` before the deletes, so a rerun after a failed
+    step still resets them.
+  - Each step is safe to run twice.
+- **Tested** locally three times: restore of the 18 Oct live dump, migrate, then Run everything through the
+  queue with a worker. The result was identical to the hand-made reset: 39 items, 11 warehouses, 40
+  locations, 48 schedules, no stock.

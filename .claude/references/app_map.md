@@ -1,11 +1,12 @@
 # app_map — manufyxinvenzaerp
 
-_Generated: 2026-10-18 00:55:48_
+_Generated: 2026-10-20 03:36:32_
 
 ## Modules
 
 - accounts_management
 - config
+- data_works
 - drawing_management
 - item_management
 - manufyxinvenzaerp
@@ -27,7 +28,7 @@ _Generated: 2026-10-18 00:55:48_
 
 ## Python files
 
-_Total: 387_
+_Total: 390_
 
 - accounts_management/__init__.py
 - accounts_management/payment_entry.py
@@ -37,6 +38,8 @@ _Total: 387_
 - accounts_management/report/__init__.py
 - apps_screen.py
 - config/__init__.py
+- data_works/engine.py
+- data_works/__init__.py
 - deploy_log.py
 - drawing_management/bom_class_override.py
 - drawing_management/doctype/drawing/drawing.py
@@ -91,6 +94,7 @@ _Total: 387_
 - manufyxinvenzaerp/doctype/material_spec/material_spec.py
 - manufyxinvenzaerp/__init__.py
 - manufyxinvenzaerp/page/bulk_permissions/__init__.py
+- manufyxinvenzaerp/page/data_works/__init__.py
 - manufyxinvenzaerp/page/__init__.py
 - material_request_management/__init__.py
 - material_request_management/material_request.py
@@ -419,13 +423,14 @@ _Total: 387_
 
 ## JavaScript files
 
-_Total: 36_
+_Total: 37_
 
 - accounts_management/report/customer_fund_usage/customer_fund_usage.js
 - drawing_management/doctype/drawing/drawing.js
 - manufyxinvenzaerp/doctype/delivery_challan/delivery_challan.js
 - manufyxinvenzaerp/doctype/delivery_challan/delivery_challan_list.js
 - manufyxinvenzaerp/page/bulk_permissions/bulk_permissions.js
+- manufyxinvenzaerp/page/data_works/data_works.js
 - production_management/doctype/cut_sheet/cut_sheet.js
 - production_management/doctype/inspection_entry/inspection_entry_list.js
 - production_management/doctype/material_planning/material_planning.js
@@ -460,11 +465,13 @@ _Total: 36_
 
 ## JSON files
 
-_Total: 178_
+_Total: 181_
 
 - accounts_management/custom/payment_entry.json
 - accounts_management/custom/payment_request.json
 - accounts_management/report/customer_fund_usage/customer_fund_usage.json
+- data_works/data/rate_schedules.json
+- data_works/data/setup.json
 - drawing_management/custom/bom_explosion_item.json
 - drawing_management/custom/bom_item.json
 - drawing_management/custom/bom.json
@@ -574,6 +581,7 @@ _Total: 178_
 - manufyxinvenzaerp/doctype/material_grade/material_grade.json
 - manufyxinvenzaerp/doctype/material_spec/material_spec.json
 - manufyxinvenzaerp/page/bulk_permissions/bulk_permissions.json
+- manufyxinvenzaerp/page/data_works/data_works.json
 - manufyxinvenzaerp/sidebar/manufyxinvenzaerp/manufyxinvenzaerp.json
 - manufyxinvenzaerp/workspace/manufyx/manufyx.json
 - manufyxinvenzaerp/workspace/masters/masters.json
@@ -1169,6 +1177,35 @@ Functions:
 Functions:
   - 20:has_app_permission:
   - 24:hide_admin_only_apps:
+
+### data_works/engine.py
+Functions:
+  - 32:_data:
+  - 37:_guard:
+  - 43:_status_path:
+  - 47:_log_path:
+  - 51:_log:
+  - 58:_set_status:
+  - 63:_get_status:
+  - 71:_company:
+  - 78:_wh_name:
+  - 85:get_state:
+  - 96:preview:
+  - 109:run:
+  - 128:get_log:
+  - 141:run_job:
+  - 159:_backup:
+  - 168:_table:
+  - 172:_test_names:
+  - 184:_preview_step:
+  - 210:_series_file:
+  - 214:_note_series:
+  - 228:_reset_series:
+  - 242:_inline_cleanup:
+  - 254:_delete:
+  - 261:_do_transactions:
+  - 302:_do_warehouses:
+  - 365:_do_rate_schedules:
 
 ### deploy_log.py
 Functions:
@@ -3090,6 +3127,10 @@ Functions:
 - `stock_management/storage_location.py:597` — `get_location_settings`
 - `accounts_management/payment_request.py:28` — `@frappe.validate_and_sanitize_search_inputs`
 - `accounts_management/payment_request.py:56` — `get_fund_usage`
+- `data_works/engine.py:85` — `get_state`
+- `data_works/engine.py:96` — `preview`
+- `data_works/engine.py:109` — `run`
+- `data_works/engine.py:128` — `get_log`
 - `tests/verify_mip_download_and_grid.py:107` — `    # registered. Checking membership there is the only thing that proves the`
 - `tests/test_whitelist_coverage.py:4` — ``reserve_batches` was swallowed when a helper was inserted directly above it, and`
 - `tests/test_whitelist_coverage.py:40` — `    found = set`

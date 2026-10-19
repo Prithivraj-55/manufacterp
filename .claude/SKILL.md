@@ -258,6 +258,10 @@ manufyxinvenzaerp/
   all ten correct by construction without touching the ledger code. Sales Order and
   Drawing only **warn**, under `Manufyxinvenza Settings → Show Warning for Duplicate
   DUNO`; that switch must never gate the two throws.
+- **Data Works is a one-time tool.** The `data-works` page and
+  `manufyxinvenzaerp/data_works/` reset a site for go-live (features §29). System Manager only, site name
+  typed to confirm, no site_config switch. Warehouse names and location ranges live in
+  `data_works/data/setup.json`, never in `engine.py`. Remove the page after the live reset.
 - **Rate Schedule propagates only on an actual EDIT, never on disagreement.**
   `rate_schedule_sync.py` keeps one drawing's schedule the same on the Drawing, its
   BOM, every Production Plan row quoting it and its Sales Order Drawing List row, in
