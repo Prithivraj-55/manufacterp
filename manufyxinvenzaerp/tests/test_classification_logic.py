@@ -69,7 +69,7 @@ class TestClassificationLogic(unittest.TestCase):
 
     # CL1 — Exact match → T2; everything else → T3; T4 empty after Check Stock
     def test_cl1_no_stock_goes_to_mapping_not_unavailable(self):
-        doc = frappe._dict({"for_warehouse": "Stores - M", "raw_materials": _RAW})
+        doc = frappe._dict({"for_warehouse": "_Test Mock Warehouse", "raw_materials": _RAW})
 
         with patch(
             "manufyxinvenzaerp.production_plan_management.production_plan.get_sbb_batches_bulk",

@@ -22,6 +22,7 @@ Run: bench --site manufact execute manufyxinvenzaerp.tests.verify_partial_transf
 import inspect
 
 import frappe
+from manufyxinvenzaerp.tests.warehouses import stock_warehouse
 
 checks = []
 
@@ -50,7 +51,7 @@ def run():
 
 def _mp(**row):
     mp = frappe.new_doc("Material Planning")
-    mp.for_warehouse = "Stores - MIPL"
+    mp.for_warehouse = stock_warehouse()
     base = {"item_code": "ISA100", "qty": 100, "batch": "ZZ-NO-SUCH-BATCH", "is_reserved": 0,
             "reserved_qty": 0, "transferred_qty": 0, "fully_transferred": 0}
     base.update(row)

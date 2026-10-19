@@ -1,5 +1,5 @@
 # Manufyxinvenzaerp — Implemented Features
-**App:** manufyxinvenzaerp | **Platform:** Frappe v15 / ERPNext v15 | **Site:** manufact
+**App:** manufyxinvenzaerp | **Platform:** Frappe v16 / ERPNext v16 | **Site:** manufactv16
 **Date:** 2026-07-16
 
 ---
@@ -104,7 +104,7 @@ The largest and most complex module. Drives all raw material identification, sto
 - Accounts for reservations made by other Material Planning documents (cross-MP awareness).
 
 ### 4.3 Batch Dimension Matching (SBB/SBE)
-- Batch availability is queried via `Serial and Batch Bundle` / `Serial and Batch Entry` tables (Frappe v15).
+- Batch availability is queried via `Serial and Batch Bundle` / `Serial and Batch Entry` tables.
 - Only batches whose `Length`, `Width`, `Thickness` exactly match the required dimensions are considered an exact match.
 
 ### 4.4 Material Mapping — Alternate/Different-Dimension Batch Assignment
@@ -1048,3 +1048,82 @@ group and unit weight onto the plan rows for both tables. Test
 - **The "Row" column** in the reassignment dialog was the Material Issue Plan's index shown
   beside the plan's name — MIP rows 1/7/11 are MP rows 16/22/26. Both are shown now, with
   the customer drawing. Test `verify_consolidate_row_identity`.
+
+## 27. No hard-coded warehouse names (2026-10-18)
+
+Live renamed Stores to RM Yard, and everything that spelled a warehouse's name broke. Warehouses
+are now always read from configuration.
+
+- **Job Worker Warehouse.** Warehouse has a new **Job Worker** field (`custom_job_worker`, Link
+  Supplier, `manufyxinvenzaerp/custom/warehouse.json`). `overrides.resolve_supplier_warehouse(supplier,
+  company)` returns the company's warehouse linked to that job worker. It used to build the name as
+  `"<Job Worker> - <Company Abbr>"`. A Job Work Order whose job worker has no linked warehouse now
+  stops with *"No warehouse of … is linked to Job Worker …"*, rather than a mandatory error on a hidden
+  field. Patch `v16.link_job_worker_warehouses` links the warehouses made under the old convention
+  (INTERNATIONAL STEEL PRO on this site). It syncs the custom field first, because migrate runs
+  patches before it syncs `custom/*.json`.
+- **Storage Locations are no longer seeded.** `setup.setup_storage_location` used to create A-1 and
+  A-2 with no warehouse. Once `warehouse` became mandatory, every migrate failed on them.
+- **Tests** read warehouses through `tests/warehouses.py`. That means Stock Settings → Default
+  Warehouse, Company → Default WIP / FG Warehouse and the Job Worker link. Each helper fails naming the
+  setting when it is blank. This site's Company now has Default WIP = Work In Progress - MIPL and
+  Default FG = Finished Goods - MIPL.
+- Not changed: `sample_data.py` *creates* its own sample warehouses, so it names them. Labels and
+  comments mentioning "Stores" describe the flow, not a warehouse.
+
+
+## 28. Rate Schedule Category (2026-10-20)
+
+- New Select field **Category** on Rate Schedule (Fabrication / Blasting & Painting / Painting), right
+  after Type, with a list-view filter. It is **for reference only**. The client asked that nothing
+  filter on it: the Fabrication and Painting Rate Schedule pickers on Drawing, BOM, Production Plan and
+  Sales Order still list every schedule. Not mandatory, so older schedules without one still save.
+- manufactv16's 48 schedules were filled from their Job Nature: Blasting & Painting → 6,
+  Painting → 4, everything else Fabrication → 38. There's no patch, because live gets the same
+  load when its data is reset.
+
+## 29. Data Works page — one-time go-live data reset (2026-10-20)
+
+Desk page **Data Works** (`/desk/data-works`, System Manager). It repeats on the live server what was
+done by hand on manufactv16 on 18–20 Oct. It is meant to be used once and then removed in a later commit.
+
+- **Guards:** System Manager only, and every button asks for the site name. There is no site_config switch
+  (removed on request), so after a deploy the page is live; it must be removed in the next commit.
+- **Buttons:** Back up now · Delete transactions and test data · Create warehouses and storage locations ·
+  Create rate schedules · Run everything (backup + the three steps). Each shows a preview of what it will
+  do, then asks for the site name. The work runs as a background job on the `long` queue, and the page
+  follows `sites/<site>/private/data_works.log`. State is in `data_works_status.json`. One backup is
+  taken, by Run everything or the Back up button. There is no maintenance mode.
+- **Transactions step:**
+  - Ledgers cleared by SQL: Stock Ledger Entry, GL Entry, Payment Ledger Entry, Bin, Repost Item Valuation,
+    Stock Reservation Entry.
+  - Documents deleted (with children, comments, versions and attachments): Packing Slip, Delivery Note,
+    Delivery Challan, Supplier Operation Entry, Material Issue Plan, Inspection Entry, Cut Sheet, Material
+    Planning, Subcontracting Order, Stock Entry, Purchase Receipt, Purchase Order, Material Request,
+    Production Plan, BOM, Drawing, Sales Order, Process Deferred Accounting, Process Subscription, Manufyx
+    Decision Log, Serial and Batch Bundle, Batch.
+  - Test masters deleted: Items, Suppliers, Customers whose name starts with `ZZ` or `Test`, and Projects whose
+    project name does (list in `setup.json`). The preview lists them first.
+  - Naming series of everything deleted restart at 1.
+  - Kept: the item master and every other master.
+- **Warehouses step:** renames whatever Stock Settings → Default Warehouse is today to `RM Yard`, creates
+  RM Store, Consumables Store and Maintenance Store, gives all four the Warehouse Type *Storage Location
+  Applicable* (created if missing), deletes the duplicate `Work in Progress - MIPL_1`, sets the Company's
+  default WIP and FG warehouses, deletes every Storage Location and creates A1 (RM Store), A2–A20 (RM Yard),
+  C1–C10 and M1–M10. System and job-worker warehouses stay.
+- **Rate schedules step:** deletes all Rate Schedules and Job Natures, then loads 17 Job Natures and 48 Rate
+  Schedules (Category filled in) from `data/rate_schedules.json`.
+- **Where the data lives:** `manufyxinvenzaerp/data_works/data/setup.json` (warehouses, location ranges, test
+  prefixes, the doctype lists) and `rate_schedules.json`. Warehouse names stay out of `engine.py`; see §27.
+  The engine finds the warehouse to rename through Stock Settings.
+- **Gotchas found while building it:**
+  - Frappe refuses to delete a submitted document even with `force`, so each is marked cancelled first (the
+    ledgers are already gone).
+  - `delete_doc` queues one cleanup job per document, which overloads the queue (600 jobs, no worker
+    locally). The engine queues nothing during the delete loops and runs `delete_dynamic_links` inline.
+  - Naming-series keys are saved to `data_works_series.json` before the deletes, so a rerun after a failed
+    step still resets them.
+  - Each step is safe to run twice.
+- **Tested** locally three times: restore of the 18 Oct live dump, migrate, then Run everything through the
+  queue with a worker. The result was identical to the hand-made reset: 39 items, 11 warehouses, 40
+  locations, 48 schedules, no stock.

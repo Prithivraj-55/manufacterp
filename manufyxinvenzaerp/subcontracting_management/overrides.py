@@ -16,23 +16,26 @@ def _is_pp_flow_sco(sco_name):
 
 
 def resolve_supplier_warehouse(supplier, company):
-    """The Warehouse a Job Worker's material sits in, by this site's naming
-    convention: '<Job Worker> - <Company Abbr>' (e.g. 'INTERNATIONAL STEEL PRO -
-    MIPL'). Returns "" when the supplier/company is missing or no such Warehouse
-    has been created yet.
+    """The Warehouse a Job Worker's material sits in: the company's warehouse whose
+    Job Worker (`custom_job_worker`) is this supplier. Returns "" when the
+    supplier/company is missing or no warehouse is linked to the job worker yet.
+
+    Read from the link, never from the warehouse's name -- a name convention breaks
+    the moment a warehouse is renamed or a job worker's name is spelled differently.
 
     Shared so the Material Issue Plan can resolve the same warehouse the
-    Subcontracting Order would, rather than restating the convention -- an MIP is
-    created in the same click as its SCO, before the SCO has had a chance to fill
-    the field in, and a blank warehouse there blocks every transfer later on.
+    Subcontracting Order would -- an MIP is created in the same click as its SCO,
+    before the SCO has had a chance to fill the field in, and a blank warehouse
+    there blocks every transfer later on.
     """
     if not (supplier and company):
         return ""
-    abbr = frappe.db.get_value("Company", company, "abbr")
-    if not abbr:
-        return ""
-    warehouse = f"{supplier} - {abbr}"
-    return warehouse if frappe.db.exists("Warehouse", warehouse) else ""
+    return frappe.db.get_value(
+        "Warehouse",
+        {"custom_job_worker": supplier, "company": company, "is_group": 0, "disabled": 0},
+        "name",
+        order_by="creation asc",
+    ) or ""
 
 
 def _any_operation_started(sco_name):
@@ -142,14 +145,22 @@ class CustomSubcontractingOrder(SubcontractingOrder):
 
     def _auto_set_supplier_warehouse(self):
         """Job Worker Warehouse is hidden on the form (setup.py hide_sco_job_worker_warehouse)
-        since every active Job Worker has a dedicated Warehouse named '<Job Worker> - <Company
-        Abbr>' (e.g. 'INTERNATIONAL STEEL PRO - MIPL') — resolve it automatically instead of
-        asking the user to pick it. Leaves the field untouched if already set (e.g. by an
-        existing doc) or if no matching Warehouse exists yet (mandatory validation will then
-        surface the standard "create it first" error)."""
+        since every active Job Worker has a dedicated Warehouse whose Job Worker field names
+        it — resolve it automatically instead of asking the user to pick it. Leaves the field
+        untouched if already set (e.g. by an existing doc). With no linked warehouse, says
+        where to link one: the field is hidden, so the standard mandatory error would name a
+        field the user cannot see."""
         if self.supplier_warehouse or not self.supplier:
             return
         self.supplier_warehouse = resolve_supplier_warehouse(self.supplier, self.company) or None
+        if not self.supplier_warehouse:
+            frappe.throw(
+                _("No warehouse of {0} is linked to Job Worker {1}. Open that job worker's "
+                  "Warehouse and set its <b>Job Worker</b> field, or create one.").format(
+                    frappe.bold(self.company), frappe.bold(self.supplier)
+                ),
+                title=_("Job Worker Warehouse Missing"),
+            )
 
     # ── on_submit / on_cancel overrides ──────────────────────────────────────
 

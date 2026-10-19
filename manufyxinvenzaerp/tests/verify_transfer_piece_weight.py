@@ -163,7 +163,7 @@ def run():
 
     print()
     print("=== 7. The shortage message ===")
-    info = frappe._dict({"warehouse": "Stores", "in_stock": 2260.8, "available": 1000.0,
+    info = frappe._dict({"warehouse": "_Test Mock Warehouse", "in_stock": 2260.8, "available": 1000.0,
                          "reserved_for_others_kg": 1260.8,
                          "reserved_for_others": [{"material_planning": "MP-X", "table": "Material Mapping",
                                                   "idx": 4, "duno": "TYPE 2", "qty": 1260.8}]})
@@ -181,7 +181,7 @@ def run():
     original = t.get_mip_cnc_pending_items
     try:
         t.get_mip_cnc_pending_items = lambda mip_name: fake
-        mip = frappe._dict({"name": "MIP-X", "cnc_warehouse": "CNC"})
+        mip = frappe._dict({"name": "MIP-X", "cnc_warehouse": "_Test Mock CNC Warehouse"})
         up = t._update_cnc_forward_sec_qty(mip, "X", "B", 1)
         check("raising above what is at CNC is refused", up["blocked"], True)
         down = t._update_cnc_forward_sec_qty(mip, "X", "B", 0.25)

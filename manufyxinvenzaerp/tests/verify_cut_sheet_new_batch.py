@@ -30,6 +30,8 @@ Run: bench --site manufact execute manufyxinvenzaerp.tests.verify_cut_sheet_new_
 import frappe
 from frappe.utils import flt
 
+from manufyxinvenzaerp.tests.warehouses import company_of, stock_warehouse
+
 from manufyxinvenzaerp.production_management.doctype.cut_sheet.cut_sheet import (
     apply_w2_to_batch,
     revert_w2_from_batch,
@@ -68,13 +70,10 @@ def _company(warehouse=None):
 
 
 def _warehouse(company=None):
-    for name in ("Stores - MIPL", "Work In Progress - MIPL"):
-        if frappe.db.exists("Warehouse", name):
-            return name
-    filters = {"is_group": 0}
-    if company:
-        filters["company"] = company
-    return frappe.get_all("Warehouse", filters=filters, pluck="name")[0]
+    wh = stock_warehouse()
+    if not company or company_of(wh) == company:
+        return wh
+    return frappe.get_all("Warehouse", filters={"is_group": 0, "company": company}, pluck="name")[0]
 
 
 def _ensure_item():

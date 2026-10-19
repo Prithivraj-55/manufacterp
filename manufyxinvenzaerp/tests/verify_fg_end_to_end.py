@@ -31,10 +31,10 @@ SHORTCUTS (steps of the real chain that are stood in for, and why):
      Material Issue Plan transfer popup. The Final Stock Entry consumes it as it would
      the real material; the finished-goods rows under test do not depend on it. The
      Material Issue Plan's Supplier / WIP and Finished Goods warehouses, which the user
-     fills on the form, are written onto it when blank (Work In Progress / Finished
-     Goods - MIPL), and so is the Job Work Order's Transferred Weight, which the app
+     fills on the form, are written onto it when blank (the Company's default WIP /
+     Finished Goods warehouses), and so is the Job Work Order's Transferred Weight, which the app
      rolls up only from "Send to Subcontractor" entries and CNC -> supplier transfers
-     (stock_entry._update_sco_transferred_weight), not from this Stores -> WIP transfer.
+     (stock_entry._update_sco_transferred_weight), not from this stock -> WIP transfer.
   3. Drawing buttons. The Sales Order's Submit Drawing / Mark as Final Revision / Create
      and Submit BOM steps are called directly (Drawing.submit, mark_as_final_revision,
      create_bom_from_drawing + submit) rather than through process_drawings, whose error
@@ -60,13 +60,14 @@ import tempfile
 
 import frappe
 from frappe.utils import add_days, flt, nowdate
+from manufyxinvenzaerp.tests.warehouses import fg_warehouse, stock_warehouse, wip_warehouse
 
 checks = []
 
 PREFIX = "ZZFG-A8-"
 COMPANY = "Manufyx Invenza Private Limited"
-FG_WH = "Finished Goods - MIPL"
-STORES = "Stores - MIPL"
+FG_WH = fg_warehouse()
+STORES = stock_warehouse()
 CUSTOMER = "ZZFG-A8 Customer"
 FG_ITEM = "ZZFG-A8-FG"
 CONSUMABLE = "ZZFG-A8-NUT"
@@ -366,7 +367,7 @@ def _material_at_supplier(sco_name, mip_name):
     sco = frappe.get_doc("Subcontracting Order", sco_name)
     supplier_wh = _get_sco_supplier_warehouse(sco)
     if not supplier_wh:
-        supplier_wh = "Work In Progress - MIPL"
+        supplier_wh = wip_warehouse()
         frappe.db.set_value("Material Issue Plan", mip_name, "supplier_warehouse", supplier_wh,
                             update_modified=False)
         print("   (Material Issue Plan had no Supplier / WIP Warehouse: set to %s)" % supplier_wh)

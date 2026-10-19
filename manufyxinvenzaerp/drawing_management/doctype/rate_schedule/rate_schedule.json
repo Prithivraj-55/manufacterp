@@ -6,6 +6,7 @@
  "engine": "InnoDB",
  "field_order": [
   "type",
+  "category",
   "rs_no",
   "column_break_top",
   "job_nature",
@@ -31,6 +32,14 @@
    "label": "Type",
    "options": "Inhouse\nOutsource",
    "reqd": 1
+  },
+  {
+   "description": "For reference only. No picker filters on it.",
+   "fieldname": "category",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Category",
+   "options": "\nFabrication\nBlasting & Painting\nPainting"
   },
   {
    "fieldname": "rs_no",
@@ -123,7 +132,7 @@
   }
  ],
  "links": [],
- "modified": "2026-08-10 00:00:00.000000",
+ "modified": "2026-10-20 03:00:12.580938",
  "modified_by": "Administrator",
  "module": "Drawing Management",
  "name": "Rate Schedule",

@@ -105,8 +105,8 @@ def run():
 
     print("=== which warehouses need a location ===")
     check("the ZZTEST warehouse needs one", sl.location_applicable(wh), True)
-    check("a warehouse with no type does not", sl.location_applicable("Stores - MIPL")
-          if not frappe.db.get_value("Warehouse", "Stores - MIPL", "warehouse_type") else False, False)
+    untyped = frappe.db.get_value("Warehouse", {"is_group": 0, "warehouse_type": ["is", "not set"]}, "name")
+    check("a warehouse with no type does not", sl.location_applicable(untyped) if untyped else False, False)
     check("its locations", sl.warehouse_locations(wh), [L1, L2])
 
     try:

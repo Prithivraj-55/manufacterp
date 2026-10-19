@@ -1524,3 +1524,93 @@ Stores without a location (Stores now requires one); `verify_fg_final_stock_entr
 `verify_reservation_release_on_transfer`, `verify_fg_end_to_end`, `verify_fg_sales_order`,
 `verify_status_mirror`, `verify_create_operation_and_inspection_gate` fail on the code before
 this work too.
+
+---
+
+## Site data reset for go-live — manufactv16, 18 Oct 2026
+
+Source: live dump `20261018_000002-erp_manufyx_co_in` restored onto manufactv16 and migrated.
+Client sheets: `~/Downloads/Storage Location.xlsx`, `~/Downloads/Rate Schedule Final.xlsx`.
+Backups taken before each step: `sites/manufactv16/private/backups/20261018_001222-*` (old local DB)
+and `20261018_002541-*` (restored live, before the reset).
+
+**Transactions removed — kept only the Item master, all other masters, and the opening stock entry
+`MAT-STE-00001`** (Material Receipt dated 2026-04-01, 51 rows, 280,191.003 Kg, ₹1,40,09,550.15; its 51
+SLE, 2 GL, 49 bundles and 49 batches). Deleted with their child tables, ledgers, timeline rows and
+attachments: Sales Order, Purchase Order, Material Request, Purchase Receipt, Delivery Note, Packing
+Slip, the other 42 Stock Entries, Subcontracting Order, Production Plan, BOM, Repost Item Valuation,
+Process Deferred Accounting / Subscription, 184 bundles, 84 batches, Drawing, Material Planning,
+Material Issue Plan, Supplier Operation Entry, Cut Sheet, Inspection Entry, Delivery Challan, Manufyx
+Decision Log. Bins rebuilt from the ledger (v16's `repost_stock` only queues a Repost Item Valuation —
+with the scheduler paused it does nothing, so bins were set directly). Batch `custom_sec_qty` reset to
+the opening entry's Nos. Naming series of every deleted doctype reset to 0 (`MAT-STE-` to 1).
+
+**Warehouses** (user chose: keep system + supplier warehouses):
+- `Stores - MIPL` **renamed** to `RM Yard - MIPL` — the opening stock, its ledger, bins, all 68 Item
+  Defaults and Stock Settings' default warehouse moved with it.
+- New: `RM Store - MIPL`, `Consumables Store - MIPL`, `Maintenance Store - MIPL` (sheet spells it
+  "Maintanence").
+- All four have the new Warehouse Type **Storage Location Applicable** (`custom_storage_location_applicable` = 1).
+- Kept: Work In Progress, Finished Goods, Goods In Transit, CNC, Kavi Contractor, INTERNATIONAL STEEL PRO.
+  Deleted: the duplicate `Work in Progress - MIPL_1 - MIPL`.
+
+**Storage Locations**: A1 (RM Store); A2–A20 (RM Yard); C1–C10 (Consumables); M1–M10 (Maintenance).
+Old locations holding opening stock were **renamed 1:1** (user's choice): B-1→A2, B-2→A3, B-3→A4,
+B-5→A5, CNC→A6, CNCSET→A7. A-1 and A-2 (empty) deleted. Move stock to its real place with a
+same-warehouse Material Transfer.
+
+**Rate Schedules**: both old ones deleted (RS-001 @ ₹5, RS- O/S-001 A @ ₹7); 48 loaded from the sheet
+(32 In-House → Type Inhouse, 16 Out Sourcing → Outsource). Job Description split as the old RS-001
+was: Job Nature / Details / Job Reference; "Nature of works" → Work Content; sheet text kept as
+typed. 16 Job Natures created; spelling variants of one category share a Job Nature (Double angel →
+Double angle, Chennel Box → Channel box, Build-up Beam → Builtup Beam, HANDRAILS → HANDRAIL).
+
+**Code follow-up — done the same day**: no warehouse name is hard-coded any more (features §27). Tests
+read warehouses via `tests/warehouses.py`. Tests that receive into RM Yard still need a Storage Location
+on every inward row, and data-dependent checks (e.g. `verify_fg_masters` 1b expects FINGOODS001 to
+have transactions) now fail on the reset site.
+
+**Test items deleted — 20 Oct 2026** (backup `20261020_025211-*` first): all 29 test items (`ZZTEST-…`,
+`Test 123`, `Test Bolt`, `Test Nut M24`, `Test Struct`) and their 6 Item Prices. None had stock, BOMs,
+batches or other documents. Items left: 39 (the real masters). Still present, not asked to remove:
+Supplier `Test Supplier 1`, Customer `Test customer`, Project `PROJ-0002` (ZZTEST-SE-DUNO-PROJECT).
+
+### Client answers — 20 Oct 2026
+
+Applied on manufactv16 the same day (backup `20261020_030017-*` taken first):
+- **Opening stock cancelled and deleted, and all stock removed.** MAT-STE-00001 was cancelled after
+  recalculating every batch quantity: they were stale from the 18 Oct transaction delete, and the cancel
+  failed with "negative batch quantity". It was then deleted. All Bins, Batches (49) and the 36 Repost
+  Item Valuations created by the cancel were wiped. Stock Entry, SLE, GL, bundles, bins and batches are
+  now all 0. Series MAT-STE-, MAT-SLE-2026- and ACC-GLE-2026- were reset to 0. The new opening stock
+  will come from the client.
+- **Test masters deleted**: Supplier Test Supplier 1, Customer Test customer, Project PROJ-0002
+  (ZZTEST-SE-DUNO-PROJECT). The 29 test items had been deleted earlier the same day.
+- Storage Location answers:
+  - Maintenance Store keeps the correct spelling.
+  - RM Store has only A1. All four warehouses keep the location mandatory.
+  - Item → location lists and the consumable / maintenance items will come from the client; the user
+    will configure them.
+  - Kavi Contractor and the other job workers are left as they are.
+- Rate Schedule answers:
+  - RS-011 stays as Build-up Column ₹6.5. The second RS-011 (HANDRAILS ₹12) is dropped.
+  - RS-005 stays at ₹4. RS-008B stays at ₹6; the client will change it if needed.
+  - RS-11B / RS-11C / "RS- O/S-200" are kept as typed.
+  - **Category** was added for reference, with no filtering (features §28).
+- **Spellings corrected.**
+  - Job Natures were renamed, along with every link to them: Roof Turss → Roof Truss, Pannel Assy →
+    Panel Assy, Build-up Collum → Build-up Column, Braket's → Brackets.
+  - Details and Work Content were fixed on 11 schedules: Turss, Cussets → Gussets, Pannel, Assembley →
+    Assembly, Collum, Paiting → Painting.
+  - The words left as typed are Builtup, angle and HANDRAIL; they were never questioned.
+
+### Data Works page — same reset on live (20 Oct 2026)
+
+The user will do the reset on the live server himself, so the three steps were turned into a **Data Works**
+page (features §29). Tested here from a fresh restore of the 18 Oct dump. **Next commit: delete the page
+and `data_works/` after the live reset** (the user's call). No site_config switch.
+
+### Still pending from the client
+
+- The new opening stock (quantities, batches, storage locations).
+- The item → storage location list, and the consumable / maintenance item lists.

@@ -10,7 +10,7 @@ from manufyxinvenzaerp.production_management.doctype.material_planning.material_
     move_to_exact_match,
 )
 
-_WAREHOUSE = "Stores - M"
+_WAREHOUSE = "_Test Mock Warehouse"
 
 _UNAVAILABLE = [
     {

@@ -18,11 +18,12 @@ Run: bench --site manufact execute manufyxinvenzaerp.tests.verify_mp_batch_dust.
 
 import frappe
 from frappe.utils import flt
+from manufyxinvenzaerp.tests.warehouses import stock_warehouse
 
 checks = []
 
 ITEM = "ISMB450"
-WH = "Stores - MIPL"
+WH = stock_warehouse()
 LENGTH = 7331.55
 REQUIRED = 530.80395  # one piece, as the requirement rows actually carry it
 
