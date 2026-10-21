@@ -5089,7 +5089,15 @@ def make_production_plan(material_planning_name):
         # Production Plan's own validate (apply_fg_nos) turns it into Planned Qty
         # (Kg) -- the one place that sum is done (sep14 FG plan, D26). A row with no
         # drawing has nothing to convert from and keeps its quantity as it was.
-        qty_fields = {"custom_sec_qty": nos, "custom_sec_uom": "Nos"} if row.drawing else {"planned_qty": nos}
+        # planned_qty is set here as well: ERPNext v16's validate_data refuses a row with
+        # Planned Qty 0 BEFORE apply_fg_nos runs, so a Nos-only row could never be inserted.
+        # apply_fg_nos recomputes the same figure on that validate.
+        if row.drawing:
+            from manufyxinvenzaerp.production_plan_management.production_plan import drawing_kg_for_nos
+            qty_fields = {"custom_sec_qty": nos, "custom_sec_uom": "Nos",
+                          "planned_qty": drawing_kg_for_nos(row.drawing, nos) or nos}
+        else:
+            qty_fields = {"planned_qty": nos}
         pp.append("po_items", {
             "item_code": item_code,
             "item_name": item_name,
@@ -5098,7 +5106,11 @@ def make_production_plan(material_planning_name):
             "stock_uom": stock_uom,
             "sales_order": row.sales_order or "",
             "custom_customer": row.customer or "",
-            "warehouse": mp.for_warehouse or "",
+            # The plan item's warehouse is where the FINISHED goods are booked (the Job Work
+            # Order's item line, then the Final Stock Entry). mp.for_warehouse is the RAW
+            # material warehouse, so a drawing row used to finish in the raw-material store.
+            "warehouse": (frappe.get_cached_value("Company", mp.company, "default_fg_warehouse")
+                          if row.drawing else None) or mp.for_warehouse or "",
             "custom_drawing": row.drawing or "",
             "custom_duno_mark_no": row.duno_mark_no or 0,
             "custom_material_planning": material_planning_name,

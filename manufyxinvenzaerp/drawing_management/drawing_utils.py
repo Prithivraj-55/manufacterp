@@ -260,7 +260,7 @@ def create_production_plan_from_bom(bom_name):
     # plan has claimed yet (D16), and its own validate (apply_fg_nos) turns the Nos
     # into Planned Qty (Kg) -- this sets Qty (Nos) only (D26).
     from manufyxinvenzaerp.production_plan_management.production_plan import (
-        fg_nos_remaining,
+        drawing_kg_for_nos, fg_nos_remaining,
     )
 
     nos_left = fg_nos_remaining(bom.custom_drawing)
@@ -284,6 +284,9 @@ def create_production_plan_from_bom(bom_name):
             "bom_no": bom_name,
             "custom_sec_qty": nos_left,
             "custom_sec_uom": "Nos",
+            # ERPNext v16 refuses Planned Qty 0 before apply_fg_nos can compute it (see
+            # material_planning.make_production_plan); the same figure is recomputed on validate.
+            "planned_qty": drawing_kg_for_nos(bom.custom_drawing, nos_left) or nos_left,
             "planned_start_date": frappe.utils.now_datetime(),
             "stock_uom": stock_uom,
             "custom_drawing": bom.get("custom_drawing") or "",
