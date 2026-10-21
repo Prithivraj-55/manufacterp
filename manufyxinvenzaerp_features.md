@@ -1127,3 +1127,21 @@ done by hand on manufactv16 on 18–20 Oct. It is meant to be used once and then
 - **Tested** locally three times: restore of the 18 Oct live dump, migrate, then Run everything through the
   queue with a worker. The result was identical to the hand-made reset: 39 items, 11 warehouses, 40
   locations, 48 schedules, no stock.
+
+## 30. Full-process test with the client's 21 Oct 2026 BOM sheet, and the two fixes it found
+
+Run on manufactv16 (a restore of live dump `20261021_180002`, plus the 279 RM Section items) with `BOM_Import_Template _21-oCT-26.xlsx`: Sales Order `SAL-ORD-2026-00004` (JK Cement, 8,722.75 Kg / 50 Nos of *Fabricated Structurs*) → Verify → 2 Drawings → 2 BOMs → Material Planning `MP-2026-00002` (10,489 Kg of raw material) → Auto Purchase (MR → PO → PR, 8 batches) → reserve → Production Plan `PP-INT-2026-00002` → Job Work Order `SC-ORD-2026-00002` + Material Issue Plan `MIP-2026-00002` → transfer to supplier → 5 operation entries (Final with an Inspection Entry, 50/50 accepted) → Final Stock Entry → Delivery Note `DN-26-00002` → Sales Invoice `SINV-26-00002`. Every document reached its end status.
+
+**Fixed in code**
+- **"Make Production Plan" (Material Planning) and "Create Production Plan" (BOM) could not insert a plan.** Both set only *Qty (Nos)* on a drawing row and left Planned Qty to `apply_fg_nos`, but ERPNext v16's `validate_data` refuses Planned Qty 0 *before* that hook runs ("Row #1: Planned Qty must be greater than 0"). Both now also set `planned_qty` from `drawing_kg_for_nos`; `apply_fg_nos` recomputes the same figure. Files: `material_planning.py` (`make_production_plan`), `drawing_utils.py` (`create_production_plan_from_bom`).
+- **Finished goods were booked into the raw-material warehouse.** `make_production_plan` copied the Material Planning's *Raw Materials Warehouse* onto the plan item's warehouse, which is where the Job Work Order and the Final Stock Entry book the FINISHED goods. A drawing row now takes the Company's Default Finished Goods Warehouse (the raw-material warehouse stays as the fallback).
+
+**Seen, not changed — for the client / next session**
+- Cancelling a submitted Final Stock Entry leaves the Material Issue Plan **Completed and locked**, so the entry cannot be recreated ("already Completed and locked"). The test reset the status by hand.
+- The Sales Order line took its warehouse from the FG item's *Item Default* (RM Yard), so the Delivery Note found no finished-goods batch until the row's warehouse was changed to Finished Goods. Set the FG items' default warehouse.
+- *Auto-suggest dimensions* proposes fractional pieces (e.g. 219.831 Nos of 191×58×30); the test rounded each up to whole Nos before buying.
+- BOM `BOM-Fabricated Structurs-023` (IS2062/SS-304 mix) shows a total cost 2.4× that of the SS-heavier `-024`; items have no price list, so costs are not meaningful yet.
+- A Packing Slip can only be made from a **draft** Delivery Note (ERPNext rule); not exercised.
+- Every item needs Storage Locations for the receiving warehouse before a Purchase Receipt will submit (PR blocked on PLATE10, whose list named only RM Store). The test added A2 / RM Yard to the 8 items used.
+
+**Sheet corrections** (original kept as `BOM_Import_Template _21-oCT-26 (client original).xlsx`): material code now follows the plate's Thickness and Grade — `PLATE8` with Thickness 6 → `PLATE6` (MS) / `PLATE6-SS304`; `PLATE25` with Thickness 30 → `PLATE30-SS304`; SS-304 rows `PLATE10` → `PLATE10-SS304`; Material Spec `MS` → `SS` on every SS-304 row. 15 rows changed. New local Item `PLATE6` (MS / IS2062) — does not exist on live.

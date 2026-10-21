@@ -1614,3 +1614,17 @@ and `data_works/` after the live reset** (the user's call). No site_config switc
 
 - The new opening stock (quantities, batches, storage locations).
 - The item → storage location list, and the consumable / maintenance item lists.
+
+### RM Section weight master — items created on live (21 Oct 2026)
+
+Source: `~/Downloads/RM Section weight master (2).xls` (291 rows). Reviewed in `~/Downloads/RM Section items - review.xlsx`, then created on live through the Manufact MCP server (`create_document`, Item). Local manufactv16 was first restored from live dump `20261021_180002` (backup of the previous local DB: `20261021_231715-*`).
+
+- **279 Items + 5 Material Grades** (IS2062-E250, IS2062-E350, SS-409, SS-430, SS-316). Verified against the plan: every code, unit weight, grade, group, Kg UOM and batch prefix matches.
+- Structurals → *Structural child node* / parent *Structurals*; Plate & FLAT → *Plates child node* / parent *Plates*. Kg primary, Nos secondary, Has Batch No + Create New Batch, batch prefix = item code, `custom_unit_weight` from the sheet.
+- **Codes:** upper case; a plate code that appears in several grades gets a grade suffix (`PLATE10-E250`, `PLATE10-SS304`; plain IS2062 has none); `Chqd Plate5` → `CHQD-PLATE5`. Exact duplicate rows merged.
+- **HSN 72082510 on all 279 is a placeholder** copied from the existing items (the system refuses an Item without one). Stainless and rod/section lines probably need their own HSN — to confirm with the client.
+- **Not created (conflicting weights in the sheet, awaiting the client):** ISMBX200X100 (24.2 / 27.32), ISMCX250X82 (30.4 / 34.2), NPBX300X150 (42.24 / 49.3).
+
+### Full-process test, 22 Oct 2026 (manufactv16)
+
+End-to-end run with the client's `BOM_Import_Template _21-oCT-26.xlsx` — see features §30 for the document chain, the two code fixes (Production Plan creators; finished-goods warehouse) and the open items. **To confirm with the client:** the sheet's plate codes did not match their thickness / grade (15 rows corrected in the same file, original kept); item `PLATE6` (MS / IS2062) is needed on live.
